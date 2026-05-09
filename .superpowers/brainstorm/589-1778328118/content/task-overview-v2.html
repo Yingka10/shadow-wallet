@@ -1,0 +1,230 @@
+<h2>TaskSelectionScreen + OverviewScreen v2</h2>
+<p class="subtitle">更新：自訂任務、換一批建議、ⓘ 時間儲蓄說明、Overview 編輯入口</p>
+
+<div style="display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap;justify-content:center">
+
+  <!-- TaskSelectionScreen v2 -->
+  <div style="text-align:center">
+    <div style="font-size:12px;font-weight:700;color:#4A90D9;letter-spacing:1px;margin-bottom:8px">步驟 2 / 3 — 選任務 v2</div>
+    <div class="mockup" style="width:268px">
+      <div class="mockup-header">TaskSelectionScreen</div>
+      <div class="mockup-body" style="padding:16px;background:#F8F9FA;font-family:sans-serif;max-height:680px;overflow-y:auto">
+
+        <!-- Progress -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+          <div style="flex:1;height:4px;background:#22C55E;border-radius:2px"></div>
+          <div style="flex:1;height:4px;background:#4A90D9;border-radius:2px"></div>
+          <div style="flex:1;height:4px;background:#E5E7EB;border-radius:2px"></div>
+          <span style="font-size:11px;color:#6B7280;white-space:nowrap">2 / 3</span>
+        </div>
+
+        <div style="font-size:18px;font-weight:700;color:#1A1A2E;margin-bottom:2px">幫小明選任務</div>
+        <div style="font-size:12px;color:#6B7280;margin-bottom:14px">目標：🃏 寶可夢卡牌（80 幣）</div>
+
+        <!-- Task-B section with ⓘ -->
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+          <div style="font-size:11px;font-weight:700;color:#6B7280;letter-spacing:1px">家庭本分</div>
+          <div style="width:16px;height:16px;background:#E5E7EB;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#6B7280;cursor:pointer">i</div>
+          <div style="flex:1;height:1px;background:#E5E7EB"></div>
+          <div style="font-size:10px;color:#16A34A;font-weight:600">賺時間存款⏱</div>
+        </div>
+
+        <!-- ⓘ tooltip (shown state) -->
+        <div style="background:#1A1A2E;border-radius:10px;padding:10px 12px;margin-bottom:10px;position:relative">
+          <div style="font-size:11px;color:#D1D5DB;line-height:1.6">
+            完成後累積「<strong style="color:#4A90D9">時間儲蓄</strong>」，可以兌換看電視、玩電動的額外時間。<br>
+            例如：存到 60 分鐘可換 1 小時 Switch 時間 🎮
+          </div>
+          <div style="font-size:10px;color:#6B7280;margin-top:6px;text-align:right">點其他地方關閉</div>
+          <!-- Arrow -->
+          <div style="position:absolute;top:-6px;left:20px;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:6px solid #1A1A2E"></div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
+          <div style="background:#fff;border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:10px;border:1.5px solid #22C55E">
+            <div style="width:20px;height:20px;background:#22C55E;border-radius:5px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <span style="color:#fff;font-size:12px;font-weight:700">✓</span>
+            </div>
+            <div style="flex:1"><div style="font-size:13px;font-weight:600;color:#1A1A2E">整理書包</div><div style="font-size:10px;color:#6B7280">10 分鐘</div></div>
+            <div style="background:#DCFCE7;color:#16A34A;font-size:10px;font-weight:700;border-radius:20px;padding:2px 8px">⏱ +10min</div>
+          </div>
+          <div style="background:#fff;border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:10px;border:1.5px solid #22C55E">
+            <div style="width:20px;height:20px;background:#22C55E;border-radius:5px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <span style="color:#fff;font-size:12px;font-weight:700">✓</span>
+            </div>
+            <div style="flex:1"><div style="font-size:13px;font-weight:600;color:#1A1A2E">收好玩具</div><div style="font-size:10px;color:#6B7280">15 分鐘</div></div>
+            <div style="background:#DCFCE7;color:#16A34A;font-size:10px;font-weight:700;border-radius:20px;padding:2px 8px">⏱ +15min</div>
+          </div>
+          <div style="background:#fff;border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:10px;border:1.5px solid #E5E7EB">
+            <div style="width:20px;height:20px;background:#F3F4F6;border-radius:5px;border:1.5px solid #D1D5DB;flex-shrink:0"></div>
+            <div style="flex:1"><div style="font-size:13px;font-weight:600;color:#1A1A2E">幫忙擺餐具</div><div style="font-size:10px;color:#6B7280">10 分鐘</div></div>
+            <div style="background:#F3F4F6;color:#9CA3AF;font-size:10px;font-weight:700;border-radius:20px;padding:2px 8px">⏱ +10min</div>
+          </div>
+          <div style="background:#fff;border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:10px;border:1.5px solid #E5E7EB">
+            <div style="width:20px;height:20px;background:#F3F4F6;border-radius:5px;border:1.5px solid #D1D5DB;flex-shrink:0"></div>
+            <div style="flex:1"><div style="font-size:13px;font-weight:600;color:#1A1A2E">洗自己的碗</div><div style="font-size:10px;color:#6B7280">10 分鐘</div></div>
+            <div style="background:#F3F4F6;color:#9CA3AF;font-size:10px;font-weight:700;border-radius:20px;padding:2px 8px">⏱ +10min</div>
+          </div>
+          <!-- Custom task button -->
+          <div style="background:#fff;border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:10px;border:1.5px dashed #9CA3AF">
+            <div style="width:20px;height:20px;background:#F3F4F6;border-radius:5px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <span style="font-size:14px;color:#6B7280;font-weight:700">+</span>
+            </div>
+            <div style="flex:1"><div style="font-size:13px;font-weight:500;color:#6B7280">新增自訂任務…</div></div>
+          </div>
+        </div>
+
+        <!-- Task-C section -->
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+          <div style="font-size:11px;font-weight:700;color:#6B7280;letter-spacing:1px">超出本分貢獻</div>
+          <div style="flex:1;height:1px;background:#E5E7EB"></div>
+          <div style="font-size:10px;color:#F5A623;font-weight:600">💰 賺幣</div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
+          <div style="background:#FFF8EC;border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:10px;border:1.5px solid #F5A623">
+            <div style="width:20px;height:20px;background:#F5A623;border-radius:5px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <span style="color:#fff;font-size:12px;font-weight:700">✓</span>
+            </div>
+            <div style="flex:1"><div style="font-size:13px;font-weight:600;color:#1A1A2E">幫忙擦桌子</div><div style="font-size:10px;color:#6B7280">15 分鐘 × 難度 2</div></div>
+            <div style="background:#FFF3DC;color:#F5A623;font-size:10px;font-weight:700;border-radius:20px;padding:2px 8px">30 幣</div>
+          </div>
+          <div style="background:#FFF8EC;border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:10px;border:1.5px solid #F5A623">
+            <div style="width:20px;height:20px;background:#F5A623;border-radius:5px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <span style="color:#fff;font-size:12px;font-weight:700">✓</span>
+            </div>
+            <div style="flex:1"><div style="font-size:13px;font-weight:600;color:#1A1A2E">幫忙洗碗</div><div style="font-size:10px;color:#6B7280">20 分鐘 × 難度 2</div></div>
+            <div style="background:#FFF3DC;color:#F5A623;font-size:10px;font-weight:700;border-radius:20px;padding:2px 8px">40 幣</div>
+          </div>
+          <div style="background:#fff;border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:10px;border:1.5px solid #E5E7EB">
+            <div style="width:20px;height:20px;background:#F3F4F6;border-radius:5px;border:1.5px solid #D1D5DB;flex-shrink:0"></div>
+            <div style="flex:1"><div style="font-size:13px;font-weight:600;color:#1A1A2E">整理客廳</div><div style="font-size:10px;color:#6B7280">20 分鐘 × 難度 2.5</div></div>
+            <div style="background:#F3F4F6;color:#9CA3AF;font-size:10px;font-weight:700;border-radius:20px;padding:2px 8px">50 幣</div>
+          </div>
+          <!-- Custom task button -->
+          <div style="background:#fff;border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:10px;border:1.5px dashed #9CA3AF">
+            <div style="width:20px;height:20px;background:#F3F4F6;border-radius:5px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <span style="font-size:14px;color:#6B7280;font-weight:700">+</span>
+            </div>
+            <div style="flex:1"><div style="font-size:13px;font-weight:500;color:#6B7280">新增自訂任務…</div></div>
+          </div>
+        </div>
+
+        <!-- 換一批建議 -->
+        <div style="background:#fff;border-radius:12px;padding:10px 14px;display:flex;align-items:center;justify-content:center;gap:8px;border:1.5px solid #E5E7EB;margin-bottom:12px">
+          <span style="font-size:14px">🔄</span>
+          <div style="font-size:13px;font-weight:500;color:#4A90D9">換一批建議</div>
+        </div>
+
+        <!-- Coin summary -->
+        <div style="background:#fff;border-radius:12px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;border:1px solid #E5E7EB;margin-bottom:12px">
+          <div style="font-size:12px;color:#6B7280">每次全完成可賺</div>
+          <div style="font-size:18px;font-weight:800;color:#F5A623">70 幣</div>
+        </div>
+
+        <div style="background:#4A90D9;border-radius:12px;padding:12px;text-align:center;color:#fff;font-weight:600;font-size:14px">
+          下一步：確認總覽 →
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Arrow -->
+  <div style="font-size:28px;color:#CBD5E1;margin-top:140px">→</div>
+
+  <!-- OverviewScreen v2 -->
+  <div style="text-align:center">
+    <div style="font-size:12px;font-weight:700;color:#4A90D9;letter-spacing:1px;margin-bottom:8px">步驟 3 / 3 — 確認總覽 v2</div>
+    <div class="mockup" style="width:268px">
+      <div class="mockup-header">OverviewScreen</div>
+      <div class="mockup-body" style="padding:16px;background:#F8F9FA;font-family:sans-serif">
+
+        <!-- Progress -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+          <div style="flex:1;height:4px;background:#22C55E;border-radius:2px"></div>
+          <div style="flex:1;height:4px;background:#22C55E;border-radius:2px"></div>
+          <div style="flex:1;height:4px;background:#4A90D9;border-radius:2px"></div>
+          <span style="font-size:11px;color:#6B7280;white-space:nowrap">3 / 3</span>
+        </div>
+
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px">
+          <div>
+            <div style="font-size:18px;font-weight:700;color:#1A1A2E">確認小明的計畫</div>
+            <div style="font-size:12px;color:#6B7280;margin-top:2px">看起來都 OK 就出發 🚀</div>
+          </div>
+          <!-- Edit button -->
+          <div style="background:#fff;border-radius:10px;padding:7px 12px;border:1.5px solid #E5E7EB;display:flex;align-items:center;gap:5px;cursor:pointer">
+            <span style="font-size:13px">✏️</span>
+            <span style="font-size:12px;font-weight:600;color:#4A90D9">修改任務</span>
+          </div>
+        </div>
+
+        <!-- Goal card -->
+        <div style="background:linear-gradient(135deg,#EEF5FF,#FFF8EC);border-radius:14px;padding:14px;margin-bottom:12px;border:1.5px solid #BFDBFE">
+          <div style="font-size:10px;font-weight:700;color:#6B7280;letter-spacing:1px;margin-bottom:8px">🎯 本週目標</div>
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <div style="font-size:16px;font-weight:700;color:#1A1A2E">🃏 寶可夢卡牌</div>
+              <div style="font-size:11px;color:#6B7280;margin-top:2px">達成後可兌換</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:22px;font-weight:800;color:#F5A623">80 幣</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tasks summary -->
+        <div style="font-size:10px;font-weight:700;color:#6B7280;letter-spacing:1px;margin-bottom:8px">📋 本週任務包</div>
+
+        <div style="background:#fff;border-radius:12px;padding:11px 12px;margin-bottom:6px;border:1px solid #E5E7EB">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <div style="font-size:12px;font-weight:600;color:#1A1A2E">家庭本分 <span style="font-weight:400;color:#6B7280">2 項</span></div>
+            <div style="background:#DCFCE7;color:#16A34A;font-size:10px;font-weight:700;border-radius:20px;padding:2px 8px">⏱ +25min/次</div>
+          </div>
+          <div style="font-size:12px;color:#6B7280">整理書包、收好玩具</div>
+        </div>
+
+        <div style="background:#fff;border-radius:12px;padding:11px 12px;margin-bottom:12px;border:1px solid #E5E7EB">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <div style="font-size:12px;font-weight:600;color:#1A1A2E">賺幣任務 <span style="font-weight:400;color:#6B7280">2 項</span></div>
+            <div style="background:#FFF3DC;color:#F5A623;font-size:10px;font-weight:700;border-radius:20px;padding:2px 8px">70 幣/次</div>
+          </div>
+          <div style="font-size:12px;color:#6B7280">幫忙擦桌子、幫忙洗碗</div>
+        </div>
+
+        <!-- Estimate card -->
+        <div style="background:#1A1A2E;border-radius:14px;padding:13px;margin-bottom:14px">
+          <div style="font-size:11px;color:#9CA3AF;margin-bottom:8px">全部完成時，大概…</div>
+          <div style="display:flex;gap:16px">
+            <div>
+              <div style="font-size:20px;font-weight:800;color:#F5A623">~2 次</div>
+              <div style="font-size:10px;color:#6B7280;margin-top:2px">就能換到目標</div>
+            </div>
+            <div style="width:1px;background:#374151"></div>
+            <div>
+              <div style="font-size:20px;font-weight:800;color:#4A90D9">70 幣</div>
+              <div style="font-size:10px;color:#6B7280;margin-top:2px">每次最多可賺</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="background:#22C55E;border-radius:12px;padding:13px;text-align:center;color:#fff;font-weight:700;font-size:15px">
+          ✓ 確認並開始！
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div style="margin-top:20px;background:#EEF5FF;border-radius:12px;padding:14px 18px;max-width:580px;margin-left:auto;margin-right:auto">
+  <div style="font-size:12px;color:#374151;line-height:1.8">
+    <strong>更新重點：</strong><br>
+    ① Task-B/C 各自有「新增自訂任務…」虛線卡 → 彈出 Modal 讓家長填任務名稱 + 時間 + 難度<br>
+    ② 「🔄 換一批建議」→ 重新呼叫 <code>recommendTasks()</code>，從剩餘模板隨機換一批<br>
+    ③ Task-B 標題 ⓘ 圖示 → 點擊顯示 Tooltip 說明時間儲蓄用途<br>
+    ④ OverviewScreen 右上角「✏️ 修改任務」→ <code>navigation.goBack()</code> 回到 TaskSelection
+  </div>
+</div>

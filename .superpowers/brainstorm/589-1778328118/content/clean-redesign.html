@@ -1,0 +1,296 @@
+<h2>重新設計 — 視覺減法版</h2>
+<p class="subtitle">去除邊框噪音、統一選取邏輯、輔助動作降為文字連結、加大留白</p>
+
+<div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;justify-content:center">
+
+  <!-- GoalSetupScreen redesign -->
+  <div style="text-align:center">
+    <div style="font-size:11px;font-weight:700;color:#4A90D9;letter-spacing:1px;margin-bottom:8px">目標設定</div>
+    <div class="mockup" style="width:260px">
+      <div class="mockup-header">GoalSetupScreen</div>
+      <div class="mockup-body" style="padding:20px 18px;background:#F8F9FA;font-family:sans-serif">
+
+        <!-- Progress -->
+        <div style="display:flex;gap:6px;margin-bottom:24px">
+          <div style="flex:1;height:3px;background:#4A90D9;border-radius:2px"></div>
+          <div style="flex:1;height:3px;background:#E5E7EB;border-radius:2px"></div>
+          <div style="flex:1;height:3px;background:#E5E7EB;border-radius:2px"></div>
+        </div>
+
+        <div style="font-size:20px;font-weight:700;color:#1A1A2E;margin-bottom:4px">為小明設定目標</div>
+        <div style="font-size:13px;color:#6B7280;margin-bottom:20px">選一個最想換的獎勵 🎯</div>
+
+        <!-- 2-col grid — no borders, clean white cards -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px">
+
+          <!-- Selected card -->
+          <div style="background:#EEF5FF;border-radius:14px;padding:14px 8px;text-align:center;position:relative">
+            <div style="position:absolute;top:8px;right:8px;width:18px;height:18px;background:#4A90D9;border-radius:50%;display:flex;align-items:center;justify-content:center">
+              <span style="color:#fff;font-size:10px;font-weight:700">✓</span>
+            </div>
+            <div style="font-size:26px;margin-bottom:6px">🃏</div>
+            <div style="font-size:12px;font-weight:600;color:#1A1A2E">寶可夢卡牌</div>
+            <div style="font-size:12px;font-weight:700;color:#F5A623;margin-top:4px">80 幣</div>
+          </div>
+
+          <!-- Normal cards -->
+          <div style="background:#fff;border-radius:14px;padding:14px 8px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+            <div style="font-size:26px;margin-bottom:6px">🎮</div>
+            <div style="font-size:12px;font-weight:600;color:#1A1A2E">多 30 分鐘<br>Switch</div>
+            <div style="font-size:12px;font-weight:700;color:#F5A623;margin-top:4px">80 幣</div>
+          </div>
+
+          <div style="background:#fff;border-radius:14px;padding:14px 8px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+            <div style="font-size:26px;margin-bottom:6px">🎬</div>
+            <div style="font-size:12px;font-weight:600;color:#1A1A2E">選一部電影</div>
+            <div style="font-size:12px;font-weight:700;color:#F5A623;margin-top:4px">60 幣</div>
+          </div>
+
+          <div style="background:#fff;border-radius:14px;padding:14px 8px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+            <div style="font-size:26px;margin-bottom:6px">📚</div>
+            <div style="font-size:12px;font-weight:600;color:#1A1A2E">買一本漫畫</div>
+            <div style="font-size:12px;font-weight:700;color:#F5A623;margin-top:4px">70 幣</div>
+          </div>
+
+          <div style="background:#fff;border-radius:14px;padding:14px 8px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+            <div style="font-size:26px;margin-bottom:6px">🎡</div>
+            <div style="font-size:12px;font-weight:600;color:#1A1A2E">去遊樂場</div>
+            <div style="font-size:12px;font-weight:700;color:#F5A623;margin-top:4px">100 幣</div>
+          </div>
+
+          <!-- Custom card -->
+          <div style="background:#fff;border-radius:14px;padding:14px 8px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+            <div style="font-size:26px;margin-bottom:6px">✏️</div>
+            <div style="font-size:12px;font-weight:500;color:#6B7280">自己填…</div>
+            <div style="font-size:11px;color:#9CA3AF;margin-top:4px">自訂幣值</div>
+          </div>
+
+        </div>
+
+        <!-- 換一批 text link -->
+        <div style="text-align:center;padding:8px 0 4px">
+          <span style="font-size:12px;color:#4A90D9;font-weight:500">🔄 換一批建議</span>
+        </div>
+
+        <!-- Coin info note -->
+        <div style="display:flex;align-items:flex-start;gap:6px;background:#fff;border-radius:10px;padding:10px 12px;margin-top:12px;margin-bottom:18px;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
+          <div style="width:16px;height:16px;background:#E5E7EB;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#6B7280;flex-shrink:0;margin-top:1px">i</div>
+          <div style="font-size:11px;color:#6B7280;line-height:1.6">幣是孩子完成任務賺的虛擬貨幣，每週大約可賺 <strong style="color:#F5A623">120–150 幣</strong>。建議第一個目標設在 60–100 幣，大約 1 週就能達成，增加成就感。</div>
+        </div>
+
+        <div style="background:#4A90D9;border-radius:12px;padding:13px;text-align:center;color:#fff;font-weight:600;font-size:15px">
+          下一步：選任務 →
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- TaskSelectionScreen redesign -->
+  <div style="text-align:center">
+    <div style="font-size:11px;font-weight:700;color:#4A90D9;letter-spacing:1px;margin-bottom:8px">任務選擇</div>
+    <div class="mockup" style="width:260px">
+      <div class="mockup-header">TaskSelectionScreen</div>
+      <div class="mockup-body" style="padding:20px 18px;background:#F8F9FA;font-family:sans-serif">
+
+        <!-- Progress -->
+        <div style="display:flex;gap:6px;margin-bottom:24px">
+          <div style="flex:1;height:3px;background:#22C55E;border-radius:2px"></div>
+          <div style="flex:1;height:3px;background:#4A90D9;border-radius:2px"></div>
+          <div style="flex:1;height:3px;background:#E5E7EB;border-radius:2px"></div>
+        </div>
+
+        <div style="font-size:20px;font-weight:700;color:#1A1A2E;margin-bottom:4px">幫小明選任務</div>
+        <div style="font-size:13px;color:#6B7280;margin-bottom:24px">目標：🃏 寶可夢卡牌（80 幣）</div>
+
+        <!-- Task-B section -->
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:12px">
+          <div style="font-size:12px;font-weight:700;color:#1A1A2E">家庭本分</div>
+          <!-- ⓘ tooltip trigger -->
+          <div style="width:15px;height:15px;background:#E5E7EB;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#6B7280">i</div>
+        </div>
+
+        <!-- Tooltip shown -->
+        <div style="background:#1A1A2E;border-radius:10px;padding:10px 12px;margin-bottom:12px;margin-top:-4px">
+          <div style="font-size:11px;color:#D1D5DB;line-height:1.6">完成後，幫家裡省下這些分鐘的時間。累積了，可以跟爸媽討論一起把它兌換成<strong style="color:#4A90D9">家庭共同時間</strong>，例如週末出去玩！ 🎉</div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:6px">
+          <!-- Selected state: light blue bg, small check, no border -->
+          <div style="background:#EEF5FF;border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:12px">
+            <div style="width:20px;height:20px;background:#4A90D9;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <span style="color:#fff;font-size:11px;font-weight:700">✓</span>
+            </div>
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:600;color:#1A1A2E">整理書包</div>
+              <div style="font-size:11px;color:#6B7280">10 分鐘・幫家裡省 10 分鐘</div>
+            </div>
+          </div>
+          <div style="background:#EEF5FF;border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:12px">
+            <div style="width:20px;height:20px;background:#4A90D9;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <span style="color:#fff;font-size:11px;font-weight:700">✓</span>
+            </div>
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:600;color:#1A1A2E">收好玩具</div>
+              <div style="font-size:11px;color:#6B7280">15 分鐘・幫家裡省 15 分鐘</div>
+            </div>
+          </div>
+          <!-- Unselected: clean white, no border -->
+          <div style="background:#fff;border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:12px;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+            <div style="width:20px;height:20px;background:#F3F4F6;border-radius:6px;flex-shrink:0"></div>
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:600;color:#1A1A2E">幫忙擺餐具</div>
+              <div style="font-size:11px;color:#6B7280">10 分鐘・幫家裡省 10 分鐘</div>
+            </div>
+          </div>
+          <div style="background:#fff;border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:12px;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+            <div style="width:20px;height:20px;background:#F3F4F6;border-radius:6px;flex-shrink:0"></div>
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:600;color:#1A1A2E">洗自己的碗</div>
+              <div style="font-size:11px;color:#6B7280">10 分鐘・幫家裡省 10 分鐘</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Text link actions -->
+        <div style="display:flex;justify-content:space-between;padding:6px 2px 20px">
+          <span style="font-size:12px;color:#4A90D9;font-weight:500">＋ 新增自訂任務</span>
+          <span style="font-size:12px;color:#9CA3AF">🔄 換一批</span>
+        </div>
+
+        <!-- Task-C section -->
+        <div style="font-size:12px;font-weight:700;color:#1A1A2E;margin-bottom:12px">超出本分貢獻</div>
+
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:6px">
+          <div style="background:#EEF5FF;border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:12px">
+            <div style="width:20px;height:20px;background:#4A90D9;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <span style="color:#fff;font-size:11px;font-weight:700">✓</span>
+            </div>
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:600;color:#1A1A2E">幫忙擦桌子</div>
+              <div style="font-size:11px;color:#6B7280">15 分鐘 × 難度 2</div>
+            </div>
+            <div style="font-size:12px;font-weight:700;color:#F5A623">30 幣</div>
+          </div>
+          <div style="background:#EEF5FF;border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:12px">
+            <div style="width:20px;height:20px;background:#4A90D9;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <span style="color:#fff;font-size:11px;font-weight:700">✓</span>
+            </div>
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:600;color:#1A1A2E">幫忙洗碗</div>
+              <div style="font-size:11px;color:#6B7280">20 分鐘 × 難度 2</div>
+            </div>
+            <div style="font-size:12px;font-weight:700;color:#F5A623">40 幣</div>
+          </div>
+          <div style="background:#fff;border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:12px;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+            <div style="width:20px;height:20px;background:#F3F4F6;border-radius:6px;flex-shrink:0"></div>
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:600;color:#1A1A2E">整理客廳</div>
+              <div style="font-size:11px;color:#6B7280">20 分鐘 × 難度 2.5</div>
+            </div>
+            <div style="font-size:12px;font-weight:700;color:#9CA3AF">50 幣</div>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;padding:6px 2px 20px">
+          <span style="font-size:12px;color:#4A90D9;font-weight:500">＋ 新增自訂任務</span>
+          <span style="font-size:12px;color:#9CA3AF">🔄 換一批</span>
+        </div>
+
+        <!-- Coin summary — minimal -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:#fff;border-radius:12px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+          <div style="font-size:13px;color:#6B7280">每次全完成可賺</div>
+          <div style="font-size:18px;font-weight:800;color:#F5A623">70 幣</div>
+        </div>
+
+        <div style="background:#4A90D9;border-radius:12px;padding:13px;text-align:center;color:#fff;font-weight:600;font-size:15px">
+          下一步：確認總覽 →
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- OverviewScreen redesign -->
+  <div style="text-align:center">
+    <div style="font-size:11px;font-weight:700;color:#4A90D9;letter-spacing:1px;margin-bottom:8px">確認總覽</div>
+    <div class="mockup" style="width:260px">
+      <div class="mockup-header">OverviewScreen</div>
+      <div class="mockup-body" style="padding:20px 18px;background:#F8F9FA;font-family:sans-serif">
+
+        <!-- Progress -->
+        <div style="display:flex;gap:6px;margin-bottom:24px">
+          <div style="flex:1;height:3px;background:#22C55E;border-radius:2px"></div>
+          <div style="flex:1;height:3px;background:#22C55E;border-radius:2px"></div>
+          <div style="flex:1;height:3px;background:#4A90D9;border-radius:2px"></div>
+        </div>
+
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px">
+          <div>
+            <div style="font-size:20px;font-weight:700;color:#1A1A2E">確認小明的計畫</div>
+            <div style="font-size:13px;color:#6B7280;margin-top:2px">看起來 OK 就出發 🚀</div>
+          </div>
+          <div style="font-size:12px;color:#4A90D9;font-weight:500;padding-top:4px">✏️ 修改</div>
+        </div>
+
+        <!-- Goal -->
+        <div style="background:#fff;border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+          <div style="font-size:11px;color:#9CA3AF;font-weight:600;letter-spacing:1px;margin-bottom:10px">目標</div>
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div style="font-size:16px;font-weight:700;color:#1A1A2E">🃏 寶可夢卡牌</div>
+            <div style="font-size:20px;font-weight:800;color:#F5A623">80 幣</div>
+          </div>
+        </div>
+
+        <!-- Tasks -->
+        <div style="background:#fff;border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+          <div style="font-size:11px;color:#9CA3AF;font-weight:600;letter-spacing:1px;margin-bottom:12px">任務包</div>
+
+          <div style="margin-bottom:10px">
+            <div style="font-size:12px;font-weight:600;color:#6B7280;margin-bottom:4px">家庭本分</div>
+            <div style="font-size:13px;color:#1A1A2E;line-height:1.8">整理書包・收好玩具</div>
+          </div>
+
+          <div style="height:1px;background:#F3F4F6;margin-bottom:10px"></div>
+
+          <div>
+            <div style="font-size:12px;font-weight:600;color:#6B7280;margin-bottom:4px">賺幣任務</div>
+            <div style="font-size:13px;color:#1A1A2E;line-height:1.8">幫忙擦桌子・幫忙洗碗</div>
+          </div>
+        </div>
+
+        <!-- Estimate -->
+        <div style="background:#1A1A2E;border-radius:14px;padding:16px;margin-bottom:20px">
+          <div style="display:flex;justify-content:space-around">
+            <div style="text-align:center">
+              <div style="font-size:22px;font-weight:800;color:#F5A623">70 幣</div>
+              <div style="font-size:11px;color:#6B7280;margin-top:4px">每次最多可賺</div>
+            </div>
+            <div style="width:1px;background:#374151"></div>
+            <div style="text-align:center">
+              <div style="font-size:22px;font-weight:800;color:#4A90D9">~2 次</div>
+              <div style="font-size:11px;color:#6B7280;margin-top:4px">就能換到目標</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="background:#22C55E;border-radius:12px;padding:14px;text-align:center;color:#fff;font-weight:700;font-size:16px">
+          ✓ 確認並開始！
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div style="margin-top:20px;background:#F0FDF4;border-radius:12px;padding:14px 18px;max-width:620px;margin-left:auto;margin-right:auto">
+  <div style="font-size:12px;color:#374151;line-height:1.8">
+    <strong>設計原則變更：</strong><br>
+    • 全部卡片拿掉 border，改用 <code>box-shadow: 0 1px 3px rgba(0,0,0,0.06)</code> 做微微浮起感<br>
+    • 選取狀態統一：藍色 <code>#EEF5FF</code> 背景 + 藍色 ✓ 圓角方塊，Task-B / C 相同邏輯<br>
+    • 輔助動作（自訂任務、換一批）降為 12px 文字連結<br>
+    • 時間儲蓄說明改為「幫家裡省 X 分鐘，累積可兌換家庭共同時間」<br>
+    • Overview 「✏️ 修改」改為右上角文字連結
+  </div>
+</div>
