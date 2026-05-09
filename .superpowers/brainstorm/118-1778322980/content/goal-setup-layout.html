@@ -1,0 +1,140 @@
+<h2>GoalSetupScreen — 版型選擇</h2>
+<p class="subtitle">哪種目標選擇介面更有「親子一起選」的感覺？</p>
+
+<div class="split" style="gap:32px;align-items:flex-start">
+
+  <!-- Option A -->
+  <div class="option" data-choice="a" onclick="toggleSelect(this)" style="flex:1;padding:0;background:none;border:none;box-shadow:none">
+    <div class="letter">A</div>
+    <div class="content" style="padding:0">
+      <h3 style="margin-bottom:12px">圖卡格狀排列</h3>
+      <div class="mockup" style="max-width:280px;margin:0 auto">
+        <div class="mockup-header">GoalSetupScreen</div>
+        <div class="mockup-body" style="padding:16px;background:#F8F9FA;font-family:sans-serif">
+
+          <!-- Progress -->
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+            <div style="flex:1;height:4px;background:#4A90D9;border-radius:2px"></div>
+            <div style="flex:1;height:4px;background:#E5E7EB;border-radius:2px"></div>
+            <div style="flex:1;height:4px;background:#E5E7EB;border-radius:2px"></div>
+            <span style="font-size:11px;color:#6B7280;white-space:nowrap">1 / 3</span>
+          </div>
+
+          <div style="font-size:20px;font-weight:700;color:#1A1A2E;margin-bottom:4px">為小明設定目標</div>
+          <div style="font-size:13px;color:#6B7280;margin-bottom:20px">選一個你最想換的東西 🎯</div>
+
+          <!-- 2-column grid -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+            <div style="background:#fff;border-radius:14px;padding:14px 8px;text-align:center;border:2px solid #E5E7EB">
+              <div style="font-size:28px">🃏</div>
+              <div style="font-size:13px;font-weight:600;color:#1A1A2E;margin-top:6px">寶可夢卡牌</div>
+              <div style="background:#FFF3DC;color:#F5A623;font-size:11px;font-weight:700;border-radius:20px;padding:2px 10px;margin-top:6px;display:inline-block">80 幣</div>
+            </div>
+            <div style="background:#EEF5FF;border-radius:14px;padding:14px 8px;text-align:center;border:2px solid #4A90D9">
+              <div style="font-size:28px">🎮</div>
+              <div style="font-size:13px;font-weight:600;color:#1A1A2E;margin-top:6px">多30分鐘Switch</div>
+              <div style="background:#FFF3DC;color:#F5A623;font-size:11px;font-weight:700;border-radius:20px;padding:2px 10px;margin-top:6px;display:inline-block">80 幣</div>
+            </div>
+            <div style="background:#fff;border-radius:14px;padding:14px 8px;text-align:center;border:2px solid #E5E7EB">
+              <div style="font-size:28px">🎬</div>
+              <div style="font-size:13px;font-weight:600;color:#1A1A2E;margin-top:6px">選一部電影</div>
+              <div style="background:#FFF3DC;color:#F5A623;font-size:11px;font-weight:700;border-radius:20px;padding:2px 10px;margin-top:6px;display:inline-block">60 幣</div>
+            </div>
+            <div style="background:#fff;border-radius:14px;padding:14px 8px;text-align:center;border:2px solid #E5E7EB">
+              <div style="font-size:28px">📚</div>
+              <div style="font-size:13px;font-weight:600;color:#1A1A2E;margin-top:6px">買一本漫畫</div>
+              <div style="background:#FFF3DC;color:#F5A623;font-size:11px;font-weight:700;border-radius:20px;padding:2px 10px;margin-top:6px;display:inline-block">70 幣</div>
+            </div>
+            <div style="background:#fff;border-radius:14px;padding:14px 8px;text-align:center;border:2px solid #E5E7EB">
+              <div style="font-size:28px">🎡</div>
+              <div style="font-size:13px;font-weight:600;color:#1A1A2E;margin-top:6px">去遊樂場</div>
+              <div style="background:#FFF3DC;color:#F5A623;font-size:11px;font-weight:700;border-radius:20px;padding:2px 10px;margin-top:6px;display:inline-block">100 幣</div>
+            </div>
+            <div style="background:#fff;border-radius:14px;padding:14px 8px;text-align:center;border:2px dashed #6B7280">
+              <div style="font-size:28px">✏️</div>
+              <div style="font-size:13px;font-weight:600;color:#6B7280;margin-top:6px">自己填…</div>
+              <div style="font-size:11px;color:#9CA3AF;margin-top:6px">自訂幣值</div>
+            </div>
+          </div>
+
+          <div style="background:#fff;border-radius:10px;padding:10px;text-align:center;font-size:12px;color:#6B7280;margin-bottom:14px">
+            建議 <strong style="color:#F5A623">60–100 幣</strong>，大約 1 週可以賺到 ✨
+          </div>
+
+          <div style="background:#4A90D9;border-radius:12px;padding:13px;text-align:center;color:#fff;font-weight:600;font-size:15px">
+            下一步：選任務 →
+          </div>
+
+        </div>
+      </div>
+      <p style="font-size:13px;color:#6B7280;margin-top:12px;text-align:center">孩子可以直接指著選，視覺豐富</p>
+    </div>
+  </div>
+
+  <!-- Option B -->
+  <div class="option" data-choice="b" onclick="toggleSelect(this)" style="flex:1;padding:0;background:none;border:none;box-shadow:none">
+    <div class="letter">B</div>
+    <div class="content" style="padding:0">
+      <h3 style="margin-bottom:12px">清單式帶幣值輸入</h3>
+      <div class="mockup" style="max-width:280px;margin:0 auto">
+        <div class="mockup-header">GoalSetupScreen</div>
+        <div class="mockup-body" style="padding:16px;background:#F8F9FA;font-family:sans-serif">
+
+          <!-- Progress -->
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+            <div style="flex:1;height:4px;background:#4A90D9;border-radius:2px"></div>
+            <div style="flex:1;height:4px;background:#E5E7EB;border-radius:2px"></div>
+            <div style="flex:1;height:4px;background:#E5E7EB;border-radius:2px"></div>
+            <span style="font-size:11px;color:#6B7280;white-space:nowrap">1 / 3</span>
+          </div>
+
+          <div style="font-size:20px;font-weight:700;color:#1A1A2E;margin-bottom:4px">為小明設定目標</div>
+          <div style="font-size:13px;color:#6B7280;margin-bottom:20px">選一個你最想換的東西 🎯</div>
+
+          <!-- List items -->
+          <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
+            <div style="background:#EEF5FF;border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:12px;border:1.5px solid #4A90D9">
+              <span style="font-size:22px">🃏</span>
+              <div style="flex:1">
+                <div style="font-size:14px;font-weight:600;color:#1A1A2E">寶可夢卡牌</div>
+              </div>
+              <div style="background:#FFF3DC;color:#F5A623;font-size:12px;font-weight:700;border-radius:20px;padding:3px 10px">80 幣</div>
+            </div>
+            <div style="background:#fff;border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:12px;border:1.5px solid #E5E7EB">
+              <span style="font-size:22px">🎮</span>
+              <div style="flex:1">
+                <div style="font-size:14px;font-weight:600;color:#1A1A2E">多30分鐘Switch</div>
+              </div>
+              <div style="background:#F3F4F6;color:#6B7280;font-size:12px;font-weight:700;border-radius:20px;padding:3px 10px">80 幣</div>
+            </div>
+            <div style="background:#fff;border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:12px;border:1.5px solid #E5E7EB">
+              <span style="font-size:22px">🎬</span>
+              <div style="flex:1">
+                <div style="font-size:14px;font-weight:600;color:#1A1A2E">選一部電影</div>
+              </div>
+              <div style="background:#F3F4F6;color:#6B7280;font-size:12px;font-weight:700;border-radius:20px;padding:3px 10px">60 幣</div>
+            </div>
+
+            <!-- Custom input inline -->
+            <div style="background:#fff;border-radius:12px;padding:12px 14px;border:1.5px dashed #6B7280">
+              <div style="font-size:12px;color:#6B7280;margin-bottom:6px">自訂目標名稱</div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <div style="flex:1;background:#F3F4F6;border-radius:8px;padding:8px 10px;font-size:13px;color:#9CA3AF">例：去吃火鍋</div>
+                <div style="background:#F3F4F6;border-radius:8px;padding:8px 10px;font-size:13px;color:#9CA3AF;white-space:nowrap">80 幣</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="background:#4A90D9;border-radius:12px;padding:13px;text-align:center;color:#fff;font-weight:600;font-size:15px">
+            下一步：選任務 →
+          </div>
+
+        </div>
+      </div>
+      <p style="font-size:13px;color:#6B7280;margin-top:12px;text-align:center">清楚對比幣值，家長主導感較強</p>
+    </div>
+  </div>
+
+</div>
+
+<p style="text-align:center;color:#6B7280;font-size:13px;margin-top:24px">點擊選擇偏好的版型，或在下方告訴我想調整什麼</p>
