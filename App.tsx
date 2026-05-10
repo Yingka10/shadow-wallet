@@ -13,6 +13,7 @@ import ParentScreen from './src/screens/parent/ParentScreen';
 import GoalSetupScreen from './src/screens/onboarding/GoalSetupScreen';
 import TaskSelectionScreen from './src/screens/onboarding/TaskSelectionScreen';
 import OverviewScreen from './src/screens/onboarding/OverviewScreen';
+import LongTermDetailScreen from './src/screens/child/LongTermDetailScreen';
 import type { AgeGroup, CustomTask } from './src/types/database';
 
 export type RootStackParamList = {
@@ -48,6 +49,11 @@ export type RootStackParamList = {
     goalCoinCost: number;
     isOnboarding: boolean;
   };
+  LongTermDetail: {
+    goalId: string;
+    taskId: string;
+    taskName: string;
+  };
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -69,6 +75,7 @@ export default function App() {
           <Stack.Screen name="GoalSetup" component={GoalSetupScreen} />
           <Stack.Screen name="TaskSelection" component={TaskSelectionScreen} />
           <Stack.Screen name="Overview" component={OverviewScreen} />
+          <Stack.Screen name="LongTermDetail" component={LongTermDetailScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </SafeAreaProvider>
