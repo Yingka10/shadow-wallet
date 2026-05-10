@@ -24,6 +24,9 @@ export type GoalStatus = 'active' | 'completed' | 'paused';
 export type PoolType = 'family_time' | 'game_time';
 export type ReportedBy = 'child' | 'parent';
 
+/** Maps day-number (as string key) to coin reward. E.g. {"7": 20, "14": 40, "21": 80} */
+export type CheckpointRewards = Record<string, number>;
+
 // ── Row 型別（對應 DB 欄位，全必填）──────────────────────────
 // 使用 type 而非 interface：TypeScript 5.9+ 中 interface 不滿足
 // Record<string, unknown> 的 extends 約束，導致 supabase-js 的
@@ -88,6 +91,7 @@ export type Task = {
   max_age: number;
   is_active: boolean;
   time_saving_min: number;
+  parent_task_id: string | null;
   created_at: string;
 };
 
@@ -159,7 +163,7 @@ export type LongTermGoal = {
   total_days: number | null;
   current_day: number;
   status: GoalStatus;
-  checkpoint_rewards: unknown | null;
+  checkpoint_rewards: CheckpointRewards | null;
   motivation_note: string | null;
   started_at: string;
   next_review_at: string | null;
@@ -373,6 +377,7 @@ export interface Database {
           max_age?: number;
           is_active?: boolean;
           time_saving_min?: number;
+          parent_task_id?: string | null;
           created_at?: string;
         };
         Update: Partial<Task>;
@@ -489,7 +494,7 @@ export interface Database {
           total_days?: number | null;
           current_day?: number;
           status?: GoalStatus;
-          checkpoint_rewards?: unknown | null;
+          checkpoint_rewards?: CheckpointRewards | null;
           motivation_note?: string | null;
           started_at?: string;
           next_review_at?: string | null;
