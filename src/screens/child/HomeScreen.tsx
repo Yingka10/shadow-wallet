@@ -6,49 +6,51 @@ import {
   RefreshControl,
   TouchableOpacity,
   StyleSheet,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
-import { Colors } from '../../constants/colors';
 import type { RootStackParamList } from '../../../App';
 import { useTodayTasks, type TodayTask } from '../../hooks/useTodayTasks';
-import TaskItem from '../../components/TaskItem';
+import DutyTaskCard from '../../components/DutyTaskCard';
+import ContributionTaskCard from '../../components/ContributionTaskCard';
+import GoalHeroCard from '../../components/GoalHeroCard';
+import BottomNav from '../../components/BottomNav';
 import TaskCompleteModal from '../../components/TaskCompleteModal';
 import FeedbackAnimation, { type FeedbackType } from '../../components/FeedbackAnimation';
+import { CoinIcon, WaveIcon } from '../../components/icons/TaskIcons';
 import { completeTask } from '../../lib/taskActions';
+import { Colors } from '../../constants/colors';
 import type { Task } from '../../types/database';
 
 type HomeRoute = RouteProp<RootStackParamList, 'Home'>;
 type Nav = StackNavigationProp<RootStackParamList, 'Home'>;
 
-type ModalState = {
-  task: TodayTask | null;
-  visible: boolean;
-};
+type ModalState = { task: TodayTask | null; visible: boolean };
+type FeedbackState = { visible: boolean; type: FeedbackType; value: number };
 
-type FeedbackState = {
-  visible: boolean;
-  type: FeedbackType;
-  value: number;
-};
+// TODO: replace with useWallet(childId) once wallet hook is implemented
+const MOCK_COIN_BALANCE = 128;
 
-function SectionHeader({ title, count }: { title: string; count: number }) {
-  return (
-    <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      <Text style={styles.sectionCount}>{count} 個任務</Text>
-    </View>
-  );
+function getGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return '早安';
+  if (h < 18) return '午安';
+  return '晚安';
 }
 
-function PrereqBanner() {
+function getSubGreeting(remaining: number, total: number): string {
+  if (total === 0 || remaining === 0) return '今天全部完成了！太厲害！';
+  return `今天有 ${remaining} 件事等你開動`;
+}
+
+function SectionHeader({ title }: { title: string }) {
   return (
-    <View style={styles.prereqBanner}>
-      <Text style={styles.prereqBannerText}>
-        ⚠️ 完成自理和本分任務後，貢獻任務的幣值會恢復全額！
-      </Text>
+    <View style={styles.sectionHead}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      <WaveIcon />
     </View>
   );
 }
@@ -62,11 +64,21 @@ export default function HomeScreen() {
     useTodayTasks(childId);
 
   const [modal, setModal] = useState<ModalState>({ task: null, visible: false });
-  const [feedback, setFeedback] = useState<FeedbackState>({
-    visible: false,
-    type: 'task-a',
-    value: 0,
-  });
+  const [feedback, setFeedback] = useState<FeedbackState>({ visible: false, type: 'task-a', value: 0 });
+
+  const isWeekend = [0, 6].includes(new Date().getDay());
+  const shortTermTasks = isWeekend ? weekendTasks : weekdayTasks;
+  const dutyTasks = shortTermTasks.filter(t => t.category === 'A' || t.category === 'B');
+  const contributionTasks = shortTermTasks.filter(t => t.category === 'C');
+
+  const allCount = dutyTasks.length + contributionTasks.length + longTermTasks.length;
+  const doneCount = [...dutyTasks, ...contributionTasks, ...longTermTasks].filter(t => t.isCompleted).length;
+  const remaining = allCount - doneCount;
+
+  const hasDiscountableTasks =
+    !isPrerequisiteMet && contributionTasks.some(t => !t.isCompleted);
+
+  const isEmpty = allCount === 0 && !loading;
 
   const openModal = useCallback((task: TodayTask) => {
     setModal({ task, visible: true });
@@ -80,7 +92,6 @@ export default function HomeScreen() {
     async (completedDate: string) => {
       if (!modal.task) return;
       const task: Task = modal.task;
-
       const result = await completeTask(
         task.id,
         childId,
@@ -89,9 +100,7 @@ export default function HomeScreen() {
         task,
         modal.task.goal?.id,
       );
-
       closeModal();
-
       if (result.milestone) {
         setFeedback({ visible: true, type: 'milestone', value: result.milestone.coinReward });
       } else if (task.category === 'A') {
@@ -110,36 +119,82 @@ export default function HomeScreen() {
     refresh();
   }, [refresh]);
 
-  const hasDiscountableTasks =
-    !isPrerequisiteMet &&
-    [...weekdayTasks, ...weekendTasks].some(
-      t => (t.category === 'C' || t.category === 'D') && !t.isCompleted,
-    );
-
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.headerLeft}>
+          <Text style={styles.greeting}>{getGreeting()}，小探險家！</Text>
+          <Text style={styles.greetSub}>{getSubGreeting(remaining, allCount)}</Text>
+        </View>
+        <TouchableOpacity
+          style={styles.coinPill}
+          onPress={() => Alert.alert('撲滿', '即將推出！')}
+          accessibilityLabel={`金幣餘額 ${MOCK_COIN_BALANCE}`}
+        >
+          <CoinIcon size={28} />
+          <Text style={styles.coinCount}>{MOCK_COIN_BALANCE}</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Scroll content */}
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} />}
+        refreshControl={
+          <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={Colors.coral500} />
+        }
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>今天的任務</Text>
-          <TouchableOpacity
-            onPress={() => navigation.replace('Entry')}
-            style={styles.logoutBtn}
-          >
-            <Text style={styles.logoutText}>登出</Text>
-          </TouchableOpacity>
-        </View>
+        {/* Long-term goal hero card(s) */}
+        {longTermTasks.map(task =>
+          task.goal ? (
+            <GoalHeroCard
+              key={task.id}
+              task={task}
+              goal={task.goal}
+              isCompleted={task.isCompleted}
+              onCheckIn={() => openModal(task)}
+              onOpen={() =>
+                navigation.navigate('LongTermDetail', {
+                  goalId: task.goal!.id,
+                  taskId: task.id,
+                  taskName: task.name,
+                })
+              }
+            />
+          ) : null,
+        )}
 
-        {hasDiscountableTasks && <PrereqBanner />}
+        {/* Prerequisite nudge banner */}
+        {hasDiscountableTasks && (
+          <View style={styles.prereqBanner}>
+            <View style={styles.nudgeDot} />
+            <Text style={styles.prereqText}>先完成本分任務，解鎖完整金幣！</Text>
+          </View>
+        )}
 
-        {weekdayTasks.length > 0 && (
+        {/* Duty tasks (Task-A + Task-B) */}
+        {dutyTasks.length > 0 && (
           <View style={styles.section}>
-            <SectionHeader title="平日任務" count={weekdayTasks.length} />
-            {weekdayTasks.map(task => (
-              <TaskItem
+            <SectionHeader title="本分任務" />
+            {dutyTasks.map(task => (
+              <DutyTaskCard
+                key={task.id}
+                task={task}
+                isCompleted={task.isCompleted}
+                onPress={() => openModal(task)}
+              />
+            ))}
+          </View>
+        )}
+
+        {/* Contribution tasks (Task-C) */}
+        {contributionTasks.length > 0 && (
+          <View style={styles.section}>
+            <SectionHeader title="貢獻任務" />
+            {contributionTasks.map(task => (
+              <ContributionTaskCard
                 key={task.id}
                 task={task}
                 isCompleted={task.isCompleted}
@@ -150,61 +205,26 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {weekendTasks.length > 0 && (
-          <View style={styles.section}>
-            <SectionHeader title="週末任務" count={weekendTasks.length} />
-            {weekendTasks.map(task => (
-              <TaskItem
-                key={task.id}
-                task={task}
-                isCompleted={task.isCompleted}
-                isPrerequisiteMet={isPrerequisiteMet}
-                onPress={() => openModal(task)}
-              />
-            ))}
+        {/* Empty state */}
+        {isEmpty && (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>今天全部完成了！</Text>
+            <Text style={styles.emptySub}>你今天超棒的！</Text>
           </View>
         )}
 
-        {longTermTasks.length > 0 && (
-          <View style={styles.section}>
-            <SectionHeader title="長期任務" count={longTermTasks.length} />
-            {longTermTasks.map(task => (
-              <TouchableOpacity
-                key={task.id}
-                onPress={() => {
-                  if (task.goal) {
-                    navigation.navigate('LongTermDetail', {
-                      goalId: task.goal.id,
-                      taskId: task.id,
-                      taskName: task.name,
-                    });
-                  }
-                }}
-                activeOpacity={0.75}
-              >
-                <TaskItem
-                  task={task}
-                  isCompleted={task.isCompleted}
-                  isPrerequisiteMet={isPrerequisiteMet}
-                  goal={task.goal}
-                  onPress={() => openModal(task)}
-                />
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {weekdayTasks.length === 0 &&
-          weekendTasks.length === 0 &&
-          longTermTasks.length === 0 &&
-          !loading && (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyEmoji}>🎉</Text>
-              <Text style={styles.emptyText}>今天的任務都完成了！</Text>
-            </View>
-          )}
+        <View style={styles.bottomPad} />
       </ScrollView>
 
+      {/* Bottom nav */}
+      <BottomNav
+        activeTab="home"
+        onTabPress={tab => {
+          if (tab !== 'home') Alert.alert('功能開發中', '即將推出！');
+        }}
+      />
+
+      {/* Modals — untouched logic */}
       <TaskCompleteModal
         visible={modal.visible}
         task={modal.task}
@@ -225,80 +245,126 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  safe: {
     flex: 1,
-    backgroundColor: Colors.background,
-  },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 40,
+    backgroundColor: Colors.bgCanvas,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    gap: 12,
+    backgroundColor: 'rgba(255, 248, 238, 0.85)',
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 14,
+    borderRadius: 24,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    shadowColor: Colors.shadowWarm,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 4,
   },
-  headerTitle: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: Colors.text,
+  headerLeft: {
+    flex: 1,
   },
-  logoutBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    backgroundColor: Colors.border,
+  greeting: {
+    fontWeight: '800',
+    fontSize: 22,
+    color: Colors.ink900,
+    lineHeight: 26,
   },
-  logoutText: {
+  greetSub: {
     fontSize: 13,
-    color: Colors.textSecondary,
+    fontWeight: '600',
+    color: Colors.ink500,
+    marginTop: 2,
+  },
+  coinPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.bgSurface,
+    paddingVertical: 6,
+    paddingLeft: 6,
+    paddingRight: 14,
+    borderRadius: 999,
+    shadowColor: Colors.shadowWarm,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 3,
+  },
+  coinCount: {
+    fontWeight: '800',
+    fontSize: 17,
+    color: Colors.gold700,
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
   },
   prereqBanner: {
-    backgroundColor: Colors.warning + '22',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.warning,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.coral100,
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginBottom: 18,
   },
-  prereqBannerText: {
+  nudgeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.coral500,
+  },
+  prereqText: {
+    flex: 1,
     fontSize: 13,
-    color: Colors.text,
-    lineHeight: 18,
+    fontWeight: '700',
+    color: Colors.coral700,
   },
   section: {
     marginBottom: 24,
   },
-  sectionHeader: {
+  sectionHead: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    gap: 10,
+    marginBottom: 12,
+    marginTop: 6,
+    marginLeft: 4,
   },
   sectionTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: Colors.text,
-  },
-  sectionCount: {
+    fontWeight: '800',
     fontSize: 13,
-    color: Colors.textSecondary,
+    color: Colors.ink700,
+    letterSpacing: 1.0,
+    textTransform: 'uppercase',
   },
   emptyState: {
     alignItems: 'center',
-    marginTop: 80,
+    paddingTop: 72,
   },
-  emptyEmoji: {
-    fontSize: 56,
-    marginBottom: 12,
+  emptyTitle: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: Colors.ink900,
+    marginBottom: 8,
   },
-  emptyText: {
-    fontSize: 20,
-    color: Colors.textSecondary,
+  emptySub: {
+    fontSize: 16,
+    color: Colors.ink500,
     fontWeight: '500',
+  },
+  bottomPad: {
+    height: 32,
   },
 });
