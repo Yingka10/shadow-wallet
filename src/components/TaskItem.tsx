@@ -1,6 +1,5 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { Colors } from '../constants/colors';
 import type { Task, LongTermGoal } from '../types/database';
 
 interface TaskItemProps {
@@ -14,39 +13,61 @@ interface TaskItemProps {
 function calcDisplayCoin(task: Task, isPrerequisiteMet: boolean): number {
   if (task.category === 'A' || task.category === 'B') return 0;
   const base = task.coin_override ?? Math.round(task.base_time_min * task.difficulty);
-  const discount = isPrerequisiteMet ? 1.0 : 0.7;
-  return Math.round(base * discount);
+  return Math.round(base * (isPrerequisiteMet ? 1.0 : 0.7));
 }
 
-function CategoryBadge({ category }: { category: string }) {
-  const labels: Record<string, string> = { A: '自理', B: '本分', C: '貢獻', D: '成長' };
-  const bg: Record<string, string> = {
-    A: Colors.textSecondary,
-    B: Colors.primary,
-    C: Colors.secondary,
-    D: '#8B5CF6',
-  };
-  return (
-    <View style={[styles.badge, { backgroundColor: bg[category] ?? Colors.textSecondary }]}>
-      <Text style={styles.badgeText}>{labels[category] ?? category}</Text>
-    </View>
-  );
+const CAT_EMOJI: Record<string, string> = { A: '🌅', B: '🏡', C: '⭐', D: '🚀' };
+const CAT_LABEL: Record<string, string> = { A: '自理', B: '本分', C: '貢獻', D: '成長' };
+
+const ACCENT_BAR = StyleSheet.create({
+  A: { backgroundColor: '#3B82F6' },
+  B: { backgroundColor: '#10B981' },
+  C: { backgroundColor: '#F97316' },
+  D: { backgroundColor: '#8B5CF6' },
+});
+
+const ICON_BG = StyleSheet.create({
+  A: { backgroundColor: '#DBEAFE' },
+  B: { backgroundColor: '#D1FAE5' },
+  C: { backgroundColor: '#FFEDD5' },
+  D: { backgroundColor: '#EDE9FE' },
+});
+
+const CAT_TEXT = StyleSheet.create({
+  A: { color: '#2563EB' },
+  B: { color: '#059669' },
+  C: { color: '#EA580C' },
+  D: { color: '#7C3AED' },
+});
+
+const PROGRESS_BAR = StyleSheet.create({
+  A: { backgroundColor: '#3B82F6' },
+  B: { backgroundColor: '#10B981' },
+  C: { backgroundColor: '#F97316' },
+  D: { backgroundColor: '#8B5CF6' },
+});
+
+type TaskCategory = 'A' | 'B' | 'C' | 'D';
+
+function toCategory(cat: string): TaskCategory {
+  if (cat === 'A' || cat === 'B' || cat === 'C' || cat === 'D') return cat;
+  return 'B';
 }
 
-function LongTermProgress({ goal }: { goal: LongTermGoal }) {
+function LongTermProgress({ goal, category }: { goal: LongTermGoal; category: TaskCategory }) {
   const total = goal.total_days ?? 30;
-  const progress = Math.min(goal.current_day / total, 1);
+  const pct = Math.min(Math.round((goal.current_day / total) * 100), 100);
   const label =
     goal.goal_type === 'habit'
       ? `第 ${goal.current_day} / ${total} 天`
       : `Level ${goal.current_day} / ${total}`;
 
   return (
-    <View style={styles.progressContainer}>
-      <Text style={styles.progressLabel}>{label}</Text>
-      <View style={styles.progressBar}>
-        <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
+    <View style={styles.ltWrap}>
+      <View style={styles.ltTrack}>
+        <View style={[styles.ltFill, PROGRESS_BAR[category], { width: `${pct}%` }]} />
       </View>
+      <Text style={styles.ltLabel}>{label}</Text>
     </View>
   );
 }
@@ -58,56 +79,57 @@ export default function TaskItem({
   goal,
   onPress,
 }: TaskItemProps) {
-  const showCoinDiscount = (task.category === 'C' || task.category === 'D') && !isPrerequisiteMet;
+  const cat = toCategory(task.category);
+  const showDiscount = (task.category === 'C' || task.category === 'D') && !isPrerequisiteMet;
   const displayCoin = calcDisplayCoin(task, isPrerequisiteMet);
 
   return (
     <TouchableOpacity
-      style={[styles.card, isCompleted && styles.cardCompleted]}
+      style={[styles.card, isCompleted && styles.cardDone]}
       onPress={onPress}
       disabled={isCompleted && !task.allow_repeat}
-      activeOpacity={0.7}
+      activeOpacity={0.75}
     >
-      <View style={styles.row}>
-        <View style={styles.leftCol}>
-          {isCompleted ? (
-            <View style={styles.checkCircle}>
-              <Text style={styles.checkMark}>✓</Text>
-            </View>
-          ) : (
-            <CategoryBadge category={task.category} />
-          )}
+      <View style={[styles.accentBar, ACCENT_BAR[cat]]} />
+
+      <View style={styles.inner}>
+        <View style={styles.row}>
+          <View style={[styles.iconCircle, ICON_BG[cat]]}>
+            {isCompleted ? (
+              <Text style={styles.doneCheck}>✓</Text>
+            ) : (
+              <Text style={styles.catEmoji}>{CAT_EMOJI[task.category] ?? '📋'}</Text>
+            )}
+          </View>
+
+          <View style={styles.mid}>
+            <Text style={[styles.taskName, isCompleted && styles.taskNameDone]} numberOfLines={2}>
+              {task.name}
+            </Text>
+            <Text style={[styles.catLabel, isCompleted ? styles.catLabelDone : CAT_TEXT[cat]]}>
+              {CAT_LABEL[task.category] ?? task.category}
+              {showDiscount ? ' · 打折中 🔓' : ''}
+            </Text>
+          </View>
+
+          <View style={styles.rewardCol}>
+            {task.category === 'A' && <Text style={styles.noCoin}>—</Text>}
+            {task.category === 'B' && (
+              <View style={styles.timePill}>
+                <Text style={styles.timePillText}>⏱ +{task.time_saving_min}分</Text>
+              </View>
+            )}
+            {(task.category === 'C' || task.category === 'D') && !task.is_long_term && (
+              <View style={[styles.coinPill, showDiscount && styles.coinPillDiscount]}>
+                <Text style={[styles.coinAmt, showDiscount && styles.coinAmtDiscount]}>
+                  +{displayCoin}幣
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
 
-        <View style={styles.centerCol}>
-          <Text style={[styles.taskName, isCompleted && styles.taskNameCompleted]}>
-            {task.name}
-          </Text>
-          {task.is_long_term && goal && <LongTermProgress goal={goal} />}
-          {showCoinDiscount && (
-            <Text style={styles.discountNote}>本分未完成，幣值打折中</Text>
-          )}
-        </View>
-
-        <View style={styles.rightCol}>
-          {task.category === 'A' && (
-            <Text style={styles.rewardEmpty}>—</Text>
-          )}
-          {task.category === 'B' && (
-            <View style={styles.timeSavingRow}>
-              <Text style={styles.hourglassIcon}>⏳</Text>
-              <Text style={styles.timeSavingText}>+{task.time_saving_min}分</Text>
-            </View>
-          )}
-          {(task.category === 'C' || task.category === 'D') && !task.is_long_term && (
-            <View style={styles.coinRow}>
-              <Text style={[styles.coinText, showCoinDiscount && styles.coinTextDiscounted]}>
-                +{displayCoin}
-              </Text>
-              <Text style={styles.coinUnit}>幣</Text>
-            </View>
-          )}
-        </View>
+        {task.is_long_term && goal && <LongTermProgress goal={goal} category={cat} />}
       </View>
     </TouchableOpacity>
   );
@@ -115,124 +137,124 @@ export default function TaskItem({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
     marginBottom: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    shadowColor: '#1E1B4B',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 3,
   },
-  cardCompleted: {
-    opacity: 0.55,
+  cardDone: {
+    opacity: 0.5,
+  },
+  accentBar: {
+    width: 6,
+  },
+  inner: {
+    flex: 1,
+    padding: 14,
+    paddingLeft: 13,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  leftCol: {
-    width: 44,
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  centerCol: {
-    flex: 1,
-  },
-  rightCol: {
-    marginLeft: 12,
-    alignItems: 'flex-end',
-    minWidth: 56,
-  },
-  badge: {
-    borderRadius: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-  },
-  badgeText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  checkCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: Colors.success,
+  iconCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 12,
   },
-  checkMark: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 'bold',
+  doneCheck: {
+    fontSize: 20,
+    color: '#22C55E',
+    fontWeight: '900',
+  },
+  catEmoji: {
+    fontSize: 20,
+  },
+  mid: {
+    flex: 1,
+    gap: 4,
   },
   taskName: {
     fontSize: 16,
-    color: Colors.text,
-    fontWeight: '500',
+    fontWeight: '700',
+    color: '#111827',
+    lineHeight: 22,
+    letterSpacing: -0.2,
   },
-  taskNameCompleted: {
+  taskNameDone: {
     textDecorationLine: 'line-through',
-    color: Colors.textSecondary,
+    color: '#9CA3AF',
   },
-  discountNote: {
-    fontSize: 11,
-    color: Colors.warning,
-    marginTop: 3,
+  catLabel: {
+    fontSize: 12,
+    fontWeight: '700',
   },
-  rewardEmpty: {
-    color: Colors.textSecondary,
-    fontSize: 14,
+  catLabelDone: {
+    color: '#D1D5DB',
   },
-  timeSavingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
+  rewardCol: {
+    marginLeft: 10,
+    alignItems: 'flex-end',
   },
-  hourglassIcon: {
-    fontSize: 14,
-  },
-  timeSavingText: {
-    fontSize: 13,
-    color: Colors.primary,
+  noCoin: {
+    color: '#E5E7EB',
+    fontSize: 16,
     fontWeight: '600',
   },
-  coinRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 1,
+  timePill: {
+    backgroundColor: '#D1FAE5',
+    borderRadius: 10,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
   },
-  coinText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: Colors.coin,
-  },
-  coinTextDiscounted: {
-    color: Colors.warning,
-  },
-  coinUnit: {
+  timePillText: {
+    color: '#065F46',
     fontSize: 12,
-    color: Colors.coin,
+    fontWeight: '800',
   },
-  progressContainer: {
-    marginTop: 6,
+  coinPill: {
+    backgroundColor: '#FEF3C7',
+    borderRadius: 10,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
   },
-  progressLabel: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginBottom: 3,
+  coinPillDiscount: {
+    backgroundColor: '#FEE2E2',
   },
-  progressBar: {
-    height: 6,
-    backgroundColor: Colors.border,
-    borderRadius: 3,
+  coinAmt: {
+    color: '#92400E',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  coinAmtDiscount: {
+    color: '#DC2626',
+  },
+  ltWrap: {
+    marginTop: 12,
+    gap: 5,
+  },
+  ltTrack: {
+    height: 7,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 4,
     overflow: 'hidden',
   },
-  progressFill: {
-    height: 6,
-    backgroundColor: Colors.primary,
-    borderRadius: 3,
+  ltFill: {
+    height: 7,
+    borderRadius: 4,
+  },
+  ltLabel: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    fontWeight: '600',
   },
 });
