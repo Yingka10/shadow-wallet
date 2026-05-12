@@ -9,6 +9,16 @@ dayjs.extend(timezone);
 
 const TZ = 'Asia/Taipei';
 
+type CreateChildTaskInput = {
+  familyId: string;
+  childId: string;
+  ageGroup: '2-4' | '4-6' | '6-9' | '9-12';
+  name: string;
+  category: 'B' | 'C';
+  baseTimeMin: number;
+  difficulty: number;
+};
+
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
 /**
@@ -251,4 +261,56 @@ export async function applyHabitResume(
     .from('long_term_goals')
     .update({ current_day: newDay })
     .eq('id', goalId);
+}
+
+function getAgeRange(ageGroup: CreateChildTaskInput['ageGroup']): { minAge: number; maxAge: number } {
+  if (ageGroup === '2-4') return { minAge: 2, maxAge: 4 };
+  if (ageGroup === '4-6') return { minAge: 4, maxAge: 6 };
+  if (ageGroup === '6-9') return { minAge: 6, maxAge: 9 };
+  return { minAge: 9, maxAge: 12 };
+}
+
+/**
+ * 建立一筆孩子專屬的自訂任務，並同步綁定到 child_tasks。
+ */
+export async function createChildTask(input: CreateChildTaskInput): Promise<void> {
+  const ageRange = getAgeRange(input.ageGroup);
+
+  const { data: task, error: taskError } = await supabase
+    .from('tasks')
+    .insert({
+      family_id: input.familyId,
+      name: input.name,
+      category: input.category,
+      day_type: 'both',
+      long_term_type: null,
+      is_long_term: false,
+      base_time_min: input.baseTimeMin,
+      difficulty: input.difficulty,
+      coin_override: null,
+      is_system_default: false,
+      allow_repeat: false,
+      min_age: ageRange.minAge,
+      max_age: ageRange.maxAge,
+      is_active: true,
+      time_saving_min: input.category === 'B' ? input.baseTimeMin : 0,
+      parent_task_id: null,
+    })
+    .select('id')
+    .single();
+
+  if (taskError || !task) {
+    throw new Error(taskError?.message ?? '建立任務失敗');
+  }
+
+  const { error: childTaskError } = await supabase.from('child_tasks').insert({
+    child_id: input.childId,
+    task_id: task.id,
+    is_active: true,
+  });
+
+  if (childTaskError) {
+    await supabase.from('tasks').delete().eq('id', task.id);
+    throw new Error(childTaskError.message);
+  }
 }
