@@ -323,7 +323,11 @@ export default function HomeScreen() {
       <BottomNav
         activeTab="home"
         onTabPress={tab => {
-          if (tab !== 'home') Alert.alert('功能開發中', '即將推出！');
+          if (tab === 'profile') {
+            navigation.navigate('Profile', { childId });
+          } else if (tab !== 'home') {
+            Alert.alert('功能開發中', '即將推出！');
+          }
         }}
       />
 

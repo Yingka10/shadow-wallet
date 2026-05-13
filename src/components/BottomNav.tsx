@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/colors';
 import { HomeIcon, SparkleIcon, WalletIcon, StarIcon } from './icons/TaskIcons';
 
-type TabId = 'home' | 'reports' | 'wallet' | 'wish';
+type TabId = 'home' | 'wallet' | 'wish' | 'profile';
 
 interface BottomNavProps {
   activeTab?: TabId;
@@ -13,9 +13,9 @@ interface BottomNavProps {
 
 const TABS: { id: TabId; label: string; Icon: React.ComponentType<{ size?: number; color?: string }> }[] = [
   { id: 'home',    label: '首頁', Icon: HomeIcon },
-  { id: 'reports', label: '回顧', Icon: SparkleIcon },
   { id: 'wallet',  label: '撲滿', Icon: WalletIcon },
   { id: 'wish',    label: '願望', Icon: StarIcon },
+  { id: 'profile', label: '個人', Icon: SparkleIcon },
 ];
 
 export default function BottomNav({ activeTab = 'home', onTabPress }: BottomNavProps) {

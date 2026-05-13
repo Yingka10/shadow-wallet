@@ -168,30 +168,56 @@ export function useTodayTasks(childId: string): UseTodayTasksResult {
 
   // Subscribe to realtime changes on task_completions for this child
   useEffect(() => {
-    fetchAll();
+    let isMounted = true;
 
-    const channel = supabase
-      .channel(`task_completions:child_${childId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'task_completions',
-          filter: `child_id=eq.${childId}`,
-        },
-        () => { fetchAll(); },
-      )
-      .subscribe();
+    const setupSubscription = async () => {
+      // Load initial data
+      await fetchAll();
 
-    channelRef.current = channel;
-
-    return () => {
+      // Unsubscribe from old channel if it exists
       if (channelRef.current) {
+        channelRef.current.unsubscribe();
         supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+
+      if (!isMounted) return;
+
+      // Create new subscription channel
+      const channel = supabase
+        .channel(`task_completions:child_${childId}`, { config: { broadcast: { self: false } } })
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'task_completions',
+            filter: `child_id=eq.${childId}`,
+          },
+          () => {
+            if (isMounted) {
+              fetchAll();
+            }
+          },
+        )
+        .subscribe();
+
+      if (isMounted) {
+        channelRef.current = channel;
       }
     };
-  }, [childId, fetchAll]);
+
+    setupSubscription();
+
+    return () => {
+      isMounted = false;
+      if (channelRef.current) {
+        channelRef.current.unsubscribe();
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
+  }, [childId]);
 
   return {
     weekdayTasks,
