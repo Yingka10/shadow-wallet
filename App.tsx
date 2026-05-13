@@ -14,6 +14,7 @@ import GoalSetupScreen from './src/screens/onboarding/GoalSetupScreen';
 import TaskSelectionScreen from './src/screens/onboarding/TaskSelectionScreen';
 import OverviewScreen from './src/screens/onboarding/OverviewScreen';
 import LongTermDetailScreen from './src/screens/child/LongTermDetailScreen';
+import ProfileScreen from './src/screens/child/ProfileScreen';
 import type { AgeGroup, CustomTask } from './src/types/database';
 
 export type RootStackParamList = {
@@ -23,6 +24,7 @@ export type RootStackParamList = {
   Onboarding: undefined;
   Home: { childId: string };
   Parent: undefined;
+  Profile: { childId: string };
   GoalSetup: {
     childId: string;
     childNickname: string;
@@ -71,6 +73,7 @@ export default function App() {
           <Stack.Screen name="ChildLogin" component={ChildLoginScreen} />
           <Stack.Screen name="Onboarding" component={OnboardingScreen} />
           <Stack.Screen name="Home" component={HomeScreen} />
+          <Stack.Screen name="Profile" component={ProfileScreen} />
           <Stack.Screen name="Parent" component={ParentScreen} />
           <Stack.Screen name="GoalSetup" component={GoalSetupScreen} />
           <Stack.Screen name="TaskSelection" component={TaskSelectionScreen} />
