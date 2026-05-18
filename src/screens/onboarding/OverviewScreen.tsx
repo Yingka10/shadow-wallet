@@ -84,7 +84,7 @@ export default function OverviewScreen() {
       });
       if (isOnboarding) {
         navigation.dispatch(
-          CommonActions.reset({ index: 0, routes: [{ name: 'Parent' }] })
+          CommonActions.reset({ index: 0, routes: [{ name: 'ParentTab' }] })
         );
       } else {
         navigation.pop(3);

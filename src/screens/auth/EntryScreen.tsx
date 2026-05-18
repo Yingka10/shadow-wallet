@@ -16,7 +16,7 @@ export default function EntryScreen() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        navigation.replace('Parent');
+        navigation.replace('ParentTab');
       } else {
         setChecking(false);
       }

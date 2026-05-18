@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>影子貨幣錢包 · 家長端</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="parent-theme.css">
+<style>
+  html, body { margin: 0; padding: 0; min-height: 100vh; }
+  body {
+    font-family: var(--p-font-body);
+    background: #E8E2D5;
+    background-image:
+      radial-gradient(circle at 20% 10%, #F0EADC 0%, transparent 50%),
+      radial-gradient(circle at 80% 80%, #DDD5C2 0%, transparent 50%);
+    background-color: #E8E2D5;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+    box-sizing: border-box;
+  }
+  #root { display: flex; align-items: center; justify-content: center; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<template id="__bundler_thumbnail" data-bg-color="#E8E2D5">
+  <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+    <rect width="1200" height="800" fill="#E8E2D5"/>
+    <!-- phone silhouette -->
+    <rect x="440" y="120" width="320" height="560" rx="44" fill="#FAF8F3" stroke="#1C1B17" stroke-width="6"/>
+    <rect x="540" y="138" width="120" height="14" rx="7" fill="#1C1B17"/>
+    <!-- coin icon -->
+    <circle cx="600" cy="340" r="78" fill="#F5B800" stroke="#A87800" stroke-width="6"/>
+    <text x="600" y="372" font-family="serif" font-size="92" font-weight="700" text-anchor="middle" fill="#A87800">¥</text>
+    <!-- progress bar -->
+    <rect x="490" y="470" width="220" height="14" rx="7" fill="#E7DFC8"/>
+    <rect x="490" y="470" width="150" height="14" rx="7" fill="#234E47"/>
+    <!-- two task rows -->
+    <rect x="480" y="510" width="240" height="44" rx="10" fill="#FFFFFF" stroke="#E7DFC8" stroke-width="2"/>
+    <rect x="480" y="566" width="240" height="44" rx="10" fill="#FFFFFF" stroke="#E7DFC8" stroke-width="2"/>
+    <rect x="492" y="522" width="20" height="20" rx="5" fill="#E6EEEA"/>
+    <rect x="492" y="578" width="20" height="20" rx="5" fill="#FAF1E7"/>
+  </svg>
+</template>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="ios-frame.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="components.jsx"></script>
+<script type="text/babel" src="screen-dashboard.jsx"></script>
+<script type="text/babel" src="screen-tasks.jsx"></script>
+<script type="text/babel" src="screen-task-detail.jsx"></script>
+<script type="text/babel" src="screen-rewards.jsx"></script>
+<script type="text/babel" src="screen-new-proposal.jsx"></script>
+<script type="text/babel" src="screen-weekly.jsx"></script>
+<script type="text/babel" src="screen-aux.jsx"></script>
+<script type="text/babel" src="app.jsx"></script>
+</body>
+</html>
