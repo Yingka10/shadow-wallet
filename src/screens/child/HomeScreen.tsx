@@ -223,8 +223,8 @@ export default function HomeScreen() {
         </View>
         <TouchableOpacity
           style={styles.coinPill}
-          onPress={() => Alert.alert('撲滿', '即將推出！')}
-          accessibilityLabel={`金幣餘額 ${coinBalance}`}
+          onPress={() => navigation.navigate('Wallet', { childId })}
+          accessibilityLabel={`前往撲滿，金幣餘額 ${coinBalance}`}
         >
           <CoinIcon size={28} />
           <Text style={styles.coinCount}>{coinBalance}</Text>
@@ -324,6 +324,10 @@ export default function HomeScreen() {
       <BottomNav
         activeTab="home"
         onTabPress={tab => {
+          if (tab === 'wallet') {
+            navigation.navigate('Wallet', { childId });
+            return;
+          }
           if (tab === 'profile') {
             navigation.navigate('Profile', { childId });
           } else if (tab !== 'home') {
