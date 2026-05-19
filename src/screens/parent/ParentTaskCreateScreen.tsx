@@ -15,6 +15,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useNavigation } from '@react-navigation/native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { supabase } from '../../lib/supabase';
+import { suggestTaskCoin } from '../../lib/aiAgent';
 import { useSelectedChild } from '../../context/SelectedChildContext';
 import {
   ParentColors,
@@ -175,12 +176,29 @@ export default function ParentTaskCreateScreen() {
   const [rewardOverride, setRewardOverride] = useState<'auto' | 'coins' | 'time'>('auto');
   const [appliesTo, setAppliesTo] = useState<string[]>(childId ? [childId] : []);
   const [saving, setSaving] = useState(false);
+  const [aiCoinLoading, setAiCoinLoading] = useState(false);
+  const [aiCoinReason, setAiCoinReason] = useState<string | null>(null);
 
   const isDuty = cat === 'B';
   const isMilestone = cat === 'D';
   const useTime = rewardOverride === 'time' ? true : rewardOverride === 'coins' ? false : isDuty;
 
   const suggestions = ['整理玩具', '幫忙摺衣服', '練琴 30 分鐘', '幫忙準備餐桌', '自己量血壓記錄'];
+
+  async function handleAiCoinSuggest() {
+    if (!name.trim()) return;
+    setAiCoinLoading(true);
+    setAiCoinReason(null);
+    try {
+      const result = await suggestTaskCoin(name.trim());
+      setRewardN(result.coins);
+      setAiCoinReason(result.reason);
+    } catch {
+      Alert.alert('AI 建議失敗', '請手動設定幣值');
+    } finally {
+      setAiCoinLoading(false);
+    }
+  }
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -407,6 +425,21 @@ export default function ParentTaskCreateScreen() {
                     suffix={useTime ? '分' : '幣'}
                   />
                 </View>
+                {!useTime && (
+                  <View style={styles.aiCoinRow}>
+                    <TouchableOpacity
+                      style={[styles.aiCoinBtn, (!name.trim() || aiCoinLoading) && styles.aiCoinBtnDisabled]}
+                      onPress={handleAiCoinSuggest}
+                      disabled={!name.trim() || aiCoinLoading}
+                      activeOpacity={0.7}
+                    >
+                      {aiCoinLoading
+                        ? <ActivityIndicator color="#fff" size="small" />
+                        : <Text style={styles.aiCoinBtnText}>✨ AI 建議幣值</Text>}
+                    </TouchableOpacity>
+                    {aiCoinReason ? <Text style={styles.aiCoinReason}>{aiCoinReason}</Text> : null}
+                  </View>
+                )}
               </>
             )}
             {isMilestone && (
@@ -875,5 +908,31 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: ParentFontWeights.semi,
     color: '#FFFFFF',
+  },
+  aiCoinRow: {
+    marginTop: 8,
+    gap: 6,
+  },
+  aiCoinBtn: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: ParentColors.teal500,
+    borderRadius: ParentRadii.pill,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+  },
+  aiCoinBtnDisabled: {
+    opacity: 0.4,
+  },
+  aiCoinBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: ParentFontWeights.semi,
+  },
+  aiCoinReason: {
+    fontSize: 12,
+    color: ParentColors.ink500,
+    lineHeight: 18,
   },
 });

@@ -43,38 +43,17 @@ export function calcTotalCoin(selectedC: SystemTaskTemplate[]): number {
 }
 
 /**
- * 呼叫 Gemini 1.5 Flash API 取得自訂目標的幣值建議
+ * 透過 ai-proxy Edge Function 取得自訂目標的幣值建議。
+ * Gemini 1.5 Flash 在 Edge Function 端執行，API key 不暴露於 client。
  */
 export async function suggestCoinWithAI(
   rewardName: string
 ): Promise<{ coins: number; weeks: number; reason: string }> {
-  const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-  if (!apiKey) throw new Error('未設定 EXPO_PUBLIC_GEMINI_API_KEY');
-
-  const prompt = `你是一個家庭教養 App 的幣值顧問。
-這個 App 使用「幣」作為虛擬貨幣。孩子（6-9歲）每週透過完成家務賺取約 120-150 幣。
-家長想設定一個兌換目標：「${rewardName}」
-請根據這個獎品的相對吸引力，建議一個合適的幣值（60-200 幣之間）。
-回應 JSON（不含其他文字）：{ "coins": number, "weeks": number, "reason": string }`;
-
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: 'application/json' },
-      }),
-    }
-  );
-  if (!res.ok) throw new Error(`Gemini API 錯誤：${res.status}`);
-  const json = await res.json() as {
-    candidates?: Array<{ content: { parts: Array<{ text: string }> } }>;
-  };
-  const text = json.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
-  const cleanText = text.replace(/```json\n?/g, '').replace(/```/g, '').trim();
-  return JSON.parse(cleanText) as { coins: number; weeks: number; reason: string };
+  const { data, error } = await supabase.functions.invoke('ai-proxy', {
+    body: { type: 'suggestCoinWithAI', payload: { rewardName } },
+  });
+  if (error) throw new Error(`suggestCoinWithAI 失敗：${error.message}`);
+  return data as { coins: number; weeks: number; reason: string };
 }
 
 /**

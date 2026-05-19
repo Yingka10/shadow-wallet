@@ -82,18 +82,16 @@ export type CompletionResult = {
 };
 
 /**
- * Records a task completion and handles all side-effects:
- * - Inserts a task_completion row
- * - Task-C/D: updates wallet balance and inserts a transaction
- * - Task-B: inserts a time_savings row
- * - Task-D habit: increments long_term_goal.current_day and checks for milestone coin
+ * Records a task completion via the complete-task Edge Function.
+ * All DB writes (task_completion, wallet, transaction, time_savings, long_term_goal)
+ * happen server-side for consistency.
  *
- * @param taskId       The task being completed
- * @param childId      The child completing the task
- * @param completedDate ISO date string (YYYY-MM-DD) in Asia/Taipei timezone
+ * @param taskId            The task being completed
+ * @param childId           The child completing the task
+ * @param completedDate     ISO date string (YYYY-MM-DD) in Asia/Taipei timezone
  * @param isPrerequisiteMet Whether all Task-A and Task-B tasks are done today
- * @param task         Full task row (needed for coin calculation)
- * @param goalId       Required only for Task-D habit-type tasks
+ * @param task              Full task row — still used for local UI coin preview
+ * @param goalId            Required only for Task-D habit-type tasks
  */
 export async function completeTask(
   taskId: string,
@@ -103,129 +101,31 @@ export async function completeTask(
   task: Task,
   goalId?: string,
 ): Promise<CompletionResult> {
-  const coinEarned = calcCoin(task, isPrerequisiteMet);
-  const timeSavedMin = task.category === 'B' ? task.time_saving_min : 0;
+  const { data, error } = await supabase.functions.invoke('complete-task', {
+    body: { taskId, childId, completedDate, isPrerequisiteMet, goalId },
+  });
 
-  // 1. Insert task_completion
-  const { data: completion, error: completionError } = await supabase
-    .from('task_completions')
-    .insert({
-      task_id: taskId,
-      child_id: childId,
-      completed_at: completedDate,
-      reported_by: 'child',
-      status: 'completed',
-      coin_earned: coinEarned,
-      time_saved_min: timeSavedMin,
-    })
-    .select('id')
-    .single();
+  if (error) throw new Error(error.message ?? 'complete-task Edge Function failed');
 
-  if (completionError || !completion) {
-    throw new Error(completionError?.message ?? 'Failed to insert task_completion');
+  const result = data as CompletionResult;
+
+  // Re-attach milestone goalId for callers that rely on it (Edge Function returns it already,
+  // but coerce the type to match MilestoneResult)
+  if (result.milestone) {
+    result.milestone = result.milestone as MilestoneResult;
   }
 
-  const completionId = completion.id;
-  let milestone: MilestoneResult | null = null;
-
-  // 2. Task-C/D: update wallet and insert transaction
-  if (coinEarned > 0) {
-    const { data: wallet, error: walletFetchError } = await supabase
-      .from('wallets')
-      .select('id, balance')
-      .eq('child_id', childId)
-      .eq('wallet_type', 'spending')
-      .single();
-
-    if (walletFetchError || !wallet) {
-      throw new Error(walletFetchError?.message ?? 'Spending wallet not found');
-    }
-
-    const { error: walletUpdateError } = await supabase
-      .from('wallets')
-      .update({ balance: wallet.balance + coinEarned })
-      .eq('id', wallet.id);
-
-    if (walletUpdateError) {
-      throw new Error(walletUpdateError.message);
-    }
-
-    const { error: txError } = await supabase
-      .from('transactions')
-      .insert({
-        wallet_id: wallet.id,
-        amount: coinEarned,
-        type: 'earn',
-        reference_id: completionId,
-        reference_type: 'task_completion',
-      });
-
-    if (txError) throw new Error(txError.message);
+  // Keep coin/time in sync with local task state for immediate UI feedback
+  // (Edge Function recalculates authoritative values from DB, but these should match)
+  const expectedCoin = calcCoin(task, isPrerequisiteMet);
+  if (result.coinEarned !== expectedCoin) {
+    console.warn('[completeTask] server coinEarned differs from client preview', {
+      server: result.coinEarned,
+      client: expectedCoin,
+    });
   }
 
-  // 3. Task-B: insert time_savings
-  if (task.category === 'B' && timeSavedMin > 0) {
-    const { error: tsError } = await supabase
-      .from('time_savings')
-      .insert({
-        child_id: childId,
-        completion_id: completionId,
-        minutes_saved: timeSavedMin,
-      });
-
-    if (tsError) throw new Error(tsError.message);
-  }
-
-  // 4. Task-D habit: increment current_day, check milestone
-  if (task.category === 'D' && task.long_term_type === 'habit' && goalId) {
-    const { data: goal, error: goalFetchError } = await supabase
-      .from('long_term_goals')
-      .select('current_day, checkpoint_rewards')
-      .eq('id', goalId)
-      .single();
-
-    if (goalFetchError || !goal) {
-      throw new Error(goalFetchError?.message ?? 'Long-term goal not found');
-    }
-
-    const newDay = goal.current_day + 1;
-    const { error: goalUpdateError } = await supabase
-      .from('long_term_goals')
-      .update({ current_day: newDay })
-      .eq('id', goalId);
-
-    if (goalUpdateError) throw new Error(goalUpdateError.message);
-
-    const rewards = goal.checkpoint_rewards as CheckpointRewards | null;
-    milestone = checkMilestone(goalId, newDay, rewards);
-
-    // Award milestone coins
-    if (milestone) {
-      const { data: wallet, error: wErr } = await supabase
-        .from('wallets')
-        .select('id, balance')
-        .eq('child_id', childId)
-        .eq('wallet_type', 'spending')
-        .single();
-
-      if (!wErr && wallet) {
-        await supabase
-          .from('wallets')
-          .update({ balance: wallet.balance + milestone.coinReward })
-          .eq('id', wallet.id);
-
-        await supabase.from('transactions').insert({
-          wallet_id: wallet.id,
-          amount: milestone.coinReward,
-          type: 'earn',
-          reference_id: goalId,
-          reference_type: 'long_term_goal_milestone',
-        });
-      }
-    }
-  }
-
-  return { completionId, coinEarned, timeSavedMin, milestone };
+  return result;
 }
 
 /**

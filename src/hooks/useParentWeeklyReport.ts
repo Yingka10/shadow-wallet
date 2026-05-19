@@ -1,14 +1,3 @@
-// NOTE: This hook writes to a `growth_moments` table.
-// Create it in Supabase before using the "記錄 +" feature:
-//
-//   create table growth_moments (
-//     id         uuid primary key default gen_random_uuid(),
-//     child_id   uuid not null references children(id),
-//     title      text not null,
-//     body       text,
-//     created_at timestamptz not null default now()
-//   );
-
 import { useState, useEffect, useCallback } from 'react';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
@@ -73,6 +62,7 @@ export type ParentWeeklyReportData = {
   suggestions: WeeklySuggestion[];
   moments: GrowthMoment[];
   affirmations: string[];
+  aiReady: boolean;
   loading: boolean;
   error: string | null;
   weekOffset: number;
@@ -82,39 +72,21 @@ export type ParentWeeklyReportData = {
   goForward: () => void;
   addMoment: (title: string, body: string) => Promise<void>;
   refresh: () => void;
+  requestAiRefresh: () => Promise<void>;
 };
 
 // ---------------------------------------------------------------------------
-// Mock AI content — replace with AI integration when ready
+// Fallback content (shown while AI report hasn't been generated yet)
 // ---------------------------------------------------------------------------
 
-const MOCK_AI_INSIGHTS = [
-  '這週孩子展現出穩定的自律力，特別是平日的任務完成率比上週進步不少。有幾個貼心的舉動不在任何任務清單裡，卻讓人很暖心。下週可以聊聊「主動幫忙」這件事，讓孩子感受到被看見。',
-  '這週學習類任務的完成率維持在高水位，孩子正在建立穩定的習慣。金幣的使用也比較謹慎，收支比表現穩健。可以考慮在下週引入一個難度稍高的挑戰，讓成就感更紮實。',
-];
+const PENDING_INSIGHT = '本週 AI 洞察正在生成中，通常在週日深夜完成。可點擊右上角重新整理。';
 
-const MOCK_SUGGESTIONS: WeeklySuggestion[] = [
-  {
-    body: '這週有部分任務的打卡時間集中在很晚，可能錯過最佳完成時段。建議把提醒時間提早 30 分鐘試試。',
-    actionLabel: '調整提醒時間',
-    action: 'adjust_reminder',
-  },
-  {
-    body: '孩子近期對中等難度任務都應付自如，是個好時機加入一個較高難度的挑戰，讓成就感更紮實。',
-    actionLabel: '提高任務難度',
-    action: 'increase_difficulty',
-  },
-  {
-    body: '這週孩子有主動幫忙做了一些額外的家務，可以新增一個正式的貢獻型任務來肯定並延續這個行為。',
-    actionLabel: '新增貢獻型任務',
-    action: 'add_contribution',
-  },
-];
+const PENDING_SUGGESTIONS: WeeklySuggestion[] = [];
 
-const MOCK_AFFIRMATIONS = [
-  '這週你幫了很多忙，我都有看到，謝謝你。',
-  '你一件一件把事情做完，這比任何金幣都更讓我驕傲。',
-  '你主動去做那件事的時候，讓我感到非常驕傲。',
+const PENDING_AFFIRMATIONS: string[] = [
+  '這週辛苦了，謝謝你的努力。',
+  '你做到了，我都有看見。',
+  '繼續加油，我們一起！',
 ];
 
 // ---------------------------------------------------------------------------
@@ -134,7 +106,8 @@ function getWeekBounds(offset: number) {
 /**
  * Fetches weekly report data for a child.
  * weekOffset: 0 = current week, -1 = last week.
- * AI insight and affirmations are mocked until AI integration is complete.
+ * AI insight, suggestions, and affirmations are read from weekly_reports table
+ * (populated by WF-3 generate-weekly-report Edge Function every Sunday).
  */
 export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
   const [weekOffset, setWeekOffset] = useState(0);
@@ -146,6 +119,10 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
   const [moments, setMoments] = useState<GrowthMoment[]>([]);
   const [totalTasks, setTotalTasks] = useState(0);
   const [checkIns, setCheckIns] = useState(0);
+  const [aiInsight, setAiInsight] = useState(PENDING_INSIGHT);
+  const [suggestions, setSuggestions] = useState<WeeklySuggestion[]>(PENDING_SUGGESTIONS);
+  const [affirmations, setAffirmations] = useState<string[]>(PENDING_AFFIRMATIONS);
+  const [aiReady, setAiReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -163,14 +140,11 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
       const { start, end } = getWeekBounds(weekOffset);
       const startISO = start.toISOString();
       const endISO = end.toISOString();
+      const weekStartDate = start.format('YYYY-MM-DD');
 
       const [childRes, ctRes, completionsRes, walletRes] = await Promise.all([
-        supabase.from('children').select('nickname').eq('id', childId).single(),
-        supabase
-          .from('child_tasks')
-          .select('task_id')
-          .eq('child_id', childId)
-          .eq('is_active', true),
+        supabase.from('children').select('nickname, family_id').eq('id', childId).single(),
+        supabase.from('child_tasks').select('task_id').eq('child_id', childId).eq('is_active', true),
         supabase
           .from('task_completions')
           .select('task_id, coin_earned, completed_at')
@@ -187,6 +161,7 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
 
       if (childRes.error) throw childRes.error;
       setChildName(childRes.data?.nickname ?? '');
+      const familyId = childRes.data?.family_id ?? null;
 
       const taskIds = (ctRes.data ?? []).map(r => r.task_id);
       const completionData = completionsRes.data ?? [];
@@ -194,13 +169,9 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
 
       const walletId = walletRes.data?.id ?? null;
 
-      const [tasksRes, txRes, momentRes] = await Promise.all([
+      const [tasksRes, txRes, momentRes, reportRes] = await Promise.all([
         taskIds.length > 0
-          ? supabase
-              .from('tasks')
-              .select('id, category')
-              .in('id', taskIds)
-              .eq('is_active', true)
+          ? supabase.from('tasks').select('id, category').in('id', taskIds).eq('is_active', true)
           : Promise.resolve({ data: [] as { id: string; category: string }[], error: null }),
         walletId
           ? supabase
@@ -212,12 +183,21 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
               .lte('created_at', endISO)
           : Promise.resolve({ data: [] as { amount: number; type: string }[], error: null }),
         supabase
-          .from('growth_moments' as never)
+          .from('growth_moments')
           .select('id, title, body, created_at')
           .eq('child_id', childId)
           .gte('created_at', startISO)
           .lte('created_at', endISO)
           .order('created_at', { ascending: false }),
+        familyId
+          ? supabase
+              .from('weekly_reports')
+              .select('motivation_observation, ai_suggestions')
+              .eq('family_id', familyId)
+              .eq('child_id', childId)
+              .eq('week_start', weekStartDate)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
       ]);
 
       if (tasksRes.error) throw tasksRes.error;
@@ -268,6 +248,27 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
           createdAt: m.created_at,
         })),
       );
+
+      // AI insights from weekly_reports
+      const report = reportRes.data as {
+        motivation_observation: string | null;
+        ai_suggestions: {
+          suggestions?: WeeklySuggestion[];
+          affirmations?: string[];
+        } | null;
+      } | null;
+
+      if (report?.motivation_observation) {
+        setAiInsight(report.motivation_observation);
+        setSuggestions(report.ai_suggestions?.suggestions ?? PENDING_SUGGESTIONS);
+        setAffirmations(report.ai_suggestions?.affirmations ?? PENDING_AFFIRMATIONS);
+        setAiReady(true);
+      } else {
+        setAiInsight(PENDING_INSIGHT);
+        setSuggestions(PENDING_SUGGESTIONS);
+        setAffirmations(PENDING_AFFIRMATIONS);
+        setAiReady(false);
+      }
     } catch (err) {
       console.error('[useParentWeeklyReport] fetch error:', err);
       setError('資料載入失敗，請稍後再試');
@@ -282,7 +283,7 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
 
   const addMoment = useCallback(async (title: string, body: string) => {
     const { error: err } = await supabase
-      .from('growth_moments' as any)
+      .from('growth_moments')
       .insert({ child_id: childId, title: title.trim(), body: body.trim() || null });
     if (err) {
       console.error('[useParentWeeklyReport] addMoment error:', err);
@@ -291,7 +292,13 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     await fetchAll();
   }, [childId, fetchAll]);
 
-  const aiInsight = MOCK_AI_INSIGHTS[weekNum % MOCK_AI_INSIGHTS.length];
+  const requestAiRefresh = useCallback(async () => {
+    const { error: err } = await supabase.functions.invoke('generate-weekly-report', {
+      body: { childId },
+    });
+    if (err) throw err;
+    await fetchAll();
+  }, [childId, fetchAll]);
 
   return {
     childName,
@@ -302,9 +309,10 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     aiInsight,
     activity,
     coinFlow,
-    suggestions: MOCK_SUGGESTIONS,
+    suggestions,
     moments,
-    affirmations: MOCK_AFFIRMATIONS,
+    affirmations,
+    aiReady,
     loading,
     error,
     weekOffset,
@@ -314,5 +322,6 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     goForward: () => setWeekOffset(o => Math.min(o + 1, 0)),
     addMoment,
     refresh: fetchAll,
+    requestAiRefresh,
   };
 }

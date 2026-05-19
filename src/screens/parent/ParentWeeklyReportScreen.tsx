@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
   Alert,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { StackNavigationProp } from '@react-navigation/stack';
@@ -411,6 +411,9 @@ export default function ParentWeeklyReportScreen() {
   const { childId } = useSelectedChild();
 
   const report = useParentWeeklyReport(childId);
+
+  useFocusEffect(useCallback(() => { report.refresh(); }, [report.refresh]));
+
   const [pickedAffirmation, setPickedAffirmation] = useState<number | null>(null);
   const [addMomentVisible, setAddMomentVisible] = useState(false);
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../../../App';
 import { useSelectedChild } from '../../context/SelectedChildContext';
@@ -140,7 +140,8 @@ function StatCard({
 
 function GoalCard({ goal }: { goal: DashboardGoal }) {
   const pct = Math.min(100, Math.round((goal.current / goal.target) * 100));
-  const remaining = goal.target - goal.current;
+  const remaining = Math.max(0, goal.target - goal.current);
+  const isGoalMet = goal.current >= goal.target;
 
   return (
     <View style={styles.goalCard}>
@@ -153,11 +154,17 @@ function GoalCard({ goal }: { goal: DashboardGoal }) {
           <Text style={styles.goalName}>{goal.name}</Text>
         </View>
         <View style={styles.goalRemaining}>
-          <Text style={styles.goalRemainingLabel}>剩餘</Text>
-          <Text style={styles.goalRemainingNum}>
-            {remaining}
-            <Text style={styles.goalRemainingUnit}> 枚金幣</Text>
-          </Text>
+          {isGoalMet ? (
+            <Text style={styles.goalMetLabel}>已達標 🎉</Text>
+          ) : (
+            <>
+              <Text style={styles.goalRemainingLabel}>剩餘</Text>
+              <Text style={styles.goalRemainingNum}>
+                {remaining}
+                <Text style={styles.goalRemainingUnit}> 枚金幣</Text>
+              </Text>
+            </>
+          )}
         </View>
       </View>
 
@@ -167,10 +174,16 @@ function GoalCard({ goal }: { goal: DashboardGoal }) {
       </View>
 
       <View style={styles.goalFooter}>
-        <Text style={styles.goalProgress}>{goal.current} / {goal.target}</Text>
-        <Text style={styles.goalEta}>
-          預估再 <Text style={styles.goalEtaAccent}>{goal.etaLabel}</Text> 達成
-        </Text>
+        {isGoalMet ? (
+          <Text style={styles.goalMetHint}>金幣已存夠，可以跟孩子討論兌換囉！</Text>
+        ) : (
+          <>
+            <Text style={styles.goalProgress}>{goal.current} / {goal.target}</Text>
+            <Text style={styles.goalEta}>
+              預估再 <Text style={styles.goalEtaAccent}>{goal.etaLabel}</Text> 達成
+            </Text>
+          </>
+        )}
       </View>
     </View>
   );
@@ -338,7 +351,10 @@ export default function ParentDashboardScreen() {
     todayTasks,
     loading,
     error,
+    refresh,
   } = useParentDashboard(childId);
+
+  useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
 
   const todayLabel = new Date().toLocaleDateString('zh-TW', {
     month: 'long',
@@ -561,6 +577,16 @@ const styles = StyleSheet.create({
   },
   goalRemaining: {
     alignItems: 'flex-end',
+  },
+  goalMetLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: ParentColors.teal500,
+  },
+  goalMetHint: {
+    fontSize: 12,
+    color: ParentColors.teal500,
+    fontWeight: '500',
   },
   goalRemainingLabel: {
     fontSize: 12,

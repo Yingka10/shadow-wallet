@@ -25,6 +25,7 @@
 
 import { useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { screenRedemptionRequest } from '../lib/aiAgent';
 
 export type AiVerdict = 'ok' | 'high';
 export type RedemptionStatus = 'pending' | 'approved' | 'rejected';
@@ -61,7 +62,7 @@ export type RedemptionChildInfo = {
   nickname: string;
 };
 
-/** Mock AI review based on coin cost — replace with real AI call later. */
+/** Synchronous fallback verdict shown while AI enrichment is in flight or on API failure. */
 export function mockAiResult(coinCost: number): {
   verdict: AiVerdict;
   reason: string;
@@ -148,7 +149,9 @@ export function useParentRedemption(familyId: string | null) {
       if (childrenRes.error) throw childrenRes.error;
 
       setChildren((childrenRes.data ?? []) as RedemptionChildInfo[]);
-      setPendingRequests((pendingRes.data ?? []) as RedemptionRequest[]);
+      const pending = (pendingRes.data ?? []) as RedemptionRequest[];
+      setPendingRequests(pending);
+      void enrichPendingWithAi(pending);
       setParentProposals((proposalsRes.data ?? []) as ParentProposal[]);
       setHistory((historyRes.data ?? []) as RedemptionRequest[]);
     } catch (err) {
@@ -208,6 +211,37 @@ export function useParentRedemption(familyId: string | null) {
       .update({ is_active: false })
       .eq('id', id);
     if (err) throw err;
+  }, []);
+
+  const enrichPendingWithAi = useCallback(async (requests: RedemptionRequest[]) => {
+    const unscreened = requests.filter(r => !r.ai_verdict);
+    if (unscreened.length === 0) return;
+
+    const results = await Promise.allSettled(
+      unscreened.map(r => screenRedemptionRequest(r.name, r.coin_cost, r.description)),
+    );
+
+    const patches: RedemptionRequest[] = [];
+    await Promise.allSettled(
+      unscreened.map(async (req, i) => {
+        const result = results[i];
+        if (result.status === 'rejected') return;
+        const { verdict, reason, suggestedCoins } = result.value;
+        const { error: dbErr } = await supabase
+          .from('redemption_requests' as never)
+          .update({ ai_verdict: verdict, ai_reason: reason, ai_suggested_coins: suggestedCoins ?? null } as never)
+          .eq('id', req.id);
+        if (!dbErr) {
+          patches.push({ ...req, ai_verdict: verdict, ai_reason: reason, ai_suggested_coins: suggestedCoins });
+        } else {
+          console.warn('[useParentRedemption] AI verdict DB update failed for', req.id, dbErr);
+        }
+      }),
+    );
+
+    if (patches.length > 0) {
+      setPendingRequests(prev => prev.map(r => patches.find(p => p.id === r.id) ?? r));
+    }
   }, []);
 
   return {
