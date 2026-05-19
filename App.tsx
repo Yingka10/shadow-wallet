@@ -21,6 +21,7 @@ import OverviewScreen from './src/screens/onboarding/OverviewScreen';
 import LongTermDetailScreen from './src/screens/child/LongTermDetailScreen';
 import ProfileScreen from './src/screens/child/ProfileScreen';
 import WalletScreen from './src/screens/child/WalletScreen';
+import WishScreen from './src/screens/child/WishScreen';
 import type { AgeGroup, CustomTask } from './src/types/database';
 
 // ---------------------------------------------------------------------------
@@ -37,6 +38,7 @@ export type RootStackParamList = {
   Onboarding: undefined;
   Home: { childId: string };
   Wallet: { childId: string };
+  Wish: { childId: string };
   Parent: undefined;            // legacy; redirect via EntryScreen
   ParentTab: undefined;         // parent tab navigator
   Profile: { childId: string };
@@ -105,6 +107,7 @@ export default function App() {
             {/* ── Child side ────────────────────────────────── */}
             <Stack.Screen name="Home" component={HomeScreen} />
             <Stack.Screen name="Wallet" component={WalletScreen} />
+            <Stack.Screen name="Wish" component={WishScreen} />
             <Stack.Screen name="Profile" component={ProfileScreen} />
             <Stack.Screen name="LongTermDetail" component={LongTermDetailScreen} />
 

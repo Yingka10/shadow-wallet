@@ -18,7 +18,6 @@ type CreateChildTaskInput = {
   baseTimeMin: number;
   difficulty: number;
 };
-
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
 /**
@@ -71,9 +70,6 @@ export function getPrevCheckpoint(
   const prev = days.filter(d => d < currentDay);
   return prev.length > 0 ? prev[prev.length - 1] : 0;
 }
-
-// ── Async actions ─────────────────────────────────────────────────────────────
-
 export type CompletionResult = {
   completionId: string;
   coinEarned: number;
@@ -163,6 +159,12 @@ export async function applyHabitResume(
     .eq('id', goalId);
 }
 
+/**
+ * Convert an age group identifier into numeric min/max ages.
+ *
+ * This helps ensure inserted `tasks` rows carry concrete numeric
+ * `min_age`/`max_age` values rather than string enums.
+ */
 function getAgeRange(ageGroup: CreateChildTaskInput['ageGroup']): { minAge: number; maxAge: number } {
   if (ageGroup === '2-4') return { minAge: 2, maxAge: 4 };
   if (ageGroup === '4-6') return { minAge: 4, maxAge: 6 };
@@ -170,47 +172,63 @@ function getAgeRange(ageGroup: CreateChildTaskInput['ageGroup']): { minAge: numb
   return { minAge: 9, maxAge: 12 };
 }
 
+
 /**
  * 建立一筆孩子專屬的自訂任務，並同步綁定到 child_tasks。
  */
 export async function createChildTask(input: CreateChildTaskInput): Promise<void> {
   const ageRange = getAgeRange(input.ageGroup);
+  // Normalize numeric fields to match DB column expectations and avoid accidental type mismatches
+  const safeBaseTime = Number.isFinite(Number(input.baseTimeMin)) ? Math.max(1, Math.round(input.baseTimeMin)) : 1;
+  // Keep one decimal for difficulty (e.g. 1.5) but avoid passing weird strings
+  const safeDifficulty = Number.isFinite(Number(input.difficulty))
+    ? Math.round(Number(input.difficulty) * 10) / 10
+    : 1;
+  const safeTimeSaving = input.category === 'B' ? safeBaseTime : 0;
 
-  const { data: task, error: taskError } = await supabase
-    .from('tasks')
-    .insert({
-      family_id: input.familyId,
-      name: input.name,
-      category: input.category,
-      day_type: 'both',
-      long_term_type: null,
-      is_long_term: false,
-      base_time_min: input.baseTimeMin,
-      difficulty: input.difficulty,
-      coin_override: null,
-      is_system_default: false,
-      allow_repeat: false,
-      min_age: ageRange.minAge,
-      max_age: ageRange.maxAge,
+  try {
+    const { data: task, error: taskError } = await supabase
+      .from('tasks')
+      .insert({
+        family_id: input.familyId,
+        name: input.name,
+        category: input.category,
+        day_type: 'both',
+        long_term_type: null,
+        is_long_term: false,
+        base_time_min: safeBaseTime,
+        difficulty: safeDifficulty,
+        coin_override: null,
+        is_system_default: false,
+        allow_repeat: false,
+        min_age: ageRange.minAge,
+        max_age: ageRange.maxAge,
+        is_active: true,
+        time_saving_min: safeTimeSaving,
+      })
+      .select('id')
+      .single();
+
+    if (taskError || !task) {
+      console.error('[createChildTask] tasks.insert error:', taskError);
+      throw new Error(taskError?.message ?? '建立任務失敗');
+    }
+
+    const { error: childTaskError } = await supabase.from('child_tasks').insert({
+      child_id: input.childId,
+      task_id: task.id,
       is_active: true,
-      time_saving_min: input.category === 'B' ? input.baseTimeMin : 0,
-      parent_task_id: null,
-    })
-    .select('id')
-    .single();
+    });
 
-  if (taskError || !task) {
-    throw new Error(taskError?.message ?? '建立任務失敗');
-  }
-
-  const { error: childTaskError } = await supabase.from('child_tasks').insert({
-    child_id: input.childId,
-    task_id: task.id,
-    is_active: true,
-  });
-
-  if (childTaskError) {
-    await supabase.from('tasks').delete().eq('id', task.id);
-    throw new Error(childTaskError.message);
+    if (childTaskError) {
+      // rollback created task to avoid orphan rows
+      await supabase.from('tasks').delete().eq('id', task.id);
+      console.error('[createChildTask] child_tasks.insert error:', childTaskError);
+      throw new Error(childTaskError.message);
+    }
+  } catch (err) {
+    // rethrow with helpful message for caller
+    console.error('[createChildTask] unexpected error:', err);
+    throw err;
   }
 }
