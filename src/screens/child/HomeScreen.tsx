@@ -18,6 +18,7 @@ import type { RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../../../App';
 import { useTodayTasks, type TodayTask } from '../../hooks/useTodayTasks';
+import { useWallet } from '../../hooks/useWallet';
 import DutyTaskCard from '../../components/DutyTaskCard';
 import ContributionTaskCard from '../../components/ContributionTaskCard';
 import GoalHeroCard from '../../components/GoalHeroCard';
@@ -43,8 +44,6 @@ type ChildMeta = {
 
 const TASK_DIFF_OPTIONS = [1, 1.5, 2, 2.5, 3];
 
-// TODO: replace with useWallet(childId) once wallet hook is implemented
-const MOCK_COIN_BALANCE = 128;
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -74,6 +73,8 @@ export default function HomeScreen() {
 
   const { weekdayTasks, weekendTasks, longTermTasks, isPrerequisiteMet, loading, refresh } =
     useTodayTasks(childId);
+  const { spending } = useWallet(childId);
+  const coinBalance = spending?.balance ?? 0;
 
   const [modal, setModal] = useState<ModalState>({ task: null, visible: false });
   const [feedback, setFeedback] = useState<FeedbackState>({ visible: false, type: 'task-a', value: 0 });
@@ -222,11 +223,11 @@ export default function HomeScreen() {
         </View>
         <TouchableOpacity
           style={styles.coinPill}
-          onPress={() => Alert.alert('撲滿', '即將推出！')}
-          accessibilityLabel={`金幣餘額 ${MOCK_COIN_BALANCE}`}
+          onPress={() => navigation.navigate('Wallet', { childId })}
+          accessibilityLabel={`前往撲滿，金幣餘額 ${coinBalance}`}
         >
           <CoinIcon size={28} />
-          <Text style={styles.coinCount}>{MOCK_COIN_BALANCE}</Text>
+          <Text style={styles.coinCount}>{coinBalance}</Text>
         </TouchableOpacity>
       </View>
 
@@ -323,6 +324,14 @@ export default function HomeScreen() {
       <BottomNav
         activeTab="home"
         onTabPress={tab => {
+          if (tab === 'wallet') {
+            navigation.navigate('Wallet', { childId });
+            return;
+          }
+          if (tab === 'wish') {
+            navigation.navigate('Wish', { childId });
+            return;
+          }
           if (tab === 'profile') {
             navigation.navigate('Profile', { childId });
           } else if (tab !== 'home') {

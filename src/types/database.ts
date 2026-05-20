@@ -14,6 +14,9 @@ export type LongTermType = 'habit' | 'skill' | 'responsibility' | 'challenge';
 export type AccountType = 'SINGLE' | 'DOUBLE';
 export type ParentRole = 'primary' | 'co';
 export type AiMode = 'conservative' | 'balanced' | 'auto';
+export type RedemptionStatus = 'pending' | 'approved' | 'rejected';
+export type AiVerdict = 'ok' | 'high';
+export type ObsType = 'noaction' | 'quality' | 'bonus' | 'other';
 export type WalletType = 'spending' | 'saving';
 export type TransactionType = 'earn' | 'redeem' | 'deduct' | 'interest' | 'adjust';
 export type RewardType = 'item' | 'privilege' | 'screen_time';
@@ -223,6 +226,41 @@ export type SiblingRelation = {
   mentor_child_id: string;
   mentee_child_id: string;
   is_active: boolean;
+  created_at: string;
+};
+
+export type RedemptionRequest = {
+  id: string;
+  family_id: string;
+  child_id: string;
+  name: string;
+  description: string | null;
+  coin_cost: number;
+  status: RedemptionStatus;
+  ai_verdict: AiVerdict | null;
+  ai_reason: string | null;
+  ai_suggested_coins: number | null;
+  adjusted_coins: number | null;
+  parent_note: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+};
+
+export type GrowthMoment = {
+  id: string;
+  child_id: string;
+  title: string;
+  body: string | null;
+  created_at: string;
+};
+
+export type ParentObservation = {
+  id: string;
+  task_id: string;
+  child_id: string;
+  obs_type: ObsType;
+  note: string | null;
+  reward_adj: string | null;
   created_at: string;
 };
 
@@ -611,6 +649,64 @@ export interface Database {
           is_active?: boolean;
           created_at?: string;
         };
+        Relationships: [];
+      };
+      redemption_requests: {
+        Row: RedemptionRequest;
+        Insert: {
+          id?: string;
+          family_id: string;
+          child_id: string;
+          name: string;
+          description?: string | null;
+          coin_cost: number;
+          status?: RedemptionStatus;
+          ai_verdict?: AiVerdict | null;
+          ai_reason?: string | null;
+          ai_suggested_coins?: number | null;
+          adjusted_coins?: number | null;
+          parent_note?: string | null;
+          created_at?: string;
+          reviewed_at?: string | null;
+        };
+        Update: {
+          status?: RedemptionStatus;
+          ai_verdict?: AiVerdict | null;
+          ai_reason?: string | null;
+          ai_suggested_coins?: number | null;
+          adjusted_coins?: number | null;
+          parent_note?: string | null;
+          reviewed_at?: string | null;
+        };
+        Relationships: [];
+      };
+      growth_moments: {
+        Row: GrowthMoment;
+        Insert: {
+          id?: string;
+          child_id: string;
+          title: string;
+          body?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          title?: string;
+          body?: string | null;
+        };
+        Relationships: [];
+      };
+      parent_observations: {
+        Row: ParentObservation;
+        Insert: {
+          id?: string;
+          task_id: string;
+          child_id: string;
+          obs_type: ObsType;
+          note?: string | null;
+          reward_adj?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<ParentObservation>;
         Relationships: [];
       };
     };
