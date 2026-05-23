@@ -363,6 +363,8 @@ export default function WalletScreen() {
         onTabPress={tab => {
           if (tab === 'home') {
             navigation.navigate('Home', { childId });
+          } else if (tab === 'wish') {
+            navigation.navigate('Wish', { childId });
           } else if (tab === 'profile') {
             navigation.navigate('Profile', { childId });
           }

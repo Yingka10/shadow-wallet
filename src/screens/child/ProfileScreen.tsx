@@ -273,6 +273,8 @@ export default function ProfileScreen() {
             navigation.navigate('Home', { childId });
           } else if (tab === 'wallet') {
             navigation.navigate('Wallet', { childId });
+          } else if (tab === 'wish') {
+            navigation.navigate('Wish', { childId });
           } else if (tab !== 'profile') {
             Alert.alert('功能開發中', '即將推出！');
           }

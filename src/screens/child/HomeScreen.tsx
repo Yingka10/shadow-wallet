@@ -392,6 +392,10 @@ export default function HomeScreen() {
             navigation.navigate('Wallet', { childId });
             return;
           }
+          if (tab === 'wish') {
+            navigation.navigate('Wish', { childId });
+            return;
+          }
           if (tab === 'profile') {
             navigation.navigate('Profile', { childId });
           } else if (tab !== 'home') {
