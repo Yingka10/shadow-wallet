@@ -367,7 +367,7 @@ export default function ParentDashboardScreen() {
   const allTimeH = Math.floor(timeSavedAllMin / 60);
   const completed = todayTasks.filter(t => t.status === 'done').length;
 
-  if (loading) {
+  if (loading && child === null) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color={ParentColors.teal500} />

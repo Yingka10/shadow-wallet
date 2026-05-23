@@ -165,7 +165,7 @@ async function processChild(
   const completions = completionsRes.data ?? [];
   const walletId = walletRes.data?.id ?? null;
 
-  const [tasksRes, txRes, childRes] = await Promise.all([
+  const [tasksRes, txRes, childRes, existingReportRes] = await Promise.all([
     taskIds.length > 0
       ? supabase.from('tasks').select('id, category').in('id', taskIds).eq('is_active', true)
       : Promise.resolve({ data: [] as { id: string; category: string }[], error: null }),
@@ -179,6 +179,13 @@ async function processChild(
           .lt('created_at', weekEndISO)
       : Promise.resolve({ data: [] as { amount: number; type: string }[], error: null }),
     supabase.from('children').select('age_group').eq('id', childId).single(),
+    supabase
+      .from('weekly_reports')
+      .select('task_adjustments')
+      .eq('family_id', familyId)
+      .eq('child_id', childId)
+      .eq('week_start', weekStart)
+      .maybeSingle(),
   ]);
 
   // Build task counts per category
@@ -216,6 +223,10 @@ async function processChild(
 
   const insight = await generateInsight(ctx);
 
+  // Preserve abandonment_tier (and any other fields) written by detect-abandonment
+  const existingAdjustments =
+    (existingReportRes.data?.task_adjustments as Record<string, unknown> | null) ?? {};
+
   // Upsert weekly_reports
   await supabase.from('weekly_reports').upsert(
     {
@@ -228,6 +239,7 @@ async function processChild(
         affirmations: insight.affirmations,
       },
       task_adjustments: {
+        ...existingAdjustments,
         recommendations: insight.task_recommendations,
       },
     },
@@ -255,10 +267,12 @@ Deno.serve(async (req) => {
 
     // HTTP mode: single child on-demand
     let targetChildId: string | null = null;
+    let weekStart = defaultWeekStart;
     if (req.method === 'POST') {
       try {
-        const body = await req.json() as { childId?: string };
+        const body = await req.json() as { childId?: string; weekStart?: string };
         targetChildId = body.childId ?? null;
+        if (body.weekStart) weekStart = body.weekStart;
       } catch { /* no body = cron mode */ }
     }
 
@@ -271,9 +285,9 @@ Deno.serve(async (req) => {
         .single();
       if (!child) throw new Error('Child not found');
 
-      await processChild(supabase, child.id, child.family_id, defaultWeekStart);
+      await processChild(supabase, child.id, child.family_id, weekStart);
       return new Response(
-        JSON.stringify({ ok: true, childId: targetChildId, weekStart: defaultWeekStart }),
+        JSON.stringify({ ok: true, childId: targetChildId, weekStart }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
       );
     }

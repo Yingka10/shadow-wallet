@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,11 +8,12 @@ import {
   StyleSheet,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../../../App';
 import { useSelectedChild } from '../../context/SelectedChildContext';
 import { ParentTopBar } from '../../components/ParentTopBar';
+import { supabase } from '../../lib/supabase';
 import {
   ParentColors,
   ParentFontSizes,
@@ -240,6 +241,18 @@ function SectionHead({ cat }: { cat: TaskCategory }) {
 }
 
 // ---------------------------------------------------------------------------
+// Long-term goal row data type
+// ---------------------------------------------------------------------------
+
+type LongTermGoalRow = {
+  id: string;
+  task_id: string;
+  current_day: number;
+  total_days: number | null;
+  tasks: { id: string; name: string } | null;
+};
+
+// ---------------------------------------------------------------------------
 // Main screen
 // ---------------------------------------------------------------------------
 
@@ -247,16 +260,46 @@ export default function ParentTaskListScreen() {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
   const { childId } = useSelectedChild();
 
-  const { child, tasks, todayCompletedIds, loading, error } = useParentTaskList(childId);
+  const { child, tasks, todayCompletedIds, loading, error, refresh } = useParentTaskList(childId);
   const [activeFilter, setActiveFilter] = useState<TaskCategory | 'all'>('all');
 
-  const visibleCats = ALL_CATS.filter(cat => tasks.some(t => t.cat === cat));
-  const filteredTasks = activeFilter === 'all' ? tasks : tasks.filter(t => t.cat === activeFilter);
+  const [longTermGoals, setLongTermGoals] = useState<LongTermGoalRow[]>([]);
+  const [ltLoading, setLtLoading] = useState(true);
+
+  const fetchLongTermGoals = useCallback(async () => {
+    if (!childId) return;
+    setLtLoading(true);
+    try {
+      const { data } = await supabase
+        .from('long_term_goals')
+        .select('id, task_id, current_day, total_days, tasks(id, name)')
+        .eq('child_id', childId)
+        .eq('status', 'active')
+        .order('started_at', { ascending: false });
+      setLongTermGoals((data ?? []) as LongTermGoalRow[]);
+    } catch (err) {
+      console.error('[ParentTaskListScreen] fetchLongTermGoals error:', err);
+    } finally {
+      setLtLoading(false);
+    }
+  }, [childId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void fetchLongTermGoals();
+      void refresh();
+    }, [fetchLongTermGoals, refresh]),
+  );
+
+  // Separate long-term tasks from regular tasks
+  const regularTasks = tasks.filter(t => !t.isLongTerm);
+  const visibleCats = ALL_CATS.filter(cat => regularTasks.some(t => t.cat === cat));
+  const filteredTasks = activeFilter === 'all' ? regularTasks : regularTasks.filter(t => t.cat === activeFilter);
   const groups = (activeFilter === 'all' ? visibleCats : [activeFilter as TaskCategory])
     .map(cat => ({ cat, items: filteredTasks.filter(t => t.cat === cat) }))
     .filter(g => g.items.length > 0);
 
-  if (loading) {
+  if (loading && child === null) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color={ParentColors.teal500} />
@@ -274,18 +317,75 @@ export default function ParentTaskListScreen() {
 
   return (
     <View style={styles.screen}>
-    <ParentTopBar />
+    <ParentTopBar onSettingsPress={() => navigation.navigate('ParentSettings')} />
     <ScrollView
       style={styles.scrollView}
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
     >
-      {/* Header */}
+      {/* ── 長期目標 section ──────────────────────────────────── */}
+      <View style={styles.ltSection}>
+        <View style={styles.ltSectionHeader}>
+          <Text style={styles.ltSectionTitle}>長期目標</Text>
+          <TouchableOpacity
+            style={styles.ltAddBtn}
+            onPress={() => navigation.navigate('ParentLongTermCreate', { childId })}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.ltAddBtnText}>＋ 新增</Text>
+          </TouchableOpacity>
+        </View>
+
+        {ltLoading && longTermGoals.length === 0 ? (
+          <ActivityIndicator color={ParentColors.teal500} style={styles.ltLoader} />
+        ) : longTermGoals.length === 0 ? (
+          <View style={styles.ltEmpty}>
+            <Text style={styles.ltEmptyText}>
+              還沒有長期目標，點右側「＋ 新增」建立第一個
+            </Text>
+          </View>
+        ) : (
+          longTermGoals.map((goal, idx) => {
+            const taskName = goal.tasks?.name ?? '（已刪除任務）';
+            const total = goal.total_days ?? 30;
+            const pct = Math.min(Math.round((goal.current_day / total) * 100), 100);
+            return (
+              <TouchableOpacity
+                key={goal.id}
+                style={[styles.ltGoalRow, idx > 0 && styles.ltGoalRowBorder]}
+                onPress={() =>
+                  navigation.navigate('ParentTaskDetail', {
+                    taskId: goal.task_id,
+                    childId,
+                    taskName,
+                  })
+                }
+                activeOpacity={0.75}
+              >
+                <View style={styles.ltGoalBody}>
+                  <View style={styles.ltGoalTopRow}>
+                    <Text style={styles.ltGoalName} numberOfLines={1}>{taskName}</Text>
+                    <Text style={styles.ltGoalDays}>
+                      第 {goal.current_day} 天 / {total} 天
+                    </Text>
+                  </View>
+                  <View style={styles.ltProgressTrack}>
+                    <View style={[styles.ltProgressFill, { width: `${pct}%` as any }]} />
+                  </View>
+                </View>
+                <ChevronRightIcon size={14} />
+              </TouchableOpacity>
+            );
+          })
+        )}
+      </View>
+
+      {/* ── Header ────────────────────────────────────────────── */}
       <View style={styles.header}>
-        <Text style={styles.eyebrow}>任務</Text>
+        <Text style={styles.eyebrow}>一般任務</Text>
         <Text style={styles.title}>{child?.nickname ?? ''}的任務清單</Text>
         <Text style={styles.meta}>
-          共 <Text style={styles.metaNum}>{tasks.length}</Text> 項，按類別分組
+          共 <Text style={styles.metaNum}>{regularTasks.length}</Text> 項，按類別分組
         </Text>
       </View>
 
@@ -298,7 +398,7 @@ export default function ParentTaskListScreen() {
       >
         <FilterChip
           label="全部"
-          count={tasks.length}
+          count={regularTasks.length}
           active={activeFilter === 'all'}
           onPress={() => setActiveFilter('all')}
         />
@@ -306,7 +406,7 @@ export default function ParentTaskListScreen() {
           <FilterChip
             key={cat}
             label={TASK_CAT_META[cat].label}
-            count={tasks.filter(t => t.cat === cat).length}
+            count={regularTasks.filter(t => t.cat === cat).length}
             active={activeFilter === cat}
             onPress={() => setActiveFilter(cat)}
           />
@@ -377,6 +477,102 @@ const styles = StyleSheet.create({
     color: ParentColors.error,
     textAlign: 'center',
     paddingHorizontal: 32,
+  },
+
+  // ── Long-term goals section ───────────────────────────────────────────────
+  ltSection: {
+    backgroundColor: ParentColors.bgSurface,
+    borderRadius: ParentRadii.lg,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    marginTop: 14,
+    marginBottom: 6,
+    overflow: 'hidden',
+    ...ParentShadows.card,
+  },
+  ltSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: ParentColors.borderSoft,
+  },
+  ltSectionTitle: {
+    fontSize: ParentFontSizes.pBody,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgPrimary,
+    fontFamily: ParentFonts.display,
+  },
+  ltAddBtn: {
+    backgroundColor: ParentColors.teal50,
+    borderRadius: ParentRadii.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+  },
+  ltAddBtnText: {
+    fontSize: 13,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.teal500,
+  },
+  ltLoader: {
+    marginVertical: 16,
+  },
+  ltEmpty: {
+    padding: 16,
+  },
+  ltEmptyText: {
+    fontSize: ParentFontSizes.pMeta,
+    color: ParentColors.fgMuted,
+    lineHeight: 18,
+  },
+  ltGoalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  ltGoalRowBorder: {
+    borderTopWidth: 1,
+    borderTopColor: ParentColors.borderSoft,
+  },
+  ltGoalBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  ltGoalTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  ltGoalName: {
+    flex: 1,
+    fontSize: ParentFontSizes.pBody,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgPrimary,
+    marginRight: 8,
+  },
+  ltGoalDays: {
+    fontSize: 12,
+    color: ParentColors.fgMuted,
+    flexShrink: 0,
+  },
+  ltProgressTrack: {
+    height: 6,
+    backgroundColor: ParentColors.bgSurfaceWarm,
+    borderRadius: ParentRadii.pill,
+    overflow: 'hidden',
+  },
+  ltProgressFill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: ParentColors.teal400,
+    borderRadius: ParentRadii.pill,
   },
 
   // ── Header ────────────────────────────────────────────────────────────────

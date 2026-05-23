@@ -293,12 +293,13 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
   }, [childId, fetchAll]);
 
   const requestAiRefresh = useCallback(async () => {
+    const weekStartDate = getWeekBounds(weekOffset).start.format('YYYY-MM-DD');
     const { error: err } = await supabase.functions.invoke('generate-weekly-report', {
-      body: { childId },
+      body: { childId, weekStart: weekStartDate },
     });
     if (err) throw err;
     await fetchAll();
-  }, [childId, fetchAll]);
+  }, [childId, weekOffset, fetchAll]);
 
   return {
     childName,
@@ -316,7 +317,7 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     loading,
     error,
     weekOffset,
-    canGoBack: weekOffset > -1,
+    canGoBack: weekOffset > -4,
     canGoForward: weekOffset < 0,
     goBack: () => setWeekOffset(o => Math.max(o - 1, -1)),
     goForward: () => setWeekOffset(o => Math.min(o + 1, 0)),

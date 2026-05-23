@@ -94,7 +94,6 @@ export type Task = {
   max_age: number;
   is_active: boolean;
   time_saving_min: number;
-  parent_task_id: string | null;
   created_at: string;
 };
 
@@ -172,6 +171,24 @@ export type LongTermGoal = {
   next_review_at: string | null;
   completed_at: string | null;
   created_at: string;
+  // 通用
+  min_age: number;
+  interrupt_count: number;
+  last_active_date: string | null;
+  // 技能學習專用
+  level_definitions: Record<string, any>[] | null;
+  current_level: number | null;
+  level_count: number | null;
+  // 家庭責任專用
+  role_title: string | null;
+  salary_mode: boolean | null;
+  base_salary: number | null;
+  weekly_target_rate: number | null;
+  privilege_reward: Record<string, any> | null;
+  // 自我挑戰專用
+  target_value: number | null;
+  current_value: number | null;
+  value_unit: string | null;
 };
 
 export type TimeSaving = {
@@ -256,6 +273,7 @@ export type GrowthMoment = {
 
 export type ParentObservation = {
   id: string;
+  parent_id: string | null;
   task_id: string;
   child_id: string;
   obs_type: ObsType;
@@ -415,7 +433,6 @@ export interface Database {
           max_age?: number;
           is_active?: boolean;
           time_saving_min?: number;
-          parent_task_id?: string | null;
           created_at?: string;
         };
         Update: Partial<Task>;
@@ -538,6 +555,20 @@ export interface Database {
           next_review_at?: string | null;
           completed_at?: string | null;
           created_at?: string;
+          min_age?: number;
+          interrupt_count?: number;
+          last_active_date?: string | null;
+          level_definitions?: Record<string, any>[] | null;
+          current_level?: number | null;
+          level_count?: number | null;
+          role_title?: string | null;
+          salary_mode?: boolean | null;
+          base_salary?: number | null;
+          weekly_target_rate?: number | null;
+          privilege_reward?: Record<string, any> | null;
+          target_value?: number | null;
+          current_value?: number | null;
+          value_unit?: string | null;
         };
         Update: Partial<LongTermGoal>;
         Relationships: [];
@@ -699,6 +730,7 @@ export interface Database {
         Row: ParentObservation;
         Insert: {
           id?: string;
+          parent_id?: string | null;
           task_id: string;
           child_id: string;
           obs_type: ObsType;

@@ -163,6 +163,79 @@ export async function applyHabitResume(
     .eq('id', goalId);
 }
 
+type CreateLongTermGoalInput = {
+  familyId: string;
+  childId: string;
+  name: string;
+  totalDays: number;
+  checkpointRewards: CheckpointRewards;
+  motivationNote?: string;
+};
+
+/**
+ * 建立 habit 類型長期目標。
+ * 依序寫入 tasks（is_long_term=true）、child_tasks、long_term_goals（含關卡獎勵）。
+ */
+export async function createLongTermGoal(input: CreateLongTermGoalInput): Promise<void> {
+  const today = dayjs().tz(TZ).format('YYYY-MM-DD');
+
+  const { data: task, error: taskError } = await supabase
+    .from('tasks')
+    .insert({
+      family_id: input.familyId,
+      name: input.name,
+      category: 'D',
+      day_type: 'both',
+      is_long_term: true,
+      long_term_type: 'habit',
+      base_time_min: 15,
+      difficulty: 1,
+      coin_override: null,
+      time_saving_min: 0,
+      is_system_default: false,
+      allow_repeat: false,
+      min_age: 0,
+      max_age: 99,
+      is_active: true,
+    })
+    .select('id')
+    .single();
+
+  if (taskError || !task) {
+    throw new Error(taskError?.message ?? '建立長期任務失敗');
+  }
+
+  const { error: childTaskError } = await supabase.from('child_tasks').insert({
+    child_id: input.childId,
+    task_id: task.id,
+    is_active: true,
+  });
+
+  if (childTaskError) {
+    await supabase.from('tasks').delete().eq('id', task.id);
+    throw new Error(childTaskError.message);
+  }
+
+  const { error: goalError } = await supabase.from('long_term_goals').insert({
+    child_id: input.childId,
+    task_id: task.id,
+    goal_type: 'habit',
+    status: 'active',
+    current_day: 0,
+    total_days: input.totalDays,
+    checkpoint_rewards: input.checkpointRewards,
+    motivation_note: input.motivationNote ?? null,
+    started_at: today,
+    interrupt_count: 0,
+  });
+
+  if (goalError) {
+    await supabase.from('child_tasks').delete().eq('task_id', task.id);
+    await supabase.from('tasks').delete().eq('id', task.id);
+    throw new Error(goalError.message);
+  }
+}
+
 function getAgeRange(ageGroup: CreateChildTaskInput['ageGroup']): { minAge: number; maxAge: number } {
   if (ageGroup === '2-4') return { minAge: 2, maxAge: 4 };
   if (ageGroup === '4-6') return { minAge: 4, maxAge: 6 };
@@ -194,7 +267,6 @@ export async function createChildTask(input: CreateChildTaskInput): Promise<void
       max_age: ageRange.maxAge,
       is_active: true,
       time_saving_min: input.category === 'B' ? input.baseTimeMin : 0,
-      parent_task_id: null,
     })
     .select('id')
     .single();

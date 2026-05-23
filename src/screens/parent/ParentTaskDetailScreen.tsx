@@ -1,8 +1,9 @@
 // NOTE: This screen writes observations to a `parent_observations` table.
-// Create it in Supabase before using that feature:
+// Create it in Supabase (or add the parent_id column if the table already exists):
 //
 //   create table parent_observations (
 //     id         uuid primary key default gen_random_uuid(),
+//     parent_id  uuid references auth.users(id),
 //     task_id    uuid not null references tasks(id),
 //     child_id   uuid not null references children(id),
 //     obs_type   text not null,
@@ -10,6 +11,9 @@
 //     reward_adj text,
 //     created_at timestamptz not null default now()
 //   );
+//
+//   -- If the table already exists, run:
+//   -- alter table parent_observations add column if not exists parent_id uuid references auth.users(id);
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -44,7 +48,7 @@ import {
   ParentFonts,
 } from '../../constants/parentTheme';
 import type { RootStackParamList } from '../../../App';
-import type { Task, TaskCompletion, TaskCategory, DayType } from '../../types/database';
+import type { Task, TaskCompletion, TaskCategory, DayType, ParentObservation, LongTermGoal } from '../../types/database';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -328,10 +332,10 @@ const DAY_TYPE_LABEL: Record<string, string> = {
 };
 
 const OBSERVE_TYPES = [
-  { id: 'noaction', label: '今天情緒不好，沒有完成', desc: '' },
-  { id: 'quality', label: '完成了但品質不佳', desc: '已完成，但希望下次更專心' },
-  { id: 'bonus', label: '主動多做了額外的事', desc: '會在週報中看到「值得肯定」' },
-  { id: 'other', label: '其他狀況', desc: '自由描述' },
+  { id: 'noaction', label: '今天沒有完成', desc: '無論什麼原因，今天這項任務跳過了' },
+  { id: 'quality', label: '完成了，但狀況不太理想', desc: '有做但需要提醒，或品質未達平時水準' },
+  { id: 'bonus', label: '今天表現特別好，值得肯定', desc: '主動完成、做得比平時更好，或額外多做了' },
+  { id: 'other', label: '其他想記錄的事', desc: '自由描述這項任務今天的狀況' },
 ] as const;
 
 type ObsTypeId = typeof OBSERVE_TYPES[number]['id'];
@@ -753,9 +757,11 @@ export default function ParentTaskDetailScreen() {
   const [task, setTask] = useState<Task | null>(null);
   const [childName, setChildName] = useState<string>('');
   const [dayRecords, setDayRecords] = useState<DayRecord[]>([]);
+  const [longTermGoal, setLongTermGoal] = useState<LongTermGoal | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [todayObs, setTodayObs] = useState<ParentObservation | null>(null);
   const [observeVisible, setObserveVisible] = useState(false);
   const [editVisible, setEditVisible] = useState(false);
   const [deleteVisible, setDeleteVisible] = useState(false);
@@ -768,7 +774,8 @@ export default function ParentTaskDetailScreen() {
       const today = dayjs().tz(TZ).format('YYYY-MM-DD');
       const weekAgo = dayjs().tz(TZ).subtract(6, 'day').format('YYYY-MM-DD');
 
-      const [taskRes, completionsRes, childRes] = await Promise.all([
+      const tomorrow = dayjs().tz(TZ).add(1, 'day').format('YYYY-MM-DD');
+      const [taskRes, completionsRes, childRes, todayObsRes] = await Promise.all([
         supabase.from('tasks').select('*').eq('id', taskId).single(),
         supabase.from('task_completions')
           .select('*')
@@ -777,12 +784,35 @@ export default function ParentTaskDetailScreen() {
           .gte('completed_at', weekAgo)
           .lte('completed_at', today + 'T23:59:59'),
         supabase.from('children').select('nickname').eq('id', childId).single(),
+        supabase.from('parent_observations')
+          .select('*')
+          .eq('task_id', taskId)
+          .eq('child_id', childId)
+          .gte('created_at', today)
+          .lt('created_at', tomorrow)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
       ]);
 
       if (taskRes.error) throw taskRes.error;
       setTask(taskRes.data);
       if (childRes.data) setChildName(childRes.data.nickname);
       setDayRecords(buildDayRecords(completionsRes.data ?? []));
+      setTodayObs(todayObsRes.data ?? null);
+
+      if (taskRes.data.is_long_term) {
+        const { data: goalData } = await supabase
+          .from('long_term_goals')
+          .select('*')
+          .eq('task_id', taskId)
+          .eq('child_id', childId)
+          .eq('status', 'active')
+          .maybeSingle();
+        setLongTermGoal(goalData ?? null);
+      } else {
+        setLongTermGoal(null);
+      }
     } catch (err) {
       console.error('[ParentTaskDetailScreen] fetch error:', err);
       setError('資料載入失敗，請稍後再試');
@@ -842,19 +872,24 @@ export default function ParentTaskDetailScreen() {
   };
 
   const saveObservation = async (obsType: ObsTypeId, note: string, rewardAdj: string | null) => {
-    const { error: err } = await supabase
-      .from('parent_observations' as any)
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data: saved, error: err } = await supabase
+      .from('parent_observations')
       .insert({
+        parent_id: user?.id ?? null,
         task_id: taskId,
         child_id: childId,
         obs_type: obsType,
         note: note || null,
         reward_adj: rewardAdj || null,
-      });
+      })
+      .select('*')
+      .single();
     if (err) {
       console.error('[ParentTaskDetailScreen] observation save error:', err);
       throw err;
     }
+    if (saved) setTodayObs(saved);
   };
 
   const handleEditSave = async (name: string, dayType: DayType, difficulty: number) => {
@@ -986,6 +1021,49 @@ export default function ParentTaskDetailScreen() {
           </View>
         </View>
 
+        {/* ── Long-term goal progress ──────────────────────────── */}
+        {task.is_long_term && longTermGoal && (() => {
+          const total = longTermGoal.total_days ?? 30;
+          const pct = Math.min(Math.round((longTermGoal.current_day / total) * 100), 100);
+          const cpEntries = longTermGoal.checkpoint_rewards
+            ? Object.entries(longTermGoal.checkpoint_rewards).sort(([a], [b]) => Number(a) - Number(b))
+            : [];
+          return (
+            <View style={styles.ltSection}>
+              <Text style={styles.ltEyebrow}>目標進度</Text>
+              <View style={styles.ltProgressRow}>
+                <Text style={styles.ltProgressText}>
+                  第 {longTermGoal.current_day} 天 / 共 {total} 天
+                </Text>
+                <Text style={styles.ltProgressPct}>{pct}%</Text>
+              </View>
+              <View style={styles.ltTrack}>
+                <View style={[styles.ltFill, { width: `${pct}%` as any }]} />
+              </View>
+
+              {cpEntries.length > 0 && (
+                <>
+                  <Text style={[styles.ltEyebrow, styles.ltEyebrowSpaced]}>里程碑關卡</Text>
+                  {cpEntries.map(([day, coins]) => {
+                    const reached = longTermGoal.current_day >= Number(day);
+                    return (
+                      <View key={day} style={styles.ltMilestoneRow}>
+                        <View style={[styles.ltMilestoneDot, reached && styles.ltMilestoneDotDone]} />
+                        <Text style={styles.ltMilestoneLabel}>第 {day} 天 → {coins} 枚金幣</Text>
+                        <View style={[styles.ltStatusPill, reached && styles.ltStatusPillDone]}>
+                          <Text style={[styles.ltStatusPillText, reached && styles.ltStatusPillTextDone]}>
+                            {reached ? '已達成' : '未達成'}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </>
+              )}
+            </View>
+          );
+        })()}
+
         {/* ── Today Status Bar ─────────────────────────────────────────────── */}
         <View style={styles.todayStatusBar}>
           <Text style={styles.todayStatusTitle}>今日狀態 · {childName}</Text>
@@ -1008,6 +1086,14 @@ export default function ParentTaskDetailScreen() {
               </>
             )}
           </View>
+          {todayObs && (
+            <View style={styles.todayObsRow}>
+              <FlagIcon size={11} color={ParentColors.clay500} />
+              <Text style={styles.todayObsText} numberOfLines={1}>
+                已記錄：{OBSERVE_TYPES.find(o => o.id === todayObs.obs_type)?.label ?? todayObs.obs_type}
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* ── 7-day stats ───────────────────────────────────────── */}
@@ -1074,21 +1160,30 @@ export default function ParentTaskDetailScreen() {
 
         {/* ── Bottom action bar — flex row, always visible ──────── */}
         <View style={styles.bottomBar}>
-          <TouchableOpacity
-            style={[
-              styles.actionBtn,
-              observeVisible
-                ? { backgroundColor: ParentColors.clay500, borderColor: ParentColors.clay500 }
-                : styles.actionBtnClay,
-            ]}
-            onPress={() => { setEditVisible(false); setObserveVisible(v => !v); }}
-            activeOpacity={0.7}
-          >
-            <FlagIcon size={15} color={observeVisible ? '#FFFFFF' : ParentColors.clay500} />
-            <Text style={[styles.actionBtnText, { color: observeVisible ? '#FFFFFF' : ParentColors.clay500 }]}>
-              記錄觀察
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.observeGroup}>
+            <TouchableOpacity
+              style={[
+                styles.actionBtn,
+                observeVisible
+                  ? { backgroundColor: ParentColors.clay500, borderColor: ParentColors.clay500 }
+                  : styles.actionBtnClay,
+              ]}
+              onPress={() => { setEditVisible(false); setObserveVisible(v => !v); }}
+              activeOpacity={0.7}
+            >
+              <FlagIcon size={15} color={observeVisible ? '#FFFFFF' : ParentColors.clay500} />
+              <Text style={[styles.actionBtnText, { color: observeVisible ? '#FFFFFF' : ParentColors.clay500 }]}>
+                記錄觀察
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('ObservationHistory', { taskId, childId, taskName: task.name })}
+              activeOpacity={0.7}
+              style={styles.viewHistoryBtn}
+            >
+              <Text style={styles.viewHistoryText}>查看紀錄 →</Text>
+            </TouchableOpacity>
+          </View>
 
           <TouchableOpacity
             style={[
@@ -1257,6 +1352,21 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: ParentFontWeights.semi,
     color: ParentColors.teal500,
+  },
+  todayObsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: ParentColors.borderSoft,
+  },
+  todayObsText: {
+    flex: 1,
+    fontSize: 12,
+    color: ParentColors.clay500,
+    fontWeight: ParentFontWeights.medium,
   },
 
   // ── Hero ──────────────────────────────────────────────────────────────────
@@ -1450,6 +1560,19 @@ const styles = StyleSheet.create({
   },
 
   // ── Bottom action bar ─────────────────────────────────────────────────────
+  observeGroup: {
+    flex: 1,
+    gap: 4,
+  },
+  viewHistoryBtn: {
+    alignItems: 'center',
+    paddingVertical: 2,
+  },
+  viewHistoryText: {
+    fontSize: 11,
+    color: ParentColors.fgMuted,
+    fontWeight: ParentFontWeights.medium,
+  },
   bottomBar: {
     flexDirection: 'row',
     gap: 8,
@@ -1822,6 +1945,97 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: ParentColors.fgMuted,
     flex: 1,
+  },
+
+  // ── Long-term goal progress section ──────────────────────────────────────
+  ltSection: {
+    backgroundColor: ParentColors.bgSurface,
+    borderRadius: ParentRadii.lg,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    padding: 16,
+    marginBottom: 14,
+  },
+  ltEyebrow: {
+    fontSize: 11,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  ltEyebrowSpaced: {
+    marginTop: 14,
+  },
+  ltProgressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  ltProgressText: {
+    fontSize: ParentFontSizes.pBody,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgPrimary,
+  },
+  ltProgressPct: {
+    fontSize: 13,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.teal500,
+  },
+  ltTrack: {
+    height: 8,
+    backgroundColor: ParentColors.bgSurfaceWarm,
+    borderRadius: ParentRadii.pill,
+    overflow: 'hidden',
+  },
+  ltFill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: ParentColors.teal400,
+    borderRadius: ParentRadii.pill,
+  },
+  ltMilestoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 6,
+    borderTopWidth: 1,
+    borderTopColor: ParentColors.borderSoft,
+  },
+  ltMilestoneDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: ParentColors.ivory300,
+    flexShrink: 0,
+  },
+  ltMilestoneDotDone: {
+    backgroundColor: ParentColors.teal400,
+  },
+  ltMilestoneLabel: {
+    flex: 1,
+    fontSize: 13,
+    color: ParentColors.fgPrimary,
+  },
+  ltStatusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: ParentRadii.pill,
+    backgroundColor: ParentColors.bgSurfaceWarm,
+  },
+  ltStatusPillDone: {
+    backgroundColor: '#E8F2E6',
+  },
+  ltStatusPillText: {
+    fontSize: 11,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgMuted,
+  },
+  ltStatusPillTextDone: {
+    color: ParentColors.success,
   },
 
   // ── Delete modal ──────────────────────────────────────────────────────────

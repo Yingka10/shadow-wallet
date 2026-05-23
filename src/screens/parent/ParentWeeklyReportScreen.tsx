@@ -455,7 +455,7 @@ export default function ParentWeeklyReportScreen() {
     );
   };
 
-  if (report.loading) {
+  if (report.loading && !report.childName) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color={ParentColors.teal500} />
@@ -478,7 +478,7 @@ export default function ParentWeeklyReportScreen() {
 
   return (
     <View style={styles.root}>
-      <ParentTopBar />
+      <ParentTopBar onSettingsPress={() => navigation.navigate('ParentSettings')} />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}

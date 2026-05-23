@@ -21,7 +21,6 @@ function makeTask(overrides: Partial<Task>): Task {
     max_age: 9,
     is_active: true,
     time_saving_min: 0,
-    parent_task_id: null,
     created_at: '2026-01-01',
     ...overrides,
   };

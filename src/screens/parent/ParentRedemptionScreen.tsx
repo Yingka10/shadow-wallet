@@ -18,6 +18,9 @@ import {
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { RootStackParamList } from '../../../App';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
@@ -1103,6 +1106,7 @@ function AddProposalModal({
 // ---------------------------------------------------------------------------
 
 export default function ParentRedemptionScreen() {
+  const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [loadingFamily, setLoadingFamily] = useState(true);
 
@@ -1204,7 +1208,7 @@ export default function ParentRedemptionScreen() {
 
   return (
     <View style={styles.root}>
-      <ParentTopBar />
+      <ParentTopBar onSettingsPress={() => navigation.navigate('ParentSettings')} />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}

@@ -109,6 +109,23 @@ Deno.serve(async (req) => {
     const taipeiMin = String(nowUtc.getUTCMinutes()).padStart(2, '0');
     const completedAt = `${completedDate}T${taipeiHour}:${taipeiMin}:00+08:00`;
 
+    // Duplicate-completion guard
+    const { data: existing } = await supabaseAdmin
+      .from('task_completions')
+      .select('id')
+      .eq('child_id', childId)
+      .eq('task_id', taskId)
+      .eq('status', 'completed')
+      .gte('completed_at', `${completedDate}T00:00:00+08:00`)
+      .lte('completed_at', `${completedDate}T23:59:59+08:00`)
+      .maybeSingle();
+    if (existing) {
+      return new Response(
+        JSON.stringify({ error: 'already_completed', message: '今天已經完成過這個任務了' }),
+        { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
+
     // 1. Insert task_completion
     const { data: completion, error: completionErr } = await supabaseAdmin
       .from('task_completions')

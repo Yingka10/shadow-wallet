@@ -21,6 +21,8 @@ import OverviewScreen from './src/screens/onboarding/OverviewScreen';
 import LongTermDetailScreen from './src/screens/child/LongTermDetailScreen';
 import ProfileScreen from './src/screens/child/ProfileScreen';
 import WalletScreen from './src/screens/child/WalletScreen';
+import ObservationHistoryScreen from './src/screens/parent/ObservationHistoryScreen';
+import ParentLongTermCreateScreen from './src/screens/parent/ParentLongTermCreateScreen';
 import type { AgeGroup, CustomTask } from './src/types/database';
 
 // ---------------------------------------------------------------------------
@@ -76,7 +78,13 @@ export type RootStackParamList = {
     childId: string;
     taskName: string;
   };
+  ObservationHistory: {
+    taskId: string;
+    childId: string;
+    taskName: string;
+  };
   ParentTaskCreate: undefined;
+  ParentLongTermCreate: { childId: string };
   ParentSettings: undefined;
 };
 
@@ -111,7 +119,9 @@ export default function App() {
             {/* ── Parent side ───────────────────────────────── */}
             <Stack.Screen name="ParentTab" component={ParentTabNavigator} />
             <Stack.Screen name="ParentTaskDetail" component={ParentTaskDetailScreen} />
+            <Stack.Screen name="ObservationHistory" component={ObservationHistoryScreen} />
             <Stack.Screen name="ParentTaskCreate" component={ParentTaskCreateScreen} />
+            <Stack.Screen name="ParentLongTermCreate" component={ParentLongTermCreateScreen} />
             <Stack.Screen name="ParentSettings" component={ParentSettingsScreen} />
           </Stack.Navigator>
         </NavigationContainer>
