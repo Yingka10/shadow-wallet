@@ -23,9 +23,10 @@
 // For parent proposals, this hook uses the existing `reward_items` table
 // (added_by = 'parent', parent_approved = true).
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { screenRedemptionRequest } from '../lib/aiAgent';
+import type { RewardItem } from '../types/database';
 
 export type AiVerdict = 'ok' | 'high';
 export type RedemptionStatus = 'pending' | 'approved' | 'rejected';
@@ -56,6 +57,11 @@ export type ParentProposal = {
   is_active: boolean;
   created_at: string;
 };
+
+export type ChildWishItem = Pick<
+  RewardItem,
+  'id' | 'family_id' | 'child_id' | 'name' | 'coin_cost' | 'added_by' | 'parent_approved' | 'is_active' | 'created_at'
+>;
 
 export type RedemptionChildInfo = {
   id: string;
@@ -111,15 +117,19 @@ export function useParentRedemption(familyId: string | null) {
   const [parentProposals, setParentProposals] = useState<ParentProposal[]>([]);
   const [history, setHistory] = useState<RedemptionRequest[]>([]);
   const [children, setChildren] = useState<RedemptionChildInfo[]>([]);
+  const [childWishes, setChildWishes] = useState<ChildWishItem[]>([]);
+  const [recentChildWish, setRecentChildWish] = useState<ChildWishItem | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const lastKnownWishIdRef = useRef<string | null>(null);
 
   const fetchAll = useCallback(async () => {
     if (!familyId) return;
     setLoading(true);
     setError(null);
     try {
-      const [childrenRes, pendingRes, proposalsRes, historyRes] = await Promise.all([
+      const [childrenRes, pendingRes, proposalsRes, historyRes, childWishesRes] = await Promise.all([
         supabase
           .from('children')
           .select('id, nickname')
@@ -144,6 +154,13 @@ export function useParentRedemption(familyId: string | null) {
           .neq('status', 'pending')
           .order('reviewed_at', { ascending: false })
           .limit(50),
+        supabase
+          .from('reward_items')
+          .select('id, family_id, child_id, name, coin_cost, added_by, parent_approved, is_active, created_at')
+          .eq('family_id', familyId)
+          .eq('added_by', 'child')
+          .eq('is_active', true)
+          .order('created_at', { ascending: false }),
       ]);
 
       if (childrenRes.error) throw childrenRes.error;
@@ -154,6 +171,17 @@ export function useParentRedemption(familyId: string | null) {
       void enrichPendingWithAi(pending);
       setParentProposals((proposalsRes.data ?? []) as ParentProposal[]);
       setHistory((historyRes.data ?? []) as RedemptionRequest[]);
+      const wishes = (childWishesRes.data ?? []) as ChildWishItem[];
+      setChildWishes(wishes);
+
+      const newestWishId = wishes[0]?.id ?? null;
+      if (lastKnownWishIdRef.current !== null && newestWishId && newestWishId !== lastKnownWishIdRef.current) {
+        const newestWish = wishes[0] ?? null;
+        if (newestWish) {
+          setRecentChildWish(newestWish);
+        }
+      }
+      lastKnownWishIdRef.current = newestWishId;
     } catch (err) {
       console.error('[useParentRedemption] fetch error:', err);
       setError('資料載入失敗，請稍後再試');
@@ -161,6 +189,52 @@ export function useParentRedemption(familyId: string | null) {
       setLoading(false);
     }
   }, [familyId]);
+
+  useEffect(() => {
+    if (!familyId) return;
+
+    let isMounted = true;
+
+    const setupSubscription = async () => {
+      await fetchAll();
+
+      if (channelRef.current) {
+        channelRef.current.unsubscribe();
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+
+      if (!isMounted) return;
+
+      const channel = supabase
+        .channel(`reward_items:family_${familyId}`, { config: { broadcast: { self: false } } })
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'reward_items', filter: `family_id=eq.${familyId}` },
+          () => {
+            if (isMounted) {
+              void fetchAll();
+            }
+          },
+        )
+        .subscribe();
+
+      if (isMounted) {
+        channelRef.current = channel;
+      }
+    };
+
+    setupSubscription();
+
+    return () => {
+      isMounted = false;
+      if (channelRef.current) {
+        channelRef.current.unsubscribe();
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
+  }, [familyId, fetchAll]);
 
   const approveRequest = useCallback(async (id: string, adjustedCoins?: number) => {
     const payload: Record<string, unknown> = {
@@ -186,6 +260,18 @@ export function useParentRedemption(familyId: string | null) {
       } as never)
       .eq('id', id);
     if (err) throw err;
+  }, []);
+
+  const approveChildWish = useCallback(async (id: string) => {
+    const { error: err } = await supabase
+      .from('reward_items')
+      .update({ parent_approved: true })
+      .eq('id', id);
+    if (err) throw err;
+  }, []);
+
+  const clearRecentChildWish = useCallback(() => {
+    setRecentChildWish(null);
   }, []);
 
   const addParentProposal = useCallback(
@@ -249,11 +335,15 @@ export function useParentRedemption(familyId: string | null) {
     parentProposals,
     history,
     children,
+    childWishes,
+    recentChildWish,
+    clearRecentChildWish,
     loading,
     error,
     fetchAll,
     approveRequest,
     rejectRequest,
+    approveChildWish,
     addParentProposal,
     removeParentProposal,
   };

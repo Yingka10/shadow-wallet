@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   RefreshControl,
@@ -69,6 +69,7 @@ export default function WishScreen() {
   const [title, setTitle] = useState('');
   const [cost, setCost] = useState('');
   const [saving, setSaving] = useState(false);
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const balance = spending?.balance ?? 0;
 
@@ -84,10 +85,55 @@ export default function WishScreen() {
   }, [childId]);
 
   useEffect(() => {
-    if (child?.familyId) {
-      void loadWishes(child.familyId);
-    }
-  }, [child]);
+    if (!child?.familyId) return;
+
+    let isMounted = true;
+
+    const setupSubscription = async () => {
+      await loadWishes(child.familyId);
+
+      if (channelRef.current) {
+        channelRef.current.unsubscribe();
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+
+      if (!isMounted) return;
+
+      const channel = supabase
+        .channel(`reward_items:child_${childId}`, { config: { broadcast: { self: false } } })
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'reward_items',
+            filter: `family_id=eq.${child.familyId}`,
+          },
+          () => {
+            if (isMounted) {
+              void loadWishes(child.familyId);
+            }
+          },
+        )
+        .subscribe();
+
+      if (isMounted) {
+        channelRef.current = channel;
+      }
+    };
+
+    setupSubscription();
+
+    return () => {
+      isMounted = false;
+      if (channelRef.current) {
+        channelRef.current.unsubscribe();
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
+  }, [child?.familyId, childId, loadWishes]);
 
   async function loadChild() {
     try {

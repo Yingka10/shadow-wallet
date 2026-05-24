@@ -2,7 +2,7 @@
 // See src/hooks/useParentRedemption.ts for the CREATE TABLE SQL.
 // AI screening is currently mocked based on coin_cost; wire real AI later.
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -43,6 +43,7 @@ import {
   type RedemptionRequest,
   type RedemptionChildInfo,
   type ParentProposal,
+  type ChildWishItem,
   type AiVerdict,
 } from '../../hooks/useParentRedemption';
 
@@ -203,6 +204,71 @@ function ChildAvatar({
       <Text style={[styles.avatarText, { color: palette.fg, fontSize: size * 0.44 }]}>
         {initial}
       </Text>
+    </View>
+  );
+}
+
+function ChildWishCard({
+  wish,
+  allChildren,
+  onConfirm,
+}: {
+  wish: ChildWishItem;
+  allChildren: RedemptionChildInfo[];
+  onConfirm: (id: string) => Promise<void>;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const ownerName = childName(allChildren, wish.child_id ?? '');
+  const isConfirmed = wish.parent_approved;
+
+  const handleConfirm = async () => {
+    setSubmitting(true);
+    try {
+      await onConfirm(wish.id);
+    } catch {
+      Alert.alert('錯誤', '確認失敗，請稍後再試');
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <View style={styles.childWishCard}>
+      <View style={styles.childWishCardTop}>
+        <ChildAvatar childId={wish.child_id ?? ''} allChildren={allChildren} size={32} />
+        <View style={styles.childWishCardBody}>
+          <Text style={styles.childWishOwner}>{ownerName} 的新願望</Text>
+          <Text style={styles.childWishName} numberOfLines={1}>{wish.name}</Text>
+          <Text style={styles.childWishTime}>{formatDate(wish.created_at)}</Text>
+        </View>
+        <View style={[styles.childWishStatus, isConfirmed && styles.childWishStatusConfirmed]}>
+          <Text style={[styles.childWishStatusText, isConfirmed && styles.childWishStatusTextConfirmed]}>
+            {isConfirmed ? '已確認' : '待確認'}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.childWishFooter}>
+        <View style={styles.childWishCoinRow}>
+          <CoinGlyph size={12} />
+          <Text style={styles.childWishCoinText}>{wish.coin_cost} 幣</Text>
+        </View>
+        {!isConfirmed ? (
+          <TouchableOpacity
+            style={[styles.childWishConfirmBtn, submitting && styles.childWishConfirmBtnDisabled]}
+            onPress={handleConfirm}
+            activeOpacity={0.75}
+            disabled={submitting}
+          >
+            {submitting ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={styles.childWishConfirmBtnText}>確認</Text>
+            )}
+          </TouchableOpacity>
+        ) : (
+          <Text style={styles.childWishConfirmedNote}>已同步到孩子端</Text>
+        )}
+      </View>
     </View>
   );
 }
@@ -452,25 +518,50 @@ function RedemptionCard({
 
 function PendingTab({
   requests,
+  childWishes,
   allChildren,
   onApprove,
   onRequestReject,
+  onConfirmWish,
 }: {
   requests: RedemptionRequest[];
+  childWishes: ChildWishItem[];
   allChildren: RedemptionChildInfo[];
   onApprove: (id: string, adjustedCoins?: number) => Promise<void>;
   onRequestReject: (id: string) => void;
+  onConfirmWish: (id: string) => Promise<void>;
 }) {
-  if (requests.length === 0) {
+  const pendingChildWishes = childWishes.filter(w => w.is_active && !w.parent_approved);
+
+  if (requests.length === 0 && pendingChildWishes.length === 0) {
     return (
       <EmptyState
-        title="目前沒有待審申請"
-        desc="孩子在許願池許願後，通過 AI 初篩的會出現在這裡"
+        title="目前沒有待確認項目"
+        desc="孩子的新願望與兌換申請都會即時出現在這裡"
       />
     );
   }
   return (
     <View style={styles.tabContent}>
+      {pendingChildWishes.length > 0 && (
+        <View style={styles.childWishSection}>
+          <View style={styles.sectionLabelRow}>
+            <Text style={styles.sectionLabel}>孩子新願望</Text>
+            <Text style={styles.sectionCount}>{pendingChildWishes.length}</Text>
+          </View>
+          <View style={styles.childWishList}>
+            {pendingChildWishes.map(wish => (
+              <ChildWishCard
+                key={wish.id}
+                wish={wish}
+                allChildren={allChildren}
+                onConfirm={onConfirmWish}
+              />
+            ))}
+          </View>
+        </View>
+      )}
+
       {requests.map(req => (
         <RedemptionCard
           key={req.id}
@@ -1115,11 +1206,15 @@ export default function ParentRedemptionScreen() {
     parentProposals,
     history,
     children,
+    childWishes,
+    recentChildWish,
+    clearRecentChildWish,
     loading,
     error,
     fetchAll,
     approveRequest,
     rejectRequest,
+    approveChildWish,
     addParentProposal,
     removeParentProposal,
   } = useParentRedemption(familyId);
@@ -1127,6 +1222,10 @@ export default function ParentRedemptionScreen() {
   const [activeTab, setActiveTab] = useState<TabId>('pending');
   const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
   const [addProposalVisible, setAddProposalVisible] = useState(false);
+  const pendingChildWishCount = useMemo(
+    () => childWishes.filter(wish => wish.is_active && !wish.parent_approved).length,
+    [childWishes],
+  );
 
   // Load family on mount
   useEffect(() => {
@@ -1174,6 +1273,12 @@ export default function ParentRedemptionScreen() {
     await fetchAll();
   }, [addParentProposal, fetchAll]);
 
+  const handleConfirmWish = useCallback(async (wishId: string) => {
+    await approveChildWish(wishId);
+    clearRecentChildWish();
+    await fetchAll();
+  }, [approveChildWish, clearRecentChildWish, fetchAll]);
+
   const handleRemoveProposal = useCallback(async (id: string) => {
     Alert.alert('移除提案', '確定要從願望池移除這個提案嗎？', [
       { text: '取消', style: 'cancel' },
@@ -1201,7 +1306,7 @@ export default function ParentRedemptionScreen() {
   }
 
   const TABS: { id: TabId; label: string; count: number }[] = [
-    { id: 'pending',  label: '待審核',   count: pendingRequests.length },
+    { id: 'pending',  label: '待審核',   count: pendingRequests.length + pendingChildWishCount },
     { id: 'proposed', label: '家長提案', count: parentProposals.length },
     { id: 'history',  label: '紀錄',     count: history.length },
   ];
@@ -1219,12 +1324,36 @@ export default function ParentRedemptionScreen() {
         <View style={styles.header}>
           <Text style={styles.headerEyebrow}>兌換審核</Text>
           <Text style={styles.headerDisplay}>
-            {pendingRequests.length > 0
-              ? `有 ${pendingRequests.length} 件等你看看`
+            {pendingRequests.length + pendingChildWishCount > 0
+              ? `有 ${pendingRequests.length + pendingChildWishCount} 件等你看看`
               : '暫無待審申請'
             }
           </Text>
-          <Text style={styles.headerMeta}>AI 已先做初審，協助你 30 秒內做決定</Text>
+          <Text style={styles.headerMeta}>孩子新願望與 AI 初審申請都會即時同步到這裡</Text>
+
+          {recentChildWish && (
+            <View style={styles.syncBanner}>
+              <View style={styles.syncBannerIcon}>
+                <StarIcon size={14} color="#FFFFFF" />
+              </View>
+              <View style={styles.syncBannerText}>
+                <Text style={styles.syncBannerTitle}>收到孩子新願望</Text>
+                <Text style={styles.syncBannerSub} numberOfLines={2}>
+                  {childName(children, recentChildWish.child_id ?? '')} · {recentChildWish.name} · {recentChildWish.coin_cost} 幣
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.syncBannerAction}
+                onPress={() => {
+                  setActiveTab('pending');
+                  clearRecentChildWish();
+                }}
+                activeOpacity={0.75}
+              >
+                <Text style={styles.syncBannerActionText}>查看</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* AI screening banner */}
           <View style={styles.aiBanner}>
@@ -1281,9 +1410,11 @@ export default function ParentRedemptionScreen() {
             {activeTab === 'pending' && (
               <PendingTab
                 requests={pendingRequests}
+                childWishes={childWishes}
                 allChildren={children}
                 onApprove={handleApprove}
                 onRequestReject={id => setRejectTargetId(id)}
+                onConfirmWish={handleConfirmWish}
               />
             )}
             {activeTab === 'proposed' && (
@@ -1365,6 +1496,83 @@ const styles = StyleSheet.create({
     fontSize: ParentFontSizes.pMeta,
     color: ParentColors.fgMuted,
     marginBottom: 14,
+  },
+
+  syncBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 12,
+    marginBottom: 14,
+    backgroundColor: '#F6F1E4',
+    borderWidth: 1,
+    borderColor: '#E6D7B5',
+    borderRadius: ParentRadii.md,
+  },
+  syncBannerIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: ParentColors.clay500,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  syncBannerText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  syncBannerTitle: {
+    fontSize: 12.5,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgPrimary,
+  },
+  syncBannerSub: {
+    fontSize: 11,
+    color: ParentColors.fgMuted,
+    marginTop: 1,
+  },
+  syncBannerAction: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: ParentRadii.pill,
+    backgroundColor: ParentColors.bgSurface,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+  },
+  syncBannerActionText: {
+    fontSize: 12,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgPrimary,
+  },
+
+  childWishSection: {
+    gap: 10,
+  },
+  sectionLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 2,
+  },
+  sectionLabel: {
+    fontSize: 14,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgPrimary,
+  },
+  sectionCount: {
+    minWidth: 24,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: ParentRadii.pill,
+    backgroundColor: ParentColors.bgSurfaceWarm,
+    color: ParentColors.ink500,
+    fontSize: 11,
+    fontWeight: ParentFontWeights.semi,
+    textAlign: 'center',
+  },
+  childWishList: {
+    gap: 10,
   },
 
   // ── AI banner ─────────────────────────────────────────────────────────────
@@ -1796,6 +2004,96 @@ const styles = StyleSheet.create({
     fontFamily: ParentFonts.display,
     lineHeight: 22,
     marginBottom: 4,
+  },
+
+  // ── Child wish cards ─────────────────────────────────────────────────────
+  childWishCard: {
+    backgroundColor: ParentColors.bgSurface,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    padding: 14,
+    ...ParentShadows.card,
+  },
+  childWishCardTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  childWishCardBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  childWishOwner: {
+    fontSize: 11,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgMuted,
+    marginBottom: 3,
+  },
+  childWishName: {
+    fontSize: 17,
+    fontWeight: ParentFontWeights.medium,
+    color: ParentColors.fgPrimary,
+    fontFamily: ParentFonts.display,
+    lineHeight: 23,
+  },
+  childWishTime: {
+    marginTop: 4,
+    fontSize: 11,
+    color: ParentColors.fgMuted,
+  },
+  childWishStatus: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: ParentRadii.pill,
+    backgroundColor: ParentColors.ivory200,
+  },
+  childWishStatusConfirmed: {
+    backgroundColor: '#E8F2E6',
+  },
+  childWishStatusText: {
+    fontSize: 10.5,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.ink500,
+  },
+  childWishStatusTextConfirmed: {
+    color: ParentColors.success,
+  },
+  childWishFooter: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  childWishCoinRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  childWishCoinText: {
+    fontSize: 12,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.ink500,
+  },
+  childWishConfirmBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: ParentRadii.pill,
+    backgroundColor: ParentColors.teal500,
+  },
+  childWishConfirmBtnDisabled: {
+    opacity: 0.6,
+  },
+  childWishConfirmBtnText: {
+    fontSize: 12,
+    fontWeight: ParentFontWeights.semi,
+    color: '#FFFFFF',
+  },
+  childWishConfirmedNote: {
+    fontSize: 12,
+    color: ParentColors.success,
+    fontWeight: ParentFontWeights.semi,
   },
   proposalMeta: {
     flexDirection: 'row',
