@@ -171,7 +171,16 @@ export async function completeTask(
     if (tsError) throw new Error(tsError.message);
   }
 
-  // 4. Task-D habit: increment current_day, check milestone
+  // 4. 'once' task: deactivate from child's list after completion
+  if (task.day_type === 'once') {
+    await supabase
+      .from('child_tasks')
+      .update({ is_active: false })
+      .eq('task_id', taskId)
+      .eq('child_id', childId);
+  }
+
+  // 5. Task-D habit: increment current_day, check milestone
   if (task.category === 'D' && task.long_term_type === 'habit' && goalId) {
     const { data: goal, error: goalFetchError } = await supabase
       .from('long_term_goals')
@@ -390,7 +399,6 @@ export async function createChildTask(input: CreateChildTaskInput): Promise<void
       child_id: input.childId,
       task_id: task.id,
       is_active: true,
-      time_saving_min: input.category === 'B' ? input.baseTimeMin : 0,
     });
 
     if (childTaskError) {

@@ -203,7 +203,7 @@ function ActivityBar({ cat, done, total }: WeeklyActivityBar) {
     <View style={styles.activityBarRow}>
       <View style={styles.activityBarHeader}>
         <View style={styles.activityBarLabel}>
-          {React.cloneElement(meta.icon, { size: 13, color: meta.fg })}
+          {React.cloneElement(meta.icon as React.ReactElement<{ size?: number; color?: string }>, { size: 13, color: meta.fg })}
           <Text style={styles.activityBarName}>{meta.label}</Text>
         </View>
         <Text style={styles.activityBarCount}>

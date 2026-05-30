@@ -276,7 +276,7 @@ export default function ParentTaskListScreen() {
         .eq('child_id', childId)
         .eq('status', 'active')
         .order('started_at', { ascending: false });
-      setLongTermGoals((data ?? []) as LongTermGoalRow[]);
+      setLongTermGoals((data ?? []) as unknown as LongTermGoalRow[]);
     } catch (err) {
       console.error('[ParentTaskListScreen] fetchLongTermGoals error:', err);
     } finally {

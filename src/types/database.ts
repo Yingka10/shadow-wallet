@@ -9,7 +9,7 @@ export type BaumrindType =
 export type MotivationLevel = 'amotivation' | 'external' | 'introjected' | 'internal';
 export type PersonalityType = 'competitive' | 'relational' | 'curious';
 export type TaskCategory = 'A' | 'B' | 'C' | 'D';
-export type DayType = 'weekday' | 'weekend' | 'both';
+export type DayType = 'weekday' | 'weekend' | 'both' | 'custom' | 'once';
 export type LongTermType = 'habit' | 'skill' | 'responsibility' | 'challenge';
 export type AccountType = 'SINGLE' | 'DOUBLE';
 export type ParentRole = 'primary' | 'co';
@@ -94,6 +94,8 @@ export type Task = {
   max_age: number;
   is_active: boolean;
   time_saving_min: number;
+  recurrence_days: number[] | null;
+  due_date: string | null;
   created_at: string;
 };
 
@@ -433,6 +435,8 @@ export interface Database {
           max_age?: number;
           is_active?: boolean;
           time_saving_min?: number;
+          recurrence_days?: number[] | null;
+          due_date?: string | null;
           created_at?: string;
         };
         Update: Partial<Task>;

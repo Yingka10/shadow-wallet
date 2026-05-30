@@ -1,0 +1,145 @@
+/* Shadow Wallet · Parent Tablet — theme tokens
+   ----------------------------------------------------------------
+   A sober, editorial palette for the parent-facing tablet UI.
+   Cream paper · deep navy · brass accent. Tablet-density.
+*/
+
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,500&family=DM+Sans:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600&display=swap');
+
+:root {
+  /* ── Surfaces ─────────────────────────────────────────── */
+  --t-paper:        #FAF8F5;   /* canvas */
+  --t-paper-warm:   #F5F1EA;   /* sidebar / muted panels */
+  --t-paper-deep:   #EFE9DE;   /* inset panels */
+  --t-card:         #FFFFFF;   /* card surface */
+  --t-card-hover:   #FBF9F4;
+
+  /* ── Ink ──────────────────────────────────────────────── */
+  --t-ink:          #1B1B1A;   /* near black, slightly warm */
+  --t-ink-2:        #2E2C28;
+  --t-ink-soft:     #4A463E;   /* body */
+  --t-ink-muted:    #807A6F;   /* secondary */
+  --t-ink-faint:    #B0A99C;   /* tertiary */
+  --t-hairline:     #E5DECF;   /* dividers */
+  --t-hairline-2:   #D9D0BD;   /* stronger divider */
+
+  /* ── Primary · deep navy ──────────────────────────────── */
+  --t-navy:         #1B3A5C;
+  --t-navy-700:     #14304C;
+  --t-navy-200:     #C9D5E1;
+  --t-navy-100:     #E2E9F0;
+  --t-navy-50:      #F0F4F8;
+
+  /* ── Accent · brass / orange-gold ─────────────────────── */
+  --t-brass:        #E8934A;
+  --t-brass-700:    #C97732;
+  --t-brass-200:    #F4CDA8;
+  --t-brass-100:    #FAE4CC;
+  --t-brass-50:     #FBEFDF;
+
+  /* ── Semantic ─────────────────────────────────────────── */
+  --t-coral:        #D95C4A;   /* warning / alert */
+  --t-coral-100:    #F8DCD5;
+  --t-coral-50:     #FBE9E4;
+  --t-green:        #2D6A4F;   /* success */
+  --t-green-100:    #D6E6DC;
+  --t-green-50:     #E6F0EA;
+
+  /* ── Task category tints ─────────────────────────────── */
+  --t-cat-A: #C9D4C2;          /* sage — 基本自理 */
+  --t-cat-A-bg: #EEF3E9;
+  --t-cat-B: #B8C7D7;          /* slate blue — 家庭本分 */
+  --t-cat-B-bg: #E8EEF4;
+  --t-cat-C: #E8B47A;          /* brass — 貢獻 */
+  --t-cat-C-bg: #FAEEDC;
+  --t-cat-D: #8FA3BD;          /* navy tint — 成長里程碑 */
+  --t-cat-D-bg: #E4EAF1;
+
+  /* ── Type ─────────────────────────────────────────────── */
+  --t-serif:  "Newsreader", "Noto Serif TC", ui-serif, Georgia, serif;
+  --t-sans:   "Plus Jakarta Sans", "Noto Sans TC", -apple-system, system-ui, sans-serif;
+  --t-data:   "DM Sans", "Noto Sans TC", -apple-system, system-ui, sans-serif;
+
+  /* ── Geometry ─────────────────────────────────────────── */
+  --t-r-sm: 6px;
+  --t-r-md: 10px;
+  --t-r-lg: 14px;
+  --t-r-xl: 20px;
+  --t-r-pill: 999px;
+
+  /* ── Elevation ────────────────────────────────────────── */
+  --t-shadow-card:   0 1px 2px rgba(27,27,26,0.04), 0 6px 18px -10px rgba(27,58,92,0.10);
+  --t-shadow-card-2: 0 1px 2px rgba(27,27,26,0.05), 0 14px 32px -16px rgba(27,58,92,0.18);
+  --t-shadow-pop:    0 18px 48px -16px rgba(27,58,92,0.25), 0 2px 6px rgba(27,27,26,0.06);
+
+  /* ── Motion ───────────────────────────────────────────── */
+  --t-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+* { box-sizing: border-box; }
+
+/* —— Type scale helpers —— */
+.t-eyebrow {
+  font-family: var(--t-sans);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--t-ink-muted);
+}
+.t-h1 {
+  font-family: var(--t-serif);
+  font-weight: 600;
+  font-size: 32px;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: var(--t-ink);
+}
+.t-h2 {
+  font-family: var(--t-serif);
+  font-weight: 600;
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: -0.005em;
+  color: var(--t-ink);
+}
+.t-h3 {
+  font-family: var(--t-sans);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+  color: var(--t-ink);
+}
+.t-body {
+  font-family: var(--t-sans);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--t-ink-soft);
+}
+.t-meta {
+  font-family: var(--t-sans);
+  font-size: 12.5px;
+  color: var(--t-ink-muted);
+}
+.t-num {
+  font-family: var(--t-data);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--t-ink);
+}
+.t-num-display {
+  font-family: var(--t-data);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 28px;
+  color: var(--t-ink);
+  letter-spacing: -0.01em;
+}
+
+/* —— Surface helpers —— */
+.t-card {
+  background: var(--t-card);
+  border-radius: var(--t-r-lg);
+  box-shadow: var(--t-shadow-card);
+}
+.t-hairline { border-top: 1px solid var(--t-hairline); }

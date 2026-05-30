@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>影子貨幣錢包 · 家長端（平板）</title>
+<link rel="stylesheet" href="tablet-theme.css">
+<style>
+  html, body { margin: 0; padding: 0; min-height: 100vh; }
+  body {
+    font-family: var(--t-sans);
+    background: #14130F;
+    color: var(--t-ink);
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+    box-sizing: border-box;
+  }
+  #stage-wrap {
+    width: 100vw; height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  #stage {
+    transform-origin: center center;
+    flex: none;
+  }
+  /* —— iPad-ish bezel —— */
+  .bezel {
+    width: 1402px;
+    height: 1060px;
+    border-radius: 28px;
+    background: #1f1c17;
+    padding: 18px;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
+    position: relative;
+  }
+  .bezel::before {
+    /* subtle camera dot */
+    content: ""; position: absolute;
+    top: 18px; left: 50%; transform: translateX(-50%);
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #0a0907; opacity: 0.7;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.04);
+  }
+  .screen {
+    width: 1366px; height: 1024px;
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--t-paper);
+    position: relative;
+  }
+</style>
+</head>
+<body>
+<div id="stage-wrap">
+  <div id="stage">
+    <div class="bezel">
+      <div class="screen" id="root"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Auto-fit the tablet bezel to the viewport.
+  (function () {
+    const W = 1402, H = 1060;
+    function fit() {
+      const stage = document.getElementById('stage');
+      const wrap  = document.getElementById('stage-wrap');
+      if (!stage || !wrap) return;
+      const padding = 32;
+      const sw = wrap.clientWidth  - padding;
+      const sh = wrap.clientHeight - padding;
+      const scale = Math.min(sw / W, sh / H, 1);
+      stage.style.transform = `scale(${scale})`;
+    }
+    window.addEventListener('resize', fit);
+    window.addEventListener('load', fit);
+    setTimeout(fit, 50);
+    setTimeout(fit, 300);
+  })();
+</script>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<template id="__bundler_thumbnail" data-bg-color="#14130F">
+  <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+    <!-- iPad bezel silhouette -->
+    <rect x="120" y="120" width="960" height="560" rx="36" fill="#1f1c17"/>
+    <rect x="146" y="146" width="908" height="508" rx="14" fill="#F5EFE0"/>
+    <!-- coin glyph -->
+    <circle cx="600" cy="400" r="120" fill="#F0B557"/>
+    <circle cx="600" cy="400" r="100" fill="none" stroke="#B97A28" stroke-width="3" opacity="0.55"/>
+    <text x="600" y="438" text-anchor="middle" font-family="serif" font-size="120" font-weight="700" fill="#5a3a14">¢</text>
+  </svg>
+</template>
+
+<script type="text/babel" src="tablet-data.jsx"></script>
+<script type="text/babel" src="tablet-ui.jsx"></script>
+<script type="text/babel" src="tablet-dashboard.jsx"></script>
+<script type="text/babel" src="tablet-rewards.jsx"></script>
+<script type="text/babel" src="tablet-growth.jsx"></script>
+<script type="text/babel" src="tablet-manage.jsx"></script>
+<script type="text/babel" src="tablet-app.jsx"></script>
+</body>
+</html>

@@ -278,12 +278,14 @@ Deno.serve(async (req) => {
 
     if (targetChildId) {
       // On-demand: generate for specific child
-      const { data: child } = await supabase
+      console.log('[generate-weekly-report] on-demand childId:', targetChildId, 'weekStart:', weekStart);
+      const { data: child, error: childErr } = await supabase
         .from('children')
         .select('id, family_id')
         .eq('id', targetChildId)
         .single();
-      if (!child) throw new Error('Child not found');
+      console.log('[generate-weekly-report] child lookup result:', JSON.stringify(child), 'err:', childErr?.message);
+      if (!child) throw new Error(`Child not found: id=${targetChildId} dbErr=${childErr?.message ?? 'none'}`);
 
       await processChild(supabase, child.id, child.family_id, weekStart);
       return new Response(
