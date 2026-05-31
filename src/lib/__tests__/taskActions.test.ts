@@ -1,12 +1,20 @@
-const mockRpc = jest.fn();
-const mockFrom = jest.fn();
+// eslint-disable-next-line prefer-const -- let allows reassignment in beforeEach
+let mockRpc = jest.fn();
+// eslint-disable-next-line prefer-const
+let mockFrom = jest.fn();
 
 jest.mock('../supabase', () => ({
   supabase: {
+    // closures evaluated at call-time, not at mock-factory-time
     rpc: (...args: unknown[]) => mockRpc(...args),
     from: (...args: unknown[]) => mockFrom(...args),
   },
 }));
+
+beforeEach(() => {
+  mockRpc = jest.fn();
+  mockFrom = jest.fn();
+});
 
 import { calcCoin, checkMilestone, getPrevCheckpoint, OVERRIDE_TYPE_MAP } from '../taskActions';
 import type { Task, CheckpointRewards } from '../../types/database';
