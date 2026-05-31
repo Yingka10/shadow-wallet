@@ -1021,6 +1021,325 @@ function AssignTaskPanel({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Right column — build new task panel
+// ─────────────────────────────────────────────────────────────────────────────
+
+function NewTaskPanel({
+  currentChildId,
+  familyId,
+  onSuccess,
+  onDone,
+}: {
+  currentChildId: string;
+  familyId: string | null;
+  onSuccess: () => void;
+  onDone: () => void;
+}) {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [taskName, setTaskName] = useState('');
+  const [rewardMode, setRewardMode] = useState<'coin' | 'time'>('coin');
+  const [coins, setCoins] = useState(5);
+  const [aiBaseTime, setAiBaseTime] = useState<number | null>(null);
+  const [aiCoinRange, setAiCoinRange] = useState<[number, number] | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [selectedDays, setSelectedDays] = useState<number[]>([1, 2, 3, 4, 5]);
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(false);
+
+  function handleNext() {
+    const trimmed = taskName.trim();
+    if (!trimmed) return;
+    setStep(2);
+    setAiLoading(true);
+    void supabase.functions
+      .invoke('ai-proxy', {
+        body: { type: 'classifyTask', payload: { taskName: trimmed } },
+      })
+      .then(({ data }) => {
+        const ai = data as { base_time_min?: number; difficulty?: number } | null;
+        if (ai?.base_time_min != null && ai?.difficulty != null) {
+          const suggested = Math.max(
+            1,
+            Math.min(15, Math.round((ai.base_time_min as number) * (ai.difficulty as number))),
+          );
+          setAiBaseTime(ai.base_time_min as number);
+          setAiCoinRange([Math.max(1, suggested - 2), suggested + 3]);
+          setCoins(suggested);
+        }
+        setAiLoading(false);
+      })
+      .catch(() => setAiLoading(false));
+  }
+
+  function toggleDay(d: number) {
+    setSelectedDays(prev => {
+      if (prev.includes(d)) {
+        if (prev.length === 1) return prev;
+        return prev.filter(x => x !== d);
+      }
+      return [...prev, d];
+    });
+  }
+
+  function deriveDayInfo(): {
+    day_type: 'weekday' | 'weekend' | 'both' | 'custom';
+    recurrence_days: number[] | null;
+  } {
+    const sorted = [...selectedDays].sort((a, b) => a - b);
+    if (sorted.length === 5 && JSON.stringify(sorted) === JSON.stringify([1, 2, 3, 4, 5]))
+      return { day_type: 'weekday', recurrence_days: null };
+    if (sorted.length === 2 && sorted[0] === 0 && sorted[1] === 6)
+      return { day_type: 'weekend', recurrence_days: null };
+    if (sorted.length === 7) return { day_type: 'both', recurrence_days: null };
+    return { day_type: 'custom', recurrence_days: sorted };
+  }
+
+  function formatPeriod(): string {
+    const sorted = [...selectedDays].sort((a, b) => a - b);
+    if (JSON.stringify(sorted) === JSON.stringify([1, 2, 3, 4, 5])) return '每週平日（一至五）';
+    if (sorted.length === 2 && sorted[0] === 0 && sorted[1] === 6) return '每週六、日';
+    if (sorted.length === 7) return '每天';
+    const MAP: Record<number, string> = { 0: '日', 1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六' };
+    return '每週' + sorted.map(d => MAP[d]).join('、');
+  }
+
+  async function handleSubmit() {
+    const trimmed = taskName.trim();
+    if (submitting || !trimmed || !familyId) return;
+    setSubmitting(true);
+    const { day_type, recurrence_days } = deriveDayInfo();
+    const baseTime = aiBaseTime ?? 5;
+    try {
+      const { data: task, error: taskErr } = await supabase
+        .from('tasks')
+        .insert({
+          family_id: familyId,
+          name: trimmed,
+          category: rewardMode === 'coin' ? ('C' as const) : ('B' as const),
+          day_type,
+          recurrence_days,
+          long_term_type: null,
+          is_long_term: false,
+          base_time_min: baseTime,
+          difficulty: 1,
+          coin_override: rewardMode === 'coin' ? coins : null,
+          time_saving_min: rewardMode === 'time' ? baseTime : 0,
+          is_system_default: false,
+          allow_repeat: true,
+          min_age: 0,
+          max_age: 18,
+          is_active: true,
+          due_date: null,
+        })
+        .select('id')
+        .single();
+      if (taskErr || !task) throw taskErr ?? new Error('建立任務失敗');
+      const { error: ctErr } = await supabase.from('child_tasks').insert({
+        child_id: currentChildId,
+        task_id: task.id,
+        is_active: true,
+      });
+      if (ctErr) {
+        await supabase.from('tasks').delete().eq('id', task.id);
+        throw ctErr;
+      }
+      onSuccess();
+      setDone(true);
+    } catch (err) {
+      console.error('[NewTaskPanel] submit error:', err);
+      setSubmitting(false);
+    }
+  }
+
+  const DAY_LABELS: { value: number; label: string }[] = [
+    { value: 1, label: '一' },
+    { value: 2, label: '二' },
+    { value: 3, label: '三' },
+    { value: 4, label: '四' },
+    { value: 5, label: '五' },
+    { value: 6, label: '六' },
+    { value: 0, label: '日' },
+  ];
+
+  if (done) {
+    return (
+      <View style={styles.newTaskPanel}>
+        <View style={styles.newTaskHeader}>
+          <TouchableOpacity onPress={onDone} style={styles.newTaskBackBtn} activeOpacity={0.7}>
+            <Text style={styles.newTaskBackText}>← 返回</Text>
+          </TouchableOpacity>
+          <Text style={styles.newTaskPanelTitle}>建立新任務</Text>
+        </View>
+        <View style={styles.newTaskDoneCard}>
+          <Text style={styles.newTaskDoneIcon}>✓</Text>
+          <Text style={styles.newTaskDoneTitle}>任務已建立</Text>
+          <Text style={styles.newTaskDoneSub}>「{taskName}」已加入任務清單，可在左側看到。</Text>
+          <TouchableOpacity style={styles.newTaskPrimaryBtn} onPress={onDone} activeOpacity={0.8}>
+            <Text style={styles.newTaskPrimaryBtnText}>完成</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.newTaskPanel}>
+      {/* Header */}
+      <View style={styles.newTaskHeader}>
+        <TouchableOpacity
+          onPress={() => (step === 1 ? onDone() : setStep(s => (s - 1) as 1 | 2 | 3))}
+          style={styles.newTaskBackBtn}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.newTaskBackText}>{step === 1 ? '← 返回' : '← 上一步'}</Text>
+        </TouchableOpacity>
+        <Text style={styles.newTaskPanelTitle}>建立新任務</Text>
+      </View>
+
+      {step === 1 && (
+        <>
+          <Text style={styles.newTaskFieldLabel}>要孩子做什麼？</Text>
+          <TextInput
+            style={styles.newTaskInput}
+            value={taskName}
+            onChangeText={setTaskName}
+            placeholder="例如：倒垃圾、整理書桌、幫忙澆花"
+            placeholderTextColor={ParentColors.fgMuted}
+            returnKeyType="next"
+            onSubmitEditing={handleNext}
+            autoFocus
+          />
+          <TouchableOpacity
+            style={[styles.newTaskPrimaryBtn, !taskName.trim() && styles.newTaskPrimaryBtnDisabled]}
+            onPress={handleNext}
+            disabled={!taskName.trim()}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.newTaskPrimaryBtnText}>下一步</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {step === 2 && (
+        <>
+          <Text style={styles.newTaskFieldLabel}>怎麼回饋？</Text>
+
+          {/* Card A — 給影子幣 */}
+          <TouchableOpacity
+            style={[styles.newTaskRewardCard, rewardMode === 'coin' && styles.newTaskRewardCardActive]}
+            onPress={() => setRewardMode('coin')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.newTaskRewardTitle}>給影子幣</Text>
+            {aiLoading ? (
+              <Text style={styles.newTaskAiHintLoading}>AI 計算中…</Text>
+            ) : aiCoinRange != null ? (
+              <Text style={styles.newTaskAiHint}>
+                AI 建議：約 {aiBaseTime} 分鐘，可給 {aiCoinRange[0]}–{aiCoinRange[1]} 幣
+              </Text>
+            ) : null}
+            {rewardMode === 'coin' && (
+              <View style={styles.newTaskCoinRow}>
+                <TouchableOpacity
+                  style={styles.newTaskCoinStepBtn}
+                  onPress={() => setCoins(c => Math.max(1, c - 1))}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.newTaskCoinStepText}>－</Text>
+                </TouchableOpacity>
+                <View style={styles.newTaskCoinDisplay}>
+                  <CoinSmIcon size={18} color="#A87800" />
+                  <Text style={styles.newTaskCoinNum}>{coins}</Text>
+                  <Text style={styles.newTaskCoinUnit}>幣</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.newTaskCoinStepBtn}
+                  onPress={() => setCoins(c => Math.min(20, c + 1))}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.newTaskCoinStepText}>＋</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          {/* Card B — 只記錄時間 */}
+          <TouchableOpacity
+            style={[styles.newTaskRewardCard, rewardMode === 'time' && styles.newTaskRewardCardActive]}
+            onPress={() => setRewardMode('time')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.newTaskRewardTitle}>只記錄時間</Text>
+            <Text style={styles.newTaskRewardSub}>完成後計入時間存摺</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.newTaskPrimaryBtn}
+            onPress={() => setStep(3)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.newTaskPrimaryBtnText}>下一步</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {step === 3 && (
+        <>
+          <Text style={styles.newTaskFieldLabel}>哪幾天做？</Text>
+          <View style={styles.newTaskDayRow}>
+            {DAY_LABELS.map(({ value, label }) => {
+              const active = selectedDays.includes(value);
+              return (
+                <TouchableOpacity
+                  key={value}
+                  style={[styles.newTaskDayBtn, active && styles.newTaskDayBtnActive]}
+                  onPress={() => toggleDay(value)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[styles.newTaskDayBtnText, active && styles.newTaskDayBtnTextActive]}>
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={styles.newTaskSummaryCard}>
+            <View style={styles.newTaskSummaryRow}>
+              <Text style={styles.newTaskSummaryLabel}>任務</Text>
+              <Text style={styles.newTaskSummaryValue} numberOfLines={1}>{taskName}</Text>
+            </View>
+            <View style={styles.newTaskSummaryRow}>
+              <Text style={styles.newTaskSummaryLabel}>回饋</Text>
+              <Text style={styles.newTaskSummaryValue}>
+                {rewardMode === 'coin' ? `${coins} 幣 / 次` : '計入時間存摺'}
+              </Text>
+            </View>
+            <View style={styles.newTaskSummaryRow}>
+              <Text style={styles.newTaskSummaryLabel}>週期</Text>
+              <Text style={styles.newTaskSummaryValue}>{formatPeriod()}</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.newTaskPrimaryBtn, submitting && styles.newTaskPrimaryBtnDisabled]}
+            onPress={() => void handleSubmit()}
+            disabled={submitting}
+            activeOpacity={0.8}
+          >
+            {submitting ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.newTaskPrimaryBtnText}>建立任務</Text>
+            )}
+          </TouchableOpacity>
+        </>
+      )}
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Right column — pending items (兌換待審 + 任務提案)
 // ─────────────────────────────────────────────────────────────────────────────
 
