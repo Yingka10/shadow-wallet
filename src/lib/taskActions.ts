@@ -32,6 +32,8 @@ export async function parentMarkTask(
   adjustedCoin: number,
   note: string | null,
 ): Promise<void> {
+  const safeAdjustedCoin = Math.round(adjustedCoin);
+
   // 1. Resolve parent ID
   const { data: parentId, error: rpcError } = await supabase.rpc('my_parent_id');
   if (rpcError != null || parentId == null) throw new Error('找不到家長帳號');
@@ -51,8 +53,8 @@ export async function parentMarkTask(
 
   if (completionError != null || completion == null) throw new Error('找不到今日完成紀錄');
 
-  const completionId  = completion.id as string;
-  const originalCoin  = completion.coin_earned as number;
+  const completionId  = completion.id;
+  const originalCoin  = completion.coin_earned;
 
   // 3. Insert override record
   const { data: override, error: overrideError } = await supabase
@@ -61,7 +63,7 @@ export async function parentMarkTask(
       completion_id: completionId,
       parent_id:     parentId,
       override_type: OVERRIDE_TYPE_MAP[markOption],
-      coin_deducted: Math.max(originalCoin - adjustedCoin, 0),
+      coin_deducted: Math.max(originalCoin - safeAdjustedCoin, 0),
       credit_flag:   false,
       reason:        note ?? null,
     })
@@ -72,10 +74,10 @@ export async function parentMarkTask(
     throw new Error(overrideError?.message ?? '標記失敗');
   }
 
-  const overrideId = override.id as string;
+  const overrideId = override.id;
 
   // 4. Wallet adjustment (skip when coin value unchanged)
-  const coinDiff = originalCoin - adjustedCoin;   // positive = deduct, negative = add
+  const coinDiff = originalCoin - safeAdjustedCoin;   // positive = deduct, negative = add
   if (coinDiff !== 0) {
     const { data: wallet, error: walletError } = await supabase
       .from('wallets')
@@ -86,8 +88,8 @@ export async function parentMarkTask(
 
     if (walletError != null || wallet == null) throw new Error('找不到錢包');
 
-    const walletId  = wallet.id as string;
-    const newBalance = (wallet.balance as number) - coinDiff;
+    const walletId  = wallet.id;
+    const newBalance = wallet.balance - coinDiff;
 
     const { error: walletUpdateError } = await supabase
       .from('wallets')
@@ -109,8 +111,8 @@ export async function parentMarkTask(
 
   // 5. Update task_completion: coin_earned + override_id; flag status if 'none'
   const completionUpdate = markOption === 'none'
-    ? { coin_earned: adjustedCoin, override_id: overrideId, status: 'flagged' as const }
-    : { coin_earned: adjustedCoin, override_id: overrideId };
+    ? { coin_earned: safeAdjustedCoin, override_id: overrideId, status: 'flagged' as const }
+    : { coin_earned: safeAdjustedCoin, override_id: overrideId };
 
   const { error: updateError } = await supabase
     .from('task_completions')
