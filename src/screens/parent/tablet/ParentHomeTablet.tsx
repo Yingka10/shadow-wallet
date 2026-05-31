@@ -687,6 +687,7 @@ function TodayTaskPanel({
   doneToday,
   totalToday,
   onAssignTask,
+  onNewTask,
   childId,
   onMarked,
 }: {
@@ -694,6 +695,7 @@ function TodayTaskPanel({
   doneToday: number;
   totalToday: number;
   onAssignTask: () => void;
+  onNewTask: () => void;
   childId: string;
   onMarked: () => void;
 }) {
@@ -735,7 +737,7 @@ function TodayTaskPanel({
         <TouchableOpacity style={styles.footerBtnBrass} activeOpacity={0.8} onPress={onAssignTask}>
           <Text style={styles.footerBtnText}>＋ 指派任務</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.footerBtnNavy} activeOpacity={0.8}>
+        <TouchableOpacity style={styles.footerBtnNavy} activeOpacity={0.8} onPress={onNewTask}>
           <Text style={styles.footerBtnText}>＋ 建立新任務</Text>
         </TouchableOpacity>
       </View>
@@ -1385,7 +1387,7 @@ export default function ParentHomeTablet() {
   const { childId, childName, allChildren, setSelectedChild } = useSelectedChild();
 
   const [familyId, setFamilyId] = useState<string | null>(null);
-  const [rightMode, setRightMode] = useState<'pending' | 'assign'>('pending');
+  const [rightMode, setRightMode] = useState<'pending' | 'assign' | 'newTask'>('pending');
   useEffect(() => {
     async function loadFamily() {
       try {
@@ -1492,6 +1494,7 @@ export default function ParentHomeTablet() {
             doneToday={doneToday}
             totalToday={totalToday}
             onAssignTask={() => setRightMode('assign')}
+            onNewTask={() => setRightMode('newTask')}
             childId={childId}
             onMarked={refresh}
           />
@@ -1503,7 +1506,14 @@ export default function ParentHomeTablet() {
           contentContainerStyle={[styles.rightColContent, { paddingTop: insets.top + 16 }]}
           showsVerticalScrollIndicator={false}
         >
-          {rightMode === 'assign' ? (
+          {rightMode === 'newTask' ? (
+            <NewTaskPanel
+              currentChildId={childId}
+              familyId={familyId}
+              onSuccess={() => refresh()}
+              onDone={() => setRightMode('pending')}
+            />
+          ) : rightMode === 'assign' ? (
             <AssignTaskPanel
               allChildren={allChildren}
               currentChildId={childId}
