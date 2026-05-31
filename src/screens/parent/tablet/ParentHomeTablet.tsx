@@ -30,6 +30,10 @@ import {
   getAiResult,
 } from '../../../hooks/useParentRedemption';
 import {
+  parentMarkTask,
+  type MarkOption,
+} from '../../../lib/taskActions';
+import {
   ParentColors,
   ParentSpacing,
   ParentRadii,
@@ -423,66 +427,253 @@ function TaskRow({
   };
   const st = statusConfig[task.status];
   const isDone = task.status === 'done';
+  const [markOpen, setMarkOpen] = useState(false);
 
   return (
-    <View style={[styles.taskRow, !isLast && styles.taskRowDivider]}>
-      {/* Completion circle */}
-      <View style={[styles.taskCheckCircle, isDone && styles.taskCheckCircleDone]}>
-        {isDone && <CheckSmIcon size={13} color="#fff" />}
-      </View>
+    <View style={!isLast ? styles.taskRowDivider : undefined}>
+      <View style={styles.taskRow}>
+        {/* Completion circle */}
+        <View style={[styles.taskCheckCircle, isDone && styles.taskCheckCircleDone]}>
+          {isDone && <CheckSmIcon size={13} color="#fff" />}
+        </View>
 
-      {/* Name + chips */}
-      <View style={styles.taskInfo}>
-        <Text
-          style={[styles.taskName, task.status === 'missed' && styles.taskNameMissed]}
-          numberOfLines={1}
-        >
-          {task.name}
-        </Text>
-        <View style={styles.taskMeta}>
-          <View style={[styles.taskCatChip, { backgroundColor: cat.tint }]}>
-            {React.cloneElement(cat.icon as React.ReactElement<any>, { size: 11, color: cat.fg })}
-            <Text style={[styles.taskCatLabel, { color: cat.fg }]}>{cat.label}</Text>
-          </View>
-          {task.completedAt != null && (
-            <View style={styles.taskTimeChip}>
-              <ClockSmIcon size={10} color={ParentColors.fgMuted} />
-              <Text style={styles.taskTimeText}>{task.completedAt} 完成</Text>
+        {/* Name + chips */}
+        <View style={styles.taskInfo}>
+          <Text
+            style={[styles.taskName, task.status === 'missed' && styles.taskNameMissed]}
+            numberOfLines={1}
+          >
+            {task.name}
+          </Text>
+          <View style={styles.taskMeta}>
+            <View style={[styles.taskCatChip, { backgroundColor: cat.tint }]}>
+              {React.cloneElement(cat.icon as React.ReactElement<any>, { size: 11, color: cat.fg })}
+              <Text style={[styles.taskCatLabel, { color: cat.fg }]}>{cat.label}</Text>
             </View>
+            {task.completedAt != null && (
+              <View style={styles.taskTimeChip}>
+                <ClockSmIcon size={10} color={ParentColors.fgMuted} />
+                <Text style={styles.taskTimeText}>{task.completedAt} 完成</Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* Reward */}
+        <View style={styles.taskRewardWrap}>
+          {task.reward != null ? (
+            task.reward.kind === 'coins' ? (
+              <View style={styles.taskCoinRow}>
+                <CoinSmIcon size={14} color="#A87800" />
+                <Text style={styles.taskCoinText}>{task.reward.amount}</Text>
+              </View>
+            ) : (
+              <Text style={styles.taskTimeReward}>+{task.reward.amount}分</Text>
+            )
+          ) : (
+            <Text style={styles.taskRewardDash}>—</Text>
+          )}
+        </View>
+
+        {/* Status pill */}
+        <StatusPill tone={st.tone} label={st.label} icon={st.icon} />
+
+        {/* Action button */}
+        <View style={styles.taskAction}>
+          {isDone ? (
+            <TouchableOpacity
+              style={[styles.taskActionBtn, markOpen && styles.taskActionBtnActive]}
+              onPress={() => setMarkOpen(v => !v)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.taskActionText, markOpen && styles.taskActionTextActive]}>
+                {markOpen ? '收起' : '標記'}
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.taskRemindBtn} activeOpacity={0.7}>
+              <Text style={styles.taskRemindText}>提醒</Text>
+            </TouchableOpacity>
           )}
         </View>
       </View>
 
-      {/* Reward */}
-      <View style={styles.taskRewardWrap}>
-        {task.reward != null ? (
-          task.reward.kind === 'coins' ? (
-            <View style={styles.taskCoinRow}>
-              <CoinSmIcon size={14} color="#A87800" />
-              <Text style={styles.taskCoinText}>{task.reward.amount}</Text>
-            </View>
-          ) : (
-            <Text style={styles.taskTimeReward}>+{task.reward.amount}分</Text>
-          )
-        ) : (
-          <Text style={styles.taskRewardDash}>—</Text>
-        )}
+      {/* MarkPanel expands below the row */}
+      {markOpen && isDone && (
+        <MarkPanel
+          task={task}
+          childId={childId}
+          onSuccess={() => {
+            setMarkOpen(false);
+            onMarked();
+          }}
+          onCancel={() => setMarkOpen(false)}
+        />
+      )}
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MarkPanel — inline override UI rendered below a done TaskRow
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MARK_OPTIONS: { opt: MarkOption; label: string }[] = [
+  { opt: 'exceeded', label: '超出預期' },
+  { opt: 'partial',  label: '部分完成' },
+  { opt: 'none',     label: '今天沒做' },
+  { opt: 'other',    label: '其他' },
+];
+
+function MarkPanel({
+  task,
+  childId,
+  onSuccess,
+  onCancel,
+}: {
+  task: DashboardTask;
+  childId: string;
+  onSuccess: () => void;
+  onCancel: () => void;
+}) {
+  const hasCoin      = task.reward?.kind === 'coins';
+  const originalCoin = hasCoin
+    ? (task.reward as { kind: 'coins'; amount: number }).amount
+    : 0;
+
+  const defaultCoin = (opt: MarkOption): number => {
+    if (!hasCoin) return 0;
+    if (opt === 'exceeded') return Math.round(originalCoin * 1.5);
+    if (opt === 'partial')  return Math.round(originalCoin * 0.5);
+    if (opt === 'none')     return 0;
+    return originalCoin; // 'other'
+  };
+
+  const [selectedOption, setSelectedOption] = useState<MarkOption | null>(null);
+  const [coinValue, setCoinValue]           = useState<number>(originalCoin);
+  const [note, setNote]                     = useState('');
+  const [submitting, setSubmitting]         = useState(false);
+  const [errorMsg, setErrorMsg]             = useState<string | null>(null);
+
+  const handleOptionSelect = (opt: MarkOption) => {
+    setSelectedOption(opt);
+    setCoinValue(defaultCoin(opt));
+    setErrorMsg(null);
+  };
+
+  const isConfirmDisabled =
+    selectedOption == null ||
+    (selectedOption === 'other' && note.trim() === '') ||
+    submitting;
+
+  const handleConfirm = async () => {
+    if (selectedOption == null) return;
+    setSubmitting(true);
+    setErrorMsg(null);
+    try {
+      await parentMarkTask(
+        task.id,
+        childId,
+        selectedOption,
+        coinValue,
+        note.trim() !== '' ? note.trim() : null,
+      );
+      onSuccess();
+    } catch {
+      setErrorMsg('標記失敗，請再試一次');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <View style={styles.markPanel}>
+      {/* Option chips */}
+      <View style={styles.markPanelOptions}>
+        {MARK_OPTIONS.map(({ opt, label }) => (
+          <TouchableOpacity
+            key={opt}
+            style={[
+              styles.markOptionChip,
+              selectedOption === opt && styles.markOptionChipSelected,
+            ]}
+            onPress={() => handleOptionSelect(opt)}
+            activeOpacity={0.7}
+          >
+            <Text
+              style={[
+                styles.markOptionText,
+                selectedOption === opt && styles.markOptionTextSelected,
+              ]}
+            >
+              {label}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
-      {/* Status pill */}
-      <StatusPill tone={st.tone} label={st.label} icon={st.icon} />
+      {/* Coin adjustment input — only when task has coins and an option is selected */}
+      {hasCoin && selectedOption != null && (
+        <View style={styles.markCoinRow}>
+          <Text style={styles.markCoinLabel}>調整幣值：</Text>
+          <TextInput
+            style={styles.markCoinInput}
+            value={String(coinValue)}
+            onChangeText={(v) => {
+              const n = parseInt(v, 10);
+              setCoinValue(!isNaN(n) && n >= 0 ? n : 0);
+            }}
+            keyboardType="number-pad"
+            selectTextOnFocus
+          />
+        </View>
+      )}
 
-      {/* Action button */}
-      <View style={styles.taskAction}>
-        {isDone ? (
-          <TouchableOpacity style={styles.taskActionBtn} activeOpacity={0.7}>
-            <Text style={styles.taskActionText}>標記</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity style={styles.taskRemindBtn} activeOpacity={0.7}>
-            <Text style={styles.taskRemindText}>提醒</Text>
-          </TouchableOpacity>
-        )}
+      {/* Note input — shown once option is selected */}
+      {selectedOption != null && (
+        <View style={styles.markNoteRow}>
+          <Text style={styles.markNoteLabel}>
+            {selectedOption === 'other' ? '備註（必填）：' : '備註（選填）：'}
+          </Text>
+          <TextInput
+            style={styles.markNoteInput}
+            value={note}
+            onChangeText={setNote}
+            multiline
+            maxLength={100}
+            placeholder="寫下你的觀察..."
+            placeholderTextColor={ParentColors.fgMuted}
+          />
+        </View>
+      )}
+
+      {/* Inline error */}
+      {errorMsg != null && (
+        <Text style={styles.markErrorMsg}>{errorMsg}</Text>
+      )}
+
+      {/* Actions */}
+      <View style={styles.markActions}>
+        <TouchableOpacity
+          style={styles.markCancelBtn}
+          onPress={onCancel}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.markCancelText}>取消</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.markConfirmBtn,
+            isConfirmDisabled && styles.markConfirmBtnDisabled,
+          ]}
+          onPress={handleConfirm}
+          disabled={isConfirmDisabled}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.markConfirmText}>
+            {submitting ? '處理中...' : '確認標記 →'}
+          </Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -1970,6 +2161,128 @@ const styles = StyleSheet.create({
   pillText: {
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.semi,
+  },
+
+  // ── Mark panel ──
+  markPanel: {
+    backgroundColor: ParentColors.bgSurfaceWarm,
+    borderRadius: ParentRadii.sm,
+    padding: 14,
+    gap: 12,
+    marginBottom: 14,
+  },
+  markPanelOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  markOptionChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: ParentRadii.pill,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+  },
+  markOptionChipSelected: {
+    backgroundColor: ParentColors.ink900,
+    borderColor: ParentColors.ink900,
+  },
+  markOptionText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgSecondary,
+  },
+  markOptionTextSelected: {
+    color: '#fff',
+    fontWeight: ParentFontWeights.semi,
+  },
+  markCoinRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  markCoinLabel: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgSecondary,
+  },
+  markCoinInput: {
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    fontFamily: ParentFonts.mono,
+    fontSize: ParentFontSizes.base,
+    color: ParentColors.fgPrimary,
+    minWidth: 64,
+    textAlign: 'center',
+  },
+  markNoteRow: {
+    gap: 6,
+  },
+  markNoteLabel: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgSecondary,
+  },
+  markNoteInput: {
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgPrimary,
+    minHeight: 64,
+    textAlignVertical: 'top',
+  },
+  markErrorMsg: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.error,
+  },
+  markActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  markCancelBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: ParentRadii.sm,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+  },
+  markCancelText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgMuted,
+  },
+  markConfirmBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: ParentRadii.sm,
+    backgroundColor: ParentColors.teal500,
+  },
+  markConfirmBtnDisabled: {
+    opacity: 0.4,
+  },
+  markConfirmText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    fontWeight: ParentFontWeights.bold,
+    color: '#fff',
+  },
+  taskActionBtnActive: {
+    backgroundColor: ParentColors.bgSurfaceWarm,
+    borderColor: ParentColors.ink900,
+  },
+  taskActionTextActive: {
+    color: ParentColors.ink900,
     fontWeight: ParentFontWeights.semi,
   },
 
