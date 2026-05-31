@@ -2,18 +2,20 @@
 // Layout: left sidebar (child switcher + briefing) │ main area (overview strip + goal + tasks) │ right column (static placeholder)
 // Data: useParentDashboard + useSelectedChild — no new hooks, no new Supabase queries.
 
-import React, { useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  TextInput,
   StyleSheet,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { supabase } from '../../../lib/supabase';
 import { useSelectedChild } from '../../../context/SelectedChildContext';
 import {
   useParentDashboard,
@@ -21,6 +23,12 @@ import {
   type DashboardTaskStatus,
   type DashboardGoal,
 } from '../../../hooks/useParentDashboard';
+import {
+  useParentRedemption,
+  type RedemptionRequest,
+  type ChildWishItem,
+  getAiResult,
+} from '../../../hooks/useParentRedemption';
 import {
   ParentColors,
   ParentSpacing,
@@ -394,7 +402,17 @@ function GoalCard({ goal }: { goal: DashboardGoal }) {
 // Task row
 // ─────────────────────────────────────────────────────────────────────────────
 
-function TaskRow({ task, isLast }: { task: DashboardTask; isLast: boolean }) {
+function TaskRow({
+  task,
+  isLast,
+  childId,
+  onMarked,
+}: {
+  task: DashboardTask;
+  isLast: boolean;
+  childId: string;
+  onMarked: () => void;
+}) {
   const cat = TASK_CAT_META[task.cat];
 
   const statusConfig: Record<DashboardTaskStatus, { tone: PillTone; label: string; icon?: React.ReactElement }> = {
@@ -478,10 +496,16 @@ function TodayTaskPanel({
   tasks,
   doneToday,
   totalToday,
+  onAssignTask,
+  childId,
+  onMarked,
 }: {
   tasks: DashboardTask[];
   doneToday: number;
   totalToday: number;
+  onAssignTask: () => void;
+  childId: string;
+  onMarked: () => void;
 }) {
   const todayLabel = dayjs().format('MM/DD dd');
 
@@ -506,14 +530,20 @@ function TodayTaskPanel({
         </View>
       ) : (
         tasks.map((t, i) => (
-          <TaskRow key={t.id} task={t} isLast={i === tasks.length - 1} />
+          <TaskRow
+            key={t.id}
+            task={t}
+            isLast={i === tasks.length - 1}
+            childId={childId}
+            onMarked={onMarked}
+          />
         ))
       )}
 
       {/* Footer buttons */}
       <View style={styles.taskFooter}>
-        <TouchableOpacity style={styles.footerBtnBrass} activeOpacity={0.8}>
-          <Text style={styles.footerBtnText}>＋ 指派臨時任務</Text>
+        <TouchableOpacity style={styles.footerBtnBrass} activeOpacity={0.8} onPress={onAssignTask}>
+          <Text style={styles.footerBtnText}>＋ 指派任務</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.footerBtnNavy} activeOpacity={0.8}>
           <Text style={styles.footerBtnText}>＋ 建立新任務</Text>
@@ -524,14 +554,575 @@ function TodayTaskPanel({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Right column — static placeholder
-// TODO: 接 proposals/redemption hook
+// Right column — assign task panel (指派任務 兩步驟表單)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function PendingItemsPanel() {
+type RecentTaskEntry = { name: string; coin_override: number };
+
+function AssignTaskPanel({
+  allChildren,
+  currentChildId,
+  familyId,
+  onDone,
+}: {
+  allChildren: ChildOption[];
+  currentChildId: string;
+  familyId: string | null;
+  onDone: () => void;
+}) {
+  const [step, setStep] = useState<1 | 2>(1);
+  const [taskName, setTaskName] = useState('');
+  const [coins, setCoins] = useState(8);
+  const [targetChildId, setTargetChildId] = useState(currentChildId);
+  const [childPickerOpen, setChildPickerOpen] = useState(false);
+  const [recentTasks, setRecentTasks] = useState<RecentTaskEntry[]>([]);
+  const [suggestedRange, setSuggestedRange] = useState<[number, number] | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [doneMsg, setDoneMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!familyId) return;
+    async function loadRecent() {
+      const { data } = await supabase
+        .from('tasks')
+        .select('name, coin_override')
+        .eq('family_id', familyId!)
+        .eq('is_system_default', false)
+        .not('coin_override', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(30);
+      if (!data) return;
+      const seen = new Set<string>();
+      const unique: RecentTaskEntry[] = [];
+      for (const t of data) {
+        if (t.coin_override != null && !seen.has(t.name)) {
+          seen.add(t.name);
+          unique.push({ name: t.name, coin_override: t.coin_override as number });
+        }
+        if (unique.length >= 6) break;
+      }
+      setRecentTasks(unique);
+    }
+    void loadRecent();
+  }, [familyId]);
+
+  function handleNext() {
+    const trimmed = taskName.trim();
+    if (!trimmed) return;
+    const match = recentTasks.find(t => t.name === trimmed);
+    setCoins(match?.coin_override ?? 8);
+    setSuggestedRange(null);
+    setStep(2);
+    if (!match && familyId) {
+      void supabase.functions.invoke('ai-proxy', {
+        body: { type: 'suggestTaskCoin', payload: { taskName: trimmed } },
+      }).then(({ data: aiData }) => {
+        const suggested = (aiData as { coins?: number } | null)?.coins;
+        if (typeof suggested === 'number' && Number.isFinite(suggested)) {
+          setSuggestedRange([Math.max(1, suggested - 2), suggested + 3]);
+        }
+      }).catch(() => undefined);
+    }
+  }
+
+  async function handleSubmit() {
+    const trimmed = taskName.trim();
+    if (submitting || !trimmed || !familyId) return;
+    setSubmitting(true);
+    try {
+      const today = dayjs().format('YYYY-MM-DD');
+      const { data: task, error: taskErr } = await supabase
+        .from('tasks')
+        .insert({
+          family_id: familyId,
+          name: trimmed,
+          category: 'C' as const,
+          day_type: 'both' as const,
+          long_term_type: null,
+          is_long_term: false,
+          base_time_min: 15,
+          difficulty: 1,
+          coin_override: coins,
+          is_system_default: false,
+          allow_repeat: false,
+          min_age: 0,
+          max_age: 18,
+          is_active: true,
+          time_saving_min: 0,
+          recurrence_days: null,
+          due_date: today,
+        })
+        .select('id')
+        .single();
+      if (taskErr || !task) throw taskErr ?? new Error('建立任務失敗');
+      const { error: ctErr } = await supabase.from('child_tasks').insert({
+        child_id: targetChildId,
+        task_id: task.id,
+        is_active: true,
+      });
+      if (ctErr) {
+        await supabase.from('tasks').delete().eq('id', task.id);
+        throw ctErr;
+      }
+      const childName = allChildren.find(c => c.id === targetChildId)?.nickname ?? '孩子';
+      setDoneMsg(`已指派給${childName}·「${trimmed}」· 完成可得 ${coins} 幣`);
+      setTimeout(() => onDone(), 2200);
+    } catch (err) {
+      console.error('[AssignTaskPanel] submit error:', err);
+      setSubmitting(false);
+    }
+  }
+
+  const targetChild = allChildren.find(c => c.id === targetChildId);
+
+  if (doneMsg) {
+    return (
+      <View style={styles.assignPanel}>
+        <View style={styles.assignDoneCard}>
+          <Text style={styles.assignDoneText}>✓ {doneMsg}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.assignPanel}>
+      {/* Header */}
+      <View style={styles.assignHeader}>
+        <TouchableOpacity onPress={onDone} style={styles.assignBackBtn} activeOpacity={0.7}>
+          <Text style={styles.assignBackText}>← 返回</Text>
+        </TouchableOpacity>
+        <Text style={styles.assignPanelTitle}>指派任務</Text>
+      </View>
+
+      {step === 1 ? (
+        <>
+          <Text style={styles.assignFieldLabel}>要請孩子做什麼？</Text>
+          <TextInput
+            style={styles.assignInput}
+            value={taskName}
+            onChangeText={setTaskName}
+            placeholder="例如：洗碗、整理書桌、倒垃圾"
+            placeholderTextColor={ParentColors.fgMuted}
+            returnKeyType="next"
+            onSubmitEditing={handleNext}
+            autoFocus
+          />
+
+          {recentTasks.length > 0 ? (
+            <>
+              <Text style={styles.assignChipLabel}>最近指派過的</Text>
+              <View style={styles.assignChipRow}>
+                {recentTasks.map(t => (
+                  <TouchableOpacity
+                    key={t.name}
+                    style={styles.assignChip}
+                    onPress={() => setTaskName(t.name)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.assignChipText}>{t.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          ) : (
+            <Text style={styles.assignChipEmpty}>
+              之後你指派過的任務會出現在這裡，方便重複指派
+            </Text>
+          )}
+
+          <TouchableOpacity
+            style={[styles.assignPrimaryBtn, !taskName.trim() && styles.assignPrimaryBtnDisabled]}
+            onPress={handleNext}
+            disabled={!taskName.trim()}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.assignPrimaryBtnText}>下一步</Text>
+          </TouchableOpacity>
+        </>
+      ) : (
+        <>
+          {/* Task name row */}
+          <View style={styles.assignStep2Row}>
+            <Text style={styles.assignStep2Label}>任務</Text>
+            <Text style={styles.assignStep2Name} numberOfLines={1}>{taskName}</Text>
+            <TouchableOpacity
+              onPress={() => { setStep(1); setSuggestedRange(null); }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.assignEditLink}>修改</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Target child */}
+          <Text style={styles.assignFieldLabel}>指派給</Text>
+          <TouchableOpacity
+            style={styles.assignTargetBtn}
+            onPress={allChildren.length > 1 ? () => setChildPickerOpen(o => !o) : undefined}
+            activeOpacity={allChildren.length > 1 ? 0.7 : 1}
+          >
+            <Text style={styles.assignTargetName}>{targetChild?.nickname ?? '孩子'}</Text>
+            {allChildren.length > 1 && (
+              <Text style={styles.assignTargetChevron}>{childPickerOpen ? '▲' : '▼'}</Text>
+            )}
+          </TouchableOpacity>
+          {childPickerOpen && (
+            <View style={styles.assignChildPicker}>
+              {allChildren.map(c => (
+                <TouchableOpacity
+                  key={c.id}
+                  style={[styles.assignChildOption, c.id === targetChildId && styles.assignChildOptionActive]}
+                  onPress={() => { setTargetChildId(c.id); setChildPickerOpen(false); }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.assignChildOptionText, c.id === targetChildId && styles.assignChildOptionTextActive]}>
+                    {c.nickname}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {/* Coin amount */}
+          <Text style={styles.assignFieldLabel}>孩子完成後可以得到</Text>
+          <View style={styles.assignCoinRow}>
+            <TouchableOpacity
+              style={styles.assignCoinStepBtn}
+              onPress={() => setCoins(c => Math.max(1, c - 1))}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.assignCoinStepText}>－</Text>
+            </TouchableOpacity>
+            <View style={styles.assignCoinDisplay}>
+              <CoinSmIcon size={20} color="#A87800" />
+              <Text style={styles.assignCoinNum}>{coins}</Text>
+              <Text style={styles.assignCoinUnit}>幣</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.assignCoinStepBtn}
+              onPress={() => setCoins(c => Math.min(100, c + 1))}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.assignCoinStepText}>＋</Text>
+            </TouchableOpacity>
+          </View>
+          {suggestedRange != null && (
+            <Text style={styles.assignRangeHint}>建議 {suggestedRange[0]}–{suggestedRange[1]} 個</Text>
+          )}
+
+          <TouchableOpacity
+            style={[styles.assignPrimaryBtn, submitting && styles.assignPrimaryBtnDisabled]}
+            onPress={() => void handleSubmit()}
+            disabled={submitting}
+            activeOpacity={0.8}
+          >
+            {submitting ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.assignPrimaryBtnText}>指派給孩子</Text>
+            )}
+          </TouchableOpacity>
+        </>
+      )}
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Right column — pending items (兌換待審 + 任務提案)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function XIcon({ size = 14, color = ParentColors.error }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M18 6L6 18M6 6l12 12" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+const PROPOSAL_REJECT_REASONS = [
+  '已經包含在原本任務裡',
+  '不符合家庭規則',
+  '想再和孩子討論',
+  '幣值建議不合理',
+];
+
+// ── 兌換待審 card ──
+
+function WishApprovalCard({
+  wish,
+  onApprove,
+}: {
+  wish: ChildWishItem;
+  onApprove: (id: string) => Promise<void>;
+}) {
+  const [state, setState] = useState<'idle' | 'approved' | 'rejected'>('idle');
+  const [submitting, setSubmitting] = useState(false);
+
+  const waitedHours = dayjs().diff(dayjs(wish.created_at), 'hour');
+  const isLongWait = waitedHours >= 24;
+  const waitLabel = waitedHours < 24 ? `${waitedHours} 小時` : `${Math.floor(waitedHours / 24)} 天`;
+
+  const handleApprove = async () => {
+    setSubmitting(true);
+    try {
+      await onApprove(wish.id);
+      setState('approved');
+    } catch {
+      // stay idle on error
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleReject = async () => {
+    setSubmitting(true);
+    try {
+      await supabase.from('reward_items').update({ is_active: false }).eq('id', wish.id);
+      setState('rejected');
+    } catch {
+      // stay idle on error
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (state === 'approved') {
+    return (
+      <View style={[styles.proposalDoneCard, styles.proposalDoneApproved]}>
+        <CheckSmIcon size={16} color={ParentColors.success} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.proposalDoneTitle, { color: ParentColors.success }]}>
+            已上架 · 「{wish.name}」
+          </Text>
+          <Text style={styles.proposalDoneMeta}>{wish.coin_cost} 幣，孩子可以前往撲滿兌換。</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (state === 'rejected') {
+    return (
+      <View style={[styles.proposalDoneCard, styles.proposalDoneRejected]}>
+        <XIcon size={16} color={ParentColors.error} />
+        <Text style={[styles.proposalDoneTitle, { color: ParentColors.error }]}>
+          已拒絕 · 「{wish.name}」
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.wishCard}>
+      <View style={styles.wishCardHeader}>
+        <View style={[styles.waitPill, isLongWait ? styles.waitPillUrgent : styles.waitPillNormal]}>
+          <ClockSmIcon size={10} color={isLongWait ? ParentColors.error : ParentColors.fgMuted} />
+          <Text style={[styles.waitPillText, isLongWait && { color: ParentColors.error }]}>
+            已等 {waitLabel}
+          </Text>
+        </View>
+        <Text style={styles.wishDateText}>{dayjs(wish.created_at).format('M/D HH:mm')}</Text>
+      </View>
+      <Text style={styles.wishName}>{wish.name}</Text>
+      <View style={styles.wishCoinRow}>
+        <CoinSmIcon size={14} />
+        <Text style={styles.wishCoinText}>{wish.coin_cost} 幣</Text>
+      </View>
+      <View style={styles.proposalActions}>
+        <TouchableOpacity
+          style={[styles.proposalApproveBtn, submitting && { opacity: 0.5 }]}
+          onPress={() => void handleApprove()}
+          disabled={submitting}
+          activeOpacity={0.8}
+        >
+          <CheckSmIcon size={13} color="#fff" />
+          <Text style={styles.proposalApproveBtnText}>同意上架</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.proposalRejectBtn, submitting && { opacity: 0.5 }]}
+          onPress={() => void handleReject()}
+          disabled={submitting}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.proposalRejectBtnText}>拒絕</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+// ── 任務提案 card ──
+
+function RedemptionProposalCard({
+  request,
+  onApprove,
+  onReject,
+}: {
+  request: RedemptionRequest;
+  onApprove: (id: string, adjustedCoins?: number) => Promise<void>;
+  onReject: (id: string, note: string) => Promise<void>;
+}) {
+  const ai = getAiResult(request);
+  const [coinValue, setCoinValue] = useState(ai.suggestedCoins ?? request.coin_cost);
+  const [state, setState] = useState<'idle' | 'rejecting' | 'approved' | 'rejected'>('idle');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleApprove = async () => {
+    setSubmitting(true);
+    try {
+      await onApprove(request.id, coinValue);
+      setState('approved');
+    } catch {
+      // stay idle on error
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleReject = async (reason: string) => {
+    setSubmitting(true);
+    try {
+      await onReject(request.id, reason);
+      setState('rejected');
+    } catch {
+      // stay idle on error
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (state === 'approved') {
+    return (
+      <View style={[styles.proposalDoneCard, styles.proposalDoneApproved]}>
+        <CheckSmIcon size={18} color={ParentColors.success} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.proposalDoneTitle, { color: ParentColors.success }]}>
+            已同意 · 「{request.name}」
+          </Text>
+          <Text style={styles.proposalDoneMeta}>+{coinValue} 幣已入帳。</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (state === 'rejected') {
+    return (
+      <View style={[styles.proposalDoneCard, styles.proposalDoneRejected]}>
+        <XIcon size={18} color={ParentColors.error} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.proposalDoneTitle, { color: ParentColors.error }]}>
+            已拒絕 · 「{request.name}」
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.proposalCard}>
+      <Text style={styles.proposalCardName}>{request.name}</Text>
+      <Text style={styles.proposalCardMeta}>
+        {dayjs(request.created_at).format('M/D HH:mm')} · 孩子提案
+      </Text>
+
+      {request.description ? (
+        <View style={styles.proposalKidNote}>
+          <Text style={styles.proposalKidNoteText}>「{request.description}」</Text>
+        </View>
+      ) : null}
+
+      <View style={[styles.proposalAiBanner, ai.verdict === 'high' ? styles.proposalAiBannerHigh : styles.proposalAiBannerOk]}>
+        <SparkleSmIcon size={11} color={ai.verdict === 'high' ? ParentColors.warn : ParentColors.teal500} />
+        <Text style={[styles.proposalAiText, { color: ai.verdict === 'high' ? '#B87A00' : ParentColors.teal500 }]} numberOfLines={3}>
+          {ai.reason}{ai.suggestedCoins != null ? ` 建議 ${ai.suggestedCoins} 幣` : ''}
+        </Text>
+      </View>
+
+      <View style={styles.proposalCoinRow}>
+        <Text style={styles.proposalCoinLabel}>核准幣值</Text>
+        <View style={styles.proposalCoinInputWrap}>
+          <CoinSmIcon size={14} />
+          <TextInput
+            style={styles.proposalCoinInput}
+            value={String(coinValue)}
+            onChangeText={v => {
+              const n = parseInt(v, 10);
+              if (!isNaN(n) && n >= 0) setCoinValue(n);
+              else if (v === '') setCoinValue(0);
+            }}
+            keyboardType="number-pad"
+            maxLength={4}
+          />
+          <Text style={styles.proposalCoinUnit}>幣</Text>
+        </View>
+      </View>
+
+      {state === 'idle' && (
+        <View style={styles.proposalActions}>
+          <TouchableOpacity
+            style={[styles.proposalApproveBtn, submitting && { opacity: 0.5 }]}
+            onPress={() => void handleApprove()}
+            disabled={submitting}
+            activeOpacity={0.8}
+          >
+            <CheckSmIcon size={13} color="#fff" />
+            <Text style={styles.proposalApproveBtnText}>同意並發放</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.proposalRejectBtn, submitting && { opacity: 0.5 }]}
+            onPress={() => setState('rejecting')}
+            disabled={submitting}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.proposalRejectBtnText}>拒絕</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {state === 'rejecting' && (
+        <View style={styles.rejectPanel}>
+          <Text style={styles.rejectPanelTitle}>選擇拒絕原因</Text>
+          <View style={styles.rejectReasonList}>
+            {PROPOSAL_REJECT_REASONS.map(r => (
+              <TouchableOpacity
+                key={r}
+                style={[styles.rejectReasonBtn, submitting && { opacity: 0.5 }]}
+                onPress={() => void handleReject(r)}
+                disabled={submitting}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.rejectReasonText}>{r}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TouchableOpacity onPress={() => setState('idle')} style={styles.rejectCancelBtn}>
+            <Text style={styles.rejectCancelText}>取消</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ── Right column panel ──
+
+function PendingItemsPanel({
+  pendingRequests,
+  childWishes,
+  approveRequest,
+  rejectRequest,
+  approveChildWish,
+}: {
+  pendingRequests: RedemptionRequest[];
+  childWishes: ChildWishItem[];
+  approveRequest: (id: string, adjustedCoins?: number) => Promise<void>;
+  rejectRequest: (id: string, note: string) => Promise<void>;
+  approveChildWish: (id: string) => Promise<void>;
+}) {
+  const pendingWishes = childWishes.filter(w => !w.parent_approved);
+
   return (
     <View style={styles.pendingPanel}>
-      {/* Section header */}
       <View style={styles.sectionHeader}>
         <View>
           <Text style={styles.sectionEyebrow}>待處理事項</Text>
@@ -539,8 +1130,7 @@ function PendingItemsPanel() {
         </View>
       </View>
 
-      {/* 兌換待審 — static placeholder */}
-      {/* TODO: 接 proposals/redemption hook */}
+      {/* 兌換待審 */}
       <View style={styles.pendingSubSection}>
         <View style={styles.pendingSubHead}>
           <View style={[styles.pendingSubIcon, { backgroundColor: '#FAF1E7' }]}>
@@ -550,14 +1140,21 @@ function PendingItemsPanel() {
           <View style={styles.pendingSubLine} />
           <Text style={styles.pendingSubNote}>孩子許願 · 設定幣值後上架</Text>
         </View>
-        <View style={styles.pendingEmpty}>
-          <Text style={styles.pendingEmptyTitle}>目前沒有待審兌換</Text>
-          <Text style={styles.pendingEmptyMeta}>孩子的兌換申請會出現在這裡。</Text>
-        </View>
+        {pendingWishes.length === 0 ? (
+          <View style={styles.pendingEmpty}>
+            <Text style={styles.pendingEmptyTitle}>目前沒有待審兌換</Text>
+            <Text style={styles.pendingEmptyMeta}>孩子的兌換申請會出現在這裡。</Text>
+          </View>
+        ) : (
+          <View style={{ gap: 10 }}>
+            {pendingWishes.map(w => (
+              <WishApprovalCard key={w.id} wish={w} onApprove={approveChildWish} />
+            ))}
+          </View>
+        )}
       </View>
 
-      {/* 任務提案 — static placeholder */}
-      {/* TODO: 接 proposals/redemption hook */}
+      {/* 任務提案 */}
       <View style={styles.pendingSubSection}>
         <View style={styles.pendingSubHead}>
           <View style={[styles.pendingSubIcon, { backgroundColor: '#F4EBF0' }]}>
@@ -567,10 +1164,23 @@ function PendingItemsPanel() {
           <View style={styles.pendingSubLine} />
           <Text style={styles.pendingSubNote}>孩子提案完成的事 · 同意後發幣</Text>
         </View>
-        <View style={styles.pendingEmpty}>
-          <Text style={styles.pendingEmptyTitle}>目前沒有待審提案</Text>
-          <Text style={styles.pendingEmptyMeta}>孩子有新提案時，會在這裡出現。</Text>
-        </View>
+        {pendingRequests.length === 0 ? (
+          <View style={styles.pendingEmpty}>
+            <Text style={styles.pendingEmptyTitle}>目前沒有待審提案</Text>
+            <Text style={styles.pendingEmptyMeta}>孩子有新提案時，會在這裡出現。</Text>
+          </View>
+        ) : (
+          <View style={{ gap: 10 }}>
+            {pendingRequests.map(req => (
+              <RedemptionProposalCard
+                key={req.id}
+                request={req}
+                onApprove={approveRequest}
+                onReject={rejectRequest}
+              />
+            ))}
+          </View>
+        )}
       </View>
     </View>
   );
@@ -583,6 +1193,35 @@ function PendingItemsPanel() {
 export default function ParentHomeTablet() {
   const insets = useSafeAreaInsets();
   const { childId, childName, allChildren, setSelectedChild } = useSelectedChild();
+
+  const [familyId, setFamilyId] = useState<string | null>(null);
+  const [rightMode, setRightMode] = useState<'pending' | 'assign'>('pending');
+  useEffect(() => {
+    async function loadFamily() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data } = await supabase
+          .from('parents')
+          .select('family_id')
+          .eq('user_id', user.id)
+          .single();
+        if (data?.family_id) setFamilyId(data.family_id as string);
+      } catch (err) {
+        console.error('[ParentHomeTablet] loadFamily error:', err);
+      }
+    }
+    void loadFamily();
+  }, []);
+
+  const {
+    pendingRequests,
+    childWishes,
+    approveRequest,
+    rejectRequest,
+    approveChildWish,
+    fetchAll: refreshRedemption,
+  } = useParentRedemption(familyId);
 
   const {
     child,
@@ -598,7 +1237,8 @@ export default function ParentHomeTablet() {
   useFocusEffect(
     useCallback(() => {
       refresh();
-    }, [refresh]),
+      void refreshRedemption();
+    }, [refresh, refreshRedemption]),
   );
 
   const doneToday = todayTasks.filter(t => t.status === 'done').length;
@@ -661,16 +1301,34 @@ export default function ParentHomeTablet() {
             tasks={todayTasks}
             doneToday={doneToday}
             totalToday={totalToday}
+            onAssignTask={() => setRightMode('assign')}
+            childId={childId}
+            onMarked={refresh}
           />
         </ScrollView>
 
-        {/* ── Right column — static placeholder ── */}
+        {/* ── Right column ── */}
         <ScrollView
           style={styles.rightCol}
           contentContainerStyle={[styles.rightColContent, { paddingTop: insets.top + 16 }]}
           showsVerticalScrollIndicator={false}
         >
-          <PendingItemsPanel />
+          {rightMode === 'assign' ? (
+            <AssignTaskPanel
+              allChildren={allChildren}
+              currentChildId={childId}
+              familyId={familyId}
+              onDone={() => { setRightMode('pending'); refresh(); }}
+            />
+          ) : (
+            <PendingItemsPanel
+              pendingRequests={pendingRequests}
+              childWishes={childWishes}
+              approveRequest={approveRequest}
+              rejectRequest={rejectRequest}
+              approveChildWish={approveChildWish}
+            />
+          )}
         </ScrollView>
 
       </View>
@@ -1419,5 +2077,502 @@ const styles = StyleSheet.create({
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.xs,
     color: ParentColors.ink300,
+  },
+
+  // ── Wish approval card ──
+  wishCard: {
+    backgroundColor: ParentColors.bgSurface,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.lg,
+    padding: 14,
+    gap: 8,
+  },
+  wishCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  waitPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: ParentRadii.pill,
+    borderWidth: 1,
+  },
+  waitPillNormal: {
+    backgroundColor: ParentColors.bgSurfaceWarm,
+    borderColor: ParentColors.borderSoft,
+  },
+  waitPillUrgent: {
+    backgroundColor: '#FBE8E4',
+    borderColor: '#F0CFC7',
+  },
+  waitPillText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgMuted,
+  },
+  wishDateText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+  },
+  wishName: {
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.pBody,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgPrimary,
+  },
+  wishCoinRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  wishCoinText: {
+    fontFamily: ParentFonts.mono,
+    fontSize: ParentFontSizes.pMeta,
+    fontWeight: ParentFontWeights.bold,
+    color: '#A87800',
+  },
+
+  // ── Redemption proposal card ──
+  proposalCard: {
+    backgroundColor: ParentColors.bgSurface,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.lg,
+    padding: 14,
+    gap: 8,
+  },
+  proposalCardName: {
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.h3,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgPrimary,
+    lineHeight: 22,
+  },
+  proposalCardMeta: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+    marginTop: -4,
+  },
+  proposalKidNote: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: ParentColors.bgSurfaceWarm,
+    borderLeftWidth: 2,
+    borderLeftColor: '#C97735',
+    borderRadius: 2,
+  },
+  proposalKidNoteText: {
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.sm,
+    fontStyle: 'italic',
+    color: ParentColors.fgSecondary,
+    lineHeight: 20,
+  },
+  proposalAiBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    padding: 10,
+    borderRadius: ParentRadii.md,
+    borderWidth: 1,
+  },
+  proposalAiBannerOk: {
+    backgroundColor: ParentColors.teal50,
+    borderColor: ParentColors.teal200,
+  },
+  proposalAiBannerHigh: {
+    backgroundColor: '#FBF1DC',
+    borderColor: '#E8D0A0',
+  },
+  proposalAiText: {
+    flex: 1,
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    lineHeight: 17,
+  },
+  proposalCoinRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: ParentColors.borderSoft,
+  },
+  proposalCoinLabel: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.eyebrow,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  proposalCoinInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#FAF1E7',
+    borderWidth: 1,
+    borderColor: '#E8D0A0',
+    borderRadius: ParentRadii.pill,
+  },
+  proposalCoinInput: {
+    fontFamily: ParentFonts.mono,
+    fontSize: ParentFontSizes.pBody,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgPrimary,
+    width: 44,
+    textAlign: 'center',
+    padding: 0,
+  },
+  proposalCoinUnit: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+  },
+
+  // ── Shared action buttons ──
+  proposalActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  proposalApproveBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingVertical: 10,
+    backgroundColor: ParentColors.teal500,
+    borderRadius: ParentRadii.md,
+  },
+  proposalApproveBtnText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    fontWeight: ParentFontWeights.bold,
+    color: '#fff',
+  },
+  proposalRejectBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: ParentRadii.md,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+  },
+  proposalRejectBtnText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgSecondary,
+  },
+
+  // ── Done / result cards ──
+  proposalDoneCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    padding: 14,
+    borderRadius: ParentRadii.lg,
+    borderWidth: 1,
+  },
+  proposalDoneApproved: {
+    backgroundColor: '#E8F2E6',
+    borderColor: '#C9DDD0',
+  },
+  proposalDoneRejected: {
+    backgroundColor: '#FBE8E4',
+    borderColor: '#F0CFC7',
+  },
+  proposalDoneTitle: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    fontWeight: ParentFontWeights.bold,
+  },
+  proposalDoneMeta: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+    marginTop: 2,
+  },
+
+  // ── Reject reason panel ──
+  rejectPanel: {
+    padding: 12,
+    backgroundColor: ParentColors.bgSurfaceWarm,
+    borderRadius: ParentRadii.md,
+    gap: 8,
+  },
+  rejectPanelTitle: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.eyebrow,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  rejectReasonList: {
+    gap: 6,
+  },
+  rejectReasonBtn: {
+    padding: 10,
+    backgroundColor: ParentColors.bgSurface,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.sm,
+  },
+  rejectReasonText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgSecondary,
+  },
+  rejectCancelBtn: {
+    alignSelf: 'flex-start',
+  },
+  rejectCancelText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+  },
+
+  // ── Assign task panel ──
+  assignPanel: {
+    gap: 14,
+  },
+  assignHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 4,
+  },
+  assignBackBtn: {
+    paddingVertical: 4,
+    paddingRight: 8,
+  },
+  assignBackText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.accent,
+  },
+  assignPanelTitle: {
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.h3,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgPrimary,
+  },
+  assignFieldLabel: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.eyebrow,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginTop: 4,
+  },
+  assignInput: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgPrimary,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.md,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
+  },
+  assignChipLabel: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+    marginTop: 2,
+  },
+  assignChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  assignChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: ParentColors.ivory200,
+    borderRadius: ParentRadii.pill,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+  },
+  assignChipText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.ink700,
+  },
+  assignChipEmpty: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+    fontStyle: 'italic',
+    lineHeight: 18,
+  },
+  assignPrimaryBtn: {
+    marginTop: 4,
+    paddingVertical: 14,
+    backgroundColor: '#C97735',
+    borderRadius: ParentRadii.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  assignPrimaryBtnDisabled: {
+    opacity: 0.4,
+  },
+  assignPrimaryBtnText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    fontWeight: ParentFontWeights.bold,
+    color: '#fff',
+  },
+  assignStep2Row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: ParentColors.ivory200,
+    borderRadius: ParentRadii.md,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+  },
+  assignStep2Label: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+    flexShrink: 0,
+  },
+  assignStep2Name: {
+    flex: 1,
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgPrimary,
+  },
+  assignEditLink: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.accent,
+    flexShrink: 0,
+  },
+  assignTargetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.md,
+    backgroundColor: '#fff',
+  },
+  assignTargetName: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgPrimary,
+  },
+  assignTargetChevron: {
+    fontFamily: ParentFonts.body,
+    fontSize: 10,
+    color: ParentColors.fgMuted,
+  },
+  assignChildPicker: {
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.md,
+    overflow: 'hidden',
+    marginTop: -8,
+  },
+  assignChildOption: {
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderBottomWidth: 1,
+    borderBottomColor: ParentColors.borderSoft,
+  },
+  assignChildOptionActive: {
+    backgroundColor: '#FAF1E7',
+  },
+  assignChildOptionText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgPrimary,
+  },
+  assignChildOptionTextActive: {
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.clay500,
+  },
+  assignCoinRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 20,
+    paddingVertical: 8,
+  },
+  assignCoinStepBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+  },
+  assignCoinStepText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 18,
+    color: ParentColors.fgPrimary,
+    lineHeight: 22,
+  },
+  assignCoinDisplay: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 5,
+  },
+  assignCoinNum: {
+    fontFamily: ParentFonts.mono,
+    fontSize: 36,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgPrimary,
+    lineHeight: 42,
+  },
+  assignCoinUnit: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.pMeta,
+    color: ParentColors.fgMuted,
+  },
+  assignRangeHint: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+    textAlign: 'center',
+    marginTop: -6,
+  },
+  assignDoneCard: {
+    padding: 20,
+    backgroundColor: '#E8F2E6',
+    borderWidth: 1,
+    borderColor: '#C9DDD0',
+    borderRadius: ParentRadii.lg,
+    alignItems: 'center',
+  },
+  assignDoneText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.success,
+    textAlign: 'center',
+    lineHeight: 22,
   },
 });
