@@ -10,6 +10,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Modal,
   StyleSheet,
   useWindowDimensions,
 } from 'react-native';
@@ -101,6 +102,22 @@ function ClockSmIcon({ size = 11, color = ParentColors.teal500 }: { size?: numbe
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={2} />
       <Path d="M12 7v5l3 3" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+function ChevronRightIcon({ size = 18, color = ParentColors.fgMuted }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M9 18l6-6-6-6" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+function XIcon({ size = 20, color = ParentColors.fgPrimary }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M18 6L6 18M6 6l12 12" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
   );
 }
@@ -320,10 +337,10 @@ function RewardListSection({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Redemption History
+// Redemption History — entry button + modal
 // ─────────────────────────────────────────────────────────────────────────────
 
-function HistoryRow({
+function HistoryModalRow({
   item,
   childNickname,
   isLast,
@@ -342,6 +359,9 @@ function HistoryRow({
       <View style={s.historyMid}>
         <Text style={s.listRowName} numberOfLines={1}>{item.name}</Text>
         <Text style={s.historyMeta}>{childNickname} · {dateStr}</Text>
+        {item.parent_note ? (
+          <Text style={s.historyNote}>{item.parent_note}</Text>
+        ) : null}
       </View>
       <View style={s.coinInline}>
         <CoinSmIcon />
@@ -354,51 +374,108 @@ function HistoryRow({
   );
 }
 
-function HistorySection({
+function HistoryModal({
+  visible,
   history,
-  loading,
   allChildren,
+  loading,
+  onClose,
 }: {
+  visible: boolean;
   history: RedemptionRequest[];
-  loading: boolean;
   allChildren: RedemptionChildInfo[];
+  loading: boolean;
+  onClose: () => void;
 }) {
-  const shown = history.slice(0, 10);
   const childMap: Record<string, string> = Object.fromEntries(
     allChildren.map((c) => [c.id, c.nickname]),
   );
 
   return (
-    <View style={s.card}>
-      <View style={s.cardHead}>
-        <View style={s.eyebrowRow}>
-          <HistoryIcon />
-          <Text style={s.eyebrow}>History</Text>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent={false}
+      onRequestClose={onClose}
+    >
+      <View style={s.modalContainer}>
+        <View style={s.modalHeader}>
+          <View style={s.modalHeaderLeft}>
+            <View style={s.eyebrowRow}>
+              <HistoryIcon size={13} />
+              <Text style={s.eyebrow}>History</Text>
+            </View>
+            <Text style={s.modalTitle}>兌換歷史</Text>
+          </View>
+          <TouchableOpacity
+            style={s.modalCloseBtn}
+            onPress={onClose}
+            hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+          >
+            <XIcon />
+          </TouchableOpacity>
         </View>
-        <Text style={s.cardTitle}>兌換歷史</Text>
-        <Text style={s.cardMeta}>含 AI 初審紀錄 · 最近 {shown.length} 筆</Text>
+
+        {loading ? (
+          <View style={s.loaderBox}>
+            <ActivityIndicator size="small" color={ParentColors.accent} />
+          </View>
+        ) : history.length === 0 ? (
+          <View style={s.emptyBox}>
+            <Text style={s.emptyBoxText}>尚無兌換紀錄</Text>
+          </View>
+        ) : (
+          <ScrollView
+            style={s.modalScroll}
+            contentContainerStyle={s.modalScrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={s.innerBorder}>
+              {history.map((item, i) => (
+                <HistoryModalRow
+                  key={item.id}
+                  item={item}
+                  childNickname={childMap[item.child_id] ?? '—'}
+                  isLast={i === history.length - 1}
+                />
+              ))}
+            </View>
+          </ScrollView>
+        )}
       </View>
-      {loading ? (
-        <View style={s.loaderBox}>
-          <ActivityIndicator size="small" color={ParentColors.accent} />
+    </Modal>
+  );
+}
+
+function HistoryEntry({
+  history,
+  loading,
+  onOpen,
+}: {
+  history: RedemptionRequest[];
+  loading: boolean;
+  onOpen: () => void;
+}) {
+  const monthCount = history.filter((h) =>
+    dayjs(h.created_at).isSame(dayjs(), 'month'),
+  ).length;
+
+  return (
+    <TouchableOpacity style={s.historyEntryBtn} onPress={onOpen} activeOpacity={0.75}>
+      <View style={s.historyEntryIcon}>
+        <HistoryIcon size={18} color={ParentColors.info} />
+      </View>
+      <View style={s.historyEntryMid}>
+        <View style={s.historyEntryRow}>
+          <Text style={s.historyEntryTitle}>兌換歷史</Text>
+          {!loading && (
+            <Text style={s.historyEntryCount}>本月 {monthCount} 筆</Text>
+          )}
         </View>
-      ) : shown.length === 0 ? (
-        <View style={s.emptyBox}>
-          <Text style={s.emptyBoxText}>尚無兌換紀錄</Text>
-        </View>
-      ) : (
-        <View style={s.innerBorder}>
-          {shown.map((item, i) => (
-            <HistoryRow
-              key={item.id}
-              item={item}
-              childNickname={childMap[item.child_id] ?? '—'}
-              isLast={i === shown.length - 1}
-            />
-          ))}
-        </View>
-      )}
-    </View>
+        <Text style={s.historyEntrySub}>含 AI 初審紀錄、家長確認與已退回項目</Text>
+      </View>
+      <ChevronRightIcon />
+    </TouchableOpacity>
   );
 }
 
@@ -412,6 +489,7 @@ export default function ParentManageTablet() {
 
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [selectedChildId, setSelectedChildId] = useState<string | null>(null);
+  const [historyVisible, setHistoryVisible] = useState(false);
 
   useEffect(() => {
     async function loadFamily() {
@@ -466,6 +544,13 @@ export default function ParentManageTablet() {
 
   return (
     <View style={[s.screen, { paddingBottom: insets.bottom }]}>
+      <HistoryModal
+        visible={historyVisible}
+        history={history}
+        allChildren={allChildren}
+        loading={redemptionLoading}
+        onClose={() => setHistoryVisible(false)}
+      />
       <ManageHeader
         selectedChild={selectedChild}
         allChildren={allChildren}
@@ -482,14 +567,14 @@ export default function ParentManageTablet() {
           <View style={s.colLeft}>
             <TaskLibrarySection tasks={tasks} loading={isTaskLoading} />
           </View>
-          {/* 右欄 — 獎勵清單 + 兌換歷史 */}
+          {/* 右欄 — 獎勵清單 + 兌換歷史入口 */}
           <View style={s.colRight}>
             <RewardListSection proposals={parentProposals} loading={redemptionLoading} />
             <View style={s.colGap} />
-            <HistorySection
+            <HistoryEntry
               history={history}
               loading={redemptionLoading}
-              allChildren={allChildren}
+              onOpen={() => setHistoryVisible(true)}
             />
           </View>
         </View>
@@ -818,7 +903,7 @@ const s = StyleSheet.create({
     color: ParentColors.fgMuted,
   },
 
-  // ── History row ──
+  // ── History modal row ──
   historyMid: {
     flex: 1,
     gap: 2,
@@ -828,6 +913,106 @@ const s = StyleSheet.create({
     fontSize: ParentFontSizes.xs,
     color: ParentColors.fgMuted,
   },
+  historyNote: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+    fontStyle: 'italic',
+    marginTop: 1,
+  },
+
+  // ── History entry button ──
+  historyEntryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ParentSpacing[4],
+    padding: ParentSpacing[5],
+    backgroundColor: ParentColors.bgSurface,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.xl,
+  },
+  historyEntryIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: '#EEF3FA',
+    borderWidth: 1,
+    borderColor: '#C5D6EF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  historyEntryMid: {
+    flex: 1,
+    gap: 3,
+  },
+  historyEntryRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+  },
+  historyEntryTitle: {
+    fontFamily: ParentFonts.body,
+    fontSize: 14.5,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgPrimary,
+  },
+  historyEntryCount: {
+    fontFamily: ParentFonts.mono,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+  },
+  historyEntrySub: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+    lineHeight: 16,
+  },
+
+  // ── History modal ──
+  modalContainer: {
+    flex: 1,
+    backgroundColor: ParentColors.bgCanvas,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: ParentSpacing[8],
+    paddingVertical: ParentSpacing[5],
+    borderBottomWidth: 1,
+    borderBottomColor: ParentColors.borderSoft,
+    backgroundColor: ParentColors.bgCanvas,
+  },
+  modalHeaderLeft: {
+    flex: 1,
+    gap: 4,
+  },
+  modalTitle: {
+    fontFamily: ParentFonts.display,
+    fontSize: 24,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgPrimary,
+  },
+  modalCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: ParentColors.bgSurfaceWarm,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  modalScroll: {
+    flex: 1,
+  },
+  modalScrollContent: {
+    padding: ParentSpacing[8],
+    paddingBottom: ParentSpacing[10],
+  },
+
   statusChip: {
     paddingHorizontal: 8,
     paddingVertical: 2,

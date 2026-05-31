@@ -1,6 +1,22 @@
-jest.mock('../supabase', () => ({ supabase: {} }));
+// eslint-disable-next-line prefer-const -- let allows reassignment in beforeEach
+let mockRpc = jest.fn();
+// eslint-disable-next-line prefer-const
+let mockFrom = jest.fn();
 
-import { calcCoin, checkMilestone, getPrevCheckpoint } from '../taskActions';
+jest.mock('../supabase', () => ({
+  supabase: {
+    // closures evaluated at call-time, not at mock-factory-time
+    rpc: (...args: unknown[]) => mockRpc(...args),
+    from: (...args: unknown[]) => mockFrom(...args),
+  },
+}));
+
+beforeEach(() => {
+  mockRpc = jest.fn();
+  mockFrom = jest.fn();
+});
+
+import { calcCoin, checkMilestone, getPrevCheckpoint, OVERRIDE_TYPE_MAP, parentMarkTask } from '../taskActions';
 import type { Task, CheckpointRewards } from '../../types/database';
 
 function makeTask(overrides: Partial<Task>): Task {
@@ -111,5 +127,90 @@ describe('getPrevCheckpoint', () => {
 
   it('returns 0 when checkpoints is null', () => {
     expect(getPrevCheckpoint(10, null)).toBe(0);
+  });
+});
+
+// ── OVERRIDE_TYPE_MAP ─────────────────────────────────────────────────────────
+
+describe('OVERRIDE_TYPE_MAP', () => {
+  it('maps exceeded → renegotiate', () => {
+    expect(OVERRIDE_TYPE_MAP.exceeded).toBe('renegotiate');
+  });
+  it('maps partial → partial', () => {
+    expect(OVERRIDE_TYPE_MAP.partial).toBe('partial');
+  });
+  it('maps none → none', () => {
+    expect(OVERRIDE_TYPE_MAP.none).toBe('none');
+  });
+  it('maps other → renegotiate', () => {
+    expect(OVERRIDE_TYPE_MAP.other).toBe('renegotiate');
+  });
+});
+
+// ── parentMarkTask helpers ────────────────────────────────────────────────────
+
+// helper: build a supabase from()-chain whose .single() resolves to `result`
+function makeReadChain(result: { data: unknown; error: unknown }) {
+  const chain: Record<string, unknown> = {
+    select: () => chain,
+    eq:     () => chain,
+    gte:    () => chain,
+    lt:     () => chain,
+    single: () => Promise.resolve(result),
+  };
+  return chain;
+}
+
+// helper: build a from()-chain whose insert().select().single() resolves to `result`
+function makeInsertChain(result: { data: unknown; error: unknown }) {
+  const chain: Record<string, unknown> = {
+    insert: () => insertChain,
+  };
+  const insertChain: Record<string, unknown> = {
+    select: () => insertChain,
+    single: () => Promise.resolve(result),
+  };
+  return chain;
+}
+
+// helper: build a from()-chain whose update().eq() resolves to `{ error: null }`
+function makeUpdateChain() {
+  return {
+    update: () => ({
+      eq: () => Promise.resolve({ error: null }),
+    }),
+  };
+}
+
+// helper: build a from()-chain whose insert() (no .select()) resolves to `{ error: null }`
+function makeInsertOnlyChain() {
+  return {
+    insert: () => Promise.resolve({ error: null }),
+  };
+}
+
+describe('parentMarkTask', () => {
+  it('throws when my_parent_id returns null', async () => {
+    mockRpc.mockResolvedValueOnce({ data: null, error: null });
+    await expect(
+      parentMarkTask('task-1', 'child-1', 'exceeded', 10, null),
+    ).rejects.toThrow('找不到家長帳號');
+  });
+
+  it('throws when my_parent_id rpc errors', async () => {
+    mockRpc.mockResolvedValueOnce({ data: null, error: { message: 'auth error' } });
+    await expect(
+      parentMarkTask('task-1', 'child-1', 'exceeded', 10, null),
+    ).rejects.toThrow('找不到家長帳號');
+  });
+
+  it('throws when today completion is not found', async () => {
+    mockRpc.mockResolvedValueOnce({ data: 'parent-uuid', error: null });
+    mockFrom.mockReturnValueOnce(
+      makeReadChain({ data: null, error: { message: 'no rows' } }),
+    );
+    await expect(
+      parentMarkTask('task-1', 'child-1', 'exceeded', 10, null),
+    ).rejects.toThrow('找不到今日完成紀錄');
   });
 });
