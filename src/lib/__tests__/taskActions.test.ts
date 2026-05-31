@@ -16,7 +16,7 @@ beforeEach(() => {
   mockFrom = jest.fn();
 });
 
-import { calcCoin, checkMilestone, getPrevCheckpoint, OVERRIDE_TYPE_MAP } from '../taskActions';
+import { calcCoin, checkMilestone, getPrevCheckpoint, OVERRIDE_TYPE_MAP, parentMarkTask } from '../taskActions';
 import type { Task, CheckpointRewards } from '../../types/database';
 
 function makeTask(overrides: Partial<Task>): Task {
@@ -144,5 +144,73 @@ describe('OVERRIDE_TYPE_MAP', () => {
   });
   it('maps other → renegotiate', () => {
     expect(OVERRIDE_TYPE_MAP.other).toBe('renegotiate');
+  });
+});
+
+// ── parentMarkTask helpers ────────────────────────────────────────────────────
+
+// helper: build a supabase from()-chain whose .single() resolves to `result`
+function makeReadChain(result: { data: unknown; error: unknown }) {
+  const chain: Record<string, unknown> = {
+    select: () => chain,
+    eq:     () => chain,
+    gte:    () => chain,
+    lt:     () => chain,
+    single: () => Promise.resolve(result),
+  };
+  return chain;
+}
+
+// helper: build a from()-chain whose insert().select().single() resolves to `result`
+function makeInsertChain(result: { data: unknown; error: unknown }) {
+  const chain: Record<string, unknown> = {
+    insert: () => insertChain,
+  };
+  const insertChain: Record<string, unknown> = {
+    select: () => insertChain,
+    single: () => Promise.resolve(result),
+  };
+  return chain;
+}
+
+// helper: build a from()-chain whose update().eq() resolves to `{ error: null }`
+function makeUpdateChain() {
+  return {
+    update: () => ({
+      eq: () => Promise.resolve({ error: null }),
+    }),
+  };
+}
+
+// helper: build a from()-chain whose insert() (no .select()) resolves to `{ error: null }`
+function makeInsertOnlyChain() {
+  return {
+    insert: () => Promise.resolve({ error: null }),
+  };
+}
+
+describe('parentMarkTask', () => {
+  it('throws when my_parent_id returns null', async () => {
+    mockRpc.mockResolvedValueOnce({ data: null, error: null });
+    await expect(
+      parentMarkTask('task-1', 'child-1', 'exceeded', 10, null),
+    ).rejects.toThrow('找不到家長帳號');
+  });
+
+  it('throws when my_parent_id rpc errors', async () => {
+    mockRpc.mockResolvedValueOnce({ data: null, error: { message: 'auth error' } });
+    await expect(
+      parentMarkTask('task-1', 'child-1', 'exceeded', 10, null),
+    ).rejects.toThrow('找不到家長帳號');
+  });
+
+  it('throws when today completion is not found', async () => {
+    mockRpc.mockResolvedValueOnce({ data: 'parent-uuid', error: null });
+    mockFrom.mockReturnValueOnce(
+      makeReadChain({ data: null, error: { message: 'no rows' } }),
+    );
+    await expect(
+      parentMarkTask('task-1', 'child-1', 'exceeded', 10, null),
+    ).rejects.toThrow('找不到今日完成紀錄');
   });
 });

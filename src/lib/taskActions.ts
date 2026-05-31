@@ -18,6 +18,108 @@ export const OVERRIDE_TYPE_MAP: Record<MarkOption, OverrideType> = {
 
 const TZ = 'Asia/Taipei';
 
+/**
+ * Records a parent override for a child's completed task.
+ * Writes to overrides, optionally adjusts wallet + transactions,
+ * and updates task_completions.coin_earned / override_id / status.
+ *
+ * @throws when parent session is invalid, completion is not found, or any DB write fails
+ */
+export async function parentMarkTask(
+  taskId: string,
+  childId: string,
+  markOption: MarkOption,
+  adjustedCoin: number,
+  note: string | null,
+): Promise<void> {
+  // 1. Resolve parent ID
+  const { data: parentId, error: rpcError } = await supabase.rpc('my_parent_id');
+  if (rpcError != null || parentId == null) throw new Error('找不到家長帳號');
+
+  // 2. Find today's completion for this task + child
+  const today    = dayjs().tz(TZ).format('YYYY-MM-DD');
+  const tomorrow = dayjs().tz(TZ).add(1, 'day').format('YYYY-MM-DD');
+
+  const { data: completion, error: completionError } = await supabase
+    .from('task_completions')
+    .select('id, coin_earned')
+    .eq('task_id', taskId)
+    .eq('child_id', childId)
+    .gte('completed_at', today)
+    .lt('completed_at', tomorrow)
+    .single();
+
+  if (completionError != null || completion == null) throw new Error('找不到今日完成紀錄');
+
+  const completionId  = completion.id as string;
+  const originalCoin  = completion.coin_earned as number;
+
+  // 3. Insert override record
+  const { data: override, error: overrideError } = await supabase
+    .from('overrides')
+    .insert({
+      completion_id: completionId,
+      parent_id:     parentId,
+      override_type: OVERRIDE_TYPE_MAP[markOption],
+      coin_deducted: Math.max(originalCoin - adjustedCoin, 0),
+      credit_flag:   false,
+      reason:        note ?? null,
+    })
+    .select('id')
+    .single();
+
+  if (overrideError != null || override == null) {
+    throw new Error(overrideError?.message ?? '標記失敗');
+  }
+
+  const overrideId = override.id as string;
+
+  // 4. Wallet adjustment (skip when coin value unchanged)
+  const coinDiff = originalCoin - adjustedCoin;   // positive = deduct, negative = add
+  if (coinDiff !== 0) {
+    const { data: wallet, error: walletError } = await supabase
+      .from('wallets')
+      .select('id, balance')
+      .eq('child_id', childId)
+      .eq('wallet_type', 'spending')
+      .single();
+
+    if (walletError != null || wallet == null) throw new Error('找不到錢包');
+
+    const walletId  = wallet.id as string;
+    const newBalance = (wallet.balance as number) - coinDiff;
+
+    const { error: walletUpdateError } = await supabase
+      .from('wallets')
+      .update({ balance: newBalance })
+      .eq('id', walletId);
+
+    if (walletUpdateError != null) throw new Error(walletUpdateError.message);
+
+    const { error: txError } = await supabase.from('transactions').insert({
+      wallet_id:      walletId,
+      amount:         Math.abs(coinDiff),
+      type:           coinDiff > 0 ? 'deduct' : 'adjust',
+      reference_id:   overrideId,
+      reference_type: 'override',
+    });
+
+    if (txError != null) throw new Error(txError.message);
+  }
+
+  // 5. Update task_completion: coin_earned + override_id; flag status if 'none'
+  const completionUpdate = markOption === 'none'
+    ? { coin_earned: adjustedCoin, override_id: overrideId, status: 'flagged' as const }
+    : { coin_earned: adjustedCoin, override_id: overrideId };
+
+  const { error: updateError } = await supabase
+    .from('task_completions')
+    .update(completionUpdate)
+    .eq('id', completionId);
+
+  if (updateError != null) throw new Error(updateError.message);
+}
+
 type CreateChildTaskInput = {
   familyId: string;
   childId: string;
