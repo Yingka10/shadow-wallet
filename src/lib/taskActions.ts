@@ -2,10 +2,19 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { supabase } from './supabase';
-import type { Task, CheckpointRewards } from '../types/database';
+import type { Task, CheckpointRewards, OverrideType } from '../types/database';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
+
+export type MarkOption = 'exceeded' | 'partial' | 'none' | 'other';
+
+export const OVERRIDE_TYPE_MAP: Record<MarkOption, OverrideType> = {
+  exceeded: 'renegotiate',
+  partial:  'partial',
+  none:     'none',
+  other:    'renegotiate',
+};
 
 const TZ = 'Asia/Taipei';
 

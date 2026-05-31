@@ -1,6 +1,14 @@
-jest.mock('../supabase', () => ({ supabase: {} }));
+const mockRpc = jest.fn();
+const mockFrom = jest.fn();
 
-import { calcCoin, checkMilestone, getPrevCheckpoint } from '../taskActions';
+jest.mock('../supabase', () => ({
+  supabase: {
+    rpc: (...args: unknown[]) => mockRpc(...args),
+    from: (...args: unknown[]) => mockFrom(...args),
+  },
+}));
+
+import { calcCoin, checkMilestone, getPrevCheckpoint, OVERRIDE_TYPE_MAP } from '../taskActions';
 import type { Task, CheckpointRewards } from '../../types/database';
 
 function makeTask(overrides: Partial<Task>): Task {
@@ -111,5 +119,22 @@ describe('getPrevCheckpoint', () => {
 
   it('returns 0 when checkpoints is null', () => {
     expect(getPrevCheckpoint(10, null)).toBe(0);
+  });
+});
+
+// ── OVERRIDE_TYPE_MAP ─────────────────────────────────────────────────────────
+
+describe('OVERRIDE_TYPE_MAP', () => {
+  it('maps exceeded → renegotiate', () => {
+    expect(OVERRIDE_TYPE_MAP.exceeded).toBe('renegotiate');
+  });
+  it('maps partial → partial', () => {
+    expect(OVERRIDE_TYPE_MAP.partial).toBe('partial');
+  });
+  it('maps none → none', () => {
+    expect(OVERRIDE_TYPE_MAP.none).toBe('none');
+  });
+  it('maps other → renegotiate', () => {
+    expect(OVERRIDE_TYPE_MAP.other).toBe('renegotiate');
   });
 });
