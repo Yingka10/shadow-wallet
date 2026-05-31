@@ -2,7 +2,7 @@
 // Layout: left sidebar (child switcher + briefing) │ main area (overview strip + goal + tasks) │ right column (static placeholder)
 // Data: useParentDashboard + useSelectedChild — no new hooks, no new Supabase queries.
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -1045,6 +1045,8 @@ function NewTaskPanel({
   const [selectedDays, setSelectedDays] = useState<number[]>([1, 2, 3, 4, 5]);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  const isMounted = useRef(true);
+  useEffect(() => () => { isMounted.current = false; }, []);
 
   function handleNext() {
     const trimmed = taskName.trim();
@@ -1056,6 +1058,7 @@ function NewTaskPanel({
         body: { type: 'classifyTask', payload: { taskName: trimmed } },
       })
       .then(({ data }) => {
+        if (!isMounted.current) return;
         const ai = data as { base_time_min?: number; difficulty?: number } | null;
         if (ai?.base_time_min != null && ai?.difficulty != null) {
           const suggested = Math.max(
@@ -1068,7 +1071,7 @@ function NewTaskPanel({
         }
         setAiLoading(false);
       })
-      .catch(() => setAiLoading(false));
+      .catch(() => { if (isMounted.current) setAiLoading(false); });
   }
 
   function toggleDay(d: number) {
@@ -1140,7 +1143,8 @@ function NewTaskPanel({
         is_active: true,
       });
       if (ctErr) {
-        await supabase.from('tasks').delete().eq('id', task.id);
+        const { error: delErr } = await supabase.from('tasks').delete().eq('id', task.id);
+        if (delErr) console.error('[NewTaskPanel] rollback failed:', delErr);
         throw ctErr;
       }
       setSubmitting(false);
@@ -1323,9 +1327,9 @@ function NewTaskPanel({
           </View>
 
           <TouchableOpacity
-            style={[styles.newTaskPrimaryBtn, submitting && styles.newTaskPrimaryBtnDisabled]}
+            style={[styles.newTaskPrimaryBtn, (submitting || !familyId) && styles.newTaskPrimaryBtnDisabled]}
             onPress={() => void handleSubmit()}
-            disabled={submitting}
+            disabled={submitting || !familyId}
             activeOpacity={0.8}
           >
             {submitting ? (
