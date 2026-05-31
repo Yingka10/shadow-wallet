@@ -550,14 +550,14 @@ function MarkPanel({
   };
 
   const [selectedOption, setSelectedOption] = useState<MarkOption | null>(null);
-  const [coinValue, setCoinValue]           = useState<number>(originalCoin);
+  const [coinStr, setCoinStr]               = useState<string>('');
   const [note, setNote]                     = useState('');
   const [submitting, setSubmitting]         = useState(false);
   const [errorMsg, setErrorMsg]             = useState<string | null>(null);
 
   const handleOptionSelect = (opt: MarkOption) => {
     setSelectedOption(opt);
-    setCoinValue(defaultCoin(opt));
+    setCoinStr(String(defaultCoin(opt)));
     setErrorMsg(null);
   };
 
@@ -575,7 +575,7 @@ function MarkPanel({
         task.id,
         childId,
         selectedOption,
-        coinValue,
+        Math.max(0, parseInt(coinStr || '0', 10)),
         note.trim() !== '' ? note.trim() : null,
       );
       onSuccess();
@@ -618,10 +618,9 @@ function MarkPanel({
           <Text style={styles.markCoinLabel}>調整幣值：</Text>
           <TextInput
             style={styles.markCoinInput}
-            value={String(coinValue)}
+            value={coinStr}
             onChangeText={(v) => {
-              const n = parseInt(v, 10);
-              setCoinValue(!isNaN(n) && n >= 0 ? n : 0);
+              if (/^\d*$/.test(v)) setCoinStr(v);
             }}
             keyboardType="number-pad"
             selectTextOnFocus
@@ -666,7 +665,7 @@ function MarkPanel({
             styles.markConfirmBtn,
             isConfirmDisabled && styles.markConfirmBtnDisabled,
           ]}
-          onPress={handleConfirm}
+          onPress={() => { void handleConfirm(); }}
           disabled={isConfirmDisabled}
           activeOpacity={0.7}
         >
