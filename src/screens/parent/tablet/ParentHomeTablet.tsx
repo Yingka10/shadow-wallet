@@ -1143,9 +1143,9 @@ function NewTaskPanel({
         await supabase.from('tasks').delete().eq('id', task.id);
         throw ctErr;
       }
-      onSuccess();
       setSubmitting(false);
       setDone(true);
+      onSuccess();
     } catch (err) {
       console.error('[NewTaskPanel] submit error:', err);
       setSubmitting(false);
