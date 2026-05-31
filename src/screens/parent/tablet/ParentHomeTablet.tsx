@@ -1312,13 +1312,13 @@ function NewTaskPanel({
             </View>
             <View style={styles.newTaskSummaryRow}>
               <Text style={styles.newTaskSummaryLabel}>回饋</Text>
-              <Text style={styles.newTaskSummaryValue}>
+              <Text style={styles.newTaskSummaryValue} numberOfLines={1}>
                 {rewardMode === 'coin' ? `${coins} 幣 / 次` : '計入時間存摺'}
               </Text>
             </View>
             <View style={styles.newTaskSummaryRow}>
               <Text style={styles.newTaskSummaryLabel}>週期</Text>
-              <Text style={styles.newTaskSummaryValue}>{formatPeriod()}</Text>
+              <Text style={styles.newTaskSummaryValue} numberOfLines={1}>{formatPeriod()}</Text>
             </View>
           </View>
 
