@@ -1144,6 +1144,7 @@ function NewTaskPanel({
         throw ctErr;
       }
       onSuccess();
+      setSubmitting(false);
       setDone(true);
     } catch (err) {
       console.error('[NewTaskPanel] submit error:', err);
