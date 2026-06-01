@@ -1051,6 +1051,17 @@ function NewTaskPanel({
   const isMounted = useRef(true);
   useEffect(() => () => { isMounted.current = false; }, []);
 
+  // ── Habit task state ──────────────────────────────────────────────────────
+  const [habitName, setHabitName] = useState('');
+  const [totalDaysPreset, setTotalDaysPreset] = useState<21 | 30 | 60 | 'custom'>(30);
+  const [customDaysStr, setCustomDaysStr] = useState('');
+
+  const effectiveTotalDays: number | null = (() => {
+    if (totalDaysPreset !== 'custom') return totalDaysPreset;
+    const n = parseInt(customDaysStr, 10);
+    return Number.isFinite(n) && n >= 7 && n <= 180 ? n : null;
+  })();
+
   function handleNext() {
     const trimmed = taskName.trim();
     if (!trimmed) return;
@@ -1107,6 +1118,14 @@ function NewTaskPanel({
     if (sorted.length === 7) return '每天';
     const MAP: Record<number, string> = { 0: '日', 1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六' };
     return '每週' + sorted.map(d => MAP[d]).join('、');
+  }
+
+  function calcCheckpointDays(total: number): [number, number, number] {
+    return [
+      Math.round(total / 3),
+      Math.round((total * 2) / 3),
+      total,
+    ];
   }
 
   async function handleSubmit() {
@@ -1407,6 +1426,94 @@ function NewTaskPanel({
             ) : (
               <Text style={styles.newTaskPrimaryBtnText}>建立任務</Text>
             )}
+          </TouchableOpacity>
+        </>
+      )}
+
+      {/* Habit Step 1 — task name */}
+      {step === 1 && longTermType === 'habit' && (
+        <>
+          <Text style={styles.newTaskFieldLabel}>習慣目標名稱</Text>
+          <TextInput
+            style={styles.newTaskInput}
+            value={habitName}
+            onChangeText={setHabitName}
+            placeholder="例如：每天練鋼琴、每週運動三次"
+            placeholderTextColor={ParentColors.fgMuted}
+            returnKeyType="next"
+          />
+          <TouchableOpacity
+            style={[styles.newTaskPrimaryBtn, !habitName.trim() && styles.newTaskPrimaryBtnDisabled]}
+            onPress={() => { if (habitName.trim()) setStep(2); }}
+            disabled={!habitName.trim()}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.newTaskPrimaryBtnText}>下一步</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {/* Habit Step 2 — total days picker */}
+      {step === 2 && longTermType === 'habit' && (
+        <>
+          <Text style={styles.newTaskFieldLabel}>目標天數</Text>
+          <View style={styles.habitDayGrid}>
+            {([21, 30, 60] as const).map(n => (
+              <TouchableOpacity
+                key={n}
+                style={[
+                  styles.habitDayCard,
+                  totalDaysPreset === n && styles.habitDayCardActive,
+                ]}
+                onPress={() => setTotalDaysPreset(n)}
+                activeOpacity={0.8}
+              >
+                <Text style={[
+                  styles.habitDayCardNum,
+                  totalDaysPreset === n && styles.habitDayCardNumActive,
+                ]}>
+                  {n} 天
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={[
+                styles.habitDayCard,
+                totalDaysPreset === 'custom' && styles.habitDayCardActive,
+              ]}
+              onPress={() => setTotalDaysPreset('custom')}
+              activeOpacity={0.8}
+            >
+              <Text style={[
+                styles.habitDayCardNum,
+                totalDaysPreset === 'custom' && styles.habitDayCardNumActive,
+              ]}>
+                自訂
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {totalDaysPreset === 'custom' && (
+            <TextInput
+              style={styles.newTaskInput}
+              value={customDaysStr}
+              onChangeText={setCustomDaysStr}
+              placeholder="7–180 天"
+              placeholderTextColor={ParentColors.fgMuted}
+              keyboardType="number-pad"
+            />
+          )}
+
+          <TouchableOpacity
+            style={[
+              styles.newTaskPrimaryBtn,
+              effectiveTotalDays == null && styles.newTaskPrimaryBtnDisabled,
+            ]}
+            onPress={() => { if (effectiveTotalDays != null) setStep(3); }}
+            disabled={effectiveTotalDays == null}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.newTaskPrimaryBtnText}>下一步</Text>
           </TouchableOpacity>
         </>
       )}
@@ -3549,5 +3656,31 @@ const styles = StyleSheet.create({
   },
   habitTypeSubDisabled: {
     color: ParentColors.fgMuted,
+  },
+  habitDayGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  habitDayCard: {
+    width: '47%',
+    backgroundColor: '#fff',
+    borderRadius: ParentRadii.md,
+    borderWidth: 1.5,
+    borderColor: ParentColors.borderSoft,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  habitDayCardActive: {
+    borderColor: ParentColors.teal500,
+    backgroundColor: ParentColors.teal50,
+  },
+  habitDayCardNum: {
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgPrimary,
+  },
+  habitDayCardNumActive: {
+    color: ParentColors.teal500,
   },
 });
