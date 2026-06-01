@@ -9,7 +9,7 @@ export type BaumrindType =
 export type MotivationLevel = 'amotivation' | 'external' | 'introjected' | 'internal';
 export type PersonalityType = 'competitive' | 'relational' | 'curious';
 export type TaskCategory = 'A' | 'B' | 'C' | 'D';
-export type DayType = 'weekday' | 'weekend' | 'both';
+export type DayType = 'weekday' | 'weekend' | 'both' | 'custom' | 'once';
 export type LongTermType = 'habit' | 'skill' | 'responsibility' | 'challenge';
 export type AccountType = 'SINGLE' | 'DOUBLE';
 export type ParentRole = 'primary' | 'co';
@@ -94,6 +94,8 @@ export type Task = {
   max_age: number;
   is_active: boolean;
   time_saving_min: number;
+  recurrence_days: number[] | null;
+  due_date: string | null;
   created_at: string;
 };
 
@@ -175,6 +177,7 @@ export type LongTermGoal = {
   min_age: number;
   interrupt_count: number;
   last_active_date: string | null;
+  active_days: number[] | null;     // 0=日,1=一,...,6=六; null=every day
   // 技能學習專用
   level_definitions: Record<string, any>[] | null;
   current_level: number | null;
@@ -433,6 +436,8 @@ export interface Database {
           max_age?: number;
           is_active?: boolean;
           time_saving_min?: number;
+          recurrence_days?: number[] | null;
+          due_date?: string | null;
           created_at?: string;
         };
         Update: Partial<Task>;
@@ -558,6 +563,7 @@ export interface Database {
           min_age?: number;
           interrupt_count?: number;
           last_active_date?: string | null;
+          active_days?: number[] | null;
           level_definitions?: Record<string, any>[] | null;
           current_level?: number | null;
           level_count?: number | null;

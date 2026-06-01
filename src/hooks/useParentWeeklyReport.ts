@@ -50,6 +50,19 @@ export type GrowthMoment = {
   createdAt: string;
 };
 
+export type LongTermGoalProgress = {
+  id: string;
+  goalType: string;
+  taskName: string;
+  current: number;
+  target: number;
+  unit: string;
+  nextMilestone: string | null;
+  milestoneReward: number | null;
+  noProgressThisWeek: boolean;
+  status: string;
+};
+
 export type ParentWeeklyReportData = {
   childName: string;
   weekLabel: string;
@@ -62,6 +75,7 @@ export type ParentWeeklyReportData = {
   suggestions: WeeklySuggestion[];
   moments: GrowthMoment[];
   affirmations: string[];
+  longTermGoals: LongTermGoalProgress[];
   aiReady: boolean;
   loading: boolean;
   error: string | null;
@@ -90,13 +104,87 @@ const PENDING_AFFIRMATIONS: string[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Helper
+// Helpers
 // ---------------------------------------------------------------------------
 
 function getWeekBounds(offset: number) {
   const start = dayjs().tz(TZ).add(offset, 'week').startOf('isoWeek');
   const end = start.endOf('isoWeek');
   return { start, end };
+}
+
+type RawLTG = {
+  id: string;
+  goal_type: string;
+  total_days: number | null;
+  current_day: number;
+  level_count: number | null;
+  current_level: number | null;
+  target_value: number | null;
+  current_value: number | null;
+  value_unit: string | null;
+  checkpoint_rewards: Record<string, number> | null;
+  last_active_date: string | null;
+  status: string;
+  tasks: { name: string } | null;
+};
+
+function mapGoalProgress(g: RawLTG, weekStart: dayjs.Dayjs): LongTermGoalProgress {
+  let current = 0;
+  let target = 0;
+  let unit = '';
+
+  switch (g.goal_type) {
+    case 'habit':
+      current = g.current_day;
+      target = g.total_days ?? 0;
+      unit = '天';
+      break;
+    case 'skill':
+      current = g.current_level ?? 0;
+      target = g.level_count ?? 0;
+      unit = '關';
+      break;
+    case 'challenge':
+      current = g.current_value ?? 0;
+      target = g.target_value ?? 0;
+      unit = g.value_unit ?? '';
+      break;
+    // 'responsibility' and anything else: current=0, target=0, unit=''
+  }
+
+  let nextMilestone: string | null = null;
+  let milestoneReward: number | null = null;
+
+  if (g.checkpoint_rewards && unit) {
+    const rewards = g.checkpoint_rewards;
+    const nextThreshold = Object.keys(rewards)
+      .map(Number)
+      .filter(n => !isNaN(n) && n > current)
+      .sort((a, b) => a - b)[0];
+
+    if (nextThreshold !== undefined) {
+      nextMilestone = `第 ${nextThreshold} ${unit}`;
+      milestoneReward = rewards[String(nextThreshold)] ?? null;
+    }
+  }
+
+  const noProgressThisWeek =
+    g.last_active_date == null ||
+    dayjs(g.last_active_date).tz(TZ).isBefore(weekStart, 'day');
+
+  return {
+    id: g.id,
+    goalType: g.goal_type,
+    taskName: g.tasks?.name ?? '(未知任務)',
+    current,
+    target,
+    unit,
+    nextMilestone,
+    milestoneReward,
+    noProgressThisWeek,
+    status: g.status,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -122,6 +210,7 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
   const [aiInsight, setAiInsight] = useState(PENDING_INSIGHT);
   const [suggestions, setSuggestions] = useState<WeeklySuggestion[]>(PENDING_SUGGESTIONS);
   const [affirmations, setAffirmations] = useState<string[]>(PENDING_AFFIRMATIONS);
+  const [longTermGoals, setLongTermGoals] = useState<LongTermGoalProgress[]>([]);
   const [aiReady, setAiReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -169,7 +258,7 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
 
       const walletId = walletRes.data?.id ?? null;
 
-      const [tasksRes, txRes, momentRes, reportRes] = await Promise.all([
+      const [tasksRes, txRes, momentRes, reportRes, ltgRes] = await Promise.all([
         taskIds.length > 0
           ? supabase.from('tasks').select('id, category').in('id', taskIds).eq('is_active', true)
           : Promise.resolve({ data: [] as { id: string; category: string }[], error: null }),
@@ -198,6 +287,11 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
               .eq('week_start', weekStartDate)
               .maybeSingle()
           : Promise.resolve({ data: null, error: null }),
+        supabase
+          .from('long_term_goals')
+          .select('id, goal_type, total_days, current_day, level_count, current_level, target_value, current_value, value_unit, checkpoint_rewards, last_active_date, status, tasks(name)')
+          .eq('child_id', childId)
+          .eq('status', 'active'),
       ]);
 
       if (tasksRes.error) throw tasksRes.error;
@@ -269,6 +363,12 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
         setAffirmations(PENDING_AFFIRMATIONS);
         setAiReady(false);
       }
+
+      // Long-term goal progress
+      // Cast via unknown: Relationships:[] in database.ts means the TS type doesn't
+      // know about the tasks FK, but the runtime join works if the DB FK exists.
+      const rawLTGs = (ltgRes.data ?? []) as unknown as RawLTG[];
+      setLongTermGoals(rawLTGs.map(g => mapGoalProgress(g, start)));
     } catch (err) {
       console.error('[useParentWeeklyReport] fetch error:', err);
       setError('資料載入失敗，請稍後再試');
@@ -313,6 +413,7 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     suggestions,
     moments,
     affirmations,
+    longTermGoals,
     aiReady,
     loading,
     error,

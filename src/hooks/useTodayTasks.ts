@@ -110,6 +110,7 @@ export function useTodayTasks(childId: string): UseTodayTasksResult {
             goal.task_id,
             goal.current_day,
             goal.checkpoint_rewards,
+            goal.active_days,
           );
         }
       }
@@ -123,22 +124,36 @@ export function useTodayTasks(childId: string): UseTodayTasksResult {
       setIsPrerequisiteMet(prereqMet);
 
       // 7. Split into three buckets
-      const shortTermTasks = tasks.filter(t => !t.is_long_term);
       const longTerm = tasks
         .filter(t => t.is_long_term)
         .map(t => ({ ...t, isCompleted: completedIds.has(t.id), goal: goalsByTaskId.get(t.id) }));
 
-      // Weekday tasks: day_type='weekday' or 'both'
-      // On weekdays show all; on weekends show only 'both'
-      const wdFilter = weekend
-        ? shortTermTasks.filter(t => t.day_type === 'both')
-        : shortTermTasks.filter(t => t.day_type === 'weekday' || t.day_type === 'both');
+      const todayWd = dayjs().tz(TZ).day(); // 0=Sun, 1=Mon, ..., 6=Sat
 
-      // Weekend tasks: day_type='weekend' or 'both'
-      // On weekends show all; on weekdays show only 'both'
-      const weFilter = weekend
-        ? shortTermTasks.filter(t => t.day_type === 'weekend' || t.day_type === 'both')
-        : shortTermTasks.filter(t => t.day_type === 'both');
+      const matchesToday = (t: Task): boolean => {
+        switch (t.day_type) {
+          case 'both':    return true;
+          case 'weekday': return !weekend;
+          case 'weekend': return weekend;
+          case 'custom':  return (t.recurrence_days ?? []).includes(todayWd);
+          case 'once':    return true;
+          default:        return false;
+        }
+      };
+
+      // Hide tasks whose due_date has already passed
+      const notExpired = (t: Task): boolean =>
+        !t.due_date || t.due_date >= today;
+
+      const shortTermTasks = tasks
+        .filter(t => !t.is_long_term)
+        .filter(notExpired)
+        .filter(matchesToday);
+
+      // 'custom' and 'once' tasks appear in whichever section is relevant today.
+      // Exclude 'weekend'-only tasks on weekdays and vice versa.
+      const wdFilter = shortTermTasks.filter(t => t.day_type !== 'weekend');
+      const weFilter = shortTermTasks.filter(t => t.day_type !== 'weekday');
 
       const sortTasks = (list: Task[]): TodayTask[] => {
         const incomplete = list

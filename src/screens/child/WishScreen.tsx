@@ -84,6 +84,40 @@ export default function WishScreen() {
     void loadChild();
   }, [childId]);
 
+  const loadWishes = useCallback(async (familyId: string) => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('reward_items')
+        .select('id, name, coin_cost, added_by, parent_approved, created_at, child_id, is_active')
+        .eq('family_id', familyId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const rows = (data ?? []) as Array<WishItem & { is_active?: boolean }>;
+      setWishes(
+        rows
+          .filter(row => row.parent_approved || row.added_by === 'child')
+          .map(row => ({
+            id: row.id,
+            name: row.name,
+            coin_cost: row.coin_cost,
+            added_by: row.added_by,
+            parent_approved: row.parent_approved,
+            created_at: row.created_at,
+            child_id: row.child_id,
+          })),
+      );
+    } catch (err) {
+      console.error('[WishScreen] loadWishes error:', err);
+      Alert.alert('願望池載入失敗', err instanceof Error ? err.message : '請稍後再試');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!child?.familyId) return;
 
@@ -151,40 +185,6 @@ export default function WishScreen() {
       console.error('[WishScreen] loadChild error:', err);
     }
   }
-
-  const loadWishes = useCallback(async (familyId: string) => {
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('reward_items')
-        .select('id, name, coin_cost, added_by, parent_approved, created_at, child_id, is_active')
-        .eq('family_id', familyId)
-        .eq('is_active', true)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      const rows = (data ?? []) as Array<WishItem & { is_active?: boolean }>;
-      setWishes(
-        rows
-          .filter(row => row.parent_approved || row.added_by === 'child')
-          .map(row => ({
-            id: row.id,
-            name: row.name,
-            coin_cost: row.coin_cost,
-            added_by: row.added_by,
-            parent_approved: row.parent_approved,
-            created_at: row.created_at,
-            child_id: row.child_id,
-          })),
-      );
-    } catch (err) {
-      console.error('[WishScreen] loadWishes error:', err);
-      Alert.alert('願望池載入失敗', err instanceof Error ? err.message : '請稍後再試');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);

@@ -7,6 +7,9 @@
  *   {taskId, childId}              — rich mode (fetches history from DB)
  *
  * Falls back to a template string if Gemini fails.
+ *
+ * Writes to intervention_log in rich mode only (lightweight mode has no child
+ * identity, so cannot produce a meaningful audit record).
  */
 
 // @ts-ignore
@@ -50,23 +53,26 @@ Deno.serve(async (req: Request) => {
       childId?: string;
     };
 
+    // Create client once — used for both rich-mode DB reads and intervention_log write
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    );
+
     let taskName = body.taskName ?? '';
     let age = body.age ?? 7;
     let consecutiveDays = body.days ?? 3;
     let completionRate = '不明';
+    // Captured for intervention_log; only set in rich mode
+    let familyId: string | null = null;
 
     // Rich mode: fetch from DB if taskId + childId provided
     if (body.taskId && body.childId) {
-      const supabase = createClient(
-        Deno.env.get('SUPABASE_URL')!,
-        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-      );
-
       const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
 
       const [taskRes, childRes, completionsRes] = await Promise.all([
         supabase.from('tasks').select('name').eq('id', body.taskId).single(),
-        supabase.from('children').select('birth_date').eq('id', body.childId).single(),
+        supabase.from('children').select('birth_date, family_id').eq('id', body.childId).single(),
         supabase
           .from('task_completions')
           .select('completed_at, status')
@@ -81,6 +87,7 @@ Deno.serve(async (req: Request) => {
       if (childRes.data) {
         const birthMs = new Date(childRes.data.birth_date).getTime();
         age = Math.floor((Date.now() - birthMs) / (1000 * 60 * 60 * 24 * 365));
+        familyId = childRes.data.family_id;
       }
 
       const completions = completionsRes.data ?? [];
@@ -106,27 +113,57 @@ Deno.serve(async (req: Request) => {
 
     const fallback = `「${taskName}」連續 ${consecutiveDays} 天未完成，可以試著和孩子討論是否調整難度或時間。`;
 
-    try {
-      const prompt = `任務名稱：${taskName}
+    // Determine suggestion — Gemini or fallback
+    let suggestion: string;
+    let usedFallback: boolean;
+
+    const prompt = `任務名稱：${taskName}
 孩子年齡：${age}歲
 連續未完成天數：${consecutiveDays}天
 近14天完成率：${completionRate}
 請給家長一個簡短的建議（50字以內），說明可以怎麼調整這個任務，語氣要溫和不批判。
 只回傳建議文字，不要其他格式。`;
 
+    try {
       const text = await callGemini(prompt);
-      const suggestion = text.trim() || fallback;
-
-      return new Response(
-        JSON.stringify({ suggestion }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-      );
+      suggestion = text.trim() || fallback;
+      usedFallback = !text.trim();
     } catch {
-      return new Response(
-        JSON.stringify({ suggestion: fallback }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-      );
+      suggestion = fallback;
+      usedFallback = true;
     }
+
+    // Write to intervention_log (rich mode only; failures never affect the response)
+    // parent_id is intentionally null: getting the caller's parent_id would require
+    // a JWT→user_id→parents lookup — add if audit attribution becomes necessary.
+    if (body.taskId && body.childId && familyId) {
+      try {
+        await supabase.from('intervention_log').insert({
+          event_type: 'ai_suggestion_generated',
+          family_id: familyId,
+          child_id: body.childId,
+          task_id: body.taskId,
+          task_name_snapshot: taskName,
+          trigger_source: 'generate-degradation-suggestion',
+          ai_suggested: {
+            suggestion,
+            used_fallback: usedFallback,
+          },
+          context_snapshot: {
+            consecutive_misses: consecutiveDays,
+            completion_rate_14d: completionRate,
+            age,
+          },
+        });
+      } catch (logErr) {
+        console.warn('[generate-degradation-suggestion] intervention_log write failed:', logErr);
+      }
+    }
+
+    return new Response(
+      JSON.stringify({ suggestion }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+    );
   } catch (err) {
     console.error('[generate-degradation-suggestion] error:', err);
     return new Response(

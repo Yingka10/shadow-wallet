@@ -22,11 +22,15 @@
 
 ## 技術棧
 
-```
-React Native + Expo（行動 App）
-Supabase（PostgreSQL 資料庫 + Auth + Realtime）
-TypeScript（嚴格模式）
-```
+| 分類 | 套件 | 版本 |
+|------|------|------|
+| 框架 | React Native + Expo | RN 0.81.5 / Expo ~54 |
+| 後端 | @supabase/supabase-js | ^2.105 |
+| 語言 | TypeScript（strict: true） | ~5.9 |
+| 路由 | React Navigation（Stack + BottomTabs） | ^7.x |
+| 日期 | dayjs | ^1.11 |
+| 圖示 | react-native-svg | 15.12 |
+| 測試 | jest-expo + @testing-library/react-native | - |
 
 **測試方式：** Expo Go App 掃 QR code，不需要 Apple Developer 帳號
 
@@ -73,7 +77,17 @@ TypeScript（嚴格模式）
 長期任務：long_term_goals, time_savings
 回饋系統：weekly_reports, monthly_reports, credit_logs
 手足關係：sibling_relations
+事件記錄：intervention_log
 ```
+
+### intervention_log 說明
+
+append-only 業務事件記錄，服務 audit log 頁、週報/月報統計、家長諮詢 AI。
+關鍵設計：
+- `context_snapshot jsonb`：觸發當下的指標快照，讓 AI 問答重建因果不需回算歷史
+- `ai_suggested` / `parent_decision` jsonb：保留 AI 建議 vs 家長實際決定的對比
+- `override_id`：家長標記事件同時寫 `overrides`（金流真相）與此表（可追溯事件），兩表在同一 transaction 內寫入
+- ON DELETE RESTRICT（family_id、child_id）：保護 audit log 不被連帶刪除；未來實作 GDPR 個資刪除前需先匿名化本表 log
 
 ---
 
@@ -156,30 +170,36 @@ interest = Math.round(balance * 0.05)
 ```
 src/
   screens/
-    onboarding/        # 流程一
-    child/             # 流程二孩子端
-    parent/            # 流程二家長端
-    report/            # 流程三
-  components/          # 共用元件
+    auth/              # 登入入口（EntryScreen、ParentLoginScreen、ChildLoginScreen）
+    onboarding/        # 流程一（Onboarding、GoalSetup、TaskSelection、Overview）
+    child/             # 流程二孩子端（Home、Wallet、Wish、Profile、LongTermDetail）
+    parent/            # 流程二家長端 + 流程三週報
+                       #   ParentTabNavigator（底部 Tab）
+                       #   Dashboard、TaskList、TaskDetail、TaskCreate
+                       #   LongTermCreate、Redemption、WeeklyReport
+                       #   ObservationHistory、Settings
+  components/          # 共用元件（TaskItem、GoalHeroCard、FeedbackAnimation 等）
+  context/
+    SelectedChildContext.tsx   # 家長端跨 Tab 共用的選中孩子狀態
   lib/
     supabase.ts
     taskActions.ts
-    parentActions.ts
-    weeklyReport.ts
-    reportTemplates.ts
-    abandonDetection.ts
     onboarding.ts
     taskRecommend.ts
+    aiAgent.ts         # AI 輔助（任務建議等）
   hooks/
     useTodayTasks.ts
     useWallet.ts
-    useChild.ts
+    useParentDashboard.ts
+    useParentTaskList.ts
+    useParentRedemption.ts
+    useParentWeeklyReport.ts
   types/
     database.ts
     index.ts
   constants/
     colors.ts
-    ageGroups.ts
+    parentTheme.ts
 ```
 
 ---
@@ -207,13 +227,13 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=你的 anon key
 
 ## 目前進度
 
-- [ ] 流程一：問卷與 Profile 生成
-- [ ] 流程一：兌換目標設定
-- [ ] 流程一：初始任務推薦
-- [ ] 流程二：孩子端每日循環（6-9 歲）
-- [ ] 流程二：家長端 Override + 臨時任務
-- [ ] 流程三：週報生成（模板字串）
-- [ ] 流程三：棄坑偵測
+- [x] 流程一：問卷與 Profile 生成
+- [x] 流程一：兌換目標設定
+- [x] 流程一：初始任務推薦
+- [x] 流程二：孩子端每日循環（6-9 歲）
+- [x] 流程二：家長端 Override + 臨時任務
+- [x] 流程三：週報生成（模板字串）
+- [ ] 流程三：棄坑偵測（lib/abandonDetection.ts 尚未建立）
 - [ ] 整合測試
 
 > 每完成一個模組，把對應的 [ ] 改成 [x]

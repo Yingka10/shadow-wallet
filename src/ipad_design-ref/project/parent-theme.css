@@ -1,0 +1,145 @@
+/* Parent-side theme overrides for Shadow Wallet
+   --------------------------------------------------------
+   Adds a sober, elegant palette on top of the child-side tokens.
+   Child side: warm cream + coral + gold (playful)
+   Parent side: stone/ivory + deep teal + ink (sober, refined)
+*/
+
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,300;8..60,400;8..60,500;8..60,600;8..60,700&family=DM+Sans:wght@400;500;600;700&family=Noto+Serif+TC:wght@400;500;600;700&family=Noto+Sans+TC:wght@300;400;500;600;700&display=swap');
+
+:root {
+  /* --- Parent palette ---------------------------------------- */
+  --p-ivory-50:  #FAF8F3;    /* page canvas */
+  --p-ivory-100: #F4F1EA;    /* warm secondary */
+  --p-ivory-200: #EAE4D7;    /* soft borders */
+  --p-ivory-300: #D9D0BD;    /* hairlines */
+
+  --p-stone-50:  #F7F6F2;
+  --p-stone-100: #EDEBE4;
+  --p-stone-200: #DDD9CC;
+
+  /* Deep teal — primary accent */
+  --p-teal-50:  #EAF0EE;
+  --p-teal-100: #D2DFDB;
+  --p-teal-200: #A6C0B9;
+  --p-teal-300: #6C9489;
+  --p-teal-400: #3D6B61;
+  --p-teal-500: #234E47;   /* primary */
+  --p-teal-600: #1A3D38;   /* press */
+  --p-teal-700: #122B27;
+
+  /* Ink — warm charcoal */
+  --p-ink-900: #1C1B17;
+  --p-ink-800: #2C2A24;
+  --p-ink-700: #45413A;
+  --p-ink-500: #6F6A5E;
+  --p-ink-400: #8F897B;
+  --p-ink-300: #B0AB9D;
+
+  /* Accents */
+  --p-clay-300: #D3A88A;   /* warm muted clay for "child A" identifier */
+  --p-clay-500: #B07857;
+  --p-sage-300: #A8B89E;   /* "child B" identifier */
+  --p-sage-500: #6E8462;
+  --p-plum-300: #B898A8;   /* "child C" — third kid if needed */
+  --p-plum-500: #7E5A6F;
+
+  /* Status — kept warm */
+  --p-success: #4F7A4A;
+  --p-warn:    #C28A3A;     /* amber, not red */
+  --p-error:   #B5552F;     /* coral-700 carried in */
+  --p-info:    #3D6B61;
+
+  /* Override semantic surfaces for parent screens */
+  --bg-canvas: var(--p-ivory-50);
+  --bg-surface: #FFFFFF;
+  --bg-surface-warm: var(--p-ivory-100);
+
+  --fg-primary: var(--p-ink-900);
+  --fg-secondary: var(--p-ink-700);
+  --fg-muted: var(--p-ink-500);
+
+  --accent: var(--p-teal-500);
+  --accent-press: var(--p-teal-600);
+
+  --border-soft: rgba(28, 27, 23, 0.07);
+  --border-medium: rgba(28, 27, 23, 0.14);
+
+  /* Type — editorial serif + clean sans */
+  --p-font-display: "Source Serif 4", "Noto Serif TC", Georgia, serif;
+  --p-font-body: "DM Sans", "Noto Sans TC", system-ui, sans-serif;
+  --p-font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Shadows — softer, cooler */
+  --p-shadow-card: 0 1px 2px rgba(28, 27, 23, 0.04), 0 4px 16px -8px rgba(28, 27, 23, 0.10);
+  --p-shadow-elev: 0 2px 4px rgba(28, 27, 23, 0.05), 0 12px 28px -10px rgba(28, 27, 23, 0.15);
+  --p-shadow-pop: 0 8px 24px -8px rgba(35, 78, 71, 0.32);
+}
+
+/* ---------- Type defaults for parent app ----------- */
+.parent-app, .parent-app * { box-sizing: border-box; }
+.parent-app {
+  font-family: var(--p-font-body);
+  color: var(--p-ink-900);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+}
+
+.parent-app h1, .parent-app .p-h1,
+.parent-app h2, .parent-app .p-h2,
+.parent-app h3, .parent-app .p-h3,
+.parent-app .p-display, .parent-app .p-eyebrow {
+  font-family: var(--p-font-display);
+  color: var(--p-ink-900);
+  margin: 0;
+  letter-spacing: -0.01em;
+  font-weight: 500;
+}
+.parent-app .p-display { font-size: 30px; line-height: 1.15; letter-spacing: -0.02em; font-weight: 500; }
+.parent-app h1, .parent-app .p-h1 { font-size: 26px; line-height: 1.2; font-weight: 500; }
+.parent-app h2, .parent-app .p-h2 { font-size: 22px; line-height: 1.25; font-weight: 500; }
+.parent-app h3, .parent-app .p-h3 { font-size: 18px; line-height: 1.3; font-weight: 600; }
+
+.parent-app .p-eyebrow {
+  font-family: var(--p-font-body);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--p-ink-500);
+}
+
+.parent-app .p-body { font-size: 15px; line-height: 1.55; color: var(--p-ink-800); }
+.parent-app .p-meta { font-size: 13px; color: var(--p-ink-500); line-height: 1.45; }
+.parent-app .p-num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+/* ---------- Paper texture ----------- */
+.parent-paper {
+  background-color: var(--p-ivory-50);
+  background-image:
+    radial-gradient(rgba(28, 27, 23, 0.025) 1px, transparent 1px),
+    radial-gradient(rgba(28, 27, 23, 0.015) 1px, transparent 1px);
+  background-size: 6px 6px, 14px 14px;
+  background-position: 0 0, 3px 3px;
+}
+
+/* ---------- Reset for the in-app buttons ---------- */
+.parent-app button {
+  font-family: inherit; cursor: pointer;
+  border: none; background: none; color: inherit;
+  padding: 0; -webkit-tap-highlight-color: transparent;
+}
+.parent-app button:active { transform: translateY(0.5px); }
+
+/* Page transition */
+@keyframes p-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.parent-app .p-screen { animation: p-fade-in 280ms var(--ease-out, cubic-bezier(0.16,1,0.3,1)); }
+
+@keyframes p-slide-up {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+/* Subtle scrollbar */
+.parent-app *::-webkit-scrollbar { width: 0; height: 0; }

@@ -2,12 +2,125 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { supabase } from './supabase';
-import type { Task, CheckpointRewards } from '../types/database';
+import type { Task, CheckpointRewards, OverrideType } from '../types/database';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
+export type MarkOption = 'exceeded' | 'partial' | 'none' | 'other';
+
+export const OVERRIDE_TYPE_MAP: Record<MarkOption, OverrideType> = {
+  exceeded: 'renegotiate',
+  partial:  'partial',
+  none:     'none',
+  other:    'renegotiate',
+};
+
 const TZ = 'Asia/Taipei';
+
+/**
+ * Records a parent override for a child's completed task.
+ * Writes to overrides, optionally adjusts wallet + transactions,
+ * and updates task_completions.coin_earned / override_id / status.
+ *
+ * @throws when parent session is invalid, completion is not found, or any DB write fails
+ */
+export async function parentMarkTask(
+  taskId: string,
+  childId: string,
+  markOption: MarkOption,
+  adjustedCoin: number,
+  note: string | null,
+): Promise<void> {
+  const safeAdjustedCoin = Math.round(adjustedCoin);
+
+  // 1. Resolve parent ID
+  const { data: parentId, error: rpcError } = await supabase.rpc('my_parent_id');
+  if (rpcError != null || parentId == null) throw new Error('找不到家長帳號');
+
+  // 2. Find today's completion for this task + child
+  const today    = dayjs().tz(TZ).format('YYYY-MM-DD');
+  const tomorrow = dayjs().tz(TZ).add(1, 'day').format('YYYY-MM-DD');
+
+  const { data: completion, error: completionError } = await supabase
+    .from('task_completions')
+    .select('id, coin_earned')
+    .eq('task_id', taskId)
+    .eq('child_id', childId)
+    .gte('completed_at', today)
+    .lt('completed_at', tomorrow)
+    .single();
+
+  if (completionError != null || completion == null) throw new Error('找不到今日完成紀錄');
+
+  const completionId  = completion.id;
+  const originalCoin  = completion.coin_earned;
+
+  // 3. Insert override record
+  const { data: override, error: overrideError } = await supabase
+    .from('overrides')
+    .insert({
+      completion_id: completionId,
+      parent_id:     parentId,
+      override_type: OVERRIDE_TYPE_MAP[markOption],
+      coin_deducted: Math.max(originalCoin - safeAdjustedCoin, 0),
+      credit_flag:   false,
+      reason:        note ?? null,
+    })
+    .select('id')
+    .single();
+
+  if (overrideError != null || override == null) {
+    throw new Error(overrideError?.message ?? '標記失敗');
+  }
+
+  const overrideId = override.id;
+
+  // 4. Wallet adjustment (skip when coin value unchanged)
+  const coinDiff = originalCoin - safeAdjustedCoin;   // positive = deduct, negative = add
+  if (coinDiff !== 0) {
+    const { data: wallet, error: walletError } = await supabase
+      .from('wallets')
+      .select('id, balance')
+      .eq('child_id', childId)
+      .eq('wallet_type', 'spending')
+      .single();
+
+    if (walletError != null || wallet == null) throw new Error('找不到錢包');
+
+    const walletId  = wallet.id;
+    const newBalance = wallet.balance - coinDiff;
+
+    const { error: walletUpdateError } = await supabase
+      .from('wallets')
+      .update({ balance: newBalance })
+      .eq('id', walletId);
+
+    if (walletUpdateError != null) throw new Error(walletUpdateError.message);
+
+    const { error: txError } = await supabase.from('transactions').insert({
+      wallet_id:      walletId,
+      amount:         Math.abs(coinDiff),
+      type:           coinDiff > 0 ? 'deduct' : 'adjust',
+      reference_id:   overrideId,
+      reference_type: 'override',
+    });
+
+    if (txError != null) throw new Error(txError.message);
+  }
+
+  // 5. Update task_completion: coin_earned + override_id; flag status if 'none'
+  const completionUpdate = markOption === 'none'
+    ? { coin_earned: safeAdjustedCoin, override_id: overrideId, status: 'flagged' as const }
+    : { coin_earned: safeAdjustedCoin, override_id: overrideId };
+
+  const { error: updateError } = await supabase
+    .from('task_completions')
+    .update(completionUpdate)
+    .eq('id', completionId);
+
+  if (updateError != null) throw new Error(updateError.message);
+}
 
 type CreateChildTaskInput = {
   familyId: string;
@@ -171,7 +284,16 @@ export async function completeTask(
     if (tsError) throw new Error(tsError.message);
   }
 
-  // 4. Task-D habit: increment current_day, check milestone
+  // 4. 'once' task: deactivate from child's list after completion
+  if (task.day_type === 'once') {
+    await supabase
+      .from('child_tasks')
+      .update({ is_active: false })
+      .eq('task_id', taskId)
+      .eq('child_id', childId);
+  }
+
+  // 5. Task-D habit: increment current_day, check milestone
   if (task.category === 'D' && task.long_term_type === 'habit' && goalId) {
     const { data: goal, error: goalFetchError } = await supabase
       .from('long_term_goals')
@@ -223,10 +345,19 @@ export async function completeTask(
   return { completionId, coinEarned, timeSavedMin, milestone };
 }
 
+/** Returns true when the given day-of-week is a valid check-in day for this habit. */
+export function isActiveDayForHabit(dow: number, activeDays: number[] | null): boolean {
+  if (activeDays === null) return true;
+  return activeDays.includes(dow);
+}
+
 /**
- * Checks whether a habit-type long-term goal missed yesterday's check-in
+ * Checks whether a habit-type goal missed its most recent valid check-in day
  * and decrements current_day by 1 (floor = previous checkpoint day).
- * Called on HomeScreen mount to enforce the "soft reset" anti-frustration rule.
+ * Called on HomeScreen mount — "soft reset" anti-frustration rule.
+ *
+ * If yesterday was not in activeDays (a rest day), returns immediately with no
+ * DB access. activeDays=null means every day is valid (preserves original behaviour).
  */
 export async function applyHabitResume(
   goalId: string,
@@ -234,15 +365,20 @@ export async function applyHabitResume(
   taskId: string,
   currentDay: number,
   checkpointRewards: CheckpointRewards | null,
+  activeDays: number[] | null,
 ): Promise<void> {
-  const yesterday = dayjs().tz(TZ).subtract(1, 'day').format('YYYY-MM-DD');
+  const yesterday = dayjs().tz(TZ).subtract(1, 'day');
+  const yesterdayStr = yesterday.format('YYYY-MM-DD');
+  const yesterdayDow = yesterday.day(); // 0=Sun, 1=Mon, ..., 6=Sat
+
+  if (!isActiveDayForHabit(yesterdayDow, activeDays)) return;
 
   const { data: completions } = await supabase
     .from('task_completions')
     .select('id')
     .eq('task_id', taskId)
     .eq('child_id', childId)
-    .gte('completed_at', yesterday)
+    .gte('completed_at', yesterdayStr)
     .lt('completed_at', dayjs().tz(TZ).format('YYYY-MM-DD'))
     .limit(1);
 
@@ -264,6 +400,7 @@ type CreateLongTermGoalInput = {
   name: string;
   totalDays: number;
   checkpointRewards: CheckpointRewards;
+  activeDays?: number[];    // undefined → null in DB (every day active)
   motivationNote?: string;
 };
 
@@ -319,6 +456,7 @@ export async function createLongTermGoal(input: CreateLongTermGoalInput): Promis
     current_day: 0,
     total_days: input.totalDays,
     checkpoint_rewards: input.checkpointRewards,
+    active_days: input.activeDays ?? null,
     motivation_note: input.motivationNote ?? null,
     started_at: today,
     interrupt_count: 0,
@@ -390,7 +528,6 @@ export async function createChildTask(input: CreateChildTaskInput): Promise<void
       child_id: input.childId,
       task_id: task.id,
       is_active: true,
-      time_saving_min: input.category === 'B' ? input.baseTimeMin : 0,
     });
 
     if (childTaskError) {

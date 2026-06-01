@@ -53,16 +53,18 @@ Deno.serve(async (req) => {
 
     const now = new Date();
     const nowMs = now.getTime();
+    const correlationId = crypto.randomUUID();
     const currentWeekStart = getIsoWeekStart(now);
 
     // Fetch all children with their families
     const { data: children, error: childrenErr } = await supabase
       .from('children')
-      .select('id, family_id');
+      .select('id, family_id, created_at');
     if (childrenErr) throw childrenErr;
 
     let processed = 0;
     let flagged = 0;
+    let logged = 0;
 
     for (const child of children ?? []) {
       try {
@@ -76,6 +78,50 @@ Deno.serve(async (req) => {
           .single();
 
         const tier = calcAbandonmentTier(lastCompletion?.completed_at ?? null, nowMs);
+
+        // Write to intervention_log only when tier changes (including recovery to 0).
+        // Failures are isolated: never throw, never affect weekly_report logic below.
+        const tierForLog = tier ?? 0;
+        const childCreatedMs = new Date(child.created_at).getTime();
+        const isNewChild = (nowMs - childCreatedMs) < 3 * 24 * 60 * 60 * 1000;
+        if (!isNewChild) {
+          try {
+            const { data: lastEvent } = await supabase
+              .from('intervention_log')
+              .select('context_snapshot')
+              .eq('child_id', child.id)
+              .in('event_type', ['abandonment_flagged', 'abandonment_recovered'])
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            const lastTierRaw = (lastEvent?.context_snapshot as Record<string, unknown> | null)?.abandonment_tier;
+            const lastTier = lastTierRaw == null ? null : Number(lastTierRaw);
+
+            if (tierForLog !== lastTier) {
+              const eventType = tierForLog === 0 ? 'abandonment_recovered' : 'abandonment_flagged';
+              const { error: logErr } = await supabase
+                .from('intervention_log')
+                .insert({
+                  event_type: eventType,
+                  family_id: child.family_id,
+                  child_id: child.id,
+                  context_snapshot: {
+                    abandonment_tier: tierForLog,
+                    last_completion_at: lastCompletion?.completed_at ?? null,
+                    days_since: lastCompletion?.completed_at
+                      ? Math.floor((nowMs - new Date(lastCompletion.completed_at).getTime()) / (1000 * 60 * 60 * 24))
+                      : null,
+                  },
+                  correlation_id: correlationId,
+                  trigger_source: 'detect-abandonment-cron',
+                });
+              if (!logErr) logged++;
+            }
+          } catch (logWriteErr) {
+            console.warn(`[detect-abandonment] intervention_log write failed for child ${child.id}:`, logWriteErr);
+          }
+        }
 
         // Fetch current week's report to merge (not overwrite)
         const { data: existingReport } = await supabase
@@ -118,10 +164,10 @@ Deno.serve(async (req) => {
       }
     }
 
-    console.log(`[detect-abandonment] done: ${processed} children, ${flagged} flagged`);
+    console.log(`[detect-abandonment] done: ${processed} children, ${flagged} flagged, ${logged} logged`);
 
     return new Response(
-      JSON.stringify({ ok: true, processed, flagged, weekStart: currentWeekStart }),
+      JSON.stringify({ ok: true, processed, flagged, logged, weekStart: currentWeekStart }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   } catch (err) {
