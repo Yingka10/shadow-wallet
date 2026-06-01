@@ -1062,6 +1062,11 @@ function NewTaskPanel({
     return Number.isFinite(n) && n >= 7 && n <= 180 ? n : null;
   })();
 
+  const MAX_CHECKPOINT_COIN = 25;
+  const [checkpointCoins, setCheckpointCoins] = useState<[number, number, number]>([8, 15, 25]);
+  const [activeDaysHabit, setActiveDaysHabit] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
+  const [habitSubmitting, setHabitSubmitting] = useState(false);
+
   function handleNext() {
     const trimmed = taskName.trim();
     if (!trimmed) return;
@@ -1128,6 +1133,43 @@ function NewTaskPanel({
     ];
   }
 
+  function clampCoin(v: number): number {
+    return Math.max(1, Math.min(MAX_CHECKPOINT_COIN, v));
+  }
+
+  function coinsAreValid(): boolean {
+    const [a, b, c] = checkpointCoins;
+    return b >= a && c >= b;
+  }
+
+  function checkpointLabel(index: 0 | 1 | 2): string {
+    if (!effectiveTotalDays) return '';
+    const days = calcCheckpointDays(effectiveTotalDays);
+    const isEveryDay = activeDaysHabit.length === 7;
+    return isEveryDay ? `Day ${days[index]} 達成` : `第 ${days[index]} 次達成`;
+  }
+
+  function toggleActiveDayHabit(dow: number) {
+    setActiveDaysHabit(prev => {
+      if (prev.includes(dow)) {
+        if (prev.length === 1) return prev; // keep at least 1
+        return prev.filter(d => d !== dow);
+      }
+      return [...prev, dow];
+    });
+  }
+
+  function formatActiveDays(days: number[]): string {
+    const MAP: Record<number, string> = {
+      0: '日', 1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六',
+    };
+    const sorted = [...days].sort((a, b) => a - b);
+    if (sorted.length === 7) return '每天';
+    if (JSON.stringify(sorted) === JSON.stringify([1,2,3,4,5])) return '週一至週五';
+    if (JSON.stringify(sorted) === JSON.stringify([0,6])) return '週六、日';
+    return '每週' + sorted.map(d => MAP[d]).join('、');
+  }
+
   async function handleSubmit() {
     const trimmed = taskName.trim();
     if (submitting || !trimmed || !familyId) return;
@@ -1175,6 +1217,34 @@ function NewTaskPanel({
     } catch (err) {
       console.error('[NewTaskPanel] submit error:', err);
       setSubmitting(false);
+    }
+  }
+
+  async function handleHabitSubmit() {
+    if (habitSubmitting || !familyId || !effectiveTotalDays || !coinsAreValid()) return;
+    setHabitSubmitting(true);
+    try {
+      const days = calcCheckpointDays(effectiveTotalDays);
+      const [a, b, c] = checkpointCoins;
+      await createLongTermGoal({
+        familyId,
+        childId: currentChildId,
+        name: habitName.trim(),
+        totalDays: effectiveTotalDays,
+        checkpointRewards: {
+          [String(days[0])]: clampCoin(a),
+          [String(days[1])]: clampCoin(b),
+          [String(days[2])]: clampCoin(c),
+        },
+        activeDays: activeDaysHabit.length === 7 ? undefined : activeDaysHabit,
+      });
+      setTaskName(habitName.trim()); // done screen shows the habit name
+      setHabitSubmitting(false);
+      setDone(true);
+      onSuccess();
+    } catch (err) {
+      console.error('[NewTaskPanel] habit submit error:', err);
+      setHabitSubmitting(false);
     }
   }
 
@@ -1514,6 +1584,138 @@ function NewTaskPanel({
             activeOpacity={0.8}
           >
             <Text style={styles.newTaskPrimaryBtnText}>下一步</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {/* Habit Step 3 — checkpoint coin steppers */}
+      {step === 3 && longTermType === 'habit' && effectiveTotalDays != null && (
+        <>
+          <Text style={styles.newTaskFieldLabel}>各節點獎勵</Text>
+          {([0, 1, 2] as const).map(idx => (
+            <View key={idx} style={styles.habitCoinRow}>
+              <View style={styles.habitCoinLabel}>
+                <Text style={styles.habitCoinLabelText}>{checkpointLabel(idx)}</Text>
+              </View>
+              <View style={styles.habitCoinStepper}>
+                <TouchableOpacity
+                  style={styles.habitCoinStepBtn}
+                  onPress={() =>
+                    setCheckpointCoins(prev => {
+                      const next = [...prev] as [number, number, number];
+                      next[idx] = clampCoin(next[idx] - 1);
+                      return next;
+                    })
+                  }
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.habitCoinStepText}>－</Text>
+                </TouchableOpacity>
+                <Text style={styles.habitCoinValue}>{checkpointCoins[idx]} 幣</Text>
+                <TouchableOpacity
+                  style={styles.habitCoinStepBtn}
+                  onPress={() =>
+                    setCheckpointCoins(prev => {
+                      const next = [...prev] as [number, number, number];
+                      next[idx] = clampCoin(next[idx] + 1);
+                      return next;
+                    })
+                  }
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.habitCoinStepText}>＋</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+
+          {!coinsAreValid() && (
+            <Text style={styles.habitCoinError}>節點幣值必須遞增</Text>
+          )}
+
+          <TouchableOpacity
+            style={[
+              styles.newTaskPrimaryBtn,
+              !coinsAreValid() && styles.newTaskPrimaryBtnDisabled,
+            ]}
+            onPress={() => { if (coinsAreValid()) setStep(4); }}
+            disabled={!coinsAreValid()}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.newTaskPrimaryBtnText}>下一步</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {/* Habit Step 4 — active days + summary + confirm */}
+      {step === 4 && longTermType === 'habit' && effectiveTotalDays != null && (
+        <>
+          <Text style={styles.newTaskFieldLabel}>有效打卡日</Text>
+          <View style={styles.newTaskDayRow}>
+            {([
+              { value: 1, label: '一' }, { value: 2, label: '二' },
+              { value: 3, label: '三' }, { value: 4, label: '四' },
+              { value: 5, label: '五' }, { value: 6, label: '六' },
+              { value: 0, label: '日' },
+            ]).map(({ value, label }) => {
+              const active = activeDaysHabit.includes(value);
+              return (
+                <TouchableOpacity
+                  key={value}
+                  style={[styles.newTaskDayBtn, active && styles.newTaskDayBtnActive]}
+                  onPress={() => toggleActiveDayHabit(value)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[styles.newTaskDayBtnText, active && styles.newTaskDayBtnTextActive]}>
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={styles.newTaskSummaryCard}>
+            <View style={styles.newTaskSummaryRow}>
+              <Text style={styles.newTaskSummaryLabel}>習慣</Text>
+              <Text style={styles.newTaskSummaryValue} numberOfLines={1}>{habitName}</Text>
+            </View>
+            <View style={styles.newTaskSummaryRow}>
+              <Text style={styles.newTaskSummaryLabel}>目標</Text>
+              <Text style={styles.newTaskSummaryValue}>{effectiveTotalDays} 天</Text>
+            </View>
+            <View style={styles.newTaskSummaryRow}>
+              <Text style={styles.newTaskSummaryLabel}>節點</Text>
+              <Text style={styles.newTaskSummaryValue}>
+                {(() => {
+                  const days = calcCheckpointDays(effectiveTotalDays);
+                  const [a, b, c] = checkpointCoins;
+                  const isEveryDay = activeDaysHabit.length === 7;
+                  const u = isEveryDay ? 'Day' : '第';
+                  const s = isEveryDay ? '' : '次';
+                  return `${u}${days[0]}${s} ${a}幣 · ${u}${days[1]}${s} ${b}幣 · ${u}${days[2]}${s} ${c}幣`;
+                })()}
+              </Text>
+            </View>
+            <View style={styles.newTaskSummaryRow}>
+              <Text style={styles.newTaskSummaryLabel}>週期</Text>
+              <Text style={styles.newTaskSummaryValue}>{formatActiveDays(activeDaysHabit)}</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[
+              styles.newTaskPrimaryBtn,
+              (habitSubmitting || activeDaysHabit.length === 0) && styles.newTaskPrimaryBtnDisabled,
+            ]}
+            onPress={() => void handleHabitSubmit()}
+            disabled={habitSubmitting || activeDaysHabit.length === 0}
+            activeOpacity={0.8}
+          >
+            {habitSubmitting ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.newTaskPrimaryBtnText}>建立任務</Text>
+            )}
           </TouchableOpacity>
         </>
       )}
@@ -3682,5 +3884,55 @@ const styles = StyleSheet.create({
   },
   habitDayCardNumActive: {
     color: ParentColors.teal500,
+  },
+  habitCoinRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    borderRadius: ParentRadii.md,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  habitCoinLabel: {
+    flex: 1,
+  },
+  habitCoinLabelText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgSecondary,
+  },
+  habitCoinStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  habitCoinStepBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: ParentRadii.sm,
+    backgroundColor: ParentColors.stone100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  habitCoinStepText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.base,
+    color: ParentColors.fgPrimary,
+    lineHeight: 20,
+  },
+  habitCoinValue: {
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgPrimary,
+    minWidth: 48,
+    textAlign: 'center',
+  },
+  habitCoinError: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.error,
   },
 });
