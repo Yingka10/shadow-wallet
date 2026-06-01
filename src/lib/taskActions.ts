@@ -345,10 +345,19 @@ export async function completeTask(
   return { completionId, coinEarned, timeSavedMin, milestone };
 }
 
+/** Returns true when the given day-of-week is a valid check-in day for this habit. */
+export function isActiveDayForHabit(dow: number, activeDays: number[] | null): boolean {
+  if (activeDays === null) return true;
+  return activeDays.includes(dow);
+}
+
 /**
- * Checks whether a habit-type long-term goal missed yesterday's check-in
+ * Checks whether a habit-type goal missed its most recent valid check-in day
  * and decrements current_day by 1 (floor = previous checkpoint day).
- * Called on HomeScreen mount to enforce the "soft reset" anti-frustration rule.
+ * Called on HomeScreen mount — "soft reset" anti-frustration rule.
+ *
+ * If yesterday was not in activeDays (a rest day), returns immediately with no
+ * DB access. activeDays=null means every day is valid (preserves original behaviour).
  */
 export async function applyHabitResume(
   goalId: string,
@@ -356,15 +365,20 @@ export async function applyHabitResume(
   taskId: string,
   currentDay: number,
   checkpointRewards: CheckpointRewards | null,
+  activeDays: number[] | null,
 ): Promise<void> {
-  const yesterday = dayjs().tz(TZ).subtract(1, 'day').format('YYYY-MM-DD');
+  const yesterday = dayjs().tz(TZ).subtract(1, 'day');
+  const yesterdayStr = yesterday.format('YYYY-MM-DD');
+  const yesterdayDow = yesterday.day(); // 0=Sun, 1=Mon, ..., 6=Sat
+
+  if (!isActiveDayForHabit(yesterdayDow, activeDays)) return;
 
   const { data: completions } = await supabase
     .from('task_completions')
     .select('id')
     .eq('task_id', taskId)
     .eq('child_id', childId)
-    .gte('completed_at', yesterday)
+    .gte('completed_at', yesterdayStr)
     .lt('completed_at', dayjs().tz(TZ).format('YYYY-MM-DD'))
     .limit(1);
 
