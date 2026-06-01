@@ -400,7 +400,7 @@ type CreateLongTermGoalInput = {
   name: string;
   totalDays: number;
   checkpointRewards: CheckpointRewards;
-  activeDays?: number[];
+  activeDays?: number[];    // undefined → null in DB (every day active)
   motivationNote?: string;
 };
 
