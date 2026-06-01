@@ -31,6 +31,7 @@ import {
 } from '../../../hooks/useParentRedemption';
 import {
   parentMarkTask,
+  createLongTermGoal,
   type MarkOption,
 } from '../../../lib/taskActions';
 import {
@@ -42,7 +43,7 @@ import {
   ParentFontSizes,
   ParentFontWeights,
 } from '../../../constants/parentTheme';
-import type { TaskCategory } from '../../../types/database';
+import type { TaskCategory, LongTermType } from '../../../types/database';
 import dayjs from 'dayjs';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1035,7 +1036,9 @@ function NewTaskPanel({
   onSuccess: () => void;
   onDone: () => void;
 }) {
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<0 | 1 | 2 | 3 | 4>(0);
+  const [taskKind, setTaskKind] = useState<'general' | 'longTerm' | null>(null);
+  const [longTermType, setLongTermType] = useState<LongTermType | null>(null);
   const [taskName, setTaskName] = useState('');
   const [rewardMode, setRewardMode] = useState<'coin' | 'time'>('coin');
   const [coins, setCoins] = useState(5);
@@ -1192,16 +1195,83 @@ function NewTaskPanel({
       {/* Header */}
       <View style={styles.newTaskHeader}>
         <TouchableOpacity
-          onPress={() => (step === 1 ? onDone() : setStep(s => (s - 1) as 1 | 2 | 3))}
+          onPress={() => {
+            if (step === 0) {
+              if (taskKind === 'longTerm') setTaskKind(null); // 0b → 0a
+              else onDone();                                   // 0a → exit
+            } else if (step === 1) {
+              setStep(0);
+              if (taskKind === 'general') setTaskKind(null);  // back to 0a
+              // habit: stays step=0 + taskKind='longTerm' → shows 0b
+            } else {
+              setStep(s => (s - 1) as 1 | 2 | 3 | 4);
+            }
+          }}
           style={styles.newTaskBackBtn}
           activeOpacity={0.7}
         >
-          <Text style={styles.newTaskBackText}>{step === 1 ? '← 返回' : '← 上一步'}</Text>
+          <Text style={styles.newTaskBackText}>
+            {step === 0 && taskKind !== 'longTerm' ? '← 返回' : '← 上一步'}
+          </Text>
         </TouchableOpacity>
-        <Text style={styles.newTaskPanelTitle}>建立新任務</Text>
+        <Text style={styles.newTaskPanelTitle}>
+            {longTermType === 'habit' ? '建立長期任務' : '建立新任務'}
+          </Text>
       </View>
 
-      {step === 1 && (
+      {/* Step 0a — task kind picker */}
+      {step === 0 && taskKind === null && (
+        <>
+          <Text style={styles.newTaskFieldLabel}>要建立哪種任務？</Text>
+          <View style={styles.habitTypeGrid}>
+            <TouchableOpacity
+              style={styles.habitTypeCard}
+              onPress={() => { setTaskKind('general'); setStep(1); }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.habitTypeIcon}>⚡</Text>
+              <Text style={styles.habitTypeTitle}>一般任務</Text>
+              <Text style={styles.habitTypeSub}>{'單次完成\n即時回饋'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.habitTypeCard}
+              onPress={() => setTaskKind('longTerm')}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.habitTypeIcon}>🏁</Text>
+              <Text style={styles.habitTypeTitle}>長期任務</Text>
+              <Text style={styles.habitTypeSub}>{'習慣養成\n階段獎勵'}</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
+
+      {/* Step 0b — long-term type picker */}
+      {step === 0 && taskKind === 'longTerm' && (
+        <>
+          <Text style={styles.newTaskFieldLabel}>是哪種長期任務？</Text>
+          <View style={styles.habitTypeGrid}>
+            <TouchableOpacity
+              style={styles.habitTypeCard}
+              onPress={() => { setLongTermType('habit'); setStep(1); }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.habitTypeIcon}>🌱</Text>
+              <Text style={styles.habitTypeTitle}>習慣養成</Text>
+              <Text style={styles.habitTypeSub}>{'每日打卡\n節點獎勵'}</Text>
+            </TouchableOpacity>
+            {(['技能學習', '家庭責任', '自我挑戰'] as const).map(label => (
+              <View key={label} style={[styles.habitTypeCard, styles.habitTypeCardDisabled]}>
+                <Text style={styles.habitTypeIcon}>🔒</Text>
+                <Text style={[styles.habitTypeTitle, styles.habitTypeTitleDisabled]}>{label}</Text>
+                <Text style={[styles.habitTypeSub, styles.habitTypeSubDisabled]}>即將推出</Text>
+              </View>
+            ))}
+          </View>
+        </>
+      )}
+
+      {step === 1 && taskKind === 'general' && (
         <>
           <Text style={styles.newTaskFieldLabel}>要孩子做什麼？</Text>
           <TextInput
@@ -1225,7 +1295,7 @@ function NewTaskPanel({
         </>
       )}
 
-      {step === 2 && (
+      {step === 2 && taskKind === 'general' && (
         <>
           <Text style={styles.newTaskFieldLabel}>怎麼回饋？</Text>
 
@@ -1288,7 +1358,7 @@ function NewTaskPanel({
         </>
       )}
 
-      {step === 3 && (
+      {step === 3 && taskKind === 'general' && (
         <>
           <Text style={styles.newTaskFieldLabel}>哪幾天做？</Text>
           <View style={styles.newTaskDayRow}>
@@ -3437,5 +3507,47 @@ const styles = StyleSheet.create({
     color: ParentColors.fgMuted,
     textAlign: 'center',
     lineHeight: 20,
+  },
+  habitTypeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  habitTypeCard: {
+    width: '47%',
+    backgroundColor: '#fff',
+    borderRadius: ParentRadii.md,
+    borderWidth: 1.5,
+    borderColor: ParentColors.borderSoft,
+    padding: 14,
+    alignItems: 'center',
+    gap: 6,
+  },
+  habitTypeCardDisabled: {
+    backgroundColor: ParentColors.stone100,
+    borderColor: ParentColors.borderSoft,
+    opacity: 0.55,
+  },
+  habitTypeIcon: {
+    fontSize: 22,
+  },
+  habitTypeTitle: {
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgPrimary,
+    textAlign: 'center',
+  },
+  habitTypeTitleDisabled: {
+    color: ParentColors.fgMuted,
+  },
+  habitTypeSub: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgSecondary,
+    textAlign: 'center',
+    lineHeight: 16,
+  },
+  habitTypeSubDisabled: {
+    color: ParentColors.fgMuted,
   },
 });
