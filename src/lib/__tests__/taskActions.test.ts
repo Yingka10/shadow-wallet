@@ -16,7 +16,7 @@ beforeEach(() => {
   mockFrom = jest.fn();
 });
 
-import { calcCoin, checkMilestone, getPrevCheckpoint, OVERRIDE_TYPE_MAP, parentMarkTask } from '../taskActions';
+import { calcCoin, checkMilestone, getPrevCheckpoint, OVERRIDE_TYPE_MAP, parentMarkTask, isActiveDayForHabit, applyHabitResume } from '../taskActions';
 import type { Task, CheckpointRewards } from '../../types/database';
 
 function makeTask(overrides: Partial<Task>): Task {
@@ -212,5 +212,87 @@ describe('parentMarkTask', () => {
     await expect(
       parentMarkTask('task-1', 'child-1', 'exceeded', 10, null),
     ).rejects.toThrow('找不到今日完成紀錄');
+  });
+});
+
+// ── isActiveDayForHabit ───────────────────────────────────────────────────────
+
+describe('isActiveDayForHabit', () => {
+  it('returns true for any dow when activeDays is null (every day active)', () => {
+    expect(isActiveDayForHabit(0, null)).toBe(true);
+    expect(isActiveDayForHabit(3, null)).toBe(true);
+    expect(isActiveDayForHabit(6, null)).toBe(true);
+  });
+
+  it('returns true when dow is in activeDays', () => {
+    expect(isActiveDayForHabit(1, [1, 2, 3, 4, 5])).toBe(true);
+    expect(isActiveDayForHabit(0, [0, 6])).toBe(true);
+  });
+
+  it('returns false when dow is not in activeDays', () => {
+    expect(isActiveDayForHabit(0, [1, 2, 3, 4, 5])).toBe(false);
+    expect(isActiveDayForHabit(6, [1, 2, 3, 4, 5])).toBe(false);
+  });
+
+  it('returns false when activeDays is empty array', () => {
+    expect(isActiveDayForHabit(1, [])).toBe(false);
+    expect(isActiveDayForHabit(0, [])).toBe(false);
+  });
+});
+
+// ── applyHabitResume — active_days gating ─────────────────────────────────────
+
+// Builds a .select().eq().eq().gte().lt().limit() chain resolving to `result`
+function makeReadLimitChain(result: { data: unknown }) {
+  const chain: Record<string, unknown> = {
+    select: () => chain,
+    eq:     () => chain,
+    gte:    () => chain,
+    lt:     () => chain,
+    limit:  () => Promise.resolve(result),
+  };
+  return chain;
+}
+
+describe('applyHabitResume — active_days gating', () => {
+  it('skips all DB calls when activeDays is empty (no valid days)', async () => {
+    await applyHabitResume('goal-1', 'child-1', 'task-1', 5, { '7': 20 }, []);
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it('queries DB and updates when activeDays is null and yesterday was missed', async () => {
+    mockFrom.mockReturnValueOnce(makeReadLimitChain({ data: [] }));      // completions: missed
+    mockFrom.mockReturnValueOnce(makeUpdateChain());                      // update current_day
+
+    await applyHabitResume('goal-1', 'child-1', 'task-1', 5, { '7': 20 }, null);
+
+    expect(mockFrom).toHaveBeenCalledTimes(2);
+    expect(mockFrom).toHaveBeenNthCalledWith(1, 'task_completions');
+    expect(mockFrom).toHaveBeenNthCalledWith(2, 'long_term_goals');
+  });
+
+  it('queries DB and updates when all 7 days active and yesterday was missed', async () => {
+    mockFrom.mockReturnValueOnce(makeReadLimitChain({ data: [] }));
+    mockFrom.mockReturnValueOnce(makeUpdateChain());
+
+    await applyHabitResume('goal-1', 'child-1', 'task-1', 5, { '7': 20 }, [0,1,2,3,4,5,6]);
+
+    expect(mockFrom).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not update when currentDay is 0 even if yesterday missed', async () => {
+    mockFrom.mockReturnValueOnce(makeReadLimitChain({ data: [] }));
+
+    await applyHabitResume('goal-1', 'child-1', 'task-1', 0, null, null);
+
+    expect(mockFrom).toHaveBeenCalledTimes(1); // completions checked, no update
+  });
+
+  it('does not update when yesterday was completed', async () => {
+    mockFrom.mockReturnValueOnce(makeReadLimitChain({ data: [{ id: 'comp-1' }] }));
+
+    await applyHabitResume('goal-1', 'child-1', 'task-1', 5, null, null);
+
+    expect(mockFrom).toHaveBeenCalledTimes(1); // completions checked, no update
   });
 });
