@@ -400,6 +400,7 @@ type CreateLongTermGoalInput = {
   name: string;
   totalDays: number;
   checkpointRewards: CheckpointRewards;
+  activeDays?: number[];
   motivationNote?: string;
 };
 
@@ -455,6 +456,7 @@ export async function createLongTermGoal(input: CreateLongTermGoalInput): Promis
     current_day: 0,
     total_days: input.totalDays,
     checkpoint_rewards: input.checkpointRewards,
+    active_days: input.activeDays ?? null,
     motivation_note: input.motivationNote ?? null,
     started_at: today,
     interrupt_count: 0,

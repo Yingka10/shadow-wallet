@@ -110,6 +110,7 @@ export function useTodayTasks(childId: string): UseTodayTasksResult {
             goal.task_id,
             goal.current_day,
             goal.checkpoint_rewards,
+            goal.active_days,
           );
         }
       }
