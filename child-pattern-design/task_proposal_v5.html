@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>任務提案</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #f0f0f0;
+  display: flex; justify-content: center; align-items: center;
+  min-height: 100vh;
+  font-family: 'Noto Sans TC', 'PingFang TC', sans-serif;
+}
+
+.phone {
+  width: 360px; height: 720px;
+  border-radius: 36px;
+  border: 1.5px solid rgba(95,60,30,0.12);
+  overflow: hidden;
+  position: relative;
+  background: #FFF8EE;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+}
+
+/* ── 主頁背景（模擬） ── */
+.main-bg {
+  position: absolute; inset: 0;
+  background: #FFF8EE;
+  padding: 20px 16px 0;
+}
+.main-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 16px;
+}
+.main-greeting { font-size: 16px; font-weight: 700; color: #3B2A1E; }
+.main-coins {
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(245,184,0,0.10); border-radius: 20px; padding: 6px 12px;
+  border: 1px solid #f0d080;
+}
+.main-coins span { font-size: 13px; font-weight: 500; color: #B87A00; }
+
+.task-section-title {
+  font-size: 13px; font-weight: 500; color: #9A7B5A;
+  margin-bottom: 10px;
+}
+.task-card {
+  background: #fff8e0; border-radius: 14px;
+  border: 1px solid #f0d88a;
+  padding: 12px 14px; margin-bottom: 8px;
+  display: flex; align-items: center; gap: 12px;
+}
+.task-icon {
+  width: 36px; height: 36px; border-radius: 10px;
+  background: #ffe0a0; display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0;
+}
+.task-info { flex: 1; }
+.task-name { font-size: 13px; font-weight: 500; color: #3B2A1E; margin-bottom: 2px; }
+.task-sub { font-size: 11px; color: #9A7B5A; }
+.task-coin { font-size: 12px; font-weight: 500; color: #c07020; }
+
+.add-task-row {
+  margin-top: 4px;
+  background: rgba(245,184,0,0.10);
+  border: 1.5px dashed #f0c060;
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex; align-items: center; gap: 10px;
+  cursor: pointer;
+}
+.add-task-row span { font-size: 13px; color: #a08040; }
+
+/* ── Bottom nav ── */
+.bottom-nav {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: #FFF8EE;
+  border-top: 1px solid #f0e0b0;
+  display: flex; padding: 10px 0 18px;
+}
+.nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; }
+.nav-item i { font-size: 22px; color: #c0a870; }
+.nav-item.active i { color: #e07820; }
+.nav-item span { font-size: 10px; color: #c0a870; }
+.nav-item.active span { color: #e07820; }
+
+/* ── Overlay ── */
+.overlay {
+  position: absolute; inset: 0;
+  background: rgba(40,25,5,0);
+  pointer-events: none;
+  transition: background 0.35s ease;
+  z-index: 10;
+  border-radius: 36px;
+}
+.overlay.active {
+  background: rgba(40,25,5,0.35);
+  pointer-events: all;
+}
+
+/* ── Bottom Sheet ── */
+.sheet {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  background: #FFF8EE;
+  border-radius: 24px 24px 0 0;
+  border-top: 1px solid #f0e0b0;
+  z-index: 20;
+  transform: translateY(100%);
+  transition: transform 0.4s cubic-bezier(0.22,1,0.36,1), height 0.4s cubic-bezier(0.22,1,0.36,1);
+  height: 360px;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.sheet.open { transform: translateY(0); }
+.sheet.tall { height: 600px; }
+
+/* Sheet handle */
+.sheet-handle {
+  width: 36px; height: 4px; border-radius: 2px;
+  background: #e0d0b0; margin: 12px auto 0;
+  flex-shrink: 0;
+}
+
+/* ── Step 1: 類型選擇 ── */
+#step-type {
+  flex: 1; display: flex; flex-direction: column;
+  padding: 16px 20px 24px;
+}
+.step-title {
+  font-size: 17px; font-weight: 700; color: #3B2A1E;
+  margin-bottom: 4px; text-align: center;
+}
+.step-subtitle {
+  font-size: 12px; color: #9A7B5A; text-align: center; margin-bottom: 20px;
+}
+
+.type-cards { display: flex; flex-direction: column; gap: 12px; flex: 1; }
+
+.type-card {
+  flex: 1; border-radius: 18px; padding: 18px 20px;
+  cursor: pointer; border: 2px solid transparent;
+  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+  display: flex; align-items: center; gap: 16px;
+  position: relative; overflow: hidden;
+}
+.type-card:active { transform: scale(0.97); }
+
+.type-card.instant {
+  background: linear-gradient(135deg, #FFF8EE 0%, #FFF0DC 100%);
+  border-color: rgba(240,140,106,0.40);
+}
+.type-card.weekly {
+  background: linear-gradient(135deg, #e8f5e0 0%, #d0ecc0 100%);
+  border-color: #a0d080;
+}
+.type-card.selected { box-shadow: 0 4px 20px rgba(0,0,0,0.12); transform: scale(1.02); }
+.type-card.instant.selected { border-color: #F08C6A; }
+.type-card.weekly.selected { border-color: #5a9a30; }
+
+.type-emoji {
+  width: 52px; height: 52px; border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px; flex-shrink: 0;
+}
+.type-card.instant .type-emoji { background: rgba(240,140,106,0.15); }
+.type-card.weekly .type-emoji { background: rgba(80,160,40,0.18); }
+
+.type-text { flex: 1; }
+.type-name { font-size: 15px; font-weight: 700; color: #3B2A1E; margin-bottom: 4px; }
+.type-desc { font-size: 11px; color: #7a6a50; line-height: 1.5; }
+
+.type-arrow {
+  font-size: 20px; color: #c0a870; flex-shrink: 0;
+}
+.type-card.instant .type-arrow { color: #F08C6A; }
+.type-card.weekly .type-arrow { color: #5a9a30; }
+
+/* ── Step 2: 填寫表單 ── */
+#step-form {
+  display: none; flex: 1; flex-direction: column;
+  padding: 16px 20px 24px; overflow-y: auto;
+}
+#step-form.active { display: flex; }
+
+.form-back {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; color: #9A7B5A; cursor: pointer;
+  margin-bottom: 16px; width: fit-content;
+}
+.form-back i { font-size: 16px; }
+
+.selected-type-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: 20px;
+  font-size: 12px; font-weight: 500;
+  margin-bottom: 16px;
+}
+.selected-type-badge.instant { background: rgba(240,140,106,0.10); color: #D9744F; border: 1px solid rgba(240,140,106,0.30); }
+.selected-type-badge.weekly { background: #e0f0d0; color: #3a7020; border: 1px solid #90c870; }
+
+.form-label {
+  font-size: 13px; font-weight: 500; color: #3B2A1E;
+  margin-bottom: 8px;
+}
+.form-input {
+  width: 100%; background: #FFF8EE;
+  border: 1.5px solid #e8d498;
+  border-radius: 14px; padding: 12px 14px;
+  font-size: 14px; color: #3B2A1E;
+  font-family: inherit; resize: none;
+  outline: none; transition: border-color 0.2s;
+  margin-bottom: 16px;
+}
+.form-input:focus { border-color: #F08C6A; }
+.form-input::placeholder { color: #c0a870; }
+
+.coin-row {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 6px;
+}
+.coin-input-wrap {
+  flex: 1; display: flex; align-items: center;
+  background: #FFF8EE; border: 1.5px solid #e8d498;
+  border-radius: 14px; padding: 10px 14px; gap: 8px;
+  transition: border-color 0.2s;
+}
+.coin-input-wrap:focus-within { border-color: #F08C6A; }
+.coin-emoji { font-size: 18px; }
+.coin-input {
+  flex: 1; border: none; background: transparent;
+  font-size: 15px; font-weight: 500; color: #3B2A1E;
+  font-family: inherit; outline: none; width: 60px;
+}
+.coin-unit { font-size: 12px; color: #9A7B5A; }
+
+/* Week calendar */
+.week-cal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 10px;
+}
+.week-nav-btn {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: #FFF0DC; border: 1px solid rgba(95,60,30,0.15);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 14px; color: #a07030;
+  transition: background 0.15s;
+}
+.week-nav-btn:hover { background: rgba(240,140,106,0.12); }
+.week-nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.week-range-label { font-size: 12px; color: #9A7B5A; font-weight: 500; }
+
+.week-cal-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  gap: 5px; margin-bottom: 16px;
+}
+.cal-day-name {
+  text-align: center; font-size: 10px; color: #9A7B5A; padding-bottom: 4px;
+}
+.cal-day {
+  aspect-ratio: 1; border-radius: 10px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  cursor: pointer; border: 1.5px solid transparent;
+  background: #FFF8EE; transition: all 0.15s;
+  gap: 1px;
+}
+.cal-day:active { transform: scale(0.92); }
+.cal-day.today {
+  border-color: #e8d498; background: rgba(245,184,0,0.10);
+}
+.cal-day.today .cal-day-num { color: #B87A00; font-weight: 700; }
+.cal-day.past { opacity: 0.3; cursor: not-allowed; pointer-events: none; }
+.cal-day.selected {
+  background: #f0a030; border-color: #e07820;
+}
+.cal-day.selected .cal-day-num { color: #fff; font-weight: 700; }
+.cal-day.selected .cal-day-dot { background: rgba(255,255,255,0.7); }
+.cal-day-num { font-size: 13px; font-weight: 500; color: #3B2A1E; line-height: 1; }
+.cal-day-dot {
+  width: 4px; height: 4px; border-radius: 50%;
+  background: transparent;
+}
+.cal-day.today .cal-day-dot { background: #F08C6A; }
+
+.deadline-hint {
+  font-size: 11px; color: #9A7B5A; margin-bottom: 16px; line-height: 1.5;
+  min-height: 16px; transition: opacity 0.2s;
+}
+
+.coin-hint {
+  font-size: 11px; color: #9A7B5A; margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+/* Weekday picker (週期任務) */
+.weekday-label {
+  font-size: 13px; font-weight: 500; color: #3B2A1E;
+  margin-bottom: 10px;
+}
+.weekday-picker {
+  display: flex; gap: 6px; margin-bottom: 16px;
+}
+.weekday-btn {
+  flex: 1; height: 38px; border-radius: 10px;
+  background: #FFF0DC; border: 1.5px solid rgba(95,60,30,0.15);
+  font-size: 12px; color: #9A7B5A; cursor: pointer;
+  font-family: inherit; transition: all 0.15s;
+}
+.weekday-btn.selected {
+  background: #5a9a30; border-color: #5a9a30;
+  color: #fff; font-weight: 500;
+}
+
+.submit-btn {
+  width: 100%; padding: 14px; border-radius: 16px;
+  background: #F08C6A;
+  border: none; color: #fff;
+  font-size: 15px; font-weight: 700;
+  font-family: inherit; cursor: pointer;
+  transition: transform 0.15s, opacity 0.15s;
+  margin-top: auto;
+  box-shadow: 0 4px 16px rgba(240,140,106,0.35);
+}
+.submit-btn:active { transform: scale(0.97); opacity: 0.9; }
+.submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Step 3: 送出回饋 ── */
+#step-done {
+  display: none; flex: 1; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 24px 28px; text-align: center;
+}
+#step-done.active { display: flex; }
+
+.done-anim {
+  width: 90px; height: 90px; margin-bottom: 20px;
+  position: relative;
+}
+.done-circle {
+  width: 90px; height: 90px; border-radius: 50%;
+  background: linear-gradient(135deg, #fff3b0 0%, #ffd060 100%);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 40px;
+  animation: donePopIn 0.5s cubic-bezier(0.22,1,0.36,1) both;
+}
+@keyframes donePopIn {
+  0% { transform: scale(0.3); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.done-sparks {
+  position: absolute; inset: -10px; pointer-events: none;
+}
+.spark {
+  position: absolute; width: 6px; height: 6px;
+  border-radius: 50%; opacity: 0;
+}
+
+.done-title {
+  font-size: 20px; font-weight: 700; color: #3B2A1E;
+  margin-bottom: 8px;
+  animation: fadeUp 0.5s 0.3s ease both;
+}
+.done-desc {
+  font-size: 13px; color: #9A7B5A; line-height: 1.7;
+  margin-bottom: 24px;
+  animation: fadeUp 0.5s 0.45s ease both;
+}
+@keyframes fadeUp {
+  0% { transform: translateY(10px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+.done-tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(245,184,0,0.10); border: 1px solid #f0cc70;
+  border-radius: 20px; padding: 6px 14px;
+  font-size: 12px; color: #B87A00; margin-bottom: 24px;
+  animation: fadeUp 0.5s 0.55s ease both;
+}
+
+.done-close {
+  width: 100%; padding: 13px; border-radius: 16px;
+  background: rgba(240,140,106,0.10); border: 1.5px solid rgba(240,140,106,0.30);
+  color: #D9744F; font-size: 14px; font-weight: 500;
+  font-family: inherit; cursor: pointer;
+  animation: fadeUp 0.5s 0.65s ease both;
+}
+
+/* ── Seed fly animation ── */
+.seed-fly {
+  position: absolute; width: 10px; height: 10px;
+  border-radius: 50%; background: #f0c030;
+  box-shadow: 0 0 12px 4px rgba(240,180,30,0.6);
+  pointer-events: none; z-index: 50;
+  display: none;
+}
+</style>
+</head>
+<body>
+<div class="phone" id="phone">
+
+  <!-- 主頁背景 -->
+  <div class="main-bg">
+    <div class="main-header">
+      <div class="main-greeting">今天想做什麼？✨</div>
+      <div class="main-coins">
+        <span>🪙 88 幣</span>
+      </div>
+    </div>
+    <div class="task-section-title">今日任務</div>
+    <div class="task-card">
+      <div class="task-icon">🚗</div>
+      <div class="task-info">
+        <div class="task-name">幫爸爸洗車</div>
+        <div class="task-sub">貢獻任務</div>
+      </div>
+      <div class="task-coin">+125 幣</div>
+    </div>
+    <div class="task-card">
+      <div class="task-icon">🧹</div>
+      <div class="task-info">
+        <div class="task-name">打掃廁所</div>
+        <div class="task-sub">貢獻任務</div>
+      </div>
+      <div class="task-coin">+70 幣</div>
+    </div>
+    <div class="add-task-row" id="open-sheet-btn">
+      <span style="font-size:20px;">💡</span>
+      <span>我有一個任務想提出！</span>
+    </div>
+  </div>
+
+  <!-- Bottom nav -->
+  <div class="bottom-nav">
+    <div class="nav-item active"><i class="ti ti-home"></i><span>首頁</span></div>
+    <div class="nav-item"><i class="ti ti-layout-grid"></i><span>摸滿</span></div>
+    <div class="nav-item"><i class="ti ti-star"></i><span>願望</span></div>
+    <div class="nav-item"><i class="ti ti-user"></i><span>個人</span></div>
+  </div>
+
+  <!-- Overlay -->
+  <div class="overlay" id="overlay"></div>
+
+  <!-- Seed fly particle -->
+  <div class="seed-fly" id="seed-fly"></div>
+
+  <!-- Bottom Sheet -->
+  <div class="sheet" id="sheet">
+    <div class="sheet-handle"></div>
+
+    <!-- Step 1: 選類型 -->
+    <div id="step-type">
+      <div class="step-title">你想提什麼任務？</div>
+      <div class="step-subtitle">選一個最符合的類型</div>
+      <div class="type-cards">
+        <div class="type-card instant" id="type-instant" data-type="instant">
+          <div class="type-emoji">⚡</div>
+          <div class="type-text">
+            <div class="type-name">我想做一件事</div>
+            <div class="type-desc">設定截止日期<br>完成就賺幣</div>
+          </div>
+          <i class="ti ti-chevron-right type-arrow"></i>
+        </div>
+        <div class="type-card weekly" id="type-weekly" data-type="weekly">
+          <div class="type-emoji">🔄</div>
+          <div class="type-text">
+            <div class="type-name">我想每週固定做</div>
+            <div class="type-desc">選一天，每週都會提醒你</div>
+          </div>
+          <i class="ti ti-chevron-right type-arrow"></i>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: 填表單 -->
+    <div id="step-form">
+      <div class="form-back" id="back-btn">
+        <i class="ti ti-arrow-left"></i>
+        <span>重新選類型</span>
+      </div>
+
+      <div class="selected-type-badge" id="type-badge"></div>
+
+      <div class="form-label">這個任務是什麼？</div>
+      <textarea class="form-input" id="task-desc" rows="3"
+        placeholder="例如：幫媽媽晾衣服、每天練習鋼琴 15 分鐘⋯"></textarea>
+
+      <!-- 即時任務的截止日期 -->
+      <div id="deadline-section" style="display:none;">
+        <div class="form-label">截止日期</div>
+        <div class="week-cal-header">
+          <button class="week-nav-btn" id="week-prev" disabled>‹</button>
+          <div class="week-range-label" id="week-range-label"></div>
+          <button class="week-nav-btn" id="week-next">›</button>
+        </div>
+        <div class="week-cal-grid" id="week-cal-grid">
+          <div class="cal-day-name">日</div>
+          <div class="cal-day-name">一</div>
+          <div class="cal-day-name">二</div>
+          <div class="cal-day-name">三</div>
+          <div class="cal-day-name">四</div>
+          <div class="cal-day-name">五</div>
+          <div class="cal-day-name">六</div>
+        </div>
+        <div class="deadline-hint" id="deadline-hint">點選一個日期當作截止日</div>
+      </div>
+
+      <!-- 週期任務的星期選擇 -->
+      <div id="weekday-section" style="display:none;">
+        <div class="weekday-label">每週哪幾天做？<span style="font-size:10px;color:#b0a070;font-weight:400;margin-left:4px;">可以選多天</span></div>
+        <div class="weekday-picker">
+          <button class="weekday-btn" data-day="一">一</button>
+          <button class="weekday-btn" data-day="二">二</button>
+          <button class="weekday-btn" data-day="三">三</button>
+          <button class="weekday-btn" data-day="四">四</button>
+          <button class="weekday-btn" data-day="五">五</button>
+          <button class="weekday-btn" data-day="六">六</button>
+          <button class="weekday-btn" data-day="日">日</button>
+        </div>
+      </div>
+
+      <div class="form-label">你覺得值多少幣？</div>
+      <div class="coin-row">
+        <div class="coin-input-wrap">
+          <span class="coin-emoji">🌟</span>
+          <input class="coin-input" id="coin-val" type="number" min="1" max="999" placeholder="50">
+          <span class="coin-unit">幣</span>
+        </div>
+      </div>
+      <div class="coin-hint">AI 會幫你確認金額是否合理，再交給爸爸媽媽決定</div>
+
+      <button class="submit-btn" id="submit-btn">送出提案 🚀</button>
+    </div>
+
+    <!-- Step 3: 完成回饋 -->
+    <div id="step-done">
+      <div class="done-anim">
+        <div class="done-circle" id="done-circle">🌱</div>
+        <svg class="done-sparks" id="sparks-svg" viewBox="0 0 110 110">
+        </svg>
+      </div>
+      <div class="done-title">提案送出了！</div>
+      <div class="done-desc" id="done-desc"></div>
+      <div class="done-tag" id="done-tag"></div>
+      <button class="done-close" id="done-close">回到首頁</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const phone = document.getElementById('phone');
+const overlay = document.getElementById('overlay');
+const sheet = document.getElementById('sheet');
+const stepType = document.getElementById('step-type');
+const stepForm = document.getElementById('step-form');
+const stepDone = document.getElementById('step-done');
+const seedFly = document.getElementById('seed-fly');
+
+let selectedType = null;
+let selectedDays = [];
+
+/* ── Open / Close sheet ── */
+function openSheet() {
+  overlay.classList.add('active');
+  sheet.classList.add('open');
+  sheet.classList.remove('tall');
+  showStep('type');
+}
+function closeSheet() {
+  overlay.classList.remove('active');
+  sheet.classList.remove('open', 'tall');
+  setTimeout(resetForm, 400);
+}
+
+document.getElementById('open-sheet-btn').addEventListener('click', openSheet);
+overlay.addEventListener('click', closeSheet);
+
+/* ── Steps ── */
+function showStep(step) {
+  stepType.style.display = 'none';
+  stepForm.classList.remove('active');
+  stepDone.classList.remove('active');
+
+  if (step === 'type') {
+    stepType.style.display = 'flex';
+    sheet.classList.remove('tall');
+  } else if (step === 'form') {
+    stepForm.classList.add('active');
+    sheet.classList.add('tall');
+    setTimeout(() => document.getElementById('task-desc').focus(), 450);
+  } else if (step === 'done') {
+    stepDone.classList.add('active');
+    sheet.classList.add('tall');
+    triggerDoneAnim();
+  }
+}
+
+/* ── Type selection ── */
+document.querySelectorAll('.type-card').forEach(card => {
+  card.addEventListener('click', () => {
+    selectedType = card.dataset.type;
+    /* ripple feedback */
+    card.classList.add('selected');
+    setTimeout(() => card.classList.remove('selected'), 200);
+
+    /* setup form */
+    const badge = document.getElementById('type-badge');
+    const weekdaySection = document.getElementById('weekday-section');
+    const deadlineSection = document.getElementById('deadline-section');
+    if (selectedType === 'instant') {
+      badge.textContent = '⚡ 我想做一件事';
+      badge.className = 'selected-type-badge instant';
+      weekdaySection.style.display = 'none';
+      deadlineSection.style.display = 'block';
+      calWeekOffset = 0; selectedDeadline = null;
+      setTimeout(buildCalendar, 50);
+    } else {
+      badge.textContent = '🔄 我想每週固定做';
+      badge.className = 'selected-type-badge weekly';
+      weekdaySection.style.display = 'block';
+      deadlineSection.style.display = 'none';
+    }
+
+    setTimeout(() => showStep('form'), 180);
+  });
+});
+
+/* ── Back button ── */
+document.getElementById('back-btn').addEventListener('click', () => {
+  showStep('type');
+  selectedType = null; selectedDays = []; selectedDeadline = null;
+  document.querySelectorAll('.weekday-btn').forEach(b => b.classList.remove('selected'));
+});
+
+/* ── Weekday picker (multi-select) ── */
+document.querySelectorAll('.weekday-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const day = btn.dataset.day;
+    if (btn.classList.contains('selected')) {
+      btn.classList.remove('selected');
+      selectedDays = selectedDays.filter(d => d !== day);
+    } else {
+      btn.classList.add('selected');
+      selectedDays.push(day);
+    }
+  });
+});
+
+/* ── Week calendar ── */
+let selectedDeadline = null;
+let calWeekOffset = 0;
+const DAY_NAMES = ['日','一','二','三','四','五','六'];
+const MONTH_NAMES = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+
+function buildCalendar() {
+  const grid = document.getElementById('week-cal-grid');
+  /* Remove old day cells (keep 7 header name cells) */
+  const existing = grid.querySelectorAll('.cal-day');
+  existing.forEach(e => e.remove());
+
+  const today = new Date();
+  today.setHours(0,0,0,0);
+
+  /* Week start: this Sunday + offset weeks */
+  const weekStart = new Date(today);
+  const dayOfWeek = today.getDay();
+  weekStart.setDate(today.getDate() - dayOfWeek + calWeekOffset * 7);
+
+  /* Range label */
+  const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
+  const label = `${weekStart.getMonth()+1}/${weekStart.getDate()} – ${weekEnd.getMonth()+1}/${weekEnd.getDate()}`;
+  document.getElementById('week-range-label').textContent = label;
+
+  /* Prev button: disable if this week */
+  document.getElementById('week-prev').disabled = calWeekOffset <= 0;
+  /* Next button: disable after 2 weeks out */
+  document.getElementById('week-next').disabled = calWeekOffset >= 2;
+
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStart); d.setDate(weekStart.getDate() + i);
+    const isPast = d < today;
+    const isToday = d.getTime() === today.getTime();
+    const dateStr = d.toISOString().split('T')[0];
+    const isSelected = selectedDeadline === dateStr;
+
+    const cell = document.createElement('div');
+    cell.className = 'cal-day' +
+      (isPast ? ' past' : '') +
+      (isToday ? ' today' : '') +
+      (isSelected ? ' selected' : '');
+    cell.innerHTML = `<div class="cal-day-num">${d.getDate()}</div><div class="cal-day-dot"></div>`;
+
+    if (!isPast) {
+      cell.addEventListener('click', () => {
+        selectedDeadline = dateStr;
+        /* Update hint */
+        const dayLabel = isToday ? '今天' : `${MONTH_NAMES[d.getMonth()]}${d.getDate()}日（星期${DAY_NAMES[d.getDay()]}）`;
+        document.getElementById('deadline-hint').textContent = `截止日：${dayLabel}`;
+        buildCalendar();
+      });
+    }
+    grid.appendChild(cell);
+  }
+}
+
+document.getElementById('week-prev').addEventListener('click', () => {
+  calWeekOffset = Math.max(0, calWeekOffset - 1);
+  buildCalendar();
+});
+document.getElementById('week-next').addEventListener('click', () => {
+  calWeekOffset = Math.min(2, calWeekOffset + 1);
+  buildCalendar();
+});
+
+/* ── Submit ── */
+document.getElementById('submit-btn').addEventListener('click', () => {
+  const desc = document.getElementById('task-desc').value.trim();
+  const coin = document.getElementById('coin-val').value;
+  if (!desc) { document.getElementById('task-desc').focus(); return; }
+  if (selectedType === 'instant' && !selectedDeadline) {
+    const hint = document.getElementById('deadline-hint');
+    hint.textContent = '請選一個截止日期喔！';
+    hint.style.color = '#e06040';
+    setTimeout(() => { hint.textContent = '點選一個日期當作截止日'; hint.style.color = ''; }, 1800);
+    return;
+  }
+  if (selectedType === 'weekly' && selectedDays.length === 0) {
+    document.querySelector('.weekday-label').style.color = '#e06040';
+    setTimeout(() => document.querySelector('.weekday-label').style.color = '', 1500);
+    return;
+  }
+
+  /* Seed fly animation */
+  triggerSeedFly(() => showStep('done'));
+
+  /* Set done content */
+  const doneDesc = document.getElementById('done-desc');
+  const doneTag = document.getElementById('done-tag');
+  if (selectedType === 'instant') {
+    const d = new Date(selectedDeadline);
+    const dayLabel = `${d.getMonth()+1}月${d.getDate()}日（星期${DAY_NAMES[d.getDay()]}）`;
+    doneDesc.textContent = '爸爸媽媽收到你的提案後會決定要不要加進任務清單，記得等通知喔！';
+    doneTag.innerHTML = `⚡ 即時任務・截止 ${dayLabel}`;
+  } else {
+    const ORDER = ['一','二','三','四','五','六','日'];
+    const sorted = [...selectedDays].sort((a,b) => ORDER.indexOf(a) - ORDER.indexOf(b));
+    const daysLabel = sorted.map(d => `週${d}`).join('、');
+    doneDesc.textContent = `每週固定任務提案已送出！等爸爸媽媽確認後就會出現在你的清單裡。`;
+    doneTag.innerHTML = `🔄 ${daysLabel}`;
+  }
+});
+
+/* ── Seed fly ── */
+function triggerSeedFly(onDone) {
+  const btn = document.getElementById('submit-btn');
+  const btnRect = btn.getBoundingClientRect();
+  const phoneRect = phone.getBoundingClientRect();
+  const startX = btnRect.left - phoneRect.left + btnRect.width / 2;
+  const startY = btnRect.top - phoneRect.top;
+
+  seedFly.style.display = 'block';
+  seedFly.style.left = startX + 'px';
+  seedFly.style.top = startY + 'px';
+  seedFly.style.opacity = '1';
+  seedFly.style.transition = 'none';
+  seedFly.style.transform = 'scale(1)';
+
+  /* Spawn extra sparks */
+  for (let i = 0; i < 8; i++) {
+    const s = document.createElement('div');
+    const angle = (i / 8) * Math.PI * 2;
+    s.style.cssText = `position:absolute;width:6px;height:6px;border-radius:50%;
+      background:hsl(${40+Math.random()*30},90%,60%);z-index:50;
+      left:${startX}px;top:${startY}px;pointer-events:none;opacity:1;
+      transition:transform 0.6s ease-out,opacity 0.6s;`;
+    phone.appendChild(s);
+    setTimeout(() => {
+      s.style.transform = `translate(${Math.cos(angle)*35}px,${Math.sin(angle)*35 - 20}px) scale(0.2)`;
+      s.style.opacity = '0';
+      setTimeout(() => s.remove(), 700);
+    }, 20);
+  }
+
+  setTimeout(() => {
+    seedFly.style.transition = 'top 0.9s cubic-bezier(0.25,0.46,0.45,0.94), left 0.4s ease-in-out, opacity 0.4s ease-in 0.55s, transform 0.9s ease-out';
+    seedFly.style.top = '40px';
+    seedFly.style.left = (startX + 20) + 'px';
+    seedFly.style.opacity = '0';
+    seedFly.style.transform = 'scale(0.3)';
+    setTimeout(() => {
+      seedFly.style.display = 'none';
+      if (onDone) onDone();
+    }, 950);
+  }, 50);
+}
+
+/* ── Done animation ── */
+function triggerDoneAnim() {
+  const svg = document.getElementById('sparks-svg');
+  svg.innerHTML = '';
+  const colors = ['#f0c030','#f08030','#80d040','#60b0f0','#f060a0'];
+  for (let i = 0; i < 10; i++) {
+    const angle = (i / 10) * 360;
+    const r1 = 46, r2 = 62;
+    const rad = angle * Math.PI / 180;
+    const x1 = 55 + Math.cos(rad) * r1;
+    const y1 = 55 + Math.sin(rad) * r1;
+    const x2 = 55 + Math.cos(rad) * r2;
+    const y2 = 55 + Math.sin(rad) * r2;
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+    line.setAttribute('x2', x1); line.setAttribute('y2', y1);
+    line.setAttribute('stroke', colors[i % colors.length]);
+    line.setAttribute('stroke-width', '2.5');
+    line.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(line);
+    setTimeout(() => {
+      line.style.transition = `x2 0.4s ${i*0.04}s ease-out, y2 0.4s ${i*0.04}s ease-out, opacity 0.3s ${i*0.04+0.35}s`;
+      line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+      setTimeout(() => { line.style.opacity = '0'; }, (i*40 + 400));
+    }, 200);
+  }
+}
+
+/* ── Reset ── */
+function resetForm() {
+  showStep('type');
+  selectedType = null; selectedDays = []; selectedDeadline = null; calWeekOffset = 0;
+  document.getElementById('task-desc').value = '';
+  document.getElementById('coin-val').value = '';
+  document.getElementById('deadline-hint').textContent = '點選一個日期當作截止日';
+  document.getElementById('deadline-hint').style.color = '';
+  document.querySelectorAll('.weekday-btn').forEach(b => b.classList.remove('selected'));
+  document.querySelectorAll('.type-card').forEach(c => c.classList.remove('selected'));
+}
+
+document.getElementById('done-close').addEventListener('click', closeSheet);
+</script>
+</body>
+</html>

@@ -20,21 +20,11 @@ import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../../../App';
 import { useTodayTasks, type TodayTask } from '../../hooks/useTodayTasks';
 import { useWallet } from '../../hooks/useWallet';
-import DutyTaskCard from '../../components/DutyTaskCard';
-import ContributionTaskCard from '../../components/ContributionTaskCard';
+import TaskCard from '../../components/TaskCard';
 import BottomNav from '../../components/BottomNav';
 import TaskCompleteModal from '../../components/TaskCompleteModal';
 import FeedbackAnimation, { type FeedbackType } from '../../components/FeedbackAnimation';
-import Svg, { Path } from 'react-native-svg';
-import { CoinIcon, WaveIcon } from '../../components/icons/TaskIcons';
-
-function ChevRightIcon({ size = 18, color = Colors.ink300 }: { size?: number; color?: string }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M9 18l6-6-6-6" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-    </Svg>
-  );
-}
+import { CoinIcon } from '../../components/icons/TaskIcons';
 import { completeTask, createChildTask } from '../../lib/taskActions';
 import { supabase } from '../../lib/supabase';
 import { Colors } from '../../constants/colors';
@@ -66,11 +56,11 @@ function getSubGreeting(remaining: number, total: number): string {
   return `今天有 ${remaining} 件事等你開動`;
 }
 
-function SectionHeader({ title }: { title: string }) {
+function SectionLabel({ title }: { title: string }) {
   return (
-    <View style={styles.sectionHead}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      <WaveIcon />
+    <View style={styles.sectionLabel}>
+      <Text style={styles.sectionLabelText}>{title}</Text>
+      <View style={styles.sectionLabelLine} />
     </View>
   );
 }
@@ -249,80 +239,33 @@ export default function HomeScreen() {
         }
         showsVerticalScrollIndicator={false}
       >
-        {/* Long-term goals card — always visible */}
-        <View style={styles.ltCard}>
-          <View style={styles.ltCardHeader}>
-            <Text style={styles.ltCardTitle}>長期目標</Text>
-            {longTermTasks.length > 0 && (
-              <View style={styles.ltCountBadge}>
-                <Text style={styles.ltCountText}>{longTermTasks.length} 個進行中</Text>
-              </View>
+        {/* 長期任務 */}
+        {longTermTasks.length > 0 && (
+          <View style={styles.section}>
+            <SectionLabel title="長期任務" />
+            {loading ? (
+              <ActivityIndicator color={Colors.coral500} />
+            ) : (
+              longTermTasks.map(task => (
+                task.goal ? (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    variant="longterm"
+                    isCompleted={task.isCompleted}
+                    onPress={() =>
+                      navigation.navigate('LongTermDetail', {
+                        goalId: task.goal!.id,
+                        taskId: task.id,
+                        taskName: task.name,
+                      })
+                    }
+                  />
+                ) : null
+              ))
             )}
           </View>
-
-          {loading ? (
-            <ActivityIndicator color={Colors.coral500} style={styles.ltLoader} />
-          ) : longTermTasks.length === 0 ? (
-            <View style={styles.ltEmpty}>
-              <Text style={styles.ltEmptyTitle}>目前沒有長期目標</Text>
-              <Text style={styles.ltEmptyBody}>
-                長期目標由家長在後台設定，設定完成後就能在這裡追蹤進度。
-              </Text>
-            </View>
-          ) : (
-            longTermTasks.map((task, idx) => {
-              if (!task.goal) return null;
-              const goal = task.goal;
-              const total = goal.total_days ?? 30;
-              const pct = Math.min(Math.round((goal.current_day / total) * 100), 100);
-              const isStreak = goal.goal_type === 'habit';
-              return (
-                <TouchableOpacity
-                  key={task.id}
-                  style={[styles.ltRow, idx > 0 && styles.ltRowBorder]}
-                  onPress={() =>
-                    navigation.navigate('LongTermDetail', {
-                      goalId: goal.id,
-                      taskId: task.id,
-                      taskName: task.name,
-                    })
-                  }
-                  activeOpacity={0.75}
-                >
-                  <View style={styles.ltRowBody}>
-                    <View style={styles.ltRowTop}>
-                      <View
-                        style={[
-                          styles.ltTypePill,
-                          { backgroundColor: isStreak ? Colors.gold100 : Colors.sage100 },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.ltTypeLabel,
-                            { color: isStreak ? Colors.coral600 : Colors.sage600 },
-                          ]}
-                        >
-                          {isStreak ? '🔥 連續打卡' : '等級解鎖'}
-                        </Text>
-                      </View>
-                      <Text style={styles.ltDayCount}>
-                        第 {goal.current_day} 天 / {total} 天
-                      </Text>
-                    </View>
-                    <Text style={styles.ltRowName} numberOfLines={1}>
-                      {task.name}
-                    </Text>
-                    <View style={styles.ltTrack}>
-                      <View style={[styles.ltFill, { width: `${pct}%` as any }]} />
-                    </View>
-                  </View>
-                  <ChevRightIcon size={18} color={Colors.ink300} />
-                </TouchableOpacity>
-              );
-            })
-          )}
-        </View>
+        )}
 
         {/* Prerequisite nudge banner */}
         {hasDiscountableTasks && (
@@ -332,14 +275,15 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Duty tasks (Task-A + Task-B) */}
+        {/* 週期任務 (Task-A + Task-B) */}
         {dutyTasks.length > 0 && (
           <View style={styles.section}>
-            <SectionHeader title="本分任務" />
+            <SectionLabel title="週期任務" />
             {dutyTasks.map(task => (
-              <DutyTaskCard
+              <TaskCard
                 key={task.id}
                 task={task}
+                variant="weekly"
                 isCompleted={task.isCompleted}
                 onPress={() => openModal(task)}
               />
@@ -347,14 +291,15 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Contribution tasks (Task-C) */}
+        {/* 即時任務 (Task-C) */}
         {contributionTasks.length > 0 && (
           <View style={styles.section}>
-            <SectionHeader title="貢獻任務" />
+            <SectionLabel title="即時任務" />
             {contributionTasks.map(task => (
-              <ContributionTaskCard
+              <TaskCard
                 key={task.id}
                 task={task}
+                variant="instant"
                 isCompleted={task.isCompleted}
                 isPrerequisiteMet={isPrerequisiteMet}
                 onPress={() => openModal(task)}
@@ -628,20 +573,23 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: 24,
   },
-  sectionHead: {
+  sectionLabel: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
     marginBottom: 12,
-    marginTop: 6,
-    marginLeft: 4,
+    marginTop: 4,
   },
-  sectionTitle: {
-    fontWeight: '800',
-    fontSize: 13,
-    color: Colors.ink700,
-    letterSpacing: 1.0,
-    textTransform: 'uppercase',
+  sectionLabelText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: Colors.ink500,
+    letterSpacing: 1,
+  },
+  sectionLabelLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: 'rgba(95,60,30,0.12)',
   },
   emptyState: {
     alignItems: 'center',
@@ -847,118 +795,5 @@ const styles = StyleSheet.create({
   },
   bottomPad: {
     height: 32,
-  },
-  ltCard: {
-    backgroundColor: Colors.bgSurface,
-    borderRadius: 24,
-    marginBottom: 20,
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.14,
-    shadowRadius: 22,
-    elevation: 5,
-    overflow: 'hidden',
-  },
-  ltCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 18,
-    paddingTop: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.borderSoft,
-  },
-  ltCardTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: Colors.ink900,
-  },
-  ltCountBadge: {
-    backgroundColor: Colors.coral100,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-  },
-  ltCountText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: Colors.coral700,
-  },
-  ltLoader: {
-    marginVertical: 20,
-  },
-  ltEmpty: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  ltEmptyTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: Colors.ink700,
-    marginBottom: 6,
-    textAlign: 'center',
-  },
-  ltEmptyBody: {
-    fontSize: 13,
-    color: Colors.ink500,
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  ltRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-    gap: 10,
-  },
-  ltRowBorder: {
-    borderTopWidth: 1,
-    borderTopColor: Colors.borderSoft,
-  },
-  ltRowBody: {
-    flex: 1,
-    minWidth: 0,
-  },
-  ltRowTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  ltTypePill: {
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  ltTypeLabel: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  ltDayCount: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.ink500,
-  },
-  ltRowName: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: Colors.ink900,
-    marginBottom: 8,
-  },
-  ltTrack: {
-    height: 8,
-    backgroundColor: Colors.bgCanvas,
-    borderRadius: 999,
-    overflow: 'hidden',
-  },
-  ltFill: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    backgroundColor: Colors.gold500,
-    borderRadius: 999,
   },
 });

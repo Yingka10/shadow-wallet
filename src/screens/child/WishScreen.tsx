@@ -5,7 +5,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -15,7 +14,9 @@ import type { RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../../../App';
 import BottomNav from '../../components/BottomNav';
-import { CoinIcon, StarIcon, WalletIcon } from '../../components/icons/TaskIcons';
+import WishTreeComponent from '../../components/WishTreeComponent';
+import WishModalComponent from '../../components/WishModalComponent';
+import { CoinIcon } from '../../components/icons/TaskIcons';
 import { Colors } from '../../constants/colors';
 import { supabase } from '../../lib/supabase';
 import { useWallet } from '../../hooks/useWallet';
@@ -36,24 +37,13 @@ type WishItem = {
   parent_approved: boolean;
   created_at: string;
   child_id: string | null;
+  reward_type: string;
 };
+
+type TabKey = 'privilege' | 'item';
 
 function formatNumber(value: number): string {
   return value.toLocaleString('zh-TW');
-}
-
-function formatDate(dateStr: string): string {
-  const created = new Date(dateStr);
-  const now = new Date();
-  const diffDays = Math.floor((Date.now() - created.getTime()) / 86400000);
-  if (diffDays <= 0) return '今天';
-  if (diffDays === 1) return '昨天';
-  if (diffDays < 7) return `${diffDays} 天前`;
-  return `${created.getMonth() + 1}/${created.getDate()}`;
-}
-
-function cleanCostInput(text: string): string {
-  return text.replace(/[^0-9]/g, '');
 }
 
 export default function WishScreen() {
@@ -66,9 +56,9 @@ export default function WishScreen() {
   const [wishes, setWishes] = useState<WishItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [title, setTitle] = useState('');
-  const [cost, setCost] = useState('');
   const [saving, setSaving] = useState(false);
+  const [wishModalVisible, setWishModalVisible] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabKey>('privilege');
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const balance = spending?.balance ?? 0;
@@ -77,8 +67,25 @@ export default function WishScreen() {
     return wishes.filter(item => item.child_id === null || item.child_id === childId);
   }, [childId, wishes]);
 
-  const readyCount = filteredWishes.filter(item => item.parent_approved && item.coin_cost > 0 && balance >= item.coin_cost).length;
-  const pendingCount = filteredWishes.filter(item => item.added_by === 'child' && !item.parent_approved).length;
+  const privilegeList = useMemo(
+    () => filteredWishes.filter(w => w.reward_type === 'privilege'),
+    [filteredWishes],
+  );
+  const itemList = useMemo(
+    () => filteredWishes.filter(w => w.reward_type !== 'privilege'),
+    [filteredWishes],
+  );
+
+  const displayList = useMemo(() => {
+    const list = activeTab === 'privilege' ? privilegeList : itemList;
+    return [...list].sort((a, b) => {
+      const aReady = a.parent_approved && a.coin_cost > 0 && balance >= a.coin_cost;
+      const bReady = b.parent_approved && b.coin_cost > 0 && balance >= b.coin_cost;
+      if (aReady && !bReady) return -1;
+      if (!aReady && bReady) return 1;
+      return 0;
+    });
+  }, [activeTab, privilegeList, itemList, balance]);
 
   useEffect(() => {
     void loadChild();
@@ -89,7 +96,7 @@ export default function WishScreen() {
     try {
       const { data, error } = await supabase
         .from('reward_items')
-        .select('id, name, coin_cost, added_by, parent_approved, created_at, child_id, is_active')
+        .select('id, name, coin_cost, added_by, parent_approved, created_at, child_id, is_active, reward_type')
         .eq('family_id', familyId)
         .eq('is_active', true)
         .order('created_at', { ascending: false });
@@ -108,6 +115,7 @@ export default function WishScreen() {
             parent_approved: row.parent_approved,
             created_at: row.created_at,
             child_id: row.child_id,
+            reward_type: row.reward_type ?? 'item',
           })),
       );
     } catch (err) {
@@ -199,51 +207,6 @@ export default function WishScreen() {
     }
   }, [child?.familyId, loadWishes, refreshWallet]);
 
-  const handleAddWish = useCallback(async () => {
-    if (!child) {
-      Alert.alert('資料還在載入', '請稍後再試');
-      return;
-    }
-
-    const wishTitle = title.trim();
-    const wishCost = Number.parseInt(cost, 10);
-
-    if (!wishTitle) {
-      Alert.alert('請輸入願望名稱', '例如：去書店挑一本繪本');
-      return;
-    }
-
-    if (!Number.isFinite(wishCost) || wishCost < 1) {
-      Alert.alert('金幣數字不正確', '請輸入大於 0 的金幣數');
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const { error } = await supabase.from('reward_items').insert({
-        family_id: child.familyId,
-        child_id: childId,
-        name: wishTitle,
-        reward_type: 'item',
-        coin_cost: wishCost,
-        added_by: 'child',
-        parent_approved: false,
-        is_active: true,
-      });
-
-      if (error) throw error;
-
-      setTitle('');
-      setCost('');
-      await loadWishes(child.familyId);
-    } catch (err) {
-      console.error('[WishScreen] handleAddWish error:', err);
-      Alert.alert('新增願望失敗', err instanceof Error ? err.message : '請稍後再試');
-    } finally {
-      setSaving(false);
-    }
-  }, [child, childId, cost, loadWishes, title]);
-
   const handleRemoveWish = useCallback(
     async (wishId: string) => {
       try {
@@ -265,153 +228,317 @@ export default function WishScreen() {
     [child?.familyId, loadWishes],
   );
 
+  // ── 預留：改為家長審核流程時取消這段註解 ────────────────────────────
+  // const handleRedeemWithParentApproval = useCallback(
+  //   async (item: WishItem) => {
+  //     try {
+  //       const { error } = await supabase.from('redemption_requests').insert({
+  //         family_id: child?.familyId,
+  //         child_id: childId,
+  //         name: item.name,
+  //         coin_cost: item.coin_cost,
+  //         status: 'pending',
+  //       });
+  //       if (error) throw error;
+  //       Alert.alert('申請送出！', '等爸媽確認後就可以換了 🎉');
+  //     } catch (err) {
+  //       console.error('[WishScreen] handleRedeemWithParentApproval error:', err);
+  //       Alert.alert('送出失敗', err instanceof Error ? err.message : '請稍後再試');
+  //     }
+  //   },
+  //   [child, childId],
+  // );
+  // ─────────────────────────────────────────────────────────────────────
+
+  const handleRedeem = useCallback(
+    (item: WishItem) => {
+      Alert.alert(
+        '確認兌換',
+        `確定要用 ${formatNumber(item.coin_cost)} 枚金幣換「${item.name}」嗎？`,
+        [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '確定兌換',
+            style: 'default',
+            onPress: async () => {
+              try {
+                const { data: walletData, error: walletError } = await supabase
+                  .from('wallets')
+                  .select('id, balance')
+                  .eq('child_id', childId)
+                  .eq('wallet_type', 'spending')
+                  .single();
+
+                if (walletError) throw walletError;
+                if (!walletData) throw new Error('找不到錢包');
+
+                const newBalance = walletData.balance - item.coin_cost;
+                if (newBalance < 0) {
+                  Alert.alert('金幣不足', '金幣數量不夠喔！');
+                  return;
+                }
+
+                const { error: updateError } = await supabase
+                  .from('wallets')
+                  .update({ balance: newBalance })
+                  .eq('id', walletData.id);
+                if (updateError) throw updateError;
+
+                const { error: txError } = await supabase.from('transactions').insert({
+                  wallet_id: walletData.id,
+                  amount: item.coin_cost,
+                  type: 'redeem' as const,
+                  reference_id: item.id,
+                  reference_type: 'reward_item',
+                });
+                if (txError) throw txError;
+
+                const { error: rewardError } = await supabase
+                  .from('reward_items')
+                  .update({
+                    is_redeemed: true,
+                    redeemed_at: new Date().toISOString(),
+                    is_active: false,
+                  })
+                  .eq('id', item.id);
+                if (rewardError) throw rewardError;
+
+                await Promise.all([
+                  refreshWallet(),
+                  child?.familyId ? loadWishes(child.familyId) : Promise.resolve(),
+                ]);
+
+                Alert.alert('兌換成功！', `「${item.name}」換到了！記得去找爸媽領取喔 🎉`);
+              } catch (err) {
+                console.error('[WishScreen] handleRedeem error:', err);
+                Alert.alert('兌換失敗', err instanceof Error ? err.message : '請稍後再試');
+              }
+            },
+          },
+        ],
+      );
+    },
+    [child, childId, loadWishes, refreshWallet],
+  );
+
+  const handleWishModalSubmit = useCallback(
+    async (wishText: string) => {
+      if (!child) {
+        Alert.alert('資料還在載入', '請稍後再試');
+        return;
+      }
+
+      if (!wishText.trim()) {
+        Alert.alert('請說出或輸入願望', '例如：去書店挑一本繪本');
+        return;
+      }
+
+      setSaving(true);
+      try {
+        const { error } = await supabase.from('reward_items').insert({
+          family_id: child.familyId,
+          child_id: childId,
+          name: wishText.trim(),
+          reward_type: 'item',
+          coin_cost: 0,
+          added_by: 'child',
+          parent_approved: false,
+          is_active: true,
+        });
+
+        if (error) throw error;
+
+        if (child?.familyId) {
+          await loadWishes(child.familyId);
+        }
+
+        Alert.alert('許願成功！', '許願樹已經收到你的願望了 ✨');
+      } catch (err) {
+        console.error('[WishScreen] handleWishModalSubmit error:', err);
+        Alert.alert('許願失敗', err instanceof Error ? err.message : '請稍後再試');
+      } finally {
+        setSaving(false);
+      }
+    },
+    [child, childId, loadWishes],
+  );
+
+  function WishCard({ item }: { item: WishItem }) {
+    const isReady = item.parent_approved && item.coin_cost > 0 && balance >= item.coin_cost;
+    const isPending = item.added_by === 'child' && !item.parent_approved;
+    const isPrivilege = item.reward_type === 'privilege';
+    const emoji = isPrivilege ? '👑' : '🎁';
+
+    return (
+      <View
+        style={[
+          styles.card,
+          isReady && styles.cardReady,
+          !isReady && !isPending && styles.cardDimmed,
+        ]}
+      >
+        <View style={styles.cardRow}>
+          {/* 名稱（含 emoji icon） */}
+          <Text style={styles.cardName} numberOfLines={1} ellipsizeMode="tail">
+            {emoji} {item.name}
+          </Text>
+
+          {/* 金幣 */}
+          <View style={[styles.coinBadge, !item.parent_approved && styles.coinBadgeDim]}>
+            <CoinIcon size={11} />
+            <Text style={[styles.coinBadgeText, !item.parent_approved && styles.coinBadgeTextDim]}>
+              {item.coin_cost > 0 ? formatNumber(item.coin_cost) : '?'}
+            </Text>
+          </View>
+
+          {/* 兌換 / 取消 按鈕 */}
+          {isReady ? (
+            <TouchableOpacity
+              style={styles.btnRedeem}
+              onPress={() => handleRedeem(item)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.btnRedeemText}>兌換</Text>
+            </TouchableOpacity>
+          ) : isPending ? (
+            <TouchableOpacity
+              style={styles.btnCancel}
+              onPress={() => handleRemoveWish(item.id)}
+              activeOpacity={0.75}
+            >
+              <Text style={styles.btnCancelText}>取消</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      </View>
+    );
+  }
+
+  function renderWishCard(item: WishItem) {
+    return <WishCard key={item.id} item={item} />;
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.headerTitle}>願望池</Text>
-          <Text style={styles.headerSub}>想要的先放這裡</Text>
-        </View>
+      {/* 許願樹 Hero 區域 */}
+      <View style={styles.treeSection}>
+        {/* 金幣餘額 chip */}
         <TouchableOpacity
-          style={styles.balanceChip}
+          style={styles.coinChip}
           onPress={() => navigation.navigate('Wallet', { childId })}
           activeOpacity={0.85}
         >
-          <CoinIcon size={24} />
-          <Text style={styles.balanceText}>{formatNumber(balance)}</Text>
+          <CoinIcon size={18} />
+          <Text style={styles.coinChipText}>{formatNumber(balance)}</Text>
+        </TouchableOpacity>
+
+        {/* 裝飾背景泡泡 */}
+        <View style={styles.treeDecoration}>
+          <View style={styles.pebble1} />
+          <View style={styles.pebble2} />
+          <View style={styles.pebble3} />
+        </View>
+
+        <Text style={styles.treeTitle}>✨ 許願樹</Text>
+        <WishTreeComponent onPress={() => setWishModalVisible(true)} size={150} />
+
+        <TouchableOpacity
+          style={styles.wishBtn}
+          onPress={() => setWishModalVisible(true)}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.wishBtnText}>🌟 許一個願望</Text>
         </TouchableOpacity>
       </View>
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={Colors.coral500} />}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.heroCard}>
-          <View style={styles.heroBadge}>
-            <StarIcon size={22} />
-          </View>
-          <Text style={styles.heroTitle}>把想要的存起來</Text>
-          <Text style={styles.heroSub}>{pendingCount > 0 ? `有 ${pendingCount} 個先等等` : '先寫下來，再慢慢存'}</Text>
+      {/* 列表區域 */}
+      <View style={styles.listSection}>
+        {/* Tab 切換 */}
+        <View style={styles.tabs}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'privilege' && styles.tabActive]}
+            onPress={() => setActiveTab('privilege')}
+            activeOpacity={0.75}
+          >
+            <Text style={[styles.tabText, activeTab === 'privilege' && styles.tabTextActive]}>
+              👑 特權
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'item' && styles.tabActive]}
+            onPress={() => setActiveTab('item')}
+            activeOpacity={0.75}
+          >
+            <Text style={[styles.tabText, activeTab === 'item' && styles.tabTextActive]}>
+              🎁 獎品
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <View style={styles.statIconWrap}>
-              <WalletIcon size={22} />
-            </View>
-            <Text style={styles.statValue}>{formatNumber(balance)}</Text>
-            <Text style={styles.statLabel}>目前金幣</Text>
-          </View>
-
-          <View style={styles.statCard}>
-            <View style={styles.statIconWrap}>
-              <StarIcon size={22} />
-            </View>
-            <Text style={styles.statValue}>{readyCount}</Text>
-            <Text style={styles.statLabel}>可兌換</Text>
-          </View>
-        </View>
-
-        <View style={styles.panel}>
-          <Text style={styles.panelTitle}>新增願望</Text>
-          <Text style={styles.panelSub}>寫一句就好</Text>
-
-          <TextInput
-            style={styles.input}
-            value={title}
-            onChangeText={setTitle}
-            placeholder="例如：去書店挑一本繪本"
-            placeholderTextColor={Colors.ink300}
-          />
-
-          <View style={styles.inputRow}>
-            <TextInput
-              style={[styles.input, styles.costInput]}
-              value={cost}
-              onChangeText={text => setCost(cleanCostInput(text))}
-              placeholder="金幣數"
-              placeholderTextColor={Colors.ink300}
-              keyboardType="number-pad"
+        {/* 卡片列表 */}
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={Colors.coral500}
             />
-            <TouchableOpacity style={[styles.addBtn, saving && styles.addBtnDisabled]} onPress={handleAddWish} disabled={saving} activeOpacity={0.85}>
-              <Text style={styles.addBtnText}>{saving ? '加入中' : '加入'}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.listHeader}>
-          <Text style={styles.listTitle}>我的願望</Text>
-          <Text style={styles.listMeta}>{filteredWishes.length} 個</Text>
-        </View>
-
-        {loading || walletLoading ? (
-          <View style={styles.loadingCard}>
-            <Text style={styles.loadingText}>願望池整理中…</Text>
-          </View>
-        ) : filteredWishes.length > 0 ? (
-          <View style={styles.list}>
-            {filteredWishes.map(item => {
-              const isReady = item.parent_approved && item.coin_cost > 0 && balance >= item.coin_cost;
-              const isPending = item.added_by === 'child' && !item.parent_approved;
-
-              return (
-                <View
-                  key={item.id}
-                  style={[
-                    styles.wishCard,
-                    isReady && styles.wishCardReady,
-                    isPending && styles.wishCardPending,
-                  ]}
-                >
-                  <View style={[styles.wishIconWrap, isReady && styles.wishIconWrapReady]}>
-                    <StarIcon size={26} />
-                  </View>
-
-                  <View style={styles.wishMid}>
-                    <Text style={styles.wishTitle} numberOfLines={1}>{item.name}</Text>
-                    <Text style={styles.wishSub}>{isPending ? '等爸媽看看' : isReady ? '存夠了，可以換' : `還差 ${Math.max(0, item.coin_cost - balance)} 顆`}</Text>
-                  </View>
-
-                  <View style={styles.costPill}>
-                    <CoinIcon size={18} />
-                    <Text style={styles.costText}>{item.coin_cost || '?'}</Text>
-                  </View>
-
-                  {isPending ? (
-                    <TouchableOpacity style={styles.removeBtn} onPress={() => handleRemoveWish(item.id)} activeOpacity={0.75} accessibilityLabel="刪除願望">
-                      <Text style={styles.removeBtnText}>×</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              );
-            })}
-          </View>
-        ) : (
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIconWrap}>
-              <StarIcon size={32} />
+          }
+          showsVerticalScrollIndicator={false}
+        >
+          {loading || walletLoading ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyIcon}>🌱</Text>
+              <Text style={styles.emptyText}>載入中⋯</Text>
             </View>
-            <Text style={styles.emptyTitle}>還沒有願望</Text>
-            <Text style={styles.emptySub}>先寫下一個，再慢慢存。</Text>
-          </View>
-        )}
-
-        <View style={styles.bottomPad} />
-      </ScrollView>
+          ) : displayList.length > 0 ? (
+            <View style={styles.cardList}>
+              {displayList.map(item => renderWishCard(item))}
+            </View>
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyIcon}>
+                {activeTab === 'privilege' ? '👑' : '🎁'}
+              </Text>
+              <Text style={styles.emptyTitle}>
+                {activeTab === 'privilege' ? '還沒有特權' : '願望池是空的'}
+              </Text>
+              <Text style={styles.emptyText}>
+                {activeTab === 'privilege'
+                  ? '點上面的許願樹，告訴它你想要什麼特權吧！'
+                  : '快去點上面的許願樹，許下你的第一個願望！'}
+              </Text>
+              <TouchableOpacity
+                style={styles.emptyBtn}
+                onPress={() => setWishModalVisible(true)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.emptyBtnText}>
+                  {activeTab === 'privilege' ? '👑 許一個特權' : '🌟 許一個願望'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          <View style={styles.bottomPad} />
+        </ScrollView>
+      </View>
 
       <BottomNav
         activeTab="wish"
         onTabPress={tab => {
-          if (tab === 'home') {
-            navigation.navigate('Home', { childId });
-          } else if (tab === 'wallet') {
-            navigation.navigate('Wallet', { childId });
-          } else if (tab === 'profile') {
-            navigation.navigate('Profile', { childId });
-          }
+          if (tab === 'home') navigation.navigate('Home', { childId });
+          else if (tab === 'wallet') navigation.navigate('Wallet', { childId });
+          else if (tab === 'profile') navigation.navigate('Profile', { childId });
         }}
+      />
+
+      <WishModalComponent
+        visible={wishModalVisible}
+        onClose={() => setWishModalVisible(false)}
+        onSubmit={handleWishModalSubmit}
+        childNickname={child?.nickname ?? '小寶貝'}
       />
     </SafeAreaView>
   );
@@ -422,347 +549,270 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.bgCanvas,
   },
+
+  /* ── Tree hero ── */
+  treeSection: {
+    backgroundColor: Colors.bgSurfaceWarm,
+    paddingTop: 12,
+    paddingBottom: 20,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    borderBottomWidth: 0.5,
+    borderBottomColor: Colors.borderSoft,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  treeTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#6a8040',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  coinChip: {
+    position: 'absolute',
+    top: 14,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: Colors.bgSurface,
+    paddingVertical: 5,
+    paddingLeft: 5,
+    paddingRight: 11,
+    borderRadius: 999,
+    shadowColor: Colors.shadowWarm,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 3,
+    zIndex: 10,
+  },
+  coinChipText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: Colors.gold700,
+  },
+  treeDecoration: {
+    position: 'absolute',
+    inset: 0,
+    pointerEvents: 'none',
+  } as never,
+  pebble1: {
+    position: 'absolute',
+    width: 110,
+    height: 110,
+    borderRadius: 55,
+    backgroundColor: 'rgba(160,200,80,0.07)',
+    top: -30,
+    left: -25,
+  },
+  pebble2: {
+    position: 'absolute',
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: 'rgba(160,200,80,0.06)',
+    bottom: -10,
+    right: 15,
+  },
+  pebble3: {
+    position: 'absolute',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(245,184,0,0.05)',
+    top: 10,
+    left: '40%',
+  },
+  wishBtn: {
+    marginTop: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 32,
+    borderRadius: 24,
+    backgroundColor: Colors.coral500,
+    shadowColor: Colors.shadowWarm,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  wishBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+
+  /* ── List section ── */
+  listSection: {
+    flex: 1,
+    backgroundColor: Colors.bgCanvas,
+    paddingTop: 12,
+  },
+
+  /* ── Tabs ── */
+  tabs: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.borderSoft,
+    alignItems: 'center',
+    backgroundColor: Colors.bgSurface,
+  },
+  tabActive: {
+    backgroundColor: Colors.coral500,
+    borderColor: Colors.coral500,
+  },
+  tabText: {
+    fontSize: 13,
+    color: Colors.ink500,
+    fontWeight: '600',
+  },
+  tabTextActive: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+
+  /* ── Scroll + cards ── */
   scroll: {
     flex: 1,
   },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingTop: 8,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: 12,
-    backgroundColor: 'rgba(255, 248, 238, 0.88)',
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 14,
-    borderRadius: 24,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    elevation: 4,
-  },
-  headerLeft: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: Colors.ink900,
-    lineHeight: 26,
-  },
-  headerSub: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.ink500,
-    marginTop: 2,
-  },
-  balanceChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: Colors.bgSurface,
-    paddingVertical: 6,
-    paddingLeft: 6,
-    paddingRight: 12,
-    borderRadius: 999,
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    elevation: 3,
-  },
-  balanceText: {
-    fontWeight: '800',
-    fontSize: 16,
-    color: Colors.gold700,
-  },
-  heroCard: {
-    backgroundColor: Colors.gold100,
-    borderRadius: 20,
-    paddingVertical: 20,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    elevation: 4,
-    marginBottom: 14,
-    minHeight: 124,
-  },
-  heroBadge: {
-    marginBottom: 8,
-  },
-  heroTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: Colors.ink900,
-    lineHeight: 28,
-    textAlign: 'center',
-  },
-  heroSub: {
-    marginTop: 4,
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.ink700,
-    textAlign: 'center',
-  },
-  statsRow: {
-    flexDirection: 'row',
+  cardList: {
     gap: 10,
-    marginBottom: 14,
   },
-  statCard: {
-    flex: 1,
+
+  /* ── Card ── */
+  card: {
     backgroundColor: Colors.bgSurface,
-    borderRadius: 20,
-    padding: 16,
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.14,
-    shadowRadius: 16,
-    elevation: 3,
-  },
-  statIconWrap: {
-    width: 40,
-    height: 40,
     borderRadius: 14,
-    backgroundColor: Colors.gold100,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: Colors.ink900,
-    fontVariant: ['tabular-nums'],
-    marginBottom: 2,
-  },
-  statLabel: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.ink700,
-  },
-  panel: {
-    backgroundColor: Colors.bgSurface,
-    borderRadius: 20,
-    padding: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 3,
-    marginBottom: 14,
-  },
-  panelTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: Colors.ink900,
-  },
-  panelSub: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.ink500,
-    marginTop: 2,
-    marginBottom: 12,
-  },
-  input: {
-    backgroundColor: Colors.bgCanvas,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: Colors.cream300,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: Colors.ink900,
-    fontWeight: '600',
-  },
-  inputRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 10,
-  },
-  costInput: {
-    flex: 1,
-  },
-  addBtn: {
-    backgroundColor: Colors.coral500,
-    borderRadius: 999,
-    paddingHorizontal: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 72,
-    shadowColor: Colors.coral700,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 6,
     elevation: 2,
   },
-  addBtnDisabled: {
-    opacity: 0.6,
+  cardReady: {
+    borderWidth: 1,
+    borderColor: Colors.gold300,
+    shadowColor: Colors.shadowGold,
+    shadowOpacity: 0.18,
   },
-  addBtnText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '800',
+  cardDimmed: {
+    opacity: 0.42,
   },
-  listHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-    paddingHorizontal: 4,
-  },
-  listTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: Colors.ink900,
-  },
-  listMeta: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.ink500,
-  },
-  loadingCard: {
-    backgroundColor: Colors.bgSurface,
-    borderRadius: 20,
-    minHeight: 140,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 3,
-  },
-  loadingText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.ink500,
-  },
-  list: {
-    gap: 10,
-  },
-  wishCard: {
-    backgroundColor: Colors.bgSurface,
-    borderRadius: 20,
-    padding: 14,
+  cardRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 3,
+    gap: 8,
   },
-  wishCardReady: {
-    backgroundColor: Colors.gold100,
-    shadowOpacity: 0.16,
-  },
-  wishCardPending: {
-    backgroundColor: Colors.cream100,
-  },
-  wishIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: Colors.gold100,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  wishIconWrapReady: {
-    backgroundColor: Colors.bgSurface,
-  },
-  wishMid: {
+  cardName: {
     flex: 1,
-    minWidth: 0,
-  },
-  wishTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: Colors.ink900,
-    lineHeight: 21,
-  },
-  wishSub: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
-    color: Colors.ink500,
-    marginTop: 2,
+    color: Colors.ink900,
   },
-  costPill: {
+  coinBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    backgroundColor: Colors.bgSurface,
-    paddingVertical: 5,
-    paddingLeft: 5,
-    paddingRight: 10,
-    borderRadius: 999,
+    gap: 3,
+    backgroundColor: Colors.gold100,
+    borderRadius: 8,
+    paddingVertical: 3,
+    paddingHorizontal: 7,
     flexShrink: 0,
   },
-  costText: {
-    fontSize: 14,
-    fontWeight: '800',
+  coinBadgeDim: {
+    backgroundColor: Colors.cream200,
+  },
+  coinBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
     color: Colors.gold700,
   },
-  removeBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: Colors.bgSurface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 2,
+  coinBadgeTextDim: {
+    color: Colors.ink300,
   },
-  removeBtnText: {
-    fontSize: 18,
-    lineHeight: 18,
-    fontWeight: '800',
-    color: Colors.ink500,
+
+  /* ── Action buttons ── */
+  btnRedeem: {
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: Colors.gold100,
+    borderWidth: 1,
+    borderColor: Colors.gold300,
+    flexShrink: 0,
   },
+  btnRedeemText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.gold700,
+  },
+  btnCancel: {
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(240,140,106,0.08)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(240,140,106,0.25)',
+    flexShrink: 0,
+  },
+  btnCancelText: {
+    fontSize: 11,
+    color: Colors.coral600,
+  },
+
+  /* ── Empty state ── */
   emptyState: {
-    backgroundColor: Colors.bgSurface,
-    borderRadius: 20,
-    paddingVertical: 28,
-    paddingHorizontal: 20,
+    paddingVertical: 44,
     alignItems: 'center',
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 3,
+    paddingHorizontal: 24,
   },
-  emptyIconWrap: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
-    backgroundColor: Colors.cream100,
-    alignItems: 'center',
-    justifyContent: 'center',
+  emptyIcon: {
+    fontSize: 48,
     marginBottom: 12,
   },
   emptyTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '800',
-    color: Colors.ink900,
+    color: Colors.ink700,
+    marginBottom: 6,
   },
-  emptySub: {
-    marginTop: 6,
+  emptyText: {
     fontSize: 13,
-    fontWeight: '600',
     color: Colors.ink500,
     textAlign: 'center',
-    lineHeight: 18,
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  emptyBtn: {
+    paddingVertical: 11,
+    paddingHorizontal: 30,
+    borderRadius: 24,
+    backgroundColor: Colors.coral500,
+    shadowColor: Colors.shadowWarm,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.16,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  emptyBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
   },
   bottomPad: {
     height: 20,
