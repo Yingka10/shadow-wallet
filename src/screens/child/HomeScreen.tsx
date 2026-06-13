@@ -28,6 +28,7 @@ import { CoinIcon, WaveIcon } from '../../components/icons/TaskIcons';
 import { completeTask, createChildTask } from '../../lib/taskActions';
 import { supabase } from '../../lib/supabase';
 import { Colors } from '../../constants/colors';
+import { webFullHeight } from '../../constants/webStyles';
 import type { AgeGroup, Task } from '../../types/database';
 
 type HomeRoute = RouteProp<RootStackParamList, 'Home'>;
@@ -213,7 +214,7 @@ export default function HomeScreen() {
   }, [refresh]);
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <SafeAreaView style={[styles.safe, webFullHeight]} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>

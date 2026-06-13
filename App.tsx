@@ -1,5 +1,6 @@
 import 'react-native-gesture-handler';
 import React from 'react';
+import { Platform, View, useWindowDimensions } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -61,26 +62,47 @@ export type RootStackParamList = {
 const Stack = createStackNavigator<RootStackParamList>();
 
 export default function App() {
+  const { height } = useWindowDimensions();
+
   return (
     <SafeAreaProvider>
-      <NavigationContainer>
-        <Stack.Navigator
-          initialRouteName="Entry"
-          screenOptions={{ headerShown: false }}
-        >
-          <Stack.Screen name="Entry" component={EntryScreen} />
-          <Stack.Screen name="ParentLogin" component={ParentLoginScreen} />
-          <Stack.Screen name="ChildLogin" component={ChildLoginScreen} />
-          <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-          <Stack.Screen name="Home" component={HomeScreen} />
-          <Stack.Screen name="Profile" component={ProfileScreen} />
-          <Stack.Screen name="Parent" component={ParentScreen} />
-          <Stack.Screen name="GoalSetup" component={GoalSetupScreen} />
-          <Stack.Screen name="TaskSelection" component={TaskSelectionScreen} />
-          <Stack.Screen name="Overview" component={OverviewScreen} />
-          <Stack.Screen name="LongTermDetail" component={LongTermDetailScreen} />
-        </Stack.Navigator>
-      </NavigationContainer>
+      <SelectedChildProvider>
+        <NavigationContainer>
+          <Stack.Navigator
+            initialRouteName="Entry"
+            screenOptions={{
+              headerShown: false,
+              cardStyle: Platform.OS === 'web' ? { height } : { flex: 1 },
+            }}
+          >
+            {/* ── Auth ──────────────────────────────────────── */}
+            <Stack.Screen name="Entry" component={EntryScreen} />
+            <Stack.Screen name="ParentLogin" component={ParentLoginScreen} />
+            <Stack.Screen name="ChildLogin" component={ChildLoginScreen} />
+
+            {/* ── Onboarding ────────────────────────────────── */}
+            <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+            <Stack.Screen name="GoalSetup" component={GoalSetupScreen} />
+            <Stack.Screen name="TaskSelection" component={TaskSelectionScreen} />
+            <Stack.Screen name="Overview" component={OverviewScreen} />
+
+            {/* ── Child side ────────────────────────────────── */}
+            <Stack.Screen name="Home" component={HomeScreen} />
+            <Stack.Screen name="Wallet" component={WalletScreen} />
+            <Stack.Screen name="Wish" component={WishScreen} />
+            <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen name="LongTermDetail" component={LongTermDetailScreen} />
+
+            {/* ── Parent side ───────────────────────────────── */}
+            <Stack.Screen name="ParentTab" component={ParentTabNavigator} />
+            <Stack.Screen name="ParentTaskDetail" component={ParentTaskDetailScreen} />
+            <Stack.Screen name="ObservationHistory" component={ObservationHistoryScreen} />
+            <Stack.Screen name="ParentTaskCreate" component={ParentTaskCreateScreen} />
+            <Stack.Screen name="ParentLongTermCreate" component={ParentLongTermCreateScreen} />
+            <Stack.Screen name="ParentSettings" component={ParentSettingsScreen} />
+          </Stack.Navigator>
+        </NavigationContainer>
+      </SelectedChildProvider>
     </SafeAreaProvider>
   );
 }

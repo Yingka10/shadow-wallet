@@ -5,7 +5,6 @@ import {
   ScrollView,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,6 +14,7 @@ import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../../../App';
 import { supabase } from '../../lib/supabase';
 import { Colors } from '../../constants/colors';
+import { webFullHeight } from '../../constants/webStyles';
 import BottomNav from '../../components/BottomNav';
 import { CoinIcon, WaveIcon } from '../../components/icons/TaskIcons';
 
@@ -46,7 +46,6 @@ export default function ProfileScreen() {
   const [wallet, setWallet] = useState<WalletData | null>(null);
   const [stats, setStats] = useState<CompletionStat>({ completedCount: 0, totalCount: 0 });
   const [loading, setLoading] = useState(true);
-  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     void loadData();
@@ -115,32 +114,8 @@ export default function ProfileScreen() {
     }
   }
 
-  async function handleLogout() {
-    Alert.alert('確認登出', '你確定要登出嗎？', [
-      {
-        text: '取消',
-        onPress: () => {},
-        style: 'cancel',
-      },
-      {
-        text: '登出',
-        onPress: async () => {
-          setLoggingOut(true);
-          try {
-            await supabase.auth.signOut();
-            navigation.reset({
-              index: 0,
-              routes: [{ name: 'Entry' }],
-            });
-          } catch (err) {
-            Alert.alert('登出失敗', err instanceof Error ? err.message : '發生錯誤');
-          } finally {
-            setLoggingOut(false);
-          }
-        },
-        style: 'destructive',
-      },
-    ]);
+  function handleLogout() {
+    navigation.reset({ index: 0, routes: [{ name: 'ChildLogin' }] });
   }
 
   function calculateAge(birthDate: string): number {
@@ -151,7 +126,7 @@ export default function ProfileScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.safe} edges={['top']}>
+      <SafeAreaView style={[styles.safe, webFullHeight]} edges={['top']}>
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color={Colors.coral500} />
         </View>
@@ -162,13 +137,25 @@ export default function ProfileScreen() {
   const age = child ? calculateAge(child.birthDate) : 0;
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* Header Card */}
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <Text style={styles.greeting}>👋 {child?.nickname} 的小檔案</Text>
-            <Text style={styles.greetSub}>看看這週的成果吧！</Text>
+    <SafeAreaView style={[styles.safe, webFullHeight]} edges={['top']}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.headerCard}>
+          <View style={styles.headerMain}>
+            <View style={styles.avatarWrap}>
+              <Text style={styles.avatarText}>{nickname.charAt(0)}</Text>
+            </View>
+            <View style={styles.headerTextCol}>
+              <Text style={styles.greeting}>{greeting}，{nickname}</Text>
+              <Text style={styles.greetSub}>今天也一起把任務完成吧！</Text>
+            </View>
+          </View>
+          <View style={styles.coinPill}>
+            <CoinIcon size={24} />
+            <Text style={styles.coinPillText}>{coinBalance}</Text>
           </View>
         </View>
 
@@ -242,23 +229,22 @@ export default function ProfileScreen() {
             <WaveIcon />
           </View>
 
-          <TouchableOpacity
-            style={[styles.actionButton, styles.logoutButton]}
-            onPress={handleLogout}
-            disabled={loggingOut}
-          >
-            {loggingOut ? (
-              <ActivityIndicator color="#FFFFFF" size="small" />
-            ) : (
-              <>
-                <Text style={styles.logoutIcon}>🚪</Text>
-                <Text style={styles.logoutText}>登出帳號</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          <View style={styles.actionPanel}>
+            <View style={styles.actionHintRow}>
+              <View style={styles.actionHintIcon}>
+                <CheckIcon size={14} color={Colors.sage600} />
+              </View>
+              <Text style={styles.actionHintText}>回到選擇畫面，可切換其他帳號</Text>
+            </View>
 
-          <View style={styles.hint}>
-            <Text style={styles.hintText}>登出後需要重新輸入密碼才能登入。</Text>
+            <TouchableOpacity
+              style={styles.logoutButton}
+              onPress={handleLogout}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.logoutButtonIcon}>↩</Text>
+              <Text style={styles.logoutButtonText}>切換帳號</Text>
+            </TouchableOpacity>
           </View>
         </View>
 

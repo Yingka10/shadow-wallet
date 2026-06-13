@@ -43,6 +43,7 @@ export function useTodayTasks(childId: string): UseTodayTasksResult {
   const [isPrerequisiteMet, setIsPrerequisiteMet] = useState(false);
   const [loading, setLoading] = useState(true);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const channelNameRef = useRef(`task_completions:child_${childId}_${Date.now()}`);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -185,7 +186,7 @@ export function useTodayTasks(childId: string): UseTodayTasksResult {
 
       // Create new subscription channel
       const channel = supabase
-        .channel(`task_completions:child_${childId}`, { config: { broadcast: { self: false } } })
+        .channel(channelNameRef.current, { config: { broadcast: { self: false } } })
         .on(
           'postgres_changes',
           {
