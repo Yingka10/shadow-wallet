@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>Shadow Wallet</title>
+    <style>
+      /*
+        讓 React Native Web 的 flex:1 能正確撐滿視窗高度。
+        沒有這段，SafeAreaView 高度會等於內容高度，
+        導致 ScrollView 無法捲動、BottomNav 消失到可視區域外。
+      */
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        /* 讓 React Native 自己的 ScrollView 負責捲動，不讓瀏覽器捲動整頁 */
+        overflow: hidden;
+      }
+
+      #root {
+        display: flex;
+        width: 100%;
+        height: 100%;
+        flex-direction: column;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

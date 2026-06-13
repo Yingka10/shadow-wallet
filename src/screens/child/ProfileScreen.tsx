@@ -5,7 +5,6 @@ import {
   ScrollView,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,6 +14,7 @@ import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../../../App';
 import { supabase } from '../../lib/supabase';
 import { Colors } from '../../constants/colors';
+import { webFullHeight } from '../../constants/webStyles';
 import BottomNav from '../../components/BottomNav';
 import { CheckIcon, CoinIcon, HourglassIcon, SparkleIcon, StarIcon, TargetIcon, WaveIcon } from '../../components/icons/TaskIcons';
 
@@ -58,7 +58,6 @@ export default function ProfileScreen() {
     highlight: '這週開始養成習慣囉，繼續保持就會越來越穩定！',
   });
   const [loading, setLoading] = useState(true);
-  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     void loadData();
@@ -167,32 +166,8 @@ export default function ProfileScreen() {
     }
   }
 
-  async function handleLogout() {
-    Alert.alert('確認登出', '你確定要登出嗎？', [
-      {
-        text: '取消',
-        onPress: () => {},
-        style: 'cancel',
-      },
-      {
-        text: '登出',
-        onPress: async () => {
-          setLoggingOut(true);
-          try {
-            await supabase.auth.signOut();
-            navigation.reset({
-              index: 0,
-              routes: [{ name: 'Entry' }],
-            });
-          } catch (err) {
-            Alert.alert('登出失敗', err instanceof Error ? err.message : '發生錯誤');
-          } finally {
-            setLoggingOut(false);
-          }
-        },
-        style: 'destructive',
-      },
-    ]);
+  function handleLogout() {
+    navigation.reset({ index: 0, routes: [{ name: 'ChildLogin' }] });
   }
 
   function calculateAge(birthDate: string): number {
@@ -226,7 +201,7 @@ export default function ProfileScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.safe} edges={['top']}>
+      <SafeAreaView style={[styles.safe, webFullHeight]} edges={['top']}>
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color={Colors.coral500} />
         </View>
