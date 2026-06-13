@@ -1,0 +1,263 @@
+/* ==========================================================================
+   Shadow Wallet — Design Tokens
+   colors_and_type.css
+
+   Use as: <link rel="stylesheet" href="/colors_and_type.css">
+   Tokens prefixed with --sw- when there is a name-collision risk; otherwise
+   plain semantic names (--ink-900, --cream-50). Import order:
+     1. fonts (Google Fonts CDN — see fonts/README.md for offline copy)
+     2. :root tokens
+     3. semantic type styles
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Nunito:wght@400;600;700;800&family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
+
+:root {
+  /* ---------- COLORS ---------------------------------------------------- */
+
+  /* Cream (canvas + surfaces) */
+  --cream-50:  #FFF8EE;   /* page background */
+  --cream-100: #FFF2DF;   /* secondary surface */
+  --cream-200: #F8E8CE;   /* hover on cream surfaces */
+  --cream-300: #EDD7B4;   /* subtle border on cream */
+
+  /* Ink (text, strokes — warm dark brown, never pure black) */
+  --ink-900: #3B2A1E;
+  --ink-700: #5A4232;
+  --ink-500: #876A53;
+  --ink-300: #B89C82;
+  --ink-100: #E5D6C3;
+
+  /* Coral (primary brand warmth, CTAs) */
+  --coral-100: #FFE3D6;
+  --coral-300: #F8B49B;
+  --coral-500: #F08C6A;   /* primary */
+  --coral-600: #DB6E48;   /* press / error */
+  --coral-700: #B5552F;
+
+  /* Gold (coins, contribution cards, goal progress — "earned") */
+  --gold-100: #FFF0BF;
+  --gold-300: #FFD86B;
+  --gold-500: #F5B800;    /* the coin */
+  --gold-600: #D69A00;
+  --gold-700: #A87800;
+
+  /* Sky (duty task soft tint) */
+  --sky-100:  #E5F2F8;
+  --sky-200:  #C8E4F0;
+  --sky-400:  #95C5DD;
+  --sky-600:  #5994B3;
+
+  /* Sage (alt duty task soft tint, success) */
+  --sage-100: #ECF4E2;
+  --sage-200: #D4E8C8;
+  --sage-400: #A8C98D;
+  --sage-600: #6E9A55;
+
+  /* Lilac (parent / settings accents — quiet, used sparingly) */
+  --lilac-200: #E6DEF1;
+  --lilac-500: #9B82C7;
+
+  /* Semantic */
+  --bg-canvas:        var(--cream-50);
+  --bg-surface:       #FFFFFF;
+  --bg-surface-warm:  var(--cream-100);
+  --bg-duty:          var(--sky-200);     /* duty-task card */
+  --bg-duty-alt:      var(--sage-200);    /* alt duty card */
+  --bg-contribution:  var(--gold-100);    /* contribution-task card */
+  --bg-contribution-strong: var(--gold-300);
+
+  --fg-primary:    var(--ink-900);
+  --fg-secondary:  var(--ink-700);
+  --fg-muted:      var(--ink-500);
+  --fg-on-coral:   #FFFFFF;
+  --fg-on-gold:    var(--ink-900);
+
+  --border-soft:   rgba(95, 60, 30, 0.10);
+  --border-medium: rgba(95, 60, 30, 0.18);
+
+  --accent:        var(--coral-500);
+  --accent-press:  var(--coral-600);
+  --success:       var(--sage-600);
+  --warning:       var(--coral-500);   /* warm, never red */
+  --info:          var(--sky-600);
+
+  /* ---------- TYPE ------------------------------------------------------ */
+
+  --font-display: "Baloo 2", "Noto Sans TC", system-ui, sans-serif;
+  --font-body:    "Nunito",  "Noto Sans TC", system-ui, sans-serif;
+  --font-mono:    ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Type scale (mobile-first, kids-readable) */
+  --fs-12: 12px;   /* meta / fine print */
+  --fs-14: 14px;   /* secondary */
+  --fs-16: 16px;   /* body min */
+  --fs-18: 18px;   /* body large */
+  --fs-20: 20px;   /* card title */
+  --fs-24: 24px;   /* section title */
+  --fs-28: 28px;   /* hero title */
+  --fs-32: 32px;   /* goal headline */
+  --fs-40: 40px;   /* coin count celebration */
+
+  --lh-tight:  1.20;
+  --lh-snug:   1.35;
+  --lh-normal: 1.50;
+  --lh-loose:  1.65;
+
+  --fw-regular: 400;
+  --fw-medium:  500;
+  --fw-semi:    600;
+  --fw-bold:    700;
+  --fw-black:   800;
+
+  /* ---------- SPACING --------------------------------------------------- */
+
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  --gutter:    16px;   /* mobile horizontal gutter */
+  --card-pad:  20px;   /* default card padding */
+  --card-pad-lg: 24px; /* hero/goal card padding */
+
+  /* ---------- RADII ----------------------------------------------------- */
+
+  --r-sm:   8px;
+  --r-md:   12px;
+  --r-lg:   20px;   /* house card radius */
+  --r-xl:   28px;
+  --r-pill: 999px;
+
+  /* ---------- SHADOWS --------------------------------------------------- */
+
+  --shadow-card:    0 6px 18px -8px rgba(95, 60, 30, 0.18);
+  --shadow-card-hover: 0 10px 24px -10px rgba(95, 60, 30, 0.22);
+  --shadow-pressed: inset 0 2px 4px rgba(95, 60, 30, 0.14);
+  --shadow-goal:    0 12px 32px -12px rgba(245, 184, 0, 0.45);
+  --ring-focus:     0 0 0 2px var(--cream-50), 0 0 0 4px var(--coral-500);
+  --inner-glow-gold: inset 0 0 0 1.5px rgba(245, 184, 0, 0.45);
+
+  /* ---------- MOTION ---------------------------------------------------- */
+
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast:    140ms;
+  --dur-base:    220ms;
+  --dur-slow:    420ms;
+}
+
+/* ==========================================================================
+   Semantic type styles
+   Apply directly: <h1>, <h2>, .body, .meta, etc.
+   ========================================================================== */
+
+html, body {
+  font-family: var(--font-body);
+  font-size: var(--fs-16);
+  line-height: var(--lh-normal);
+  color: var(--fg-primary);
+  background: var(--bg-canvas);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, .h1 {
+  font-family: var(--font-display);
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-32);
+  line-height: var(--lh-tight);
+  letter-spacing: -0.01em;
+  color: var(--fg-primary);
+  margin: 0;
+}
+
+h2, .h2 {
+  font-family: var(--font-display);
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-24);
+  line-height: var(--lh-snug);
+  color: var(--fg-primary);
+  margin: 0;
+}
+
+h3, .h3 {
+  font-family: var(--font-display);
+  font-weight: var(--fw-semi);
+  font-size: var(--fs-20);
+  line-height: var(--lh-snug);
+  color: var(--fg-primary);
+  margin: 0;
+}
+
+.hero {
+  font-family: var(--font-display);
+  font-weight: var(--fw-black);
+  font-size: var(--fs-40);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.body, p {
+  font-family: var(--font-body);
+  font-weight: var(--fw-regular);
+  font-size: var(--fs-16);
+  line-height: var(--lh-normal);
+  color: var(--fg-primary);
+  margin: 0;
+  text-wrap: pretty;
+}
+
+.body-lg {
+  font-size: var(--fs-18);
+  line-height: var(--lh-normal);
+}
+
+.meta, small {
+  font-family: var(--font-body);
+  font-weight: var(--fw-semi);
+  font-size: var(--fs-14);
+  line-height: var(--lh-snug);
+  color: var(--fg-muted);
+}
+
+.coin-count {
+  font-family: var(--font-display);
+  font-weight: var(--fw-black);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--gold-700);
+}
+
+.label {
+  font-family: var(--font-body);
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-12);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-muted);
+}
+
+code, .mono {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--cream-100);
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+}
+
+::selection { background: var(--gold-300); color: var(--ink-900); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

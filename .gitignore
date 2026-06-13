@@ -43,3 +43,15 @@ yarn-error.*
 .env
 .env.local
 .env.production
+
+# local analysis & scratch docs
+DATA_SOURCE_ANALYSIS.md
+GAP_ANALYSIS.md
+scratch/
+docs/
+
+# AI tooling (local only)
+.agents/
+.superpowers/
+skills-lock.json
+/.codegraph

@@ -13,6 +13,15 @@ jest.mock('../../../hooks/useTodayTasks', () => ({
   }),
 }));
 
+jest.mock('../../../hooks/useWallet', () => ({
+  useWallet: () => ({
+    spending: { balance: 42 },
+    saving: null,
+    loading: false,
+    refresh: jest.fn(),
+  }),
+}));
+
 jest.mock('@react-navigation/native', () => ({
   useRoute: () => ({ params: { childId: 'child-1' } }),
   useNavigation: () => ({ replace: jest.fn(), navigate: jest.fn() }),
@@ -37,9 +46,9 @@ describe('HomeScreen', () => {
     ).toBeTruthy();
   });
 
-  it('renders coin pill with mock balance', () => {
+  it('renders coin pill with wallet balance', () => {
     render(<HomeScreen />);
-    expect(screen.getByText('128')).toBeTruthy();
+    expect(screen.getByText('42')).toBeTruthy();
   });
 
   it('renders bottom nav tabs', () => {

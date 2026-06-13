@@ -1,6 +1,22 @@
-jest.mock('../supabase', () => ({ supabase: {} }));
+// eslint-disable-next-line prefer-const -- let allows reassignment in beforeEach
+let mockRpc = jest.fn();
+// eslint-disable-next-line prefer-const
+let mockFrom = jest.fn();
 
-import { calcCoin, checkMilestone, getPrevCheckpoint } from '../taskActions';
+jest.mock('../supabase', () => ({
+  supabase: {
+    // closures evaluated at call-time, not at mock-factory-time
+    rpc: (...args: unknown[]) => mockRpc(...args),
+    from: (...args: unknown[]) => mockFrom(...args),
+  },
+}));
+
+beforeEach(() => {
+  mockRpc = jest.fn();
+  mockFrom = jest.fn();
+});
+
+import { calcCoin, checkMilestone, getPrevCheckpoint, OVERRIDE_TYPE_MAP, parentMarkTask, isActiveDayForHabit, applyHabitResume } from '../taskActions';
 import type { Task, CheckpointRewards } from '../../types/database';
 
 function makeTask(overrides: Partial<Task>): Task {
@@ -21,7 +37,6 @@ function makeTask(overrides: Partial<Task>): Task {
     max_age: 9,
     is_active: true,
     time_saving_min: 0,
-    parent_task_id: null,
     created_at: '2026-01-01',
     ...overrides,
   };
@@ -112,5 +127,172 @@ describe('getPrevCheckpoint', () => {
 
   it('returns 0 when checkpoints is null', () => {
     expect(getPrevCheckpoint(10, null)).toBe(0);
+  });
+});
+
+// ── OVERRIDE_TYPE_MAP ─────────────────────────────────────────────────────────
+
+describe('OVERRIDE_TYPE_MAP', () => {
+  it('maps exceeded → renegotiate', () => {
+    expect(OVERRIDE_TYPE_MAP.exceeded).toBe('renegotiate');
+  });
+  it('maps partial → partial', () => {
+    expect(OVERRIDE_TYPE_MAP.partial).toBe('partial');
+  });
+  it('maps none → none', () => {
+    expect(OVERRIDE_TYPE_MAP.none).toBe('none');
+  });
+  it('maps other → renegotiate', () => {
+    expect(OVERRIDE_TYPE_MAP.other).toBe('renegotiate');
+  });
+});
+
+// ── parentMarkTask helpers ────────────────────────────────────────────────────
+
+// helper: build a supabase from()-chain whose .single() resolves to `result`
+function makeReadChain(result: { data: unknown; error: unknown }) {
+  const chain: Record<string, unknown> = {
+    select: () => chain,
+    eq:     () => chain,
+    gte:    () => chain,
+    lt:     () => chain,
+    single: () => Promise.resolve(result),
+  };
+  return chain;
+}
+
+// helper: build a from()-chain whose insert().select().single() resolves to `result`
+function makeInsertChain(result: { data: unknown; error: unknown }) {
+  const chain: Record<string, unknown> = {
+    insert: () => insertChain,
+  };
+  const insertChain: Record<string, unknown> = {
+    select: () => insertChain,
+    single: () => Promise.resolve(result),
+  };
+  return chain;
+}
+
+// helper: build a from()-chain whose update().eq() resolves to `{ error: null }`
+function makeUpdateChain() {
+  return {
+    update: () => ({
+      eq: () => Promise.resolve({ error: null }),
+    }),
+  };
+}
+
+// helper: build a from()-chain whose insert() (no .select()) resolves to `{ error: null }`
+function makeInsertOnlyChain() {
+  return {
+    insert: () => Promise.resolve({ error: null }),
+  };
+}
+
+describe('parentMarkTask', () => {
+  it('throws when my_parent_id returns null', async () => {
+    mockRpc.mockResolvedValueOnce({ data: null, error: null });
+    await expect(
+      parentMarkTask('task-1', 'child-1', 'exceeded', 10, null),
+    ).rejects.toThrow('找不到家長帳號');
+  });
+
+  it('throws when my_parent_id rpc errors', async () => {
+    mockRpc.mockResolvedValueOnce({ data: null, error: { message: 'auth error' } });
+    await expect(
+      parentMarkTask('task-1', 'child-1', 'exceeded', 10, null),
+    ).rejects.toThrow('找不到家長帳號');
+  });
+
+  it('throws when today completion is not found', async () => {
+    mockRpc.mockResolvedValueOnce({ data: 'parent-uuid', error: null });
+    mockFrom.mockReturnValueOnce(
+      makeReadChain({ data: null, error: { message: 'no rows' } }),
+    );
+    await expect(
+      parentMarkTask('task-1', 'child-1', 'exceeded', 10, null),
+    ).rejects.toThrow('找不到今日完成紀錄');
+  });
+});
+
+// ── isActiveDayForHabit ───────────────────────────────────────────────────────
+
+describe('isActiveDayForHabit', () => {
+  it('returns true for any dow when activeDays is null (every day active)', () => {
+    expect(isActiveDayForHabit(0, null)).toBe(true);
+    expect(isActiveDayForHabit(3, null)).toBe(true);
+    expect(isActiveDayForHabit(6, null)).toBe(true);
+  });
+
+  it('returns true when dow is in activeDays', () => {
+    expect(isActiveDayForHabit(1, [1, 2, 3, 4, 5])).toBe(true);
+    expect(isActiveDayForHabit(0, [0, 6])).toBe(true);
+  });
+
+  it('returns false when dow is not in activeDays', () => {
+    expect(isActiveDayForHabit(0, [1, 2, 3, 4, 5])).toBe(false);
+    expect(isActiveDayForHabit(6, [1, 2, 3, 4, 5])).toBe(false);
+  });
+
+  it('returns false when activeDays is empty array', () => {
+    expect(isActiveDayForHabit(1, [])).toBe(false);
+    expect(isActiveDayForHabit(0, [])).toBe(false);
+  });
+});
+
+// ── applyHabitResume — active_days gating ─────────────────────────────────────
+
+// Builds a .select().eq().eq().gte().lt().limit() chain resolving to `result`
+function makeReadLimitChain(result: { data: unknown }) {
+  const chain: Record<string, unknown> = {
+    select: () => chain,
+    eq:     () => chain,
+    gte:    () => chain,
+    lt:     () => chain,
+    limit:  () => Promise.resolve(result),
+  };
+  return chain;
+}
+
+describe('applyHabitResume — active_days gating', () => {
+  it('skips all DB calls when activeDays is empty (no valid days)', async () => {
+    await applyHabitResume('goal-1', 'child-1', 'task-1', 5, { '7': 20 }, []);
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it('queries DB and updates when activeDays is null and yesterday was missed', async () => {
+    mockFrom.mockReturnValueOnce(makeReadLimitChain({ data: [] }));      // completions: missed
+    mockFrom.mockReturnValueOnce(makeUpdateChain());                      // update current_day
+
+    await applyHabitResume('goal-1', 'child-1', 'task-1', 5, { '7': 20 }, null);
+
+    expect(mockFrom).toHaveBeenCalledTimes(2);
+    expect(mockFrom).toHaveBeenNthCalledWith(1, 'task_completions');
+    expect(mockFrom).toHaveBeenNthCalledWith(2, 'long_term_goals');
+  });
+
+  it('queries DB and updates when all 7 days active and yesterday was missed', async () => {
+    mockFrom.mockReturnValueOnce(makeReadLimitChain({ data: [] }));
+    mockFrom.mockReturnValueOnce(makeUpdateChain());
+
+    await applyHabitResume('goal-1', 'child-1', 'task-1', 5, { '7': 20 }, [0,1,2,3,4,5,6]);
+
+    expect(mockFrom).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not update when currentDay is 0 even if yesterday missed', async () => {
+    mockFrom.mockReturnValueOnce(makeReadLimitChain({ data: [] }));
+
+    await applyHabitResume('goal-1', 'child-1', 'task-1', 0, null, null);
+
+    expect(mockFrom).toHaveBeenCalledTimes(1); // completions checked, no update
+  });
+
+  it('does not update when yesterday was completed', async () => {
+    mockFrom.mockReturnValueOnce(makeReadLimitChain({ data: [{ id: 'comp-1' }] }));
+
+    await applyHabitResume('goal-1', 'child-1', 'task-1', 5, null, null);
+
+    expect(mockFrom).toHaveBeenCalledTimes(1); // completions checked, no update
   });
 });

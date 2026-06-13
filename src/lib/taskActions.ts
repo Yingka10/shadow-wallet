@@ -2,12 +2,125 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { supabase } from './supabase';
-import type { Task, CheckpointRewards } from '../types/database';
+import type { Task, CheckpointRewards, OverrideType } from '../types/database';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
+export type MarkOption = 'exceeded' | 'partial' | 'none' | 'other';
+
+export const OVERRIDE_TYPE_MAP: Record<MarkOption, OverrideType> = {
+  exceeded: 'renegotiate',
+  partial:  'partial',
+  none:     'none',
+  other:    'renegotiate',
+};
+
 const TZ = 'Asia/Taipei';
+
+/**
+ * Records a parent override for a child's completed task.
+ * Writes to overrides, optionally adjusts wallet + transactions,
+ * and updates task_completions.coin_earned / override_id / status.
+ *
+ * @throws when parent session is invalid, completion is not found, or any DB write fails
+ */
+export async function parentMarkTask(
+  taskId: string,
+  childId: string,
+  markOption: MarkOption,
+  adjustedCoin: number,
+  note: string | null,
+): Promise<void> {
+  const safeAdjustedCoin = Math.round(adjustedCoin);
+
+  // 1. Resolve parent ID
+  const { data: parentId, error: rpcError } = await supabase.rpc('my_parent_id');
+  if (rpcError != null || parentId == null) throw new Error('找不到家長帳號');
+
+  // 2. Find today's completion for this task + child
+  const today    = dayjs().tz(TZ).format('YYYY-MM-DD');
+  const tomorrow = dayjs().tz(TZ).add(1, 'day').format('YYYY-MM-DD');
+
+  const { data: completion, error: completionError } = await supabase
+    .from('task_completions')
+    .select('id, coin_earned')
+    .eq('task_id', taskId)
+    .eq('child_id', childId)
+    .gte('completed_at', today)
+    .lt('completed_at', tomorrow)
+    .single();
+
+  if (completionError != null || completion == null) throw new Error('找不到今日完成紀錄');
+
+  const completionId  = completion.id;
+  const originalCoin  = completion.coin_earned;
+
+  // 3. Insert override record
+  const { data: override, error: overrideError } = await supabase
+    .from('overrides')
+    .insert({
+      completion_id: completionId,
+      parent_id:     parentId,
+      override_type: OVERRIDE_TYPE_MAP[markOption],
+      coin_deducted: Math.max(originalCoin - safeAdjustedCoin, 0),
+      credit_flag:   false,
+      reason:        note ?? null,
+    })
+    .select('id')
+    .single();
+
+  if (overrideError != null || override == null) {
+    throw new Error(overrideError?.message ?? '標記失敗');
+  }
+
+  const overrideId = override.id;
+
+  // 4. Wallet adjustment (skip when coin value unchanged)
+  const coinDiff = originalCoin - safeAdjustedCoin;   // positive = deduct, negative = add
+  if (coinDiff !== 0) {
+    const { data: wallet, error: walletError } = await supabase
+      .from('wallets')
+      .select('id, balance')
+      .eq('child_id', childId)
+      .eq('wallet_type', 'spending')
+      .single();
+
+    if (walletError != null || wallet == null) throw new Error('找不到錢包');
+
+    const walletId  = wallet.id;
+    const newBalance = wallet.balance - coinDiff;
+
+    const { error: walletUpdateError } = await supabase
+      .from('wallets')
+      .update({ balance: newBalance })
+      .eq('id', walletId);
+
+    if (walletUpdateError != null) throw new Error(walletUpdateError.message);
+
+    const { error: txError } = await supabase.from('transactions').insert({
+      wallet_id:      walletId,
+      amount:         Math.abs(coinDiff),
+      type:           coinDiff > 0 ? 'deduct' : 'adjust',
+      reference_id:   overrideId,
+      reference_type: 'override',
+    });
+
+    if (txError != null) throw new Error(txError.message);
+  }
+
+  // 5. Update task_completion: coin_earned + override_id; flag status if 'none'
+  const completionUpdate = markOption === 'none'
+    ? { coin_earned: safeAdjustedCoin, override_id: overrideId, status: 'flagged' as const }
+    : { coin_earned: safeAdjustedCoin, override_id: overrideId };
+
+  const { error: updateError } = await supabase
+    .from('task_completions')
+    .update(completionUpdate)
+    .eq('id', completionId);
+
+  if (updateError != null) throw new Error(updateError.message);
+}
 
 type CreateChildTaskInput = {
   familyId: string;
@@ -18,7 +131,6 @@ type CreateChildTaskInput = {
   baseTimeMin: number;
   difficulty: number;
 };
-
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
 /**
@@ -71,9 +183,6 @@ export function getPrevCheckpoint(
   const prev = days.filter(d => d < currentDay);
   return prev.length > 0 ? prev[prev.length - 1] : 0;
 }
-
-// ── Async actions ─────────────────────────────────────────────────────────────
-
 export type CompletionResult = {
   completionId: string;
   coinEarned: number;
@@ -82,18 +191,17 @@ export type CompletionResult = {
 };
 
 /**
- * Records a task completion and handles all side-effects:
- * - Inserts a task_completion row
- * - Task-C/D: updates wallet balance and inserts a transaction
- * - Task-B: inserts a time_savings row
- * - Task-D habit: increments long_term_goal.current_day and checks for milestone coin
+ * Records a task completion and applies the reward side-effects locally.
  *
- * @param taskId       The task being completed
- * @param childId      The child completing the task
- * @param completedDate ISO date string (YYYY-MM-DD) in Asia/Taipei timezone
+ * DB writes are handled on the client because the Edge Function path is not
+ * reliable in this workspace and was returning 400 before the insert completed.
+ *
+ * @param taskId            The task being completed
+ * @param childId           The child completing the task
+ * @param completedDate     ISO date string (YYYY-MM-DD) in Asia/Taipei timezone
  * @param isPrerequisiteMet Whether all Task-A and Task-B tasks are done today
- * @param task         Full task row (needed for coin calculation)
- * @param goalId       Required only for Task-D habit-type tasks
+ * @param task              Full task row — used for coin calculation
+ * @param goalId            Required only for Task-D habit-type tasks
  */
 export async function completeTask(
   taskId: string,
@@ -176,7 +284,16 @@ export async function completeTask(
     if (tsError) throw new Error(tsError.message);
   }
 
-  // 4. Task-D habit: increment current_day, check milestone
+  // 4. 'once' task: deactivate from child's list after completion
+  if (task.day_type === 'once') {
+    await supabase
+      .from('child_tasks')
+      .update({ is_active: false })
+      .eq('task_id', taskId)
+      .eq('child_id', childId);
+  }
+
+  // 5. Task-D habit: increment current_day, check milestone
   if (task.category === 'D' && task.long_term_type === 'habit' && goalId) {
     const { data: goal, error: goalFetchError } = await supabase
       .from('long_term_goals')
@@ -228,10 +345,19 @@ export async function completeTask(
   return { completionId, coinEarned, timeSavedMin, milestone };
 }
 
+/** Returns true when the given day-of-week is a valid check-in day for this habit. */
+export function isActiveDayForHabit(dow: number, activeDays: number[] | null): boolean {
+  if (activeDays === null) return true;
+  return activeDays.includes(dow);
+}
+
 /**
- * Checks whether a habit-type long-term goal missed yesterday's check-in
+ * Checks whether a habit-type goal missed its most recent valid check-in day
  * and decrements current_day by 1 (floor = previous checkpoint day).
- * Called on HomeScreen mount to enforce the "soft reset" anti-frustration rule.
+ * Called on HomeScreen mount — "soft reset" anti-frustration rule.
+ *
+ * If yesterday was not in activeDays (a rest day), returns immediately with no
+ * DB access. activeDays=null means every day is valid (preserves original behaviour).
  */
 export async function applyHabitResume(
   goalId: string,
@@ -239,15 +365,20 @@ export async function applyHabitResume(
   taskId: string,
   currentDay: number,
   checkpointRewards: CheckpointRewards | null,
+  activeDays: number[] | null,
 ): Promise<void> {
-  const yesterday = dayjs().tz(TZ).subtract(1, 'day').format('YYYY-MM-DD');
+  const yesterday = dayjs().tz(TZ).subtract(1, 'day');
+  const yesterdayStr = yesterday.format('YYYY-MM-DD');
+  const yesterdayDow = yesterday.day(); // 0=Sun, 1=Mon, ..., 6=Sat
+
+  if (!isActiveDayForHabit(yesterdayDow, activeDays)) return;
 
   const { data: completions } = await supabase
     .from('task_completions')
     .select('id')
     .eq('task_id', taskId)
     .eq('child_id', childId)
-    .gte('completed_at', yesterday)
+    .gte('completed_at', yesterdayStr)
     .lt('completed_at', dayjs().tz(TZ).format('YYYY-MM-DD'))
     .limit(1);
 
@@ -263,44 +394,47 @@ export async function applyHabitResume(
     .eq('id', goalId);
 }
 
-function getAgeRange(ageGroup: CreateChildTaskInput['ageGroup']): { minAge: number; maxAge: number } {
-  if (ageGroup === '2-4') return { minAge: 2, maxAge: 4 };
-  if (ageGroup === '4-6') return { minAge: 4, maxAge: 6 };
-  if (ageGroup === '6-9') return { minAge: 6, maxAge: 9 };
-  return { minAge: 9, maxAge: 12 };
-}
+type CreateLongTermGoalInput = {
+  familyId: string;
+  childId: string;
+  name: string;
+  totalDays: number;
+  checkpointRewards: CheckpointRewards;
+  activeDays?: number[];    // undefined → null in DB (every day active)
+  motivationNote?: string;
+};
 
 /**
- * 建立一筆孩子專屬的自訂任務，並同步綁定到 child_tasks。
+ * 建立 habit 類型長期目標。
+ * 依序寫入 tasks（is_long_term=true）、child_tasks、long_term_goals（含關卡獎勵）。
  */
-export async function createChildTask(input: CreateChildTaskInput): Promise<void> {
-  const ageRange = getAgeRange(input.ageGroup);
+export async function createLongTermGoal(input: CreateLongTermGoalInput): Promise<void> {
+  const today = dayjs().tz(TZ).format('YYYY-MM-DD');
 
   const { data: task, error: taskError } = await supabase
     .from('tasks')
     .insert({
       family_id: input.familyId,
       name: input.name,
-      category: input.category,
+      category: 'D',
       day_type: 'both',
-      long_term_type: null,
-      is_long_term: false,
-      base_time_min: input.baseTimeMin,
-      difficulty: input.difficulty,
+      is_long_term: true,
+      long_term_type: 'habit',
+      base_time_min: 15,
+      difficulty: 1,
       coin_override: null,
+      time_saving_min: 0,
       is_system_default: false,
       allow_repeat: false,
-      min_age: ageRange.minAge,
-      max_age: ageRange.maxAge,
+      min_age: 0,
+      max_age: 99,
       is_active: true,
-      time_saving_min: input.category === 'B' ? input.baseTimeMin : 0,
-      parent_task_id: null,
     })
     .select('id')
     .single();
 
   if (taskError || !task) {
-    throw new Error(taskError?.message ?? '建立任務失敗');
+    throw new Error(taskError?.message ?? '建立長期任務失敗');
   }
 
   const { error: childTaskError } = await supabase.from('child_tasks').insert({
@@ -312,5 +446,99 @@ export async function createChildTask(input: CreateChildTaskInput): Promise<void
   if (childTaskError) {
     await supabase.from('tasks').delete().eq('id', task.id);
     throw new Error(childTaskError.message);
+  }
+
+  const { error: goalError } = await supabase.from('long_term_goals').insert({
+    child_id: input.childId,
+    task_id: task.id,
+    goal_type: 'habit',
+    status: 'active',
+    current_day: 0,
+    total_days: input.totalDays,
+    checkpoint_rewards: input.checkpointRewards,
+    active_days: input.activeDays ?? null,
+    motivation_note: input.motivationNote ?? null,
+    started_at: today,
+    interrupt_count: 0,
+  });
+
+  if (goalError) {
+    await supabase.from('child_tasks').delete().eq('task_id', task.id);
+    await supabase.from('tasks').delete().eq('id', task.id);
+    throw new Error(goalError.message);
+  }
+}
+
+/**
+ * Convert an age group identifier into numeric min/max ages.
+ *
+ * This helps ensure inserted `tasks` rows carry concrete numeric
+ * `min_age`/`max_age` values rather than string enums.
+ */
+function getAgeRange(ageGroup: CreateChildTaskInput['ageGroup']): { minAge: number; maxAge: number } {
+  if (ageGroup === '2-4') return { minAge: 2, maxAge: 4 };
+  if (ageGroup === '4-6') return { minAge: 4, maxAge: 6 };
+  if (ageGroup === '6-9') return { minAge: 6, maxAge: 9 };
+  return { minAge: 9, maxAge: 12 };
+}
+
+
+/**
+ * 建立一筆孩子專屬的自訂任務，並同步綁定到 child_tasks。
+ */
+export async function createChildTask(input: CreateChildTaskInput): Promise<void> {
+  const ageRange = getAgeRange(input.ageGroup);
+  // Normalize numeric fields to match DB column expectations and avoid accidental type mismatches
+  const safeBaseTime = Number.isFinite(Number(input.baseTimeMin)) ? Math.max(1, Math.round(input.baseTimeMin)) : 1;
+  // Keep one decimal for difficulty (e.g. 1.5) but avoid passing weird strings
+  const safeDifficulty = Number.isFinite(Number(input.difficulty))
+    ? Math.round(Number(input.difficulty) * 10) / 10
+    : 1;
+  const safeTimeSaving = input.category === 'B' ? safeBaseTime : 0;
+
+  try {
+    const { data: task, error: taskError } = await supabase
+      .from('tasks')
+      .insert({
+        family_id: input.familyId,
+        name: input.name,
+        category: input.category,
+        day_type: 'both',
+        long_term_type: null,
+        is_long_term: false,
+        base_time_min: safeBaseTime,
+        difficulty: safeDifficulty,
+        coin_override: null,
+        is_system_default: false,
+        allow_repeat: false,
+        min_age: ageRange.minAge,
+        max_age: ageRange.maxAge,
+        is_active: true,
+        time_saving_min: safeTimeSaving,
+      })
+      .select('id')
+      .single();
+
+    if (taskError || !task) {
+      console.error('[createChildTask] tasks.insert error:', taskError);
+      throw new Error(taskError?.message ?? '建立任務失敗');
+    }
+
+    const { error: childTaskError } = await supabase.from('child_tasks').insert({
+      child_id: input.childId,
+      task_id: task.id,
+      is_active: true,
+    });
+
+    if (childTaskError) {
+      // rollback created task to avoid orphan rows
+      await supabase.from('tasks').delete().eq('id', task.id);
+      console.error('[createChildTask] child_tasks.insert error:', childTaskError);
+      throw new Error(childTaskError.message);
+    }
+  } catch (err) {
+    // rethrow with helpful message for caller
+    console.error('[createChildTask] unexpected error:', err);
+    throw err;
   }
 }

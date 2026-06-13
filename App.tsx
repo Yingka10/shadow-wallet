@@ -5,18 +5,34 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { SelectedChildProvider } from './src/context/SelectedChildContext';
+
 import EntryScreen from './src/screens/auth/EntryScreen';
 import ParentLoginScreen from './src/screens/auth/ParentLoginScreen';
 import ChildLoginScreen from './src/screens/auth/ChildLoginScreen';
 import OnboardingScreen from './src/screens/onboarding/OnboardingScreen';
 import HomeScreen from './src/screens/child/HomeScreen';
-import ParentScreen from './src/screens/parent/ParentScreen';
+import ParentTabNavigator from './src/screens/parent/ParentTabNavigator';
+import ParentTaskDetailScreen from './src/screens/parent/ParentTaskDetailScreen';
+import ParentTaskCreateScreen from './src/screens/parent/ParentTaskCreateScreen';
+import ParentSettingsScreen from './src/screens/parent/ParentSettingsScreen';
 import GoalSetupScreen from './src/screens/onboarding/GoalSetupScreen';
 import TaskSelectionScreen from './src/screens/onboarding/TaskSelectionScreen';
 import OverviewScreen from './src/screens/onboarding/OverviewScreen';
 import LongTermDetailScreen from './src/screens/child/LongTermDetailScreen';
 import ProfileScreen from './src/screens/child/ProfileScreen';
+import WalletScreen from './src/screens/child/WalletScreen';
+import WishScreen from './src/screens/child/WishScreen';
+import ObservationHistoryScreen from './src/screens/parent/ObservationHistoryScreen';
+import ParentLongTermCreateScreen from './src/screens/parent/ParentLongTermCreateScreen';
 import type { AgeGroup, CustomTask } from './src/types/database';
+
+// ---------------------------------------------------------------------------
+// Navigation param list
+// ---------------------------------------------------------------------------
+// Parent tab screens (Dashboard, Tasks, Redemption, Weekly) live inside
+// ParentTabNavigator and use SelectedChildContext — they don't need route params.
+// Screens pushed on top of the tab (TaskDetail, GoalSetup, etc.) keep their params.
 
 export type RootStackParamList = {
   Entry: undefined;
@@ -24,7 +40,10 @@ export type RootStackParamList = {
   ChildLogin: undefined;
   Onboarding: undefined;
   Home: { childId: string };
-  Parent: undefined;
+  Wallet: { childId: string };
+  Wish: { childId: string };
+  Parent: undefined;            // legacy; redirect via EntryScreen
+  ParentTab: undefined;         // parent tab navigator
   Profile: { childId: string };
   GoalSetup: {
     childId: string;
@@ -57,6 +76,19 @@ export type RootStackParamList = {
     taskId: string;
     taskName: string;
   };
+  ParentTaskDetail: {
+    taskId: string;
+    childId: string;
+    taskName: string;
+  };
+  ObservationHistory: {
+    taskId: string;
+    childId: string;
+    taskName: string;
+  };
+  ParentTaskCreate: undefined;
+  ParentLongTermCreate: { childId: string };
+  ParentSettings: undefined;
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -70,10 +102,7 @@ export default function App() {
         <NavigationContainer>
           <Stack.Navigator
             initialRouteName="Entry"
-            screenOptions={{
-              headerShown: false,
-              cardStyle: Platform.OS === 'web' ? { height } : { flex: 1 },
-            }}
+            screenOptions={{ headerShown: false }}
           >
             {/* ── Auth ──────────────────────────────────────── */}
             <Stack.Screen name="Entry" component={EntryScreen} />

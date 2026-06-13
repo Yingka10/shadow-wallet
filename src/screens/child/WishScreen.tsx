@@ -18,7 +18,6 @@ import WishTreeComponent from '../../components/WishTreeComponent';
 import WishModalComponent from '../../components/WishModalComponent';
 import { CoinIcon } from '../../components/icons/TaskIcons';
 import { Colors } from '../../constants/colors';
-import { webFullHeight } from '../../constants/webStyles';
 import { supabase } from '../../lib/supabase';
 import { useWallet } from '../../hooks/useWallet';
 
@@ -57,6 +56,7 @@ export default function WishScreen() {
   const [wishes, setWishes] = useState<WishItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [wishModalVisible, setWishModalVisible] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>('privilege');
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
@@ -299,7 +299,7 @@ export default function WishScreen() {
                     is_redeemed: true,
                     redeemed_at: new Date().toISOString(),
                     is_active: false,
-                  } as never)
+                  })
                   .eq('id', item.id);
                 if (rewardError) throw rewardError;
 
@@ -333,6 +333,7 @@ export default function WishScreen() {
         return;
       }
 
+      setSaving(true);
       try {
         const { error } = await supabase.from('reward_items').insert({
           family_id: child.familyId,
@@ -355,6 +356,8 @@ export default function WishScreen() {
       } catch (err) {
         console.error('[WishScreen] handleWishModalSubmit error:', err);
         Alert.alert('許願失敗', err instanceof Error ? err.message : '請稍後再試');
+      } finally {
+        setSaving(false);
       }
     },
     [child, childId, loadWishes],
@@ -416,7 +419,7 @@ export default function WishScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.safe, webFullHeight]} edges={['top']}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
       {/* 許願樹 Hero 區域 */}
       <View style={styles.treeSection}>
         {/* 金幣餘額 chip */}

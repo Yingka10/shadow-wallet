@@ -18,7 +18,6 @@ import type { RootStackParamList } from '../../../App';
 import BottomNav from '../../components/BottomNav';
 import { CoinIcon, TargetIcon, WalletIcon, WaveIcon } from '../../components/icons/TaskIcons';
 import { Colors } from '../../constants/colors';
-import { webFullHeight } from '../../constants/webStyles';
 import { supabase } from '../../lib/supabase';
 import { useWallet } from '../../hooks/useWallet';
 import type { Transaction } from '../../types/database';
@@ -241,7 +240,7 @@ export default function WalletScreen() {
   const savingBalance = saving?.balance ?? 0;
 
   return (
-    <SafeAreaView style={[styles.safe, webFullHeight]} edges={['top']}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <Text style={styles.greeting}>早安，{child?.nickname ?? '小探險家'}！</Text>

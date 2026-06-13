@@ -11,6 +11,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, useNavigation } from '@react-navigation/native';
@@ -18,13 +19,12 @@ import type { RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../../../App';
 import { useTodayTasks, type TodayTask } from '../../hooks/useTodayTasks';
-import DutyTaskCard from '../../components/DutyTaskCard';
-import ContributionTaskCard from '../../components/ContributionTaskCard';
-import GoalHeroCard from '../../components/GoalHeroCard';
+import { useWallet } from '../../hooks/useWallet';
+import TaskCard from '../../components/TaskCard';
 import BottomNav from '../../components/BottomNav';
 import TaskCompleteModal from '../../components/TaskCompleteModal';
 import FeedbackAnimation, { type FeedbackType } from '../../components/FeedbackAnimation';
-import { CoinIcon, WaveIcon } from '../../components/icons/TaskIcons';
+import { CoinIcon } from '../../components/icons/TaskIcons';
 import { completeTask, createChildTask } from '../../lib/taskActions';
 import { supabase } from '../../lib/supabase';
 import { Colors } from '../../constants/colors';
@@ -44,8 +44,6 @@ type ChildMeta = {
 
 const TASK_DIFF_OPTIONS = [1, 1.5, 2, 2.5, 3];
 
-// TODO: replace with useWallet(childId) once wallet hook is implemented
-const MOCK_COIN_BALANCE = 128;
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -59,11 +57,11 @@ function getSubGreeting(remaining: number, total: number): string {
   return `今天有 ${remaining} 件事等你開動`;
 }
 
-function SectionHeader({ title }: { title: string }) {
+function SectionLabel({ title }: { title: string }) {
   return (
-    <View style={styles.sectionHead}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      <WaveIcon />
+    <View style={styles.sectionLabel}>
+      <Text style={styles.sectionLabelText}>{title}</Text>
+      <View style={styles.sectionLabelLine} />
     </View>
   );
 }
@@ -75,6 +73,8 @@ export default function HomeScreen() {
 
   const { weekdayTasks, weekendTasks, longTermTasks, isPrerequisiteMet, loading, refresh } =
     useTodayTasks(childId);
+  const { spending } = useWallet(childId);
+  const coinBalance = spending?.balance ?? 0;
 
   const [modal, setModal] = useState<ModalState>({ task: null, visible: false });
   const [feedback, setFeedback] = useState<FeedbackState>({ visible: false, type: 'task-a', value: 0 });
@@ -223,11 +223,11 @@ export default function HomeScreen() {
         </View>
         <TouchableOpacity
           style={styles.coinPill}
-          onPress={() => Alert.alert('撲滿', '即將推出！')}
-          accessibilityLabel={`金幣餘額 ${MOCK_COIN_BALANCE}`}
+          onPress={() => navigation.navigate('Wallet', { childId })}
+          accessibilityLabel={`前往撲滿，金幣餘額 ${coinBalance}`}
         >
           <CoinIcon size={28} />
-          <Text style={styles.coinCount}>{MOCK_COIN_BALANCE}</Text>
+          <Text style={styles.coinCount}>{coinBalance}</Text>
         </TouchableOpacity>
       </View>
 
@@ -240,24 +240,32 @@ export default function HomeScreen() {
         }
         showsVerticalScrollIndicator={false}
       >
-        {/* Long-term goal hero card(s) */}
-        {longTermTasks.map(task =>
-          task.goal ? (
-            <GoalHeroCard
-              key={task.id}
-              task={task}
-              goal={task.goal}
-              isCompleted={task.isCompleted}
-              onCheckIn={() => openModal(task)}
-              onOpen={() =>
-                navigation.navigate('LongTermDetail', {
-                  goalId: task.goal!.id,
-                  taskId: task.id,
-                  taskName: task.name,
-                })
-              }
-            />
-          ) : null,
+        {/* 長期任務 */}
+        {longTermTasks.length > 0 && (
+          <View style={styles.section}>
+            <SectionLabel title="長期任務" />
+            {loading ? (
+              <ActivityIndicator color={Colors.coral500} />
+            ) : (
+              longTermTasks.map(task => (
+                task.goal ? (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    variant="longterm"
+                    isCompleted={task.isCompleted}
+                    onPress={() =>
+                      navigation.navigate('LongTermDetail', {
+                        goalId: task.goal!.id,
+                        taskId: task.id,
+                        taskName: task.name,
+                      })
+                    }
+                  />
+                ) : null
+              ))
+            )}
+          </View>
         )}
 
         {/* Prerequisite nudge banner */}
@@ -268,14 +276,15 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Duty tasks (Task-A + Task-B) */}
+        {/* 週期任務 (Task-A + Task-B) */}
         {dutyTasks.length > 0 && (
           <View style={styles.section}>
-            <SectionHeader title="本分任務" />
+            <SectionLabel title="週期任務" />
             {dutyTasks.map(task => (
-              <DutyTaskCard
+              <TaskCard
                 key={task.id}
                 task={task}
+                variant="weekly"
                 isCompleted={task.isCompleted}
                 onPress={() => openModal(task)}
               />
@@ -283,14 +292,15 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Contribution tasks (Task-C) */}
+        {/* 即時任務 (Task-C) */}
         {contributionTasks.length > 0 && (
           <View style={styles.section}>
-            <SectionHeader title="貢獻任務" />
+            <SectionLabel title="即時任務" />
             {contributionTasks.map(task => (
-              <ContributionTaskCard
+              <TaskCard
                 key={task.id}
                 task={task}
+                variant="instant"
                 isCompleted={task.isCompleted}
                 isPrerequisiteMet={isPrerequisiteMet}
                 onPress={() => openModal(task)}
@@ -324,6 +334,14 @@ export default function HomeScreen() {
       <BottomNav
         activeTab="home"
         onTabPress={tab => {
+          if (tab === 'wallet') {
+            navigation.navigate('Wallet', { childId });
+            return;
+          }
+          if (tab === 'wish') {
+            navigation.navigate('Wish', { childId });
+            return;
+          }
           if (tab === 'profile') {
             navigation.navigate('Profile', { childId });
           } else if (tab !== 'home') {
@@ -556,20 +574,23 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: 24,
   },
-  sectionHead: {
+  sectionLabel: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
     marginBottom: 12,
-    marginTop: 6,
-    marginLeft: 4,
+    marginTop: 4,
   },
-  sectionTitle: {
-    fontWeight: '800',
-    fontSize: 13,
-    color: Colors.ink700,
-    letterSpacing: 1.0,
-    textTransform: 'uppercase',
+  sectionLabelText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: Colors.ink500,
+    letterSpacing: 1,
+  },
+  sectionLabelLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: 'rgba(95,60,30,0.12)',
   },
   emptyState: {
     alignItems: 'center',

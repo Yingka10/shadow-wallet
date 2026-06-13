@@ -9,11 +9,14 @@ export type BaumrindType =
 export type MotivationLevel = 'amotivation' | 'external' | 'introjected' | 'internal';
 export type PersonalityType = 'competitive' | 'relational' | 'curious';
 export type TaskCategory = 'A' | 'B' | 'C' | 'D';
-export type DayType = 'weekday' | 'weekend' | 'both';
+export type DayType = 'weekday' | 'weekend' | 'both' | 'custom' | 'once';
 export type LongTermType = 'habit' | 'skill' | 'responsibility' | 'challenge';
 export type AccountType = 'SINGLE' | 'DOUBLE';
 export type ParentRole = 'primary' | 'co';
 export type AiMode = 'conservative' | 'balanced' | 'auto';
+export type RedemptionStatus = 'pending' | 'approved' | 'rejected';
+export type AiVerdict = 'ok' | 'high';
+export type ObsType = 'noaction' | 'quality' | 'bonus' | 'other';
 export type WalletType = 'spending' | 'saving';
 export type TransactionType = 'earn' | 'redeem' | 'deduct' | 'interest' | 'adjust';
 export type RewardType = 'item' | 'privilege' | 'screen_time';
@@ -91,7 +94,8 @@ export type Task = {
   max_age: number;
   is_active: boolean;
   time_saving_min: number;
-  parent_task_id: string | null;
+  recurrence_days: number[] | null;
+  due_date: string | null;
   created_at: string;
 };
 
@@ -169,6 +173,25 @@ export type LongTermGoal = {
   next_review_at: string | null;
   completed_at: string | null;
   created_at: string;
+  // 通用
+  min_age: number;
+  interrupt_count: number;
+  last_active_date: string | null;
+  active_days: number[] | null;     // 0=日,1=一,...,6=六; null=every day
+  // 技能學習專用
+  level_definitions: Record<string, any>[] | null;
+  current_level: number | null;
+  level_count: number | null;
+  // 家庭責任專用
+  role_title: string | null;
+  salary_mode: boolean | null;
+  base_salary: number | null;
+  weekly_target_rate: number | null;
+  privilege_reward: Record<string, any> | null;
+  // 自我挑戰專用
+  target_value: number | null;
+  current_value: number | null;
+  value_unit: string | null;
 };
 
 export type TimeSaving = {
@@ -223,6 +246,42 @@ export type SiblingRelation = {
   mentor_child_id: string;
   mentee_child_id: string;
   is_active: boolean;
+  created_at: string;
+};
+
+export type RedemptionRequest = {
+  id: string;
+  family_id: string;
+  child_id: string;
+  name: string;
+  description: string | null;
+  coin_cost: number;
+  status: RedemptionStatus;
+  ai_verdict: AiVerdict | null;
+  ai_reason: string | null;
+  ai_suggested_coins: number | null;
+  adjusted_coins: number | null;
+  parent_note: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+};
+
+export type GrowthMoment = {
+  id: string;
+  child_id: string;
+  title: string;
+  body: string | null;
+  created_at: string;
+};
+
+export type ParentObservation = {
+  id: string;
+  parent_id: string | null;
+  task_id: string;
+  child_id: string;
+  obs_type: ObsType;
+  note: string | null;
+  reward_adj: string | null;
   created_at: string;
 };
 
@@ -377,7 +436,8 @@ export interface Database {
           max_age?: number;
           is_active?: boolean;
           time_saving_min?: number;
-          parent_task_id?: string | null;
+          recurrence_days?: number[] | null;
+          due_date?: string | null;
           created_at?: string;
         };
         Update: Partial<Task>;
@@ -500,6 +560,21 @@ export interface Database {
           next_review_at?: string | null;
           completed_at?: string | null;
           created_at?: string;
+          min_age?: number;
+          interrupt_count?: number;
+          last_active_date?: string | null;
+          active_days?: number[] | null;
+          level_definitions?: Record<string, any>[] | null;
+          current_level?: number | null;
+          level_count?: number | null;
+          role_title?: string | null;
+          salary_mode?: boolean | null;
+          base_salary?: number | null;
+          weekly_target_rate?: number | null;
+          privilege_reward?: Record<string, any> | null;
+          target_value?: number | null;
+          current_value?: number | null;
+          value_unit?: string | null;
         };
         Update: Partial<LongTermGoal>;
         Relationships: [];
@@ -611,6 +686,65 @@ export interface Database {
           is_active?: boolean;
           created_at?: string;
         };
+        Relationships: [];
+      };
+      redemption_requests: {
+        Row: RedemptionRequest;
+        Insert: {
+          id?: string;
+          family_id: string;
+          child_id: string;
+          name: string;
+          description?: string | null;
+          coin_cost: number;
+          status?: RedemptionStatus;
+          ai_verdict?: AiVerdict | null;
+          ai_reason?: string | null;
+          ai_suggested_coins?: number | null;
+          adjusted_coins?: number | null;
+          parent_note?: string | null;
+          created_at?: string;
+          reviewed_at?: string | null;
+        };
+        Update: {
+          status?: RedemptionStatus;
+          ai_verdict?: AiVerdict | null;
+          ai_reason?: string | null;
+          ai_suggested_coins?: number | null;
+          adjusted_coins?: number | null;
+          parent_note?: string | null;
+          reviewed_at?: string | null;
+        };
+        Relationships: [];
+      };
+      growth_moments: {
+        Row: GrowthMoment;
+        Insert: {
+          id?: string;
+          child_id: string;
+          title: string;
+          body?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          title?: string;
+          body?: string | null;
+        };
+        Relationships: [];
+      };
+      parent_observations: {
+        Row: ParentObservation;
+        Insert: {
+          id?: string;
+          parent_id?: string | null;
+          task_id: string;
+          child_id: string;
+          obs_type: ObsType;
+          note?: string | null;
+          reward_adj?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<ParentObservation>;
         Relationships: [];
       };
     };

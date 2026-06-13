@@ -6,10 +6,7 @@ import {
   TouchableOpacity,
   Switch,
   StyleSheet,
-  Platform,
-  Alert,
 } from 'react-native';
-import { supabase } from '../../lib/supabase';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -177,16 +174,14 @@ type SettingRowProps = {
   right?: React.ReactNode;
   tone?: 'normal' | 'danger';
   isLast?: boolean;
-  onPress?: () => void;
 };
 
-function SettingRow({ icon, label, sub, chev, right, tone = 'normal', isLast = false, onPress }: SettingRowProps) {
+function SettingRow({ icon, label, sub, chev, right, tone = 'normal', isLast = false }: SettingRowProps) {
   const isDanger = tone === 'danger';
   return (
     <TouchableOpacity
       style={[styles.settingRow, !isLast && styles.settingRowDivider]}
       activeOpacity={0.7}
-      onPress={onPress}
     >
       {icon && (
         <View style={[styles.settingIcon, isDanger && styles.settingIconDanger]}>
@@ -285,22 +280,6 @@ export default function ParentSettingsScreen() {
   const [lockMethod, setLockMethod] = useState<LockMethod>('密碼');
   const [notifPending, setNotifPending] = useState(true);
   const [notifWeekly, setNotifWeekly] = useState(true);
-
-  async function handleLogout() {
-    await supabase.auth.signOut();
-    navigation.reset({ index: 0, routes: [{ name: 'Entry' }] });
-  }
-
-  function confirmLogout() {
-    if (Platform.OS === 'web') {
-      if (window.confirm('確定要登出嗎？')) void handleLogout();
-    } else {
-      Alert.alert('確認登出', '確定要登出嗎？', [
-        { text: '取消', style: 'cancel' },
-        { text: '登出', style: 'destructive', onPress: () => void handleLogout() },
-      ]);
-    }
-  }
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -416,7 +395,7 @@ export default function ParentSettingsScreen() {
               label="個人資料"
               chev
             />
-            <SettingRow label="登出" tone="danger" isLast onPress={confirmLogout} />
+            <SettingRow label="登出" tone="danger" isLast />
           </SettingGroup>
         </View>
 

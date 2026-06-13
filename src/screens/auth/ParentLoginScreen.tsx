@@ -56,7 +56,7 @@ export default function ParentLoginScreen() {
           setLoginError(error.message);
         }
       } else {
-        navigation.replace('Parent');
+        navigation.replace('ParentTab');
       }
     } finally {
       setLoading(false);

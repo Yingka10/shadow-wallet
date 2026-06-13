@@ -14,7 +14,6 @@ export function useWallet(childId: string): UseWalletResult {
   const [saving, setSaving] = useState<Wallet | null>(null);
   const [loading, setLoading] = useState(true);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
-  const channelNameRef = useRef(`wallets:child_${childId}_${Date.now()}`);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -51,7 +50,7 @@ export function useWallet(childId: string): UseWalletResult {
       if (!isMounted) return;
 
       const channel = supabase
-        .channel(channelNameRef.current)
+        .channel(`wallets:child_${childId}`)
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'wallets', filter: `child_id=eq.${childId}` },
