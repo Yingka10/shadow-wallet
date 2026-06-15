@@ -242,6 +242,251 @@ function MilestoneRow({ day, coins, status }: { day: number; coins: number; stat
 }
 
 // ---------------------------------------------------------------------------
+// FamilyRoleView — 家庭責任類的孩子端職位體驗
+// ---------------------------------------------------------------------------
+
+function FamilyProgressBar({ pct }: { pct: number }) {
+  const filled = Math.max(0, Math.min(100, pct));
+  return (
+    <View style={fbStyles.track}>
+      <View style={[fbStyles.fill, { width: `${filled}%` }]} />
+    </View>
+  );
+}
+
+const fbStyles = StyleSheet.create({
+  track: {
+    height: 10,
+    backgroundColor: Colors.cream200,
+    borderRadius: 999,
+    overflow: 'hidden',
+    marginTop: 12,
+  },
+  fill: {
+    height: '100%',
+    backgroundColor: Colors.sage400,
+    borderRadius: 999,
+  },
+});
+
+function FamilyRoleView({
+  goal,
+  task,
+  taskName,
+}: {
+  goal: import('../../types/database').LongTermGoal;
+  task: import('../../types/database').Task;
+  taskName: string;
+}) {
+  const [currentDay, setCurrentDay] = useState(goal.current_day);
+  const [isCheckedIn, setIsCheckedIn] = useState(false);
+  const [checking, setChecking] = useState(false);
+
+  const targetCompletions = goal.target_completions ?? 0;
+  const pct = targetCompletions > 0
+    ? Math.min(Math.round((currentDay / targetCompletions) * 100), 100)
+    : 0;
+
+  const expiryDate = dayjs(goal.started_at).add(goal.total_days ?? 0, 'day');
+  const daysLeft = Math.max(0, expiryDate.diff(dayjs().tz(TZ), 'day'));
+  const isExpired = daysLeft === 0;
+
+  // Check today's completion on mount
+  useEffect(() => {
+    const check = async () => {
+      const today = dayjs().tz(TZ).format('YYYY-MM-DD');
+      const tomorrow = dayjs().tz(TZ).add(1, 'day').format('YYYY-MM-DD');
+      const { data } = await supabase
+        .from('task_completions')
+        .select('id')
+        .eq('task_id', task.id)
+        .eq('child_id', goal.child_id)
+        .gte('completed_at', today)
+        .lt('completed_at', tomorrow)
+        .limit(1)
+        .maybeSingle();
+      setIsCheckedIn(!!data);
+    };
+    void check();
+  }, [task.id, goal.child_id]);
+
+  const handleCheckIn = useCallback(async () => {
+    if (isCheckedIn || checking) return;
+    setChecking(true);
+    try {
+      const completedDate = dayjs().tz(TZ).format('YYYY-MM-DD');
+      // completeTask handles time_savings (Task-B path) + task_completions
+      await completeTask(task.id, goal.child_id, completedDate, true, task, goal.id);
+      // Increment current_day (完成次數) in DB — completeTask only does this for habit
+      await supabase
+        .from('long_term_goals')
+        .update({ current_day: currentDay + 1 })
+        .eq('id', goal.id);
+      setCurrentDay(d => d + 1);
+      setIsCheckedIn(true);
+    } catch (err) {
+      Alert.alert('完成失敗', err instanceof Error ? err.message : '請稍後再試');
+    } finally {
+      setChecking(false);
+    }
+  }, [isCheckedIn, checking, task, goal, currentDay]);
+
+  return (
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Hero card — 職位感框架 */}
+      <View style={frStyles.heroCard}>
+        <Text style={frStyles.heroLabel}>🏠 家庭職位</Text>
+        <Text style={frStyles.heroTitle} numberOfLines={2}>{taskName}</Text>
+        <Text style={frStyles.heroSub}>
+          承諾期：{Math.round((goal.total_days ?? 0) / 7)} 週
+          {'  ·  '}
+          到期：{expiryDate.format('M/D')}
+        </Text>
+      </View>
+
+      {/* Progress card or expiry card */}
+      {isExpired ? (
+        <View style={frStyles.expiryCard}>
+          <Text style={frStyles.expiryTitle}>承諾期已結束</Text>
+          <Text style={frStyles.expiryBody}>
+            你在這 {Math.round((goal.total_days ?? 0) / 7)} 週內{'\n'}
+            完成了 {currentDay} / {targetCompletions} 次{'\n'}
+            達成率 {pct}%
+          </Text>
+          <Text style={frStyles.expiryThanks}>謝謝你為家裡做的貢獻！</Text>
+        </View>
+      ) : (
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>PROGRESS</Text>
+          <View style={styles.card}>
+            <View style={frStyles.progressRow}>
+              <View>
+                <Text style={frStyles.progressLabel}>已完成</Text>
+                <Text style={frStyles.progressNum}>{currentDay} 次</Text>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={frStyles.progressLabel}>目標</Text>
+                <Text style={frStyles.progressNum}>{targetCompletions} 次</Text>
+              </View>
+            </View>
+            <FamilyProgressBar pct={pct} />
+            <Text style={frStyles.daysLeft}>距承諾期滿：還剩 {daysLeft} 天</Text>
+          </View>
+        </View>
+      )}
+
+      {/* Check-in button (hidden when expired) */}
+      {!isExpired && (
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>今日完成</Text>
+          {isCheckedIn ? (
+            <View style={styles.checkedCard}>
+              <CheckIcon size={20} color={Colors.success} />
+              <Text style={styles.checkedText}>今天已完成</Text>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={[styles.checkInBtn, checking && styles.checkInBtnBusy]}
+              onPress={handleCheckIn}
+              activeOpacity={0.8}
+              disabled={checking}
+            >
+              {checking ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.checkInBtnText}>完成今日職責</Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+    </ScrollView>
+  );
+}
+
+const frStyles = StyleSheet.create({
+  heroCard: {
+    backgroundColor: Colors.sage100,
+    borderRadius: 24,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: Colors.sage200,
+  },
+  heroLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: Colors.sage600,
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  heroTitle: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: Colors.ink900,
+    lineHeight: 32,
+    marginBottom: 6,
+  },
+  heroSub: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.ink700,
+  },
+  progressRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  progressLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.fgMuted,
+  },
+  progressNum: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: Colors.ink900,
+  },
+  daysLeft: {
+    marginTop: 10,
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.fgMuted,
+    textAlign: 'right',
+  },
+  expiryCard: {
+    backgroundColor: Colors.sage100,
+    borderRadius: 20,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: Colors.sage200,
+    alignItems: 'center',
+    gap: 10,
+  },
+  expiryTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: Colors.ink900,
+  },
+  expiryBody: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.ink700,
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  expiryThanks: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.sage600,
+    textAlign: 'center',
+  },
+});
+
+// ---------------------------------------------------------------------------
 // Screen
 // ---------------------------------------------------------------------------
 
@@ -355,7 +600,9 @@ export default function LongTermDetailScreen() {
         <ActivityIndicator color={Colors.gold500} style={styles.loader} />
       ) : error ? (
         <Text style={styles.errorText}>{error}</Text>
-      ) : !goal ? null : goal.goal_type !== 'habit' ? (
+      ) : !goal ? null : goal.goal_type === 'family' ? (
+        <FamilyRoleView goal={goal} task={task!} taskName={taskName} />
+      ) : goal.goal_type !== 'habit' ? (
         <View style={styles.comingSoon}>
           <Text style={styles.comingSoonTitle}>{taskName}</Text>
           <Text style={styles.comingSoonBody}>此類型長期目標詳情即將推出</Text>

@@ -32,6 +32,14 @@ import {
 import {
   parentMarkTask,
   createLongTermGoal,
+  createSkillGoal,
+  calcSkillDefaultCoins,
+  clampSkillCoin,
+  skillCoinsAreValid,
+  MAX_SKILL_MILESTONE_COIN,
+  createFamilyGoal,
+  MIN_FAMILY_TIME,
+  MAX_FAMILY_TIME,
   type MarkOption,
 } from '../../../lib/taskActions';
 import {
@@ -704,6 +712,16 @@ function TodayTaskPanel({
 
   return (
     <View style={styles.taskPanel}>
+      {/* Action buttons (moved above 今日任務) */}
+      <View style={styles.taskFooter}>
+        <TouchableOpacity style={styles.footerBtnBrass} activeOpacity={0.8} onPress={onAssignTask}>
+          <Text style={styles.footerBtnText}>＋ 指派任務</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.footerBtnNavy} activeOpacity={0.8} onPress={onNewTask}>
+          <Text style={styles.footerBtnText}>＋ 建立新任務</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Section header */}
       <View style={styles.sectionHeader}>
         <View>
@@ -732,16 +750,6 @@ function TodayTaskPanel({
           />
         ))
       )}
-
-      {/* Footer buttons */}
-      <View style={styles.taskFooter}>
-        <TouchableOpacity style={styles.footerBtnBrass} activeOpacity={0.8} onPress={onAssignTask}>
-          <Text style={styles.footerBtnText}>＋ 指派任務</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.footerBtnNavy} activeOpacity={0.8} onPress={onNewTask}>
-          <Text style={styles.footerBtnText}>＋ 建立新任務</Text>
-        </TouchableOpacity>
-      </View>
     </View>
   );
 }
@@ -1067,6 +1075,82 @@ function NewTaskPanel({
   const [activeDaysHabit, setActiveDaysHabit] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
   const [habitSubmitting, setHabitSubmitting] = useState(false);
 
+  // ── Skill task state ──────────────────────────────────────────────────────
+  const SKILL_MILESTONE_NAME_MAX = 30;
+  const [milestoneNames, setMilestoneNames] = useState<string[]>(['學習目標一', '學習目標二', '學習目標三']);
+  const [skillCoins, setSkillCoins] = useState<number[]>(calcSkillDefaultCoins(3));
+  const [skillMonthsPreset, setSkillMonthsPreset] = useState<1 | 3 | 6 | 'custom'>(3);
+  const [skillCustomMonthsStr, setSkillCustomMonthsStr] = useState('');
+  const [skillSubmitting, setSkillSubmitting] = useState(false);
+
+  const skillNamesValid = milestoneNames.every(n => n.trim().length > 0);
+
+  function addMilestone() {
+    setMilestoneNames(prev => {
+      if (prev.length >= 5) return prev;
+      const next = [...prev, `學習目標${prev.length + 1}`];
+      setSkillCoins(calcSkillDefaultCoins(next.length));
+      return next;
+    });
+  }
+
+  function removeMilestone(index: number) {
+    setMilestoneNames(prev => {
+      if (prev.length <= 2) return prev;
+      const next = prev.filter((_, i) => i !== index);
+      setSkillCoins(cur => {
+        const trimmed = cur.filter((_, i) => i !== index);
+        return skillCoinsAreValid(trimmed) ? trimmed : calcSkillDefaultCoins(next.length);
+      });
+      return next;
+    });
+  }
+
+  function updateMilestoneName(index: number, value: string) {
+    setMilestoneNames(prev => prev.map((n, i) => (i === index ? value.slice(0, SKILL_MILESTONE_NAME_MAX) : n)));
+  }
+
+  function stepSkillCoin(index: number, delta: number) {
+    setSkillCoins(prev => prev.map((c, i) => (i === index ? clampSkillCoin(c + delta) : c)));
+  }
+
+  const effectiveTargetMonths: number | null = (() => {
+    if (skillMonthsPreset !== 'custom') return skillMonthsPreset;
+    const n = parseInt(skillCustomMonthsStr, 10);
+    return Number.isFinite(n) && n >= 1 && n <= 24 ? n : null;
+  })();
+
+  // ── Family task state ─────────────────────────────────────────────────────
+  const [familyTaskName, setFamilyTaskName] = useState('');
+  const [activeDaysFamily, setActiveDaysFamily] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
+  const [familyTimePreset, setFamilyTimePreset] = useState<15 | 30 | 60 | 'custom'>(30);
+  const [customFamilyTimeStr, setCustomFamilyTimeStr] = useState('');
+  const [familyCommitPreset, setFamilyCommitPreset] = useState<4 | 8 | 12 | 'custom'>(8);
+  const [customCommitWeeksStr, setCustomCommitWeeksStr] = useState('');
+  const [familySubmitting, setFamilySubmitting] = useState(false);
+
+  const effectiveFamilyTime: number | null = (() => {
+    if (familyTimePreset !== 'custom') return familyTimePreset;
+    const n = parseInt(customFamilyTimeStr, 10);
+    return Number.isFinite(n) && n >= MIN_FAMILY_TIME && n <= MAX_FAMILY_TIME ? n : null;
+  })();
+
+  const effectiveCommitWeeks: number | null = (() => {
+    if (familyCommitPreset !== 'custom') return familyCommitPreset;
+    const n = parseInt(customCommitWeeksStr, 10);
+    return Number.isFinite(n) && n >= 1 && n <= 24 ? n : null;
+  })();
+
+  function toggleActiveDayFamily(dow: number) {
+    setActiveDaysFamily(prev => {
+      if (prev.includes(dow)) {
+        if (prev.length === 1) return prev;
+        return prev.filter(d => d !== dow);
+      }
+      return [...prev, dow];
+    });
+  }
+
   function handleNext() {
     const trimmed = taskName.trim();
     if (!trimmed) return;
@@ -1248,6 +1332,69 @@ function NewTaskPanel({
     }
   }
 
+  async function handleSkillSubmit() {
+    if (
+      skillSubmitting || !familyId || !effectiveTargetMonths ||
+      !skillNamesValid || !skillCoinsAreValid(skillCoins)
+    ) return;
+    setSkillSubmitting(true);
+    try {
+      await createSkillGoal({
+        familyId,
+        childId: currentChildId,
+        name: taskName.trim(),
+        milestones: milestoneNames.map((name, i) => ({
+          name,                       // createSkillGoal 內部會 trim
+          coin: skillCoins[i],
+        })),
+        targetMonths: effectiveTargetMonths,
+      });
+      setSkillSubmitting(false);
+      setDone(true);
+      onSuccess();
+    } catch (err) {
+      console.error('[NewTaskPanel] skill submit error:', err);
+      setSkillSubmitting(false);
+    }
+  }
+
+  function formatSkillMonths(): string {
+    if (effectiveTargetMonths == null) return '';
+    return `約 ${effectiveTargetMonths} 個月`;
+  }
+
+  async function handleFamilySubmit() {
+    if (
+      familySubmitting || !familyId ||
+      !familyTaskName.trim() || activeDaysFamily.length === 0 ||
+      effectiveFamilyTime == null || effectiveCommitWeeks == null
+    ) return;
+    setFamilySubmitting(true);
+    try {
+      await createFamilyGoal({
+        familyId,
+        childId: currentChildId,
+        name: familyTaskName.trim(),
+        activeDays: activeDaysFamily,
+        timeMin: effectiveFamilyTime,
+        commitWeeks: effectiveCommitWeeks,
+      });
+      setTaskName(familyTaskName.trim());
+      setFamilySubmitting(false);
+      setDone(true);
+      onSuccess();
+    } catch (err) {
+      console.error('[NewTaskPanel] family submit error:', err);
+      setFamilySubmitting(false);
+    }
+  }
+
+  function formatFamilyCommitWeeks(): string {
+    if (effectiveCommitWeeks == null) return '';
+    const targetCompletions = activeDaysFamily.length * effectiveCommitWeeks;
+    return `${effectiveCommitWeeks} 週（共 ${targetCompletions} 次）`;
+  }
+
   const DAY_LABELS: { value: number; label: string }[] = [
     { value: 1, label: '一' },
     { value: 2, label: '二' },
@@ -1304,7 +1451,7 @@ function NewTaskPanel({
           </Text>
         </TouchableOpacity>
         <Text style={styles.newTaskPanelTitle}>
-            {longTermType === 'habit' ? '建立長期任務' : '建立新任務'}
+            {longTermType != null ? '建立長期任務' : '建立新任務'}
           </Text>
       </View>
 
@@ -1349,13 +1496,24 @@ function NewTaskPanel({
               <Text style={styles.habitTypeTitle}>習慣養成</Text>
               <Text style={styles.habitTypeSub}>{'每日打卡\n節點獎勵'}</Text>
             </TouchableOpacity>
-            {(['技能學習', '家庭責任', '自我挑戰'] as const).map(label => (
-              <View key={label} style={[styles.habitTypeCard, styles.habitTypeCardDisabled]}>
-                <Text style={styles.habitTypeIcon}>🔒</Text>
-                <Text style={[styles.habitTypeTitle, styles.habitTypeTitleDisabled]}>{label}</Text>
-                <Text style={[styles.habitTypeSub, styles.habitTypeSubDisabled]}>即將推出</Text>
-              </View>
-            ))}
+            <TouchableOpacity
+              style={styles.habitTypeCard}
+              onPress={() => { setLongTermType('skill'); setStep(1); }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.habitTypeIcon}>📚</Text>
+              <Text style={styles.habitTypeTitle}>技能學習</Text>
+              <Text style={styles.habitTypeSub}>{'階段里程碑\n完成發幣'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.habitTypeCard}
+              onPress={() => { setLongTermType('family'); setStep(1); }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.habitTypeIcon}>🏠</Text>
+              <Text style={styles.habitTypeTitle}>家庭責任</Text>
+              <Text style={styles.habitTypeSub}>{'職位託付\n時間存摺'}</Text>
+            </TouchableOpacity>
           </View>
         </>
       )}
@@ -1712,6 +1870,392 @@ function NewTaskPanel({
             activeOpacity={0.8}
           >
             {habitSubmitting ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.newTaskPrimaryBtnText}>建立任務</Text>
+            )}
+          </TouchableOpacity>
+        </>
+      )}
+
+      {/* Skill Step 1 — skill name */}
+      {step === 1 && longTermType === 'skill' && (
+        <>
+          <Text style={styles.newTaskFieldLabel}>技能名稱</Text>
+          <TextInput
+            style={styles.newTaskInput}
+            value={taskName}
+            onChangeText={setTaskName}
+            placeholder="例如：鋼琴、游泳、英文會話"
+            placeholderTextColor={ParentColors.fgMuted}
+            returnKeyType="next"
+            onSubmitEditing={() => { if (taskName.trim()) setStep(2); }}
+            autoFocus
+          />
+          <TouchableOpacity
+            style={[styles.newTaskPrimaryBtn, !taskName.trim() && styles.newTaskPrimaryBtnDisabled]}
+            onPress={() => { if (taskName.trim()) setStep(2); }}
+            disabled={!taskName.trim()}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.newTaskPrimaryBtnText}>下一步</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {/* Skill Step 2 — milestone list editor */}
+      {step === 2 && longTermType === 'skill' && (
+        <>
+          <Text style={styles.newTaskFieldLabel}>設定學習階段</Text>
+          {milestoneNames.map((name, idx) => (
+            <View key={idx} style={styles.skillMilestoneRow}>
+              <Text style={styles.skillMilestoneIndex}>{idx + 1}</Text>
+              <TextInput
+                style={styles.skillMilestoneInput}
+                value={name}
+                onChangeText={v => updateMilestoneName(idx, v)}
+                placeholder={`學習目標${idx + 1}`}
+                placeholderTextColor={ParentColors.fgMuted}
+                maxLength={SKILL_MILESTONE_NAME_MAX}
+              />
+              <TouchableOpacity
+                style={[styles.skillDeleteBtn, milestoneNames.length <= 2 && styles.skillDeleteBtnDisabled]}
+                onPress={() => removeMilestone(idx)}
+                disabled={milestoneNames.length <= 2}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.skillDeleteText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+
+          {milestoneNames.length < 5 && (
+            <TouchableOpacity style={styles.skillAddBtn} onPress={addMilestone} activeOpacity={0.75}>
+              <Text style={styles.skillAddText}>＋ 新增階段</Text>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity
+            style={[styles.newTaskPrimaryBtn, !skillNamesValid && styles.newTaskPrimaryBtnDisabled]}
+            onPress={() => { if (skillNamesValid) setStep(3); }}
+            disabled={!skillNamesValid}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.newTaskPrimaryBtnText}>下一步</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {/* Skill Step 3 — per-milestone coin steppers */}
+      {step === 3 && longTermType === 'skill' && (
+        <>
+          <Text style={styles.newTaskFieldLabel}>各階段獎勵</Text>
+          {milestoneNames.map((name, idx) => (
+            <View key={idx} style={styles.habitCoinRow}>
+              <View style={styles.habitCoinLabel}>
+                <Text style={styles.habitCoinLabelText} numberOfLines={1}>
+                  第 {idx + 1} 階段：{name.trim() || `學習目標${idx + 1}`}
+                </Text>
+              </View>
+              <View style={styles.habitCoinStepper}>
+                <TouchableOpacity
+                  style={styles.habitCoinStepBtn}
+                  onPress={() => stepSkillCoin(idx, -1)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.habitCoinStepText}>－</Text>
+                </TouchableOpacity>
+                <Text style={styles.habitCoinValue}>{skillCoins[idx]} 幣</Text>
+                <TouchableOpacity
+                  style={styles.habitCoinStepBtn}
+                  onPress={() => stepSkillCoin(idx, 1)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.habitCoinStepText}>＋</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+
+          {!skillCoinsAreValid(skillCoins) && (
+            <Text style={styles.habitCoinError}>各階段幣值需逐階非遞減（上限 {MAX_SKILL_MILESTONE_COIN} 幣）</Text>
+          )}
+
+          <TouchableOpacity
+            style={[styles.newTaskPrimaryBtn, !skillCoinsAreValid(skillCoins) && styles.newTaskPrimaryBtnDisabled]}
+            onPress={() => { if (skillCoinsAreValid(skillCoins)) setStep(4); }}
+            disabled={!skillCoinsAreValid(skillCoins)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.newTaskPrimaryBtnText}>下一步</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {/* Skill Step 4 — target months + summary + confirm */}
+      {step === 4 && longTermType === 'skill' && (
+        <>
+          <Text style={styles.newTaskFieldLabel}>預計學習時長</Text>
+          <View style={styles.habitDayGrid}>
+            {([1, 3, 6] as const).map(n => (
+              <TouchableOpacity
+                key={n}
+                style={[styles.habitDayCard, skillMonthsPreset === n && styles.habitDayCardActive]}
+                onPress={() => setSkillMonthsPreset(n)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.habitDayCardNum, skillMonthsPreset === n && styles.habitDayCardNumActive]}>
+                  {n} 個月
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={[styles.habitDayCard, skillMonthsPreset === 'custom' && styles.habitDayCardActive]}
+              onPress={() => setSkillMonthsPreset('custom')}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.habitDayCardNum, skillMonthsPreset === 'custom' && styles.habitDayCardNumActive]}>
+                自訂
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {skillMonthsPreset === 'custom' && (
+            <TextInput
+              style={styles.newTaskInput}
+              value={skillCustomMonthsStr}
+              onChangeText={setSkillCustomMonthsStr}
+              placeholder="1–24 個月"
+              placeholderTextColor={ParentColors.fgMuted}
+              keyboardType="number-pad"
+            />
+          )}
+
+          <View style={styles.newTaskSummaryCard}>
+            <View style={styles.newTaskSummaryRow}>
+              <Text style={styles.newTaskSummaryLabel}>技能</Text>
+              <Text style={styles.newTaskSummaryValue} numberOfLines={1}>{taskName.trim()}</Text>
+            </View>
+            <View style={styles.newTaskSummaryRow}>
+              <Text style={styles.newTaskSummaryLabel}>階段</Text>
+              <Text style={styles.newTaskSummaryValue} numberOfLines={2}>
+                {milestoneNames
+                  .map((n, i) => `第${i + 1}階段 ${skillCoins[i]}幣`)
+                  .join(' · ')}
+              </Text>
+            </View>
+            <View style={styles.newTaskSummaryRow}>
+              <Text style={styles.newTaskSummaryLabel}>時長</Text>
+              <Text style={styles.newTaskSummaryValue}>{formatSkillMonths()}</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[
+              styles.newTaskPrimaryBtn,
+              (skillSubmitting || effectiveTargetMonths == null) && styles.newTaskPrimaryBtnDisabled,
+            ]}
+            onPress={() => void handleSkillSubmit()}
+            disabled={skillSubmitting || effectiveTargetMonths == null}
+            activeOpacity={0.8}
+          >
+            {skillSubmitting ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.newTaskPrimaryBtnText}>建立任務</Text>
+            )}
+          </TouchableOpacity>
+        </>
+      )}
+
+      {/* Family Step 1 — responsibility name */}
+      {step === 1 && longTermType === 'family' && (
+        <>
+          <Text style={styles.newTaskFieldLabel}>這個孩子要負責什麼？</Text>
+          <TextInput
+            style={styles.newTaskInput}
+            value={familyTaskName}
+            onChangeText={setFamilyTaskName}
+            placeholder="例如：每週洗碗、每天倒垃圾、照顧植物"
+            placeholderTextColor={ParentColors.fgMuted}
+            returnKeyType="next"
+            onSubmitEditing={() => { if (familyTaskName.trim()) setStep(2); }}
+            autoFocus
+          />
+          <TouchableOpacity
+            style={[styles.newTaskPrimaryBtn, !familyTaskName.trim() && styles.newTaskPrimaryBtnDisabled]}
+            onPress={() => { if (familyTaskName.trim()) setStep(2); }}
+            disabled={!familyTaskName.trim()}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.newTaskPrimaryBtnText}>下一步</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {/* Family Step 2 — active completion days */}
+      {step === 2 && longTermType === 'family' && (
+        <>
+          <Text style={styles.newTaskFieldLabel}>哪幾天需要完成？</Text>
+          <View style={styles.newTaskDayRow}>
+            {([
+              { value: 1, label: '一' }, { value: 2, label: '二' },
+              { value: 3, label: '三' }, { value: 4, label: '四' },
+              { value: 5, label: '五' }, { value: 6, label: '六' },
+              { value: 0, label: '日' },
+            ]).map(({ value, label }) => {
+              const active = activeDaysFamily.includes(value);
+              return (
+                <TouchableOpacity
+                  key={value}
+                  style={[styles.newTaskDayBtn, active && styles.newTaskDayBtnActive]}
+                  onPress={() => toggleActiveDayFamily(value)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[styles.newTaskDayBtnText, active && styles.newTaskDayBtnTextActive]}>
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <TouchableOpacity
+            style={[styles.newTaskPrimaryBtn, activeDaysFamily.length === 0 && styles.newTaskPrimaryBtnDisabled]}
+            onPress={() => { if (activeDaysFamily.length > 0) setStep(3); }}
+            disabled={activeDaysFamily.length === 0}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.newTaskPrimaryBtnText}>下一步</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {/* Family Step 3 — time saving per completion */}
+      {step === 3 && longTermType === 'family' && (
+        <>
+          <Text style={styles.newTaskFieldLabel}>每次時間存摺</Text>
+          <Text style={styles.habitCoinError /* reuse small text style */}>
+            {'每次完成後，計入孩子的時間存摺'}
+          </Text>
+          <View style={[styles.habitDayGrid, { marginTop: 10 }]}>
+            {([15, 30, 60] as const).map(n => (
+              <TouchableOpacity
+                key={n}
+                style={[styles.habitDayCard, familyTimePreset === n && styles.habitDayCardActive]}
+                onPress={() => setFamilyTimePreset(n)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.habitDayCardNum, familyTimePreset === n && styles.habitDayCardNumActive]}>
+                  {n} 分
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={[styles.habitDayCard, familyTimePreset === 'custom' && styles.habitDayCardActive]}
+              onPress={() => setFamilyTimePreset('custom')}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.habitDayCardNum, familyTimePreset === 'custom' && styles.habitDayCardNumActive]}>
+                自訂
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {familyTimePreset === 'custom' && (
+            <TextInput
+              style={styles.newTaskInput}
+              value={customFamilyTimeStr}
+              onChangeText={setCustomFamilyTimeStr}
+              placeholder={`${MIN_FAMILY_TIME}–${MAX_FAMILY_TIME} 分鐘`}
+              placeholderTextColor={ParentColors.fgMuted}
+              keyboardType="number-pad"
+            />
+          )}
+
+          <TouchableOpacity
+            style={[styles.newTaskPrimaryBtn, effectiveFamilyTime == null && styles.newTaskPrimaryBtnDisabled]}
+            onPress={() => { if (effectiveFamilyTime != null) setStep(4); }}
+            disabled={effectiveFamilyTime == null}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.newTaskPrimaryBtnText}>下一步</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {/* Family Step 4 — commit weeks + summary + confirm */}
+      {step === 4 && longTermType === 'family' && effectiveFamilyTime != null && (
+        <>
+          <Text style={styles.newTaskFieldLabel}>承諾期間</Text>
+          <View style={styles.habitDayGrid}>
+            {([4, 8, 12] as const).map(n => (
+              <TouchableOpacity
+                key={n}
+                style={[styles.habitDayCard, familyCommitPreset === n && styles.habitDayCardActive]}
+                onPress={() => setFamilyCommitPreset(n)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.habitDayCardNum, familyCommitPreset === n && styles.habitDayCardNumActive]}>
+                  {n} 週
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={[styles.habitDayCard, familyCommitPreset === 'custom' && styles.habitDayCardActive]}
+              onPress={() => setFamilyCommitPreset('custom')}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.habitDayCardNum, familyCommitPreset === 'custom' && styles.habitDayCardNumActive]}>
+                自訂
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {familyCommitPreset === 'custom' && (
+            <TextInput
+              style={styles.newTaskInput}
+              value={customCommitWeeksStr}
+              onChangeText={setCustomCommitWeeksStr}
+              placeholder="1–24 週"
+              placeholderTextColor={ParentColors.fgMuted}
+              keyboardType="number-pad"
+            />
+          )}
+
+          <View style={styles.newTaskSummaryCard}>
+            <View style={[styles.newTaskSummaryRow, { marginBottom: 4 }]}>
+              <Text style={styles.newTaskSummaryLabel}>🏠</Text>
+              <Text style={[styles.newTaskSummaryValue, { fontWeight: '700' }]}>家庭職位</Text>
+            </View>
+            <View style={styles.newTaskSummaryRow}>
+              <Text style={styles.newTaskSummaryLabel}>職責</Text>
+              <Text style={styles.newTaskSummaryValue} numberOfLines={1}>{familyTaskName.trim()}</Text>
+            </View>
+            <View style={styles.newTaskSummaryRow}>
+              <Text style={styles.newTaskSummaryLabel}>負責天數</Text>
+              <Text style={styles.newTaskSummaryValue}>{formatActiveDays(activeDaysFamily)}</Text>
+            </View>
+            <View style={styles.newTaskSummaryRow}>
+              <Text style={styles.newTaskSummaryLabel}>時間存摺</Text>
+              <Text style={styles.newTaskSummaryValue}>每次完成 {effectiveFamilyTime} 分鐘</Text>
+            </View>
+            <View style={styles.newTaskSummaryRow}>
+              <Text style={styles.newTaskSummaryLabel}>承諾期間</Text>
+              <Text style={styles.newTaskSummaryValue}>{formatFamilyCommitWeeks()}</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[
+              styles.newTaskPrimaryBtn,
+              (familySubmitting || effectiveCommitWeeks == null) && styles.newTaskPrimaryBtnDisabled,
+            ]}
+            onPress={() => void handleFamilySubmit()}
+            disabled={familySubmitting || effectiveCommitWeeks == null}
+            activeOpacity={0.8}
+          >
+            {familySubmitting ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
               <Text style={styles.newTaskPrimaryBtnText}>建立任務</Text>
@@ -3002,10 +3546,10 @@ const styles = StyleSheet.create({
   taskFooter: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 18,
-    paddingTop: 18,
-    borderTopWidth: 1,
-    borderTopColor: ParentColors.borderSoft,
+    marginBottom: 18,
+    paddingBottom: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: ParentColors.borderSoft,
     borderStyle: 'dashed',
   },
   footerBtnBrass: {
@@ -3934,5 +4478,68 @@ const styles = StyleSheet.create({
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.xs,
     color: ParentColors.error,
+  },
+
+  // ── Skill milestone editor ──
+  skillMilestoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  skillMilestoneIndex: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: ParentColors.stone100,
+    textAlign: 'center',
+    lineHeight: 24,
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgSecondary,
+  },
+  skillMilestoneInput: {
+    flex: 1,
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgPrimary,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.md,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  skillDeleteBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: ParentRadii.sm,
+    backgroundColor: ParentColors.stone100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  skillDeleteBtnDisabled: {
+    opacity: 0.35,
+  },
+  skillDeleteText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgMuted,
+    lineHeight: 18,
+  },
+  skillAddBtn: {
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginTop: 2,
+    marginBottom: 6,
+    borderRadius: ParentRadii.md,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderStyle: 'dashed',
+  },
+  skillAddText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.teal500,
   },
 });

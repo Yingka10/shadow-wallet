@@ -262,46 +262,24 @@ export default function WishScreen() {
             style: 'default',
             onPress: async () => {
               try {
-                const { data: walletData, error: walletError } = await supabase
-                  .from('wallets')
-                  .select('id, balance')
-                  .eq('child_id', childId)
-                  .eq('wallet_type', 'spending')
-                  .single();
+                const { data, error } = await supabase.rpc('redeem_wish', {
+                  p_child_id: childId,
+                  p_item_id:  item.id,
+                  p_cost:     item.coin_cost,
+                });
 
-                if (walletError) throw walletError;
-                if (!walletData) throw new Error('找不到錢包');
+                if (error) throw error;
 
-                const newBalance = walletData.balance - item.coin_cost;
-                if (newBalance < 0) {
+                const result = data as { ok?: boolean; error?: string };
+
+                if (result.error === 'already_redeemed') {
+                  Alert.alert('已兌換', '這個願望已經換過了喔！');
+                  return;
+                }
+                if (result.error === 'insufficient_balance') {
                   Alert.alert('金幣不足', '金幣數量不夠喔！');
                   return;
                 }
-
-                const { error: updateError } = await supabase
-                  .from('wallets')
-                  .update({ balance: newBalance })
-                  .eq('id', walletData.id);
-                if (updateError) throw updateError;
-
-                const { error: txError } = await supabase.from('transactions').insert({
-                  wallet_id: walletData.id,
-                  amount: item.coin_cost,
-                  type: 'redeem' as const,
-                  reference_id: item.id,
-                  reference_type: 'reward_item',
-                });
-                if (txError) throw txError;
-
-                const { error: rewardError } = await supabase
-                  .from('reward_items')
-                  .update({
-                    is_redeemed: true,
-                    redeemed_at: new Date().toISOString(),
-                    is_active: false,
-                  })
-                  .eq('id', item.id);
-                if (rewardError) throw rewardError;
 
                 await Promise.all([
                   refreshWallet(),

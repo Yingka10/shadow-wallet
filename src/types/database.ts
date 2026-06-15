@@ -10,7 +10,7 @@ export type MotivationLevel = 'amotivation' | 'external' | 'introjected' | 'inte
 export type PersonalityType = 'competitive' | 'relational' | 'curious';
 export type TaskCategory = 'A' | 'B' | 'C' | 'D';
 export type DayType = 'weekday' | 'weekend' | 'both' | 'custom' | 'once';
-export type LongTermType = 'habit' | 'skill' | 'responsibility' | 'challenge';
+export type LongTermType = 'habit' | 'skill' | 'family' | 'challenge';
 export type AccountType = 'SINGLE' | 'DOUBLE';
 export type ParentRole = 'primary' | 'co';
 export type AiMode = 'conservative' | 'balanced' | 'auto';
@@ -29,6 +29,16 @@ export type ReportedBy = 'child' | 'parent';
 
 /** Maps day-number (as string key) to coin reward. E.g. {"7": 20, "14": 40, "21": 80} */
 export type CheckpointRewards = Record<string, number>;
+
+/**
+ * 技能學習類的單一學習階段（里程碑）。
+ * 存於 long_term_goals.level_definitions（jsonb array）。
+ */
+export type SkillMilestone = {
+  id: string;     // uuid，建立時 client 端產生
+  name: string;   // 階段名稱（已 trim，≤30 字元）
+  coin: number;   // 完成此階段的獎勵幣值（1–50）
+};
 
 // ── Row 型別（對應 DB 欄位，全必填）──────────────────────────
 // 使用 type 而非 interface：TypeScript 5.9+ 中 interface 不滿足
@@ -188,6 +198,8 @@ export type LongTermGoal = {
   base_salary: number | null;
   weekly_target_rate: number | null;
   privilege_reward: Record<string, any> | null;
+  family_time_per_completion: number | null;   // 每次完成記入時間存摺的分鐘數
+  target_completions: number | null;            // 應完成總次數 = activeDays.length × commitWeeks
   // 自我挑戰專用
   target_value: number | null;
   current_value: number | null;
@@ -572,6 +584,8 @@ export interface Database {
           base_salary?: number | null;
           weekly_target_rate?: number | null;
           privilege_reward?: Record<string, any> | null;
+          family_time_per_completion?: number | null;
+          target_completions?: number | null;
           target_value?: number | null;
           current_value?: number | null;
           value_unit?: string | null;
@@ -792,3 +806,12 @@ export interface Database {
     };
   };
 }
+
+export type CreateFamilyGoalInput = {
+  familyId: string;
+  childId: string;
+  name: string;
+  activeDays: number[];     // 有效完成日，0=日~6=六
+  timeMin: number;          // 每次完成記入時間存摺的分鐘數
+  commitWeeks: number;      // 承諾週數
+};

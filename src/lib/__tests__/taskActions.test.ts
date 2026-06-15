@@ -16,7 +16,7 @@ beforeEach(() => {
   mockFrom = jest.fn();
 });
 
-import { calcCoin, checkMilestone, getPrevCheckpoint, OVERRIDE_TYPE_MAP, parentMarkTask, isActiveDayForHabit, applyHabitResume } from '../taskActions';
+import { calcCoin, checkMilestone, getPrevCheckpoint, OVERRIDE_TYPE_MAP, parentMarkTask, isActiveDayForHabit, applyHabitResume, calcSkillDefaultCoins, clampSkillCoin, skillCoinsAreValid, MAX_SKILL_MILESTONE_COIN } from '../taskActions';
 import type { Task, CheckpointRewards } from '../../types/database';
 
 function makeTask(overrides: Partial<Task>): Task {
@@ -144,6 +144,53 @@ describe('OVERRIDE_TYPE_MAP', () => {
   });
   it('maps other → renegotiate', () => {
     expect(OVERRIDE_TYPE_MAP.other).toBe('renegotiate');
+  });
+});
+
+// ── skill milestone helpers ───────────────────────────────────────────────────
+
+describe('calcSkillDefaultCoins', () => {
+  it('distributes 10→50 evenly for 2 milestones', () => {
+    expect(calcSkillDefaultCoins(2)).toEqual([10, 50]);
+  });
+  it('distributes 10→50 evenly for 3 milestones', () => {
+    expect(calcSkillDefaultCoins(3)).toEqual([10, 30, 50]);
+  });
+  it('distributes 10→50 evenly for 5 milestones', () => {
+    expect(calcSkillDefaultCoins(5)).toEqual([10, 20, 30, 40, 50]);
+  });
+  it('starts at 10 and ends at MAX for any valid count', () => {
+    for (const n of [2, 3, 4, 5]) {
+      const coins = calcSkillDefaultCoins(n);
+      expect(coins[0]).toBe(10);
+      expect(coins[coins.length - 1]).toBe(MAX_SKILL_MILESTONE_COIN);
+    }
+  });
+});
+
+describe('clampSkillCoin', () => {
+  it('floors at 1', () => {
+    expect(clampSkillCoin(0)).toBe(1);
+    expect(clampSkillCoin(-5)).toBe(1);
+  });
+  it('caps at MAX_SKILL_MILESTONE_COIN', () => {
+    expect(clampSkillCoin(999)).toBe(MAX_SKILL_MILESTONE_COIN);
+  });
+  it('rounds fractional input', () => {
+    expect(clampSkillCoin(23.4)).toBe(23);
+    expect(clampSkillCoin(23.6)).toBe(24);
+  });
+});
+
+describe('skillCoinsAreValid', () => {
+  it('accepts non-decreasing sequences', () => {
+    expect(skillCoinsAreValid([10, 30, 50])).toBe(true);
+    expect(skillCoinsAreValid([10, 10, 20])).toBe(true);
+    expect(skillCoinsAreValid([5])).toBe(true);
+  });
+  it('rejects any decrease', () => {
+    expect(skillCoinsAreValid([10, 5, 50])).toBe(false);
+    expect(skillCoinsAreValid([50, 40])).toBe(false);
   });
 });
 

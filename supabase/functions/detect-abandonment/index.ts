@@ -68,14 +68,17 @@ Deno.serve(async (req) => {
 
     for (const child of children ?? []) {
       try {
-        // Find last task completion for this child
+        // Find last task completion for this child, excluding 家庭責任 tasks.
+        // Family tasks have irregular cadence (e.g. once a week), so including
+        // them would trigger false abandonment alerts on rest days.
         const { data: lastCompletion } = await supabase
           .from('task_completions')
-          .select('completed_at')
+          .select('completed_at, tasks!inner(long_term_type)')
           .eq('child_id', child.id)
+          .or('long_term_type.is.null,long_term_type.neq.family', { foreignTable: 'tasks' })
           .order('completed_at', { ascending: false })
           .limit(1)
-          .single();
+          .maybeSingle();
 
         const tier = calcAbandonmentTier(lastCompletion?.completed_at ?? null, nowMs);
 

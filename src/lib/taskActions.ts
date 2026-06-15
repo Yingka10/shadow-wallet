@@ -2,7 +2,7 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { supabase } from './supabase';
-import type { Task, CheckpointRewards, OverrideType } from '../types/database';
+import type { Task, CheckpointRewards, OverrideType, SkillMilestone, CreateFamilyGoalInput } from '../types/database';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -191,16 +191,19 @@ export type CompletionResult = {
 };
 
 /**
- * Records a task completion and applies the reward side-effects locally.
+ * Records a task completion and applies all reward side-effects atomically
+ * via the complete_task Postgres RPC.
  *
- * DB writes are handled on the client because the Edge Function path is not
- * reliable in this workspace and was returning 400 before the insert completed.
+ * Atomicity guarantee: the duplicate guard, coin award, time_savings, and
+ * habit milestone are all inside a single DB transaction. If any step fails,
+ * the whole thing rolls back — so a retry always sees a clean state and the
+ * duplicate guard will not falsely block it.
  *
  * @param taskId            The task being completed
  * @param childId           The child completing the task
  * @param completedDate     ISO date string (YYYY-MM-DD) in Asia/Taipei timezone
  * @param isPrerequisiteMet Whether all Task-A and Task-B tasks are done today
- * @param task              Full task row — used for coin calculation
+ * @param task              Full task row — kept in signature for call-site compat
  * @param goalId            Required only for Task-D habit-type tasks
  */
 export async function completeTask(
@@ -211,138 +214,41 @@ export async function completeTask(
   task: Task,
   goalId?: string,
 ): Promise<CompletionResult> {
-  const coinEarned = calcCoin(task, isPrerequisiteMet);
-  const timeSavedMin = task.category === 'B' ? task.time_saving_min : 0;
+  // Build a full Taipei-time timestamp so task_completions.completed_at shows
+  // the real clock time rather than midnight UTC.
+  const now = new Date();
+  const taipeiHour = String((now.getUTCHours() + 8) % 24).padStart(2, '0');
+  const taipeiMin = String(now.getUTCMinutes()).padStart(2, '0');
+  const completedAt = `${completedDate}T${taipeiHour}:${taipeiMin}:00+08:00`;
 
-  // 1. Insert task_completion
-  const { data: completion, error: completionError } = await supabase
-    .from('task_completions')
-    .insert({
-      task_id: taskId,
-      child_id: childId,
-      completed_at: completedDate,
-      reported_by: 'child',
-      status: 'completed',
-      coin_earned: coinEarned,
-      time_saved_min: timeSavedMin,
-    })
-    .select('id')
-    .single();
+  const { data, error } = await supabase.rpc('complete_task', {
+    p_task_id:             taskId,
+    p_child_id:            childId,
+    p_completed_at:        completedAt,
+    p_is_prerequisite_met: isPrerequisiteMet,
+    p_goal_id:             goalId ?? null,
+  });
 
-  if (completionError || !completion) {
-    throw new Error(completionError?.message ?? 'Failed to insert task_completion');
+  if (error) throw new Error(error.message);
+
+  const result = data as {
+    error?: string;
+    completionId?: string;
+    coinEarned?: number;
+    timeSavedMin?: number;
+    milestone?: { goalId: string; day: number; coinReward: number } | null;
+  };
+
+  if (result.error === 'already_completed') {
+    throw new Error('今天已經完成過這個任務了');
   }
 
-  const completionId = completion.id;
-  let milestone: MilestoneResult | null = null;
-
-  // 2. Task-C/D: update wallet and insert transaction
-  if (coinEarned > 0) {
-    const { data: wallet, error: walletFetchError } = await supabase
-      .from('wallets')
-      .select('id, balance')
-      .eq('child_id', childId)
-      .eq('wallet_type', 'spending')
-      .single();
-
-    if (walletFetchError || !wallet) {
-      throw new Error(walletFetchError?.message ?? 'Spending wallet not found');
-    }
-
-    const { error: walletUpdateError } = await supabase
-      .from('wallets')
-      .update({ balance: wallet.balance + coinEarned })
-      .eq('id', wallet.id);
-
-    if (walletUpdateError) {
-      throw new Error(walletUpdateError.message);
-    }
-
-    const { error: txError } = await supabase
-      .from('transactions')
-      .insert({
-        wallet_id: wallet.id,
-        amount: coinEarned,
-        type: 'earn',
-        reference_id: completionId,
-        reference_type: 'task_completion',
-      });
-
-    if (txError) throw new Error(txError.message);
-  }
-
-  // 3. Task-B: insert time_savings
-  if (task.category === 'B' && timeSavedMin > 0) {
-    const { error: tsError } = await supabase
-      .from('time_savings')
-      .insert({
-        child_id: childId,
-        completion_id: completionId,
-        minutes_saved: timeSavedMin,
-      });
-
-    if (tsError) throw new Error(tsError.message);
-  }
-
-  // 4. 'once' task: deactivate from child's list after completion
-  if (task.day_type === 'once') {
-    await supabase
-      .from('child_tasks')
-      .update({ is_active: false })
-      .eq('task_id', taskId)
-      .eq('child_id', childId);
-  }
-
-  // 5. Task-D habit: increment current_day, check milestone
-  if (task.category === 'D' && task.long_term_type === 'habit' && goalId) {
-    const { data: goal, error: goalFetchError } = await supabase
-      .from('long_term_goals')
-      .select('current_day, checkpoint_rewards')
-      .eq('id', goalId)
-      .single();
-
-    if (goalFetchError || !goal) {
-      throw new Error(goalFetchError?.message ?? 'Long-term goal not found');
-    }
-
-    const newDay = goal.current_day + 1;
-    const { error: goalUpdateError } = await supabase
-      .from('long_term_goals')
-      .update({ current_day: newDay })
-      .eq('id', goalId);
-
-    if (goalUpdateError) throw new Error(goalUpdateError.message);
-
-    const rewards = goal.checkpoint_rewards as CheckpointRewards | null;
-    milestone = checkMilestone(goalId, newDay, rewards);
-
-    // Award milestone coins
-    if (milestone) {
-      const { data: wallet, error: wErr } = await supabase
-        .from('wallets')
-        .select('id, balance')
-        .eq('child_id', childId)
-        .eq('wallet_type', 'spending')
-        .single();
-
-      if (!wErr && wallet) {
-        await supabase
-          .from('wallets')
-          .update({ balance: wallet.balance + milestone.coinReward })
-          .eq('id', wallet.id);
-
-        await supabase.from('transactions').insert({
-          wallet_id: wallet.id,
-          amount: milestone.coinReward,
-          type: 'earn',
-          reference_id: goalId,
-          reference_type: 'long_term_goal_milestone',
-        });
-      }
-    }
-  }
-
-  return { completionId, coinEarned, timeSavedMin, milestone };
+  return {
+    completionId: result.completionId!,
+    coinEarned:   result.coinEarned!,
+    timeSavedMin: result.timeSavedMin!,
+    milestone:    result.milestone ?? null,
+  };
 }
 
 /** Returns true when the given day-of-week is a valid check-in day for this habit. */
@@ -458,6 +364,246 @@ export async function createLongTermGoal(input: CreateLongTermGoalInput): Promis
     checkpoint_rewards: input.checkpointRewards,
     active_days: input.activeDays ?? null,
     motivation_note: input.motivationNote ?? null,
+    started_at: today,
+    interrupt_count: 0,
+  });
+
+  if (goalError) {
+    await supabase.from('child_tasks').delete().eq('task_id', task.id);
+    await supabase.from('tasks').delete().eq('id', task.id);
+    throw new Error(goalError.message);
+  }
+}
+
+// ── 技能學習類（skill）長期任務 ───────────────────────────────────────────────
+
+/** 單一里程碑幣值上限。*/
+export const MAX_SKILL_MILESTONE_COIN = 50;
+
+/** 將幣值夾在 1–MAX_SKILL_MILESTONE_COIN，並取整。*/
+export function clampSkillCoin(v: number): number {
+  return Math.max(1, Math.min(MAX_SKILL_MILESTONE_COIN, Math.round(v)));
+}
+
+/**
+ * 依里程碑數量產生預設幣值（等差分佈 10 → 50）。
+ * count 保證 ≥2（由 UI 最少 2 個里程碑約束）。
+ * count=2 → [10,50]、count=3 → [10,30,50]、count=5 → [10,20,30,40,50]
+ */
+export function calcSkillDefaultCoins(count: number): number[] {
+  if (count <= 1) return [MAX_SKILL_MILESTONE_COIN];
+  return Array.from({ length: count }, (_, i) =>
+    Math.round(10 + (40 / (count - 1)) * i),
+  );
+}
+
+/** 里程碑幣值必須非遞減（coins[i+1] >= coins[i]）。*/
+export function skillCoinsAreValid(coins: number[]): boolean {
+  for (let i = 1; i < coins.length; i++) {
+    if (coins[i] < coins[i - 1]) return false;
+  }
+  return true;
+}
+
+/** 產生 uuid v4。優先用平台 crypto，缺席時退回 Math.random 版本（RN/Hermes）。*/
+function genMilestoneId(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
+    const r = (Math.random() * 16) | 0;
+    const v = ch === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+export type CreateSkillGoalInput = {
+  familyId: string;
+  childId: string;
+  name: string;
+  milestones: Omit<SkillMilestone, 'id'>[];   // id 由函數內部產生
+  targetMonths: number;
+};
+
+/**
+ * 建立技能學習類長期任務。
+ * 寫入 tasks（is_long_term=true, long_term_type='skill'）+ long_term_goals
+ * （里程碑存於 level_definitions）。
+ *
+ * 不建立 child_tasks：技能類沒有每日打卡，里程碑完成 UI 延後到 P5b，
+ * 現在綁進每日任務清單會讓它變成一個可被誤完成的 0 幣任務。
+ *
+ * 與習慣類差異：
+ * - 幣值不存 coin_override（總幣值由 level_definitions 各階段算），避免汙染
+ *   「本週可賺幣值」等統計（spec 前置確認項目 B）。
+ * - current_day / total_days 對技能類只是參考時程，不代表進度。
+ *
+ * 兩步寫入無原生 transaction，採補償刪除：goal 寫入失敗則刪除已建 task，
+ * 不留孤兒資料。
+ */
+export async function createSkillGoal(input: CreateSkillGoalInput): Promise<void> {
+  const today = dayjs().tz(TZ).format('YYYY-MM-DD');
+
+  const milestones: SkillMilestone[] = input.milestones.map((m) => ({
+    id: genMilestoneId(),
+    name: m.name.trim(),
+    coin: clampSkillCoin(m.coin),
+  }));
+
+  // Step 1：建立 task
+  const { data: task, error: taskError } = await supabase
+    .from('tasks')
+    .insert({
+      family_id: input.familyId,
+      name: input.name.trim(),
+      category: 'D',
+      day_type: 'both',
+      is_long_term: true,
+      long_term_type: 'skill',
+      base_time_min: 0,
+      difficulty: 1,
+      coin_override: null,   // 技能類幣值由 level_definitions 管理，不存於此
+      time_saving_min: 0,
+      is_system_default: false,
+      allow_repeat: false,
+      min_age: 0,
+      max_age: 99,
+      is_active: true,
+    })
+    .select('id')
+    .single();
+
+  if (taskError || !task) {
+    throw new Error(taskError?.message ?? '建立技能任務失敗');
+  }
+
+  // Step 2：建立 long_term_goal
+  const { error: goalError } = await supabase.from('long_term_goals').insert({
+    child_id: input.childId,
+    task_id: task.id,
+    goal_type: 'skill',
+    status: 'active',
+    current_day: 0,                          // 技能類不用，佔位
+    total_days: input.targetMonths * 30,     // 參考時程，非進度
+    checkpoint_rewards: null,                // 技能類不用
+    level_definitions: milestones,
+    current_level: 0,
+    level_count: milestones.length,
+    started_at: today,
+    interrupt_count: 0,
+  });
+
+  if (goalError) {
+    // 補償刪除：避免孤兒 task
+    await supabase.from('tasks').delete().eq('id', task.id);
+    throw new Error(goalError.message);
+  }
+}
+
+/**
+ * [P5b — NOT YET IMPLEMENTED]
+ *
+ * Marks a skill milestone as completed and awards its coins.
+ *
+ * ATOMICITY REQUIREMENT (implement as a Postgres RPC, not multi-step JS):
+ *   These three writes must be atomic — all succeed or all roll back:
+ *     1. UPDATE long_term_goals SET current_level = current_level + 1
+ *     2. INSERT transactions (coin award)
+ *     3. UPDATE wallets SET balance = balance + milestone.coin
+ *   Without atomicity, a partial failure lets the child replay the same
+ *   milestone and collect the coins a second time.
+ *
+ *   Recommended RPC signature:
+ *     complete_skill_milestone(p_goal_id uuid, p_child_id uuid, p_level_index int)
+ *     → jsonb { ok, newLevel, coinEarned }
+ *
+ *   Also verify the duplicate guard: if the RPC fails mid-way, current_level
+ *   must be rolled back so a retry is not blocked by the guard.
+ */
+export async function completeSkillMilestone(
+  _goalId: string,
+  _childId: string,
+  _levelIndex: number,
+): Promise<never> {
+  throw new Error('completeSkillMilestone not yet implemented (P5b)');
+}
+
+// ── 家庭責任類（family）長期任務 ─────────────────────────────────────────────
+
+/** 每次完成時間存摺的最小/最大分鐘數限制。 */
+export const MIN_FAMILY_TIME = 5;
+export const MAX_FAMILY_TIME = 120;
+
+/**
+ * 建立家庭責任類長期任務。
+ * 依序寫入 tasks（category='B', is_long_term=true）→ child_tasks → long_term_goals。
+ * 任何步驟失敗都補償刪除已建資料，不留孤兒 row。
+ *
+ * 進度模型：
+ * - total_days = commitWeeks × 7（日曆天，決定承諾期何時期滿）
+ * - target_completions = activeDays.length × commitWeeks（應完成次數，達成率分母）
+ * - current_day = 實際完成次數（由 completeTask 的 Task-B 路徑自動遞增，非日曆天）
+ *
+ * 時間存摺：task.time_saving_min > 0，completeTask 的 Task-B 路徑自動處理 time_savings 記錄。
+ */
+export async function createFamilyGoal(input: CreateFamilyGoalInput): Promise<void> {
+  const today = dayjs().tz(TZ).format('YYYY-MM-DD');
+  const timeMin = Math.max(MIN_FAMILY_TIME, Math.min(MAX_FAMILY_TIME, Math.round(input.timeMin)));
+  const totalDays = input.commitWeeks * 7;
+  const targetCompletions = input.activeDays.length * input.commitWeeks;
+
+  // Step 1：建立 task（Task-B，時間存摺）
+  const { data: task, error: taskError } = await supabase
+    .from('tasks')
+    .insert({
+      family_id: input.familyId,
+      name: input.name.trim(),
+      category: 'B',
+      day_type: 'custom',
+      recurrence_days: [...input.activeDays].sort((a, b) => a - b),
+      is_long_term: true,
+      long_term_type: 'family',
+      base_time_min: timeMin,
+      difficulty: 1,
+      coin_override: null,
+      time_saving_min: timeMin,
+      is_system_default: false,
+      allow_repeat: false,
+      min_age: 0,
+      max_age: 99,
+      is_active: true,
+    })
+    .select('id')
+    .single();
+
+  if (taskError || !task) {
+    throw new Error(taskError?.message ?? '建立家庭責任任務失敗');
+  }
+
+  // Step 2：綁定 child_tasks（使家庭責任出現在孩子每日任務清單）
+  const { error: childTaskError } = await supabase.from('child_tasks').insert({
+    child_id: input.childId,
+    task_id: task.id,
+    is_active: true,
+  });
+
+  if (childTaskError) {
+    await supabase.from('tasks').delete().eq('id', task.id);
+    throw new Error(childTaskError.message);
+  }
+
+  // Step 3：建立 long_term_goal
+  const { error: goalError } = await supabase.from('long_term_goals').insert({
+    child_id: input.childId,
+    task_id: task.id,
+    goal_type: 'family',
+    status: 'active',
+    current_day: 0,
+    total_days: totalDays,
+    target_completions: targetCompletions,
+    active_days: input.activeDays,
+    family_time_per_completion: timeMin,
+    checkpoint_rewards: null,
+    motivation_note: null,
     started_at: today,
     interrupt_count: 0,
   });
