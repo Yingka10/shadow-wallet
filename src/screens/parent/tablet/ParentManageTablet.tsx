@@ -13,12 +13,20 @@ import {
   Modal,
   StyleSheet,
   useWindowDimensions,
+  Alert,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import type { StackNavigationProp } from '@react-navigation/stack';
+import type { RootStackParamList } from '../../../../App';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../../lib/supabase';
 import { useParentTaskList, type TaskListItem } from '../../../hooks/useParentTaskList';
+import {
+  useParentLongTermGoals,
+  type LongTermGoalItem,
+} from '../../../hooks/useParentLongTermGoals';
+import type { LongTermType } from '../../../types/database';
 import {
   useParentRedemption,
   type ParentProposal,
@@ -33,25 +41,33 @@ import {
   ParentFontSizes,
   ParentFontWeights,
 } from '../../../constants/parentTheme';
-import type { TaskCategory } from '../../../types/database';
 import dayjs from 'dayjs';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CAT_META: Record<TaskCategory, { name: string; color: string }> = {
-  A: { name: '生活自理', color: ParentColors.ink700  },
-  B: { name: '家庭本分', color: ParentColors.teal500 },
-  C: { name: '貢獻',     color: ParentColors.clay500 },
-  D: { name: '里程碑',   color: ParentColors.plum500 },
-};
-
 const STATUS_META: Record<string, { label: string; bg: string; fg: string }> = {
   approved: { label: '已核准', bg: '#E8F2E6', fg: ParentColors.success },
   rejected: { label: '已退回', bg: '#FDEEE8', fg: ParentColors.error   },
   pending:  { label: '待審核', bg: '#FBF1DC', fg: ParentColors.warn    },
 };
+
+// Module-level cache so a card's collapse state survives tab switches / remounts
+// within a session (resets on full app reload).
+const expandCache: Record<string, boolean> = {};
+
+function useExpandState(key: string, defaultValue: boolean): [boolean, () => void] {
+  const [expanded, setExpanded] = useState<boolean>(expandCache[key] ?? defaultValue);
+  const toggle = useCallback(() => {
+    setExpanded((prev) => {
+      const next = !prev;
+      expandCache[key] = next;
+      return next;
+    });
+  }, [key]);
+  return [expanded, toggle];
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SVG Icons
@@ -122,6 +138,33 @@ function XIcon({ size = 20, color = ParentColors.fgPrimary }: { size?: number; c
   );
 }
 
+function PencilIcon({ size = 13, color = ParentColors.fgMuted }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+function CheckCircleIcon({ size = 13, color = ParentColors.fgMuted }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={2} />
+      <Path d="M8 12l3 3 5-5" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+function FlagIcon({ size = 13, color = ParentColors.fgMuted }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M4 22v-7" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ManageHeader
 // ─────────────────────────────────────────────────────────────────────────────
@@ -176,13 +219,13 @@ function ManageHeader({
 // Task Library
 // ─────────────────────────────────────────────────────────────────────────────
 
-function TaskRow({ task }: { task: TaskListItem }) {
-  return (
-    <View style={s.taskRow}>
-      <View style={s.activeDot} />
+function TaskRow({ task, onPress }: { task: TaskListItem; onPress?: () => void }) {
+  const inner = (
+    <View style={[s.taskRow, !task.isActive && s.taskRowInactive]}>
+      <View style={[s.activeDot, !task.isActive && s.inactiveDot]} />
       <View style={s.taskMid}>
         <View style={s.taskNameRow}>
-          <Text style={s.taskName}>{task.name}</Text>
+          <Text style={[s.taskName, !task.isActive && s.taskNameInactive]}>{task.name}</Text>
           {task.isLongTerm && (
             <View style={s.longTermChip}>
               <Text style={s.longTermChipText}>長期</Text>
@@ -208,73 +251,185 @@ function TaskRow({ task }: { task: TaskListItem }) {
           <Text style={s.rewardDash}>—</Text>
         )}
       </View>
+      {onPress && <PencilIcon size={12} color={ParentColors.ink300} />}
+    </View>
+  );
+
+  if (!onPress) return inner;
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
+      {inner}
+    </TouchableOpacity>
+  );
+}
+
+type RewardGroupKey = 'time' | 'coins' | 'none';
+
+const REWARD_GROUP_LABEL: Record<RewardGroupKey, string> = {
+  time:  '時間存款任務',
+  coins: '成長幣任務',
+  none:  '生活紀錄任務',
+};
+
+function RewardGroupIcon({ groupKey, size = 14 }: { groupKey: RewardGroupKey; size?: number }) {
+  if (groupKey === 'time')  return <ClockSmIcon  size={size} color={ParentColors.teal500} />;
+  if (groupKey === 'coins') return <CoinSmIcon   size={size} color="#A87800" />;
+  return <CheckCircleIcon size={size} color={ParentColors.fgMuted} />;
+}
+
+function RewardGroup({
+  groupKey,
+  tasks,
+  onTaskPress,
+}: {
+  groupKey: RewardGroupKey;
+  tasks: TaskListItem[];
+  onTaskPress?: (task: TaskListItem) => void;
+}) {
+  const [expanded, toggle] = useExpandState(`group-${groupKey}`, true);
+
+  return (
+    <View style={s.catGroup}>
+      <TouchableOpacity
+        style={s.catGroupHead}
+        onPress={toggle}
+        activeOpacity={0.7}
+      >
+        <View style={s.catGroupLeft}>
+          <RewardGroupIcon groupKey={groupKey} />
+          <Text style={s.catLabel}>{REWARD_GROUP_LABEL[groupKey]}</Text>
+        </View>
+        <View style={s.catGroupRight}>
+          <Text style={s.catCount}>{tasks.length} 項</Text>
+          <View style={[s.chevronMini, expanded && s.chevronMiniExpanded]}>
+            <ChevronRightIcon size={14} />
+          </View>
+        </View>
+      </TouchableOpacity>
+      {expanded && (
+        <View style={s.innerBorder}>
+          {tasks.map((t, i) => (
+            <React.Fragment key={t.id}>
+              <TaskRow task={t} onPress={onTaskPress ? () => onTaskPress(t) : undefined} />
+              {i < tasks.length - 1 && <View style={s.rowDivider} />}
+            </React.Fragment>
+          ))}
+        </View>
+      )}
     </View>
   );
 }
 
-function CategoryGroup({ cat, tasks }: { cat: TaskCategory; tasks: TaskListItem[] }) {
-  const meta = CAT_META[cat];
+function CollapsibleHeader({
+  icon,
+  eyebrow,
+  title,
+  summary,
+  expanded,
+  onToggle,
+}: {
+  icon: React.ReactNode;
+  eyebrow: string;
+  title: string;
+  summary?: string;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
   return (
-    <View style={s.catGroup}>
-      <View style={s.catGroupHead}>
-        <View style={s.catGroupLeft}>
-          <View style={[s.catBadge, { backgroundColor: meta.color }]}>
-            <Text style={s.catBadgeText}>{cat}</Text>
-          </View>
-          <Text style={s.catLabel}>{cat} 類</Text>
-          <Text style={s.catName}>{meta.name}</Text>
+    <TouchableOpacity style={s.collapseHead} onPress={onToggle} activeOpacity={0.7}>
+      <View style={s.collapseHeadLeft}>
+        <View style={s.eyebrowRow}>
+          {icon}
+          <Text style={s.eyebrow}>{eyebrow}</Text>
         </View>
-        <Text style={s.catCount}>{tasks.length} 項</Text>
+        <Text style={s.cardTitle}>{title}</Text>
       </View>
-      <View style={s.innerBorder}>
-        {tasks.length === 0 ? (
-          <View style={s.emptyRow}>
-            <Text style={s.emptyRowText}>本類別尚無任務</Text>
-          </View>
-        ) : (
-          tasks.map((t, i) => (
-            <React.Fragment key={t.id}>
-              <TaskRow task={t} />
-              {i < tasks.length - 1 && <View style={s.rowDivider} />}
-            </React.Fragment>
-          ))
-        )}
+      <View style={s.collapseHeadRight}>
+        {!!summary && <Text style={s.collapseSummary}>{summary}</Text>}
+        <View style={[s.chevronBox, expanded && s.chevronBoxExpanded]}>
+          <ChevronRightIcon size={18} />
+        </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
 function TaskLibrarySection({
   tasks,
+  inactiveTasks,
   loading,
+  onTaskPress,
 }: {
   tasks: TaskListItem[];
+  inactiveTasks: TaskListItem[];
   loading: boolean;
+  onTaskPress?: (task: TaskListItem) => void;
 }) {
-  const grouped = (['A', 'B', 'C', 'D'] as TaskCategory[]).map((cat) => ({
-    cat,
-    tasks: tasks.filter((t) => t.cat === cat),
-  }));
+  const [expanded, toggle] = useExpandState('lib', false);
+
+  // Exclude long-term tasks — they're managed via the long-term section
+  const regularTasks = tasks.filter((t) => !t.isLongTerm);
+
+  const allGroups: Array<{ key: RewardGroupKey; tasks: TaskListItem[] }> = [
+    { key: 'time',  tasks: regularTasks.filter((t) => t.reward?.kind === 'time') },
+    { key: 'coins', tasks: regularTasks.filter((t) => t.reward?.kind === 'coins') },
+    { key: 'none',  tasks: regularTasks.filter((t) => t.reward == null) },
+  ];
+  const groups = allGroups.filter((g) => g.tasks.length > 0);
+
+  const summary = loading
+    ? ''
+    : `啟用 ${regularTasks.length}${inactiveTasks.length > 0 ? ` · 停用 ${inactiveTasks.length}` : ''}`;
 
   return (
     <View style={s.card}>
-      <View style={s.cardHead}>
-        <View style={s.eyebrowRow}>
-          <LibraryIcon />
-          <Text style={s.eyebrow}>Library</Text>
-        </View>
-        <Text style={s.cardTitle}>任務庫</Text>
-        <Text style={s.cardMeta}>任務設定面 · 不顯示執行狀況</Text>
-      </View>
-      {loading ? (
-        <View style={s.loaderBox}>
-          <ActivityIndicator size="small" color={ParentColors.accent} />
-        </View>
-      ) : (
-        <View style={s.catList}>
-          {grouped.map(({ cat, tasks: catTasks }) => (
-            <CategoryGroup key={cat} cat={cat} tasks={catTasks} />
-          ))}
+      <CollapsibleHeader
+        icon={<LibraryIcon />}
+        eyebrow="Library"
+        title="任務庫"
+        summary={summary}
+        expanded={expanded}
+        onToggle={toggle}
+      />
+      {expanded && (
+        <View style={s.cardBody}>
+          <Text style={s.cardBodyHint}>點任務可編輯名稱、獎勵或停用</Text>
+          {loading ? (
+            <View style={s.loaderBox}>
+              <ActivityIndicator size="small" color={ParentColors.accent} />
+            </View>
+          ) : (
+            <View style={s.catList}>
+              {groups.length === 0 ? (
+                <View style={s.emptyBox}>
+                  <Text style={s.emptyBoxText}>尚無啟用任務</Text>
+                </View>
+              ) : (
+                groups.map(({ key, tasks: groupTasks }) => (
+                  <RewardGroup
+                    key={key}
+                    groupKey={key}
+                    tasks={groupTasks}
+                    onTaskPress={onTaskPress}
+                  />
+                ))
+              )}
+
+              {inactiveTasks.length > 0 && (
+                <View style={s.inactiveSection}>
+                  <Text style={s.inactiveSectionLabel}>已停用 · {inactiveTasks.length} 項</Text>
+                  <View style={s.innerBorder}>
+                    {inactiveTasks.map((t, i) => (
+                      <React.Fragment key={t.id}>
+                        <TaskRow task={t} onPress={onTaskPress ? () => onTaskPress(t) : undefined} />
+                        {i < inactiveTasks.length - 1 && <View style={s.rowDivider} />}
+                      </React.Fragment>
+                    ))}
+                  </View>
+                </View>
+              )}
+            </View>
+          )}
         </View>
       )}
     </View>
@@ -307,29 +462,246 @@ function RewardListSection({
   proposals: ParentProposal[];
   loading: boolean;
 }) {
+  const [expanded, toggle] = useExpandState('rewards', false);
+  const summary = loading ? '' : `${proposals.length} 項`;
+
   return (
     <View style={s.card}>
-      <View style={s.cardHead}>
-        <View style={s.eyebrowRow}>
-          <GiftIcon />
-          <Text style={s.eyebrow}>Rewards</Text>
+      <CollapsibleHeader
+        icon={<GiftIcon />}
+        eyebrow="Rewards"
+        title="獎勵清單"
+        summary={summary}
+        expanded={expanded}
+        onToggle={toggle}
+      />
+      {expanded && (
+        <View style={s.cardBody}>
+          <Text style={s.cardBodyHint}>可兌換項目 · 家長提案</Text>
+          {loading ? (
+            <View style={s.loaderBox}>
+              <ActivityIndicator size="small" color={ParentColors.accent} />
+            </View>
+          ) : proposals.length === 0 ? (
+            <View style={s.emptyBox}>
+              <Text style={s.emptyBoxText}>尚無獎勵項目</Text>
+            </View>
+          ) : (
+            <View style={s.innerBorder}>
+              {proposals.map((p, i) => (
+                <RewardRow key={p.id} proposal={p} isLast={i === proposals.length - 1} />
+              ))}
+            </View>
+          )}
         </View>
-        <Text style={s.cardTitle}>獎勵清單</Text>
-        <Text style={s.cardMeta}>可兌換項目 · 家長提案</Text>
+      )}
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Long-term task management
+// ─────────────────────────────────────────────────────────────────────────────
+
+const GOAL_TYPE_META: Record<LongTermType, { emoji: string; label: string; tint: string; fg: string }> = {
+  habit:     { emoji: '🌱', label: '習慣養成', tint: '#E8F2E6', fg: ParentColors.success },
+  skill:     { emoji: '📚', label: '技能學習', tint: '#EAF0EE', fg: ParentColors.teal500 },
+  family:    { emoji: '🏠', label: '家庭責任', tint: '#EAE4D7', fg: ParentColors.ink500 },
+  challenge: { emoji: '🏆', label: '自我挑戰', tint: '#FAF1E7', fg: ParentColors.clay500 },
+};
+
+const GOAL_TYPE_FALLBACK = { emoji: '🎯', label: '長期任務', tint: '#EEE', fg: ParentColors.fgMuted };
+
+function LongTermGoalRow({
+  item,
+  isLast,
+  onPause,
+  onResume,
+  onDelete,
+}: {
+  item: LongTermGoalItem;
+  isLast: boolean;
+  onPause: (goalId: string) => Promise<void>;
+  onResume: (goalId: string) => Promise<void>;
+  onDelete: (goalId: string, taskId: string) => Promise<void>;
+}) {
+  const meta = GOAL_TYPE_META[item.goalType] ?? GOAL_TYPE_FALLBACK;
+  const isPaused = item.status === 'paused';
+  const [busy, setBusy] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  async function run(fn: () => Promise<void>, failMsg: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fn();
+    } catch (err) {
+      Alert.alert(failMsg, err instanceof Error ? err.message : '請稍後再試');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <View style={[s.ltRow, !isLast && s.rowDivider, isPaused && s.ltRowPaused]}>
+      <View style={s.ltRowTop}>
+        <View style={[s.ltTypeBadge, { backgroundColor: meta.tint }]}>
+          <Text style={s.ltTypeEmoji}>{meta.emoji}</Text>
+          <Text style={[s.ltTypeLabel, { color: meta.fg }]}>{meta.label}</Text>
+        </View>
+        <Text style={[s.ltName, isPaused && s.ltNamePaused]} numberOfLines={1}>{item.name}</Text>
+        {isPaused && (
+          <View style={s.ltPausedChip}>
+            <Text style={s.ltPausedChipText}>已暫停</Text>
+          </View>
+        )}
       </View>
-      {loading ? (
-        <View style={s.loaderBox}>
-          <ActivityIndicator size="small" color={ParentColors.accent} />
+
+      <View style={s.ltProgressRow}>
+        <View style={s.ltProgressTrack}>
+          <View style={[s.ltProgressFill, { width: `${item.progressPct}%` as `${number}%` }]} />
         </View>
-      ) : proposals.length === 0 ? (
-        <View style={s.emptyBox}>
-          <Text style={s.emptyBoxText}>尚無獎勵項目</Text>
+        <Text style={s.ltProgressLabel}>{item.progressLabel}</Text>
+      </View>
+
+      {confirmingDelete ? (
+        <View style={s.ltActionRow}>
+          <Text style={s.ltConfirmText}>確定刪除這個長期任務？</Text>
+          <TouchableOpacity
+            style={[s.ltActionBtn]}
+            onPress={() => setConfirmingDelete(false)}
+            disabled={busy}
+            activeOpacity={0.7}
+          >
+            <Text style={s.ltActionBtnText}>取消</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[s.ltActionBtn, s.ltDeleteBtn]}
+            onPress={() => run(() => onDelete(item.id, item.taskId), '刪除失敗')}
+            disabled={busy}
+            activeOpacity={0.7}
+          >
+            {busy
+              ? <ActivityIndicator size="small" color={ParentColors.error} />
+              : <Text style={[s.ltActionBtnText, s.ltDeleteBtnText]}>確定刪除</Text>}
+          </TouchableOpacity>
         </View>
       ) : (
-        <View style={s.innerBorder}>
-          {proposals.map((p, i) => (
-            <RewardRow key={p.id} proposal={p} isLast={i === proposals.length - 1} />
-          ))}
+        <View style={s.ltActionRow}>
+          {isPaused ? (
+            <TouchableOpacity
+              style={[s.ltActionBtn, s.ltResumeBtn]}
+              onPress={() => run(() => onResume(item.id), '恢復失敗')}
+              disabled={busy}
+              activeOpacity={0.7}
+            >
+              {busy
+                ? <ActivityIndicator size="small" color={ParentColors.success} />
+                : <Text style={[s.ltActionBtnText, s.ltResumeBtnText]}>恢復</Text>}
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={s.ltActionBtn}
+              onPress={() => run(() => onPause(item.id), '暫停失敗')}
+              disabled={busy}
+              activeOpacity={0.7}
+            >
+              {busy
+                ? <ActivityIndicator size="small" color={ParentColors.fgMuted} />
+                : <Text style={s.ltActionBtnText}>暫停</Text>}
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            style={s.ltActionBtn}
+            onPress={() => setConfirmingDelete(true)}
+            disabled={busy}
+            activeOpacity={0.7}
+          >
+            <Text style={[s.ltActionBtnText, s.ltDeleteBtnText]}>刪除</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function LongTermManageSection({
+  items,
+  loading,
+  onPause,
+  onResume,
+  onDelete,
+}: {
+  items: LongTermGoalItem[];
+  loading: boolean;
+  onPause: (goalId: string) => Promise<void>;
+  onResume: (goalId: string) => Promise<void>;
+  onDelete: (goalId: string, taskId: string) => Promise<void>;
+}) {
+  const [expanded, toggle] = useExpandState('lt', false);
+
+  const pausedCount = items.filter((it) => it.status === 'paused').length;
+  const activeCount = items.length - pausedCount;
+  const summary = loading
+    ? ''
+    : items.length === 0
+    ? '0'
+    : `進行中 ${activeCount}${pausedCount > 0 ? ` · 暫停 ${pausedCount}` : ''}`;
+
+  const TYPE_ORDER: LongTermType[] = ['habit', 'skill', 'family', 'challenge'];
+  const grouped = TYPE_ORDER
+    .map((type) => ({ type, list: items.filter((it) => it.goalType === type) }))
+    .filter((g) => g.list.length > 0);
+
+  return (
+    <View style={s.card}>
+      <CollapsibleHeader
+        icon={<FlagIcon color={ParentColors.clay500} />}
+        eyebrow="Long-term"
+        title="長期任務"
+        summary={summary}
+        expanded={expanded}
+        onToggle={toggle}
+      />
+      {expanded && (
+        <View style={s.cardBody}>
+          <Text style={s.cardBodyHint}>習慣養成 · 技能學習 · 家庭責任 — 可暫停或刪除</Text>
+          {loading ? (
+            <View style={s.loaderBox}>
+              <ActivityIndicator size="small" color={ParentColors.accent} />
+            </View>
+          ) : items.length === 0 ? (
+            <View style={s.emptyBox}>
+              <Text style={s.emptyBoxText}>尚無長期任務</Text>
+            </View>
+          ) : (
+            <View style={s.ltGroupList}>
+              {grouped.map(({ type, list }) => {
+                const meta = GOAL_TYPE_META[type];
+                return (
+                  <View key={type} style={s.ltGroup}>
+                    <View style={s.ltGroupHead}>
+                      <Text style={s.ltGroupEmoji}>{meta.emoji}</Text>
+                      <Text style={s.ltGroupLabel}>{meta.label}</Text>
+                      <Text style={s.ltGroupCount}>{list.length}</Text>
+                    </View>
+                    <View style={s.innerBorder}>
+                      {list.map((item, i) => (
+                        <LongTermGoalRow
+                          key={item.id}
+                          item={item}
+                          isLast={i === list.length - 1}
+                          onPause={onPause}
+                          onResume={onResume}
+                          onDelete={onDelete}
+                        />
+                      ))}
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
         </View>
       )}
     </View>
@@ -487,6 +859,7 @@ export default function ParentManageTablet() {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
+  const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [selectedChildId, setSelectedChildId] = useState<string | null>(null);
   const [historyVisible, setHistoryVisible] = useState(false);
@@ -526,15 +899,39 @@ export default function ParentManageTablet() {
 
   const {
     tasks,
+    inactiveTasks,
     loading: taskLoading,
     refresh: refreshTasks,
   } = useParentTaskList(selectedChildId ?? '');
 
+  const {
+    items: longTermGoals,
+    loading: longTermLoading,
+    refresh: refreshLongTerm,
+    pause: pauseGoal,
+    resume: resumeGoal,
+    remove: removeGoal,
+  } = useParentLongTermGoals(selectedChildId ?? '');
+
+  function handleTaskPress(task: TaskListItem) {
+    const child = allChildren.find((c) => c.id === selectedChildId);
+    if (!child) return;
+    navigation.navigate('ParentTaskEdit', {
+      taskId: task.id,
+      childTaskId: task.childTaskId,
+      childName: child.nickname,
+      isActive: task.isActive,
+    });
+  }
+
   useFocusEffect(
     useCallback(() => {
       void refreshRedemption();
-      if (selectedChildId) void refreshTasks();
-    }, [refreshRedemption, refreshTasks, selectedChildId]),
+      if (selectedChildId) {
+        void refreshTasks();
+        void refreshLongTerm();
+      }
+    }, [refreshRedemption, refreshTasks, refreshLongTerm, selectedChildId]),
   );
 
   if (width < 768) return null;
@@ -563,9 +960,22 @@ export default function ParentManageTablet() {
         showsVerticalScrollIndicator={false}
       >
         <View style={s.grid}>
-          {/* 左欄 — 任務庫 */}
+          {/* 左欄 — 任務庫 + 長期任務佔位 */}
           <View style={s.colLeft}>
-            <TaskLibrarySection tasks={tasks} loading={isTaskLoading} />
+            <TaskLibrarySection
+              tasks={tasks}
+              inactiveTasks={inactiveTasks}
+              loading={isTaskLoading}
+              onTaskPress={handleTaskPress}
+            />
+            <View style={s.colGap} />
+            <LongTermManageSection
+              items={longTermGoals}
+              loading={longTermLoading || selectedChildId === null}
+              onPause={pauseGoal}
+              onResume={resumeGoal}
+              onDelete={removeGoal}
+            />
           </View>
           {/* 右欄 — 獎勵清單 + 兌換歷史入口 */}
           <View style={s.colRight}>
@@ -708,6 +1118,51 @@ const s = StyleSheet.create({
     marginTop: 3,
   },
 
+  // ── Collapsible header ──
+  collapseHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: ParentSpacing[3],
+  },
+  collapseHeadLeft: {
+    flex: 1,
+    gap: 2,
+  },
+  collapseHeadRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ParentSpacing[3],
+    flexShrink: 0,
+  },
+  collapseSummary: {
+    fontFamily: ParentFonts.mono,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+  },
+  chevronBox: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: ParentColors.bgSurfaceWarm,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chevronBoxExpanded: {
+    transform: [{ rotate: '90deg' }],
+  },
+  cardBody: {
+    marginTop: ParentSpacing[5],
+    gap: ParentSpacing[3],
+  },
+  cardBodyHint: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+  },
+
   // ── Eyebrow ──
   eyebrow: {
     fontFamily: ParentFonts.body,
@@ -753,7 +1208,7 @@ const s = StyleSheet.create({
     borderBottomColor: ParentColors.borderSoft,
   },
 
-  // ── Category group ──
+  // ── Reward group ──
   catList: {
     gap: ParentSpacing[5],
   },
@@ -771,34 +1226,30 @@ const s = StyleSheet.create({
     alignItems: 'center',
     gap: ParentSpacing[2],
   },
-  catBadge: {
-    width: 22,
-    height: 22,
-    borderRadius: 7,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  catBadgeText: {
-    fontFamily: ParentFonts.mono,
-    fontSize: 12,
-    fontWeight: ParentFontWeights.bold,
-    color: '#fff',
-  },
   catLabel: {
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.sm,
     fontWeight: ParentFontWeights.bold,
     color: ParentColors.fgPrimary,
   },
-  catName: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.pMeta,
-    color: ParentColors.fgMuted,
+  catGroupRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ParentSpacing[2],
   },
   catCount: {
     fontFamily: ParentFonts.mono,
     fontSize: ParentFontSizes.xs,
     color: ParentColors.fgMuted,
+  },
+  chevronMini: {
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chevronMiniExpanded: {
+    transform: [{ rotate: '90deg' }],
   },
 
   // ── Task row ──
@@ -1045,4 +1496,180 @@ const s = StyleSheet.create({
     fontSize: ParentFontSizes.sm,
     color: ParentColors.fgMuted,
   },
+
+  // ── Inactive task state ──
+  taskRowInactive: {
+    backgroundColor: ParentColors.bgSurfaceWarm,
+  },
+  inactiveDot: {
+    backgroundColor: ParentColors.ink300,
+    opacity: 0.5,
+  },
+  taskNameInactive: {
+    color: ParentColors.fgMuted,
+  },
+  inactiveSection: {
+    marginTop: ParentSpacing[3],
+    gap: ParentSpacing[2],
+  },
+  inactiveSectionLabel: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    paddingHorizontal: 2,
+  },
+
+  // ── Long-term task management ──
+  ltGroupList: {
+    gap: ParentSpacing[5],
+  },
+  ltGroup: {
+    gap: ParentSpacing[2],
+  },
+  ltGroupHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ParentSpacing[2],
+    marginBottom: ParentSpacing[2],
+  },
+  ltGroupEmoji: {
+    fontSize: 13,
+  },
+  ltGroupLabel: {
+    flex: 1,
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgPrimary,
+  },
+  ltGroupCount: {
+    fontFamily: ParentFonts.mono,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+  },
+  ltRow: {
+    paddingVertical: ParentSpacing[4],
+    paddingHorizontal: ParentSpacing[4],
+    gap: ParentSpacing[3],
+    backgroundColor: ParentColors.bgSurface,
+  },
+  ltRowPaused: {
+    backgroundColor: ParentColors.bgSurfaceWarm,
+  },
+  ltRowTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ParentSpacing[2],
+  },
+  ltTypeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: ParentRadii.pill,
+    flexShrink: 0,
+  },
+  ltTypeEmoji: {
+    fontSize: 12,
+  },
+  ltTypeLabel: {
+    fontFamily: ParentFonts.body,
+    fontSize: 11,
+    fontWeight: ParentFontWeights.semi,
+  },
+  ltName: {
+    flex: 1,
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.pMeta,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgPrimary,
+  },
+  ltNamePaused: {
+    color: ParentColors.fgMuted,
+  },
+  ltPausedChip: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    backgroundColor: ParentColors.bgSurface,
+    borderRadius: ParentRadii.pill,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    flexShrink: 0,
+  },
+  ltPausedChipText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 10,
+    color: ParentColors.fgMuted,
+  },
+  ltProgressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ParentSpacing[3],
+  },
+  ltProgressTrack: {
+    flex: 1,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: ParentColors.bgSurfaceWarm,
+    overflow: 'hidden',
+  },
+  ltProgressFill: {
+    height: '100%',
+    borderRadius: 3,
+    backgroundColor: ParentColors.clay500,
+  },
+  ltProgressLabel: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+    flexShrink: 0,
+  },
+  ltActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: ParentSpacing[2],
+  },
+  ltConfirmText: {
+    flex: 1,
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.error,
+  },
+  ltActionBtn: {
+    paddingHorizontal: ParentSpacing[4],
+    paddingVertical: ParentSpacing[2],
+    borderRadius: ParentRadii.md,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    backgroundColor: ParentColors.bgSurface,
+    minWidth: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ltActionBtnText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgSecondary,
+  },
+  ltResumeBtn: {
+    borderColor: ParentColors.success,
+    backgroundColor: '#E8F2E6',
+  },
+  ltResumeBtnText: {
+    color: ParentColors.success,
+  },
+  ltDeleteBtn: {
+    borderColor: ParentColors.error,
+    backgroundColor: '#FDEEE8',
+  },
+  ltDeleteBtnText: {
+    color: ParentColors.error,
+  },
+
 });

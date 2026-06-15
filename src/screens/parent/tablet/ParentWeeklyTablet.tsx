@@ -1,15 +1,17 @@
 // Shadow Wallet · Parent Tablet — Tab 3 成長紀錄
-// 週報 tab: live data from useParentWeeklyReport — no hook or query changes.
-// 月報 / 紀錄 tabs: static "即將推出" placeholder + TODO.
+// 週報 tab: live data from useParentWeeklyReport.
+// 月報 tab: live data from useParentMonthlyReport.
+// 紀錄 tab: skipped (future).
 // Only renders when width >= 768 (returns null otherwise).
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  TextInput,
   StyleSheet,
   useWindowDimensions,
 } from 'react-native';
@@ -24,6 +26,10 @@ import {
   type GrowthMoment,
   type LongTermGoalProgress,
 } from '../../../hooks/useParentWeeklyReport';
+import {
+  useParentMonthlyReport,
+  type MonthlyAbcdCount,
+} from '../../../hooks/useParentMonthlyReport';
 import {
   ParentColors,
   ParentSpacing,
@@ -280,14 +286,225 @@ function LongTermGoalCard({ goal }: { goal: LongTermGoalProgress }) {
   );
 }
 
-// TODO: implement 月報 view using monthly_reports data
-// TODO: implement 紀錄 view (coin adjustments, parent marks, proposal audit log)
 function PlaceholderView({ title }: { title: string }) {
   return (
     <View style={s.placeholder}>
       <Text style={s.placeholderTitle}>{title}</Text>
       <Text style={s.placeholderSub}>即將推出</Text>
     </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Monthly view sub-components
+// ─────────────────────────────────────────────────────────────────────────────
+
+function MonthlyCatRow({ row }: { row: MonthlyAbcdCount }) {
+  const meta = CAT_META[row.cat];
+  return (
+    <View style={s.catRow}>
+      <View style={s.catLabelRow}>
+        <View style={[s.catBadge, { backgroundColor: meta.color }]}>
+          <Text style={s.catBadgeLetter}>{row.cat}</Text>
+        </View>
+        <Text style={s.catLabel}>{meta.label}</Text>
+        <View style={s.spacer} />
+        <Text style={s.catCount}>{row.done}</Text>
+        <Text style={[s.catPct, { minWidth: 20 }]}> 次</Text>
+      </View>
+    </View>
+  );
+}
+
+function MonthlyView({ childId }: { childId: string }) {
+  const { bottom } = useSafeAreaInsets();
+  const {
+    monthLabel, totalCompleted, activeDays, coinIncome, coinSpend, abcd,
+    longTermGoals, reflection, saveReflection, saving,
+    loading, error, canGoBack, canGoForward, goBack, goForward, refresh,
+  } = useParentMonthlyReport(childId);
+
+  const [draft, setDraft] = useState('');
+  const [dirty, setDirty] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+
+  // Sync draft when reflection loads or month changes
+  useEffect(() => {
+    setDraft(reflection);
+    setDirty(false);
+    setSaveError(false);
+  }, [reflection]);
+
+  const netCoin = coinIncome - coinSpend;
+
+  const handleSave = useCallback(async () => {
+    setSaveError(false);
+    try {
+      await saveReflection(draft);
+      setDirty(false);
+    } catch {
+      setSaveError(true);
+    }
+  }, [draft, saveReflection]);
+
+  return (
+    <ScrollView
+      style={s.scroll}
+      contentContainerStyle={[s.scrollContent, { paddingBottom: bottom + 28 }]}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Month navigation */}
+      <View style={s.weekNav}>
+        <TouchableOpacity
+          onPress={goBack}
+          disabled={!canGoBack}
+          style={[s.weekNavBtn, !canGoBack && s.weekNavBtnDisabled]}
+        >
+          <ChevLeftIcon color={canGoBack ? ParentColors.fgPrimary : ParentColors.ink300} />
+        </TouchableOpacity>
+        <Text style={s.weekNavLabel}>{monthLabel}</Text>
+        <TouchableOpacity
+          onPress={goForward}
+          disabled={!canGoForward}
+          style={[s.weekNavBtn, !canGoForward && s.weekNavBtnDisabled]}
+        >
+          <ChevRightIcon color={canGoForward ? ParentColors.fgPrimary : ParentColors.ink300} />
+        </TouchableOpacity>
+        <View style={s.spacer} />
+        <TouchableOpacity onPress={refresh} style={s.refreshBtn}>
+          <RefreshIcon />
+          <Text style={s.refreshLabel}>重新整理</Text>
+        </TouchableOpacity>
+      </View>
+
+      {loading && (
+        <View style={s.centerBox}>
+          <ActivityIndicator size="large" color={ParentColors.accent} />
+        </View>
+      )}
+
+      {!loading && error && (
+        <View style={s.centerBox}>
+          <Text style={s.errorText}>{error}</Text>
+          <TouchableOpacity onPress={refresh} style={s.retryBtn}>
+            <Text style={s.retryLabel}>重試</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {!loading && !error && (
+        <>
+          {/* 家長備忘 — 置頂，與週報 AI 札記對應 */}
+          <View style={s.card}>
+            <View style={s.statsHeaderRow}>
+              <View>
+                <Text style={s.eyebrow}>家長備忘</Text>
+                <Text style={s.sectionTitle}>本月觀察記錄</Text>
+              </View>
+              {dirty && (
+                <TouchableOpacity
+                  onPress={handleSave}
+                  disabled={saving}
+                  style={[s.refreshBtn, saving && s.weekNavBtnDisabled]}
+                >
+                  <Text style={s.refreshLabel}>{saving ? '儲存中…' : '儲存'}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            {saveError && (
+              <Text style={[s.errorText, { marginBottom: 8 }]}>儲存失敗，請再試一次</Text>
+            )}
+            <TextInput
+              style={s.reflectionInput}
+              multiline
+              placeholder="記錄這個月觀察到的孩子狀態、行為改變、親子互動…"
+              placeholderTextColor={ParentColors.fgMuted}
+              value={draft}
+              onChangeText={text => {
+                setDraft(text);
+                setDirty(text !== reflection);
+              }}
+              textAlignVertical="top"
+            />
+          </View>
+
+          {/* 本月數據 */}
+          <View style={s.card}>
+            <View style={s.statsHeaderRow}>
+              <View>
+                <Text style={s.eyebrow}>本月數據</Text>
+                <Text style={s.sectionTitle}>任務與幣值</Text>
+              </View>
+              <Text style={s.statsMeta}>
+                完成 {totalCompleted} 件 · 活躍 {activeDays} 天
+              </Text>
+            </View>
+
+            <View style={s.statsGrid}>
+              {/* Col 1: summary */}
+              <View style={s.statsColLeft}>
+                <Text style={s.colEyebrow}>整體數量</Text>
+                <View style={s.checkInsRow}>
+                  <Text style={s.checkInsNum}>{totalCompleted}</Text>
+                  <Text style={s.checkInsMeta}> 次完成</Text>
+                </View>
+                <View style={[s.checkInsRow, { marginTop: 10 }]}>
+                  <Text style={s.checkInsNum}>{activeDays}</Text>
+                  <Text style={s.checkInsMeta}> 活躍天數</Text>
+                </View>
+              </View>
+
+              {/* Col 2: ABCD breakdown */}
+              <View style={[s.statsCol, s.statsColBorder]}>
+                <Text style={s.colEyebrow}>ABCD 分類</Text>
+                <View style={s.catList}>
+                  {abcd.map(row => <MonthlyCatRow key={row.cat} row={row} />)}
+                </View>
+              </View>
+
+              {/* Col 3: coin flow */}
+              <View style={[s.statsCol, s.statsColBorder]}>
+                <Text style={s.colEyebrow}>幣值收支</Text>
+                <View style={s.coinNetRow}>
+                  <Text style={[s.coinNet, { color: netCoin >= 0 ? ParentColors.success : ParentColors.error }]}>
+                    {netCoin >= 0 ? '+' : ''}{netCoin}
+                  </Text>
+                  <Text style={s.coinNetMeta}>幣 · 本月結餘</Text>
+                </View>
+                <View style={s.coinRows}>
+                  <CoinDeltaRow tone="in" label="收入" amount={coinIncome} note="任務獎勵" />
+                  <CoinDeltaRow tone="out" label="支出" amount={coinSpend} note="兌換支出" />
+                </View>
+              </View>
+            </View>
+          </View>
+
+          {/* 長期任務進展 */}
+          <View style={s.card}>
+            <View style={s.statsHeaderRow}>
+              <View>
+                <Text style={s.eyebrow}>持續進行</Text>
+                <Text style={s.sectionTitle}>長期任務進展</Text>
+              </View>
+              <Text style={s.statsMeta}>
+                {longTermGoals.length > 0 ? `${longTermGoals.length} 項進行中` : ''}
+              </Text>
+            </View>
+            {longTermGoals.length === 0 ? (
+              <View style={s.ltgEmpty}>
+                <Text style={s.ltgEmptyText}>目前沒有進行中的長期任務</Text>
+              </View>
+            ) : (
+              <View style={s.ltgList}>
+                {longTermGoals.map(goal => (
+                  <LongTermGoalCard key={goal.id} goal={goal} />
+                ))}
+              </View>
+            )}
+          </View>
+        </>
+      )}
+    </ScrollView>
   );
 }
 
@@ -357,7 +574,7 @@ export default function ParentWeeklyTablet() {
       {/* ── Page header ──────────────────────────────────────────────────── */}
       <View style={s.header}>
         <View>
-          <Text style={s.eyebrow}>Tab 3 · 成長紀錄</Text>
+          <Text style={s.eyebrow}>成長紀錄</Text>
           <View style={s.titleRow}>
             <Text style={s.pageTitle}>觀察與長期紀錄</Text>
             {view === 'weekly' && (
@@ -661,8 +878,8 @@ export default function ParentWeeklyTablet() {
         </ScrollView>
       )}
 
-      {/* ── Monthly placeholder ───────────────────────────────────────── */}
-      {view === 'monthly' && <PlaceholderView title="月報" />}
+      {/* ── Monthly view ─────────────────────────────────────────────── */}
+      {view === 'monthly' && <MonthlyView childId={childId} />}
 
       {/* ── History placeholder ───────────────────────────────────────── */}
       {view === 'history' && <PlaceholderView title="紀錄" />}
@@ -1218,6 +1435,20 @@ const s = StyleSheet.create({
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.sm,
     color: ParentColors.fgMuted,
+  },
+
+  // ── Monthly reflection input ──────────────────────────────────────────────
+  reflectionInput: {
+    backgroundColor: ParentColors.bgSurfaceWarm,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.md,
+    padding: 14,
+    fontFamily: ParentFonts.body,
+    fontSize: 14,
+    lineHeight: 22,
+    color: ParentColors.fgPrimary,
+    minHeight: 120,
   },
 
   // ── Long-term goal cards ──────────────────────────────────────────────────

@@ -41,20 +41,44 @@ export async function parentMarkTask(
   // 2. Find today's completion for this task + child
   const today    = dayjs().tz(TZ).format('YYYY-MM-DD');
   const tomorrow = dayjs().tz(TZ).add(1, 'day').format('YYYY-MM-DD');
+  const nowIso   = dayjs().tz(TZ).toISOString();
 
-  const { data: completion, error: completionError } = await supabase
+  let existingCompletion: { id: string; coin_earned: number } | null = null;
+  const { data: found } = await supabase
     .from('task_completions')
     .select('id, coin_earned')
     .eq('task_id', taskId)
     .eq('child_id', childId)
     .gte('completed_at', today)
     .lt('completed_at', tomorrow)
-    .single();
+    .maybeSingle();
 
-  if (completionError != null || completion == null) throw new Error('找不到今日完成紀錄');
+  if (found != null) {
+    existingCompletion = found;
+  } else {
+    // No child self-report yet — create a parent-initiated completion
+    const { data: created, error: insertError } = await supabase
+      .from('task_completions')
+      .insert({
+        task_id:         taskId,
+        child_id:        childId,
+        completed_at:    nowIso,
+        reported_at:     nowIso,
+        reported_by:     'parent' as const,
+        status:          markOption === 'none' ? 'flagged' : 'completed',
+        coin_earned:     0,
+        time_saved_min:  0,
+        mentor_child_id: null,
+      })
+      .select('id, coin_earned')
+      .single();
 
-  const completionId  = completion.id;
-  const originalCoin  = completion.coin_earned;
+    if (insertError != null || created == null) throw new Error('建立完成紀錄失敗');
+    existingCompletion = created;
+  }
+
+  const completionId  = existingCompletion.id;
+  const originalCoin  = existingCompletion.coin_earned;
 
   // 3. Insert override record
   const { data: override, error: overrideError } = await supabase
@@ -120,6 +144,66 @@ export async function parentMarkTask(
     .eq('id', completionId);
 
   if (updateError != null) throw new Error(updateError.message);
+}
+
+/**
+ * Creates a parent-initiated task completion on behalf of the child.
+ * Used when the parent marks a pending task as done directly from the home screen.
+ * Writes task_completions (reported_by='parent') and credits the spending wallet.
+ */
+export async function parentCompleteTaskForChild(
+  taskId: string,
+  childId: string,
+  coinAmount: number,
+  timeSavedMin: number,
+): Promise<void> {
+  const safeAmount = Math.round(Math.max(0, coinAmount));
+  const nowIso = dayjs().tz(TZ).toISOString();
+
+  const { data: completion, error: insertError } = await supabase
+    .from('task_completions')
+    .insert({
+      task_id:         taskId,
+      child_id:        childId,
+      completed_at:    nowIso,
+      reported_at:     nowIso,
+      reported_by:     'parent' as const,
+      status:          'completed' as const,
+      coin_earned:     safeAmount,
+      time_saved_min:  timeSavedMin,
+      mentor_child_id: null,
+    })
+    .select('id')
+    .single();
+
+  if (insertError != null || completion == null) throw new Error('標記完成失敗');
+
+  if (safeAmount > 0) {
+    const { data: wallet, error: walletError } = await supabase
+      .from('wallets')
+      .select('id, balance')
+      .eq('child_id', childId)
+      .eq('wallet_type', 'spending')
+      .single();
+
+    if (walletError != null || wallet == null) throw new Error('找不到錢包');
+
+    const { error: updateError } = await supabase
+      .from('wallets')
+      .update({ balance: wallet.balance + safeAmount })
+      .eq('id', wallet.id);
+
+    if (updateError != null) throw new Error(updateError.message);
+
+    await supabase.from('transactions').insert({
+      wallet_id:      wallet.id,
+      amount:         safeAmount,
+      type:           'earn' as const,
+      reference_type: 'task_completion',
+      reference_id:   completion.id,
+      note:           null,
+    });
+  }
 }
 
 type CreateChildTaskInput = {
@@ -373,6 +457,42 @@ export async function createLongTermGoal(input: CreateLongTermGoalInput): Promis
     await supabase.from('tasks').delete().eq('id', task.id);
     throw new Error(goalError.message);
   }
+}
+
+// ── 長期任務管理（暫停 / 恢復 / 刪除）─────────────────────────────────────────
+
+/** 暫停一個長期任務（status → 'paused'），孩子端不再顯示打卡，可隨時恢復。 */
+export async function pauseLongTermGoal(goalId: string): Promise<void> {
+  const { error } = await supabase
+    .from('long_term_goals')
+    .update({ status: 'paused' })
+    .eq('id', goalId);
+  if (error) throw new Error(error.message);
+}
+
+/** 恢復一個已暫停的長期任務（status → 'active'）。 */
+export async function resumeLongTermGoal(goalId: string): Promise<void> {
+  const { error } = await supabase
+    .from('long_term_goals')
+    .update({ status: 'active' })
+    .eq('id', goalId);
+  if (error) throw new Error(error.message);
+}
+
+/**
+ * 刪除一個長期任務：移除 goal、child_tasks 連結，並停用底層 task。
+ * 底層 task 採「停用」而非硬刪除，以保留既有 task_completions（金流/打卡紀錄）
+ * 不被外鍵連帶刪除——符合信任制保留歷史的原則。
+ */
+export async function deleteLongTermGoal(goalId: string, taskId: string): Promise<void> {
+  const { error: goalErr } = await supabase
+    .from('long_term_goals')
+    .delete()
+    .eq('id', goalId);
+  if (goalErr) throw new Error(goalErr.message);
+
+  await supabase.from('child_tasks').delete().eq('task_id', taskId);
+  await supabase.from('tasks').update({ is_active: false }).eq('id', taskId);
 }
 
 // ── 技能學習類（skill）長期任務 ───────────────────────────────────────────────

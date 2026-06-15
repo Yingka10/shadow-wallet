@@ -15,7 +15,9 @@ import HomeScreen from './src/screens/child/HomeScreen';
 import ParentTabNavigator from './src/screens/parent/ParentTabNavigator';
 import ParentTaskDetailScreen from './src/screens/parent/ParentTaskDetailScreen';
 import ParentTaskCreateScreen from './src/screens/parent/ParentTaskCreateScreen';
+import ParentTaskEditScreen from './src/screens/parent/ParentTaskEditScreen';
 import ParentSettingsScreen from './src/screens/parent/ParentSettingsScreen';
+import AddChildScreen from './src/screens/parent/AddChildScreen';
 import GoalSetupScreen from './src/screens/onboarding/GoalSetupScreen';
 import TaskSelectionScreen from './src/screens/onboarding/TaskSelectionScreen';
 import OverviewScreen from './src/screens/onboarding/OverviewScreen';
@@ -87,8 +89,15 @@ export type RootStackParamList = {
     taskName: string;
   };
   ParentTaskCreate: undefined;
+  ParentTaskEdit: {
+    taskId: string;
+    childTaskId: string;
+    childName: string;
+    isActive: boolean;
+  };
   ParentLongTermCreate: { childId: string };
   ParentSettings: undefined;
+  AddChild: undefined;
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -127,8 +136,10 @@ export default function App() {
             <Stack.Screen name="ParentTaskDetail" component={ParentTaskDetailScreen} />
             <Stack.Screen name="ObservationHistory" component={ObservationHistoryScreen} />
             <Stack.Screen name="ParentTaskCreate" component={ParentTaskCreateScreen} />
+            <Stack.Screen name="ParentTaskEdit" component={ParentTaskEditScreen} />
             <Stack.Screen name="ParentLongTermCreate" component={ParentLongTermCreateScreen} />
             <Stack.Screen name="ParentSettings" component={ParentSettingsScreen} />
+            <Stack.Screen name="AddChild" component={AddChildScreen} />
           </Stack.Navigator>
         </NavigationContainer>
       </SelectedChildProvider>

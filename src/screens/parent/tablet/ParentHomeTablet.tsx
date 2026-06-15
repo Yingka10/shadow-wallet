@@ -11,18 +11,24 @@ import {
   ActivityIndicator,
   TextInput,
   StyleSheet,
+  Alert,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import type { StackNavigationProp } from '@react-navigation/stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import type { RootStackParamList } from '../../../../App';
 import { supabase } from '../../../lib/supabase';
 import { useSelectedChild } from '../../../context/SelectedChildContext';
 import {
   useParentDashboard,
   type DashboardTask,
   type DashboardTaskStatus,
-  type DashboardGoal,
 } from '../../../hooks/useParentDashboard';
+import {
+  useLongTermTasks,
+  type LongTermTaskItem,
+} from '../../../hooks/useLongTermTasks';
 import {
   useParentRedemption,
   type RedemptionRequest,
@@ -31,6 +37,7 @@ import {
 } from '../../../hooks/useParentRedemption';
 import {
   parentMarkTask,
+  parentCompleteTaskForChild,
   createLongTermGoal,
   createSkillGoal,
   calcSkillDefaultCoins,
@@ -200,6 +207,7 @@ function ChildSwitcherSidebar({
   doneToday,
   totalToday,
   spendingBalance,
+  onAddChild,
 }: {
   allChildren: ChildOption[];
   childId: string;
@@ -207,6 +215,7 @@ function ChildSwitcherSidebar({
   doneToday: number;
   totalToday: number;
   spendingBalance: number;
+  onAddChild: () => void;
 }) {
   const pct = totalToday > 0 ? Math.round((doneToday / totalToday) * 100) : 0;
 
@@ -249,7 +258,11 @@ function ChildSwitcherSidebar({
             );
           })}
 
-          <TouchableOpacity style={styles.addChildBtn} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={styles.addChildBtn}
+            activeOpacity={0.7}
+            onPress={onAddChild}
+          >
             <Text style={styles.addChildText}>＋ 新增孩子</Text>
           </TouchableOpacity>
         </View>
@@ -366,47 +379,79 @@ function OverviewStrip({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Goal card
+// Long-term task card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function GoalCard({ goal }: { goal: DashboardGoal }) {
-  const pct = Math.min(100, Math.round((goal.current / goal.target) * 100));
-  const remaining = Math.max(0, goal.target - goal.current);
-  const met = goal.current >= goal.target;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const GOAL_TYPE_META: Record<LongTermType, { emoji: string; label: string; tint: string; fg: string }> = {
+  habit:     { emoji: '🌱', label: '習慣養成', tint: '#E8F2E6', fg: ParentColors.success },
+  skill:     { emoji: '📚', label: '技能學習', tint: '#EAF0EE', fg: ParentColors.teal500 },
+  family:    { emoji: '🏠', label: '家庭責任', tint: '#EAE4D7', fg: ParentColors.ink500 },
+  challenge: { emoji: '🏆', label: '自我挑戰', tint: '#FAF1E7', fg: ParentColors.clay500 },
+};
 
+function LongTermTaskCard({
+  items,
+  totalActive,
+  loading,
+  onViewAll,
+}: {
+  items: LongTermTaskItem[];
+  totalActive: number;
+  loading: boolean;
+  onViewAll: () => void;
+}) {
   return (
-    <View style={styles.goalCard}>
-      <View style={styles.goalHeader}>
-        <View style={styles.goalIcon}>
-          <FlagIcon size={16} color={ParentColors.clay500} />
+    <View style={styles.ltCard}>
+      <View style={styles.ltHeader}>
+        <View style={styles.ltHeaderLeft}>
+          <FlagIcon size={14} color={ParentColors.clay500} />
+          <Text style={styles.ltEyebrow}>長期任務</Text>
         </View>
-        <View style={styles.goalMid}>
-          <Text style={styles.goalEyebrow}>進行中 · 長期目標</Text>
-          <Text style={styles.goalName}>{goal.name}</Text>
-        </View>
-        <View style={styles.goalRight}>
-          {met ? (
-            <Text style={styles.goalMetLabel}>已達標 🎉</Text>
-          ) : (
-            <>
-              <Text style={styles.goalRemainingLabel}>下一個里程碑</Text>
-              <Text style={styles.goalRemainingNum}>
-                還差 <Text style={styles.goalRemainingAccent}>{remaining}</Text> 枚
-              </Text>
-            </>
-          )}
-          <Text style={styles.goalEta}>預估 {goal.etaLabel} 達成</Text>
-        </View>
+        {totalActive > 0 && (
+          <View style={styles.ltCountChip}>
+            <Text style={styles.ltCountText}>{totalActive} 個進行中</Text>
+          </View>
+        )}
       </View>
 
-      <View style={styles.goalProgressTrack}>
-        <View style={[styles.goalProgressFill, { width: `${pct}%` as `${number}%` }]} />
-      </View>
+      {loading ? (
+        <ActivityIndicator size="small" color={ParentColors.fgMuted} style={{ marginVertical: 12 }} />
+      ) : items.length === 0 ? (
+        <View style={styles.ltEmpty}>
+          <Text style={styles.ltEmptyText}>尚未設定長期任務</Text>
+          <Text style={styles.ltEmptyMeta}>在「管理」Tab 建立習慣養成或技能學習任務</Text>
+        </View>
+      ) : (
+        <View style={styles.ltItems}>
+          {items.map((item, i) => {
+            const meta = GOAL_TYPE_META[item.goalType] ?? {
+              emoji: '🎯', label: '長期任務', tint: '#EEE', fg: ParentColors.fgMuted,
+            };
+            return (
+              <View key={item.id} style={[styles.ltItem, i > 0 && styles.ltItemDivider]}>
+                <View style={styles.ltItemHeader}>
+                  <View style={[styles.ltTypeBadge, { backgroundColor: meta.tint }]}>
+                    <Text style={styles.ltTypeEmoji}>{meta.emoji}</Text>
+                    <Text style={[styles.ltTypeLabel, { color: meta.fg }]}>{meta.label}</Text>
+                  </View>
+                  <Text style={styles.ltItemName} numberOfLines={1}>{item.name}</Text>
+                </View>
+                <View style={styles.ltProgressRow}>
+                  <View style={styles.ltProgressTrack}>
+                    <View style={[styles.ltProgressFill, { width: `${item.progressPct}%` as `${number}%` }]} />
+                  </View>
+                  <Text style={styles.ltProgressLabel}>{item.progressLabel}</Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
 
-      <View style={styles.goalFooter}>
-        <Text style={styles.goalProgress}>{goal.current} / {goal.target}</Text>
-        <Text style={styles.goalPct}>{pct}%</Text>
-      </View>
+      <TouchableOpacity style={styles.ltFooter} onPress={onViewAll} activeOpacity={0.7}>
+        <Text style={styles.ltViewAll}>前往管理頁查看全部 →</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -489,29 +534,24 @@ function TaskRow({
 
         {/* Action button */}
         <View style={styles.taskAction}>
-          {isDone ? (
-            <TouchableOpacity
-              style={[styles.taskActionBtn, markOpen && styles.taskActionBtnActive]}
-              onPress={() => setMarkOpen(v => !v)}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.taskActionText, markOpen && styles.taskActionTextActive]}>
-                {markOpen ? '收起' : '標記'}
-              </Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity style={styles.taskRemindBtn} activeOpacity={0.7}>
-              <Text style={styles.taskRemindText}>提醒</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={[styles.taskActionBtn, markOpen && styles.taskActionBtnActive]}
+            onPress={() => setMarkOpen(v => !v)}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.taskActionText, markOpen && styles.taskActionTextActive]}>
+              {markOpen ? '收起' : '標記'}
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
 
       {/* MarkPanel expands below the row */}
-      {markOpen && isDone && (
+      {markOpen && (
         <MarkPanel
           task={task}
           childId={childId}
+          isDone={isDone}
           onSuccess={() => {
             setMarkOpen(false);
             onMarked();
@@ -527,9 +567,19 @@ function TaskRow({
 // MarkPanel — inline override UI rendered below a done TaskRow
 // ─────────────────────────────────────────────────────────────────────────────
 
-const MARK_OPTIONS: { opt: MarkOption; label: string }[] = [
+type ExtendedOpt = MarkOption | 'complete';
+
+// Options shown when the child has already self-reported the task as done
+const DONE_MARK_OPTIONS: { opt: ExtendedOpt; label: string }[] = [
   { opt: 'exceeded', label: '超出預期' },
   { opt: 'partial',  label: '部分完成' },
+  { opt: 'none',     label: '今天沒做' },
+  { opt: 'other',    label: '其他' },
+];
+
+// Options shown when the task is still pending / missed (child hasn't reported yet)
+const PENDING_MARK_OPTIONS: { opt: ExtendedOpt; label: string }[] = [
+  { opt: 'complete', label: '幫他標記完成' },
   { opt: 'none',     label: '今天沒做' },
   { opt: 'other',    label: '其他' },
 ];
@@ -537,38 +587,44 @@ const MARK_OPTIONS: { opt: MarkOption; label: string }[] = [
 function MarkPanel({
   task,
   childId,
+  isDone,
   onSuccess,
   onCancel,
 }: {
   task: DashboardTask;
   childId: string;
+  isDone: boolean;
   onSuccess: () => void;
   onCancel: () => void;
 }) {
   const hasCoin      = task.reward?.kind === 'coins';
-  const originalCoin = hasCoin
-    ? (task.reward as { kind: 'coins'; amount: number }).amount
-    : 0;
+  const taskCoin     = hasCoin ? (task.reward as { kind: 'coins'; amount: number }).amount : 0;
+  const timeSavedMin = task.reward?.kind === 'time' ? (task.reward as { kind: 'time'; amount: number }).amount : 0;
 
-  const defaultCoin = (opt: MarkOption): number => {
+  const defaultCoin = (opt: ExtendedOpt): number => {
     if (!hasCoin) return 0;
-    if (opt === 'exceeded') return Math.round(originalCoin * 1.5);
-    if (opt === 'partial')  return Math.round(originalCoin * 0.5);
+    if (!isDone) return opt === 'complete' ? taskCoin : 0;
+    if (opt === 'exceeded') return Math.round(taskCoin * 1.5);
+    if (opt === 'partial')  return Math.round(taskCoin * 0.5);
     if (opt === 'none')     return 0;
-    return originalCoin; // 'other'
+    return taskCoin; // 'other'
   };
 
-  const [selectedOption, setSelectedOption] = useState<MarkOption | null>(null);
+  const [selectedOption, setSelectedOption] = useState<ExtendedOpt | null>(null);
   const [coinStr, setCoinStr]               = useState<string>('');
   const [note, setNote]                     = useState('');
   const [submitting, setSubmitting]         = useState(false);
   const [errorMsg, setErrorMsg]             = useState<string | null>(null);
 
-  const handleOptionSelect = (opt: MarkOption) => {
+  const handleOptionSelect = (opt: ExtendedOpt) => {
     setSelectedOption(opt);
     setCoinStr(String(defaultCoin(opt)));
     setErrorMsg(null);
   };
+
+  // For pending tasks, only show coin stepper when "幫他標記完成" is selected
+  const showCoin = hasCoin && selectedOption != null &&
+    (isDone ? true : selectedOption === 'complete');
 
   const isConfirmDisabled =
     selectedOption == null ||
@@ -580,13 +636,13 @@ function MarkPanel({
     setSubmitting(true);
     setErrorMsg(null);
     try {
-      await parentMarkTask(
-        task.id,
-        childId,
-        selectedOption,
-        Math.max(0, parseInt(coinStr || '0', 10)),
-        note.trim() !== '' ? note.trim() : null,
-      );
+      const coin    = Math.max(0, parseInt(coinStr || '0', 10));
+      const noteVal = note.trim() !== '' ? note.trim() : null;
+      if (selectedOption === 'complete') {
+        await parentCompleteTaskForChild(task.id, childId, coin, timeSavedMin);
+      } else {
+        await parentMarkTask(task.id, childId, selectedOption, coin, noteVal);
+      }
       onSuccess();
     } catch {
       setErrorMsg('標記失敗，請再試一次');
@@ -595,34 +651,40 @@ function MarkPanel({
     }
   };
 
+  const options = isDone ? DONE_MARK_OPTIONS : PENDING_MARK_OPTIONS;
+
   return (
     <View style={styles.markPanel}>
       {/* Option chips */}
       <View style={styles.markPanelOptions}>
-        {MARK_OPTIONS.map(({ opt, label }) => (
-          <TouchableOpacity
-            key={opt}
-            style={[
-              styles.markOptionChip,
-              selectedOption === opt && styles.markOptionChipSelected,
-            ]}
-            onPress={() => handleOptionSelect(opt)}
-            activeOpacity={0.7}
-          >
-            <Text
+        {options.map(({ opt, label }) => {
+          const isSelected = selectedOption === opt;
+          const isComplete = opt === 'complete';
+          return (
+            <TouchableOpacity
+              key={opt}
               style={[
-                styles.markOptionText,
-                selectedOption === opt && styles.markOptionTextSelected,
+                styles.markOptionChip,
+                isSelected && (isComplete ? styles.markOptionChipComplete : styles.markOptionChipSelected),
               ]}
+              onPress={() => handleOptionSelect(opt)}
+              activeOpacity={0.7}
             >
-              {label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+              <Text
+                style={[
+                  styles.markOptionText,
+                  isSelected && (isComplete ? styles.markOptionTextComplete : styles.markOptionTextSelected),
+                ]}
+              >
+                {label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
-      {/* Coin adjustment input — only when task has coins and an option is selected */}
-      {hasCoin && selectedOption != null && (
+      {/* Coin adjustment input */}
+      {showCoin && (
         <View style={styles.markCoinRow}>
           <Text style={styles.markCoinLabel}>調整幣值：</Text>
           <TextInput
@@ -679,7 +741,7 @@ function MarkPanel({
           activeOpacity={0.7}
         >
           <Text style={styles.markConfirmText}>
-            {submitting ? '處理中...' : '確認標記 →'}
+            {submitting ? '處理中...' : selectedOption === 'complete' ? '確認完成 →' : '確認標記 →'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -1300,12 +1362,14 @@ function NewTaskPanel({
       onSuccess();
     } catch (err) {
       console.error('[NewTaskPanel] submit error:', err);
+      Alert.alert('建立失敗', err instanceof Error ? err.message : '請稍後再試');
       setSubmitting(false);
     }
   }
 
   async function handleHabitSubmit() {
-    if (habitSubmitting || !familyId || !effectiveTotalDays || !coinsAreValid()) return;
+    if (!familyId) { Alert.alert('載入中', '家庭資料尚未載入，請稍後再試'); return; }
+    if (habitSubmitting || !effectiveTotalDays || !coinsAreValid()) return;
     setHabitSubmitting(true);
     try {
       const days = calcCheckpointDays(effectiveTotalDays);
@@ -1328,13 +1392,15 @@ function NewTaskPanel({
       onSuccess();
     } catch (err) {
       console.error('[NewTaskPanel] habit submit error:', err);
+      Alert.alert('建立失敗', err instanceof Error ? err.message : '請稍後再試');
       setHabitSubmitting(false);
     }
   }
 
   async function handleSkillSubmit() {
+    if (!familyId) { Alert.alert('載入中', '家庭資料尚未載入，請稍後再試'); return; }
     if (
-      skillSubmitting || !familyId || !effectiveTargetMonths ||
+      skillSubmitting || !effectiveTargetMonths ||
       !skillNamesValid || !skillCoinsAreValid(skillCoins)
     ) return;
     setSkillSubmitting(true);
@@ -1354,6 +1420,7 @@ function NewTaskPanel({
       onSuccess();
     } catch (err) {
       console.error('[NewTaskPanel] skill submit error:', err);
+      Alert.alert('建立失敗', err instanceof Error ? err.message : '請稍後再試');
       setSkillSubmitting(false);
     }
   }
@@ -1364,8 +1431,9 @@ function NewTaskPanel({
   }
 
   async function handleFamilySubmit() {
+    if (!familyId) { Alert.alert('載入中', '家庭資料尚未載入，請稍後再試'); return; }
     if (
-      familySubmitting || !familyId ||
+      familySubmitting ||
       !familyTaskName.trim() || activeDaysFamily.length === 0 ||
       effectiveFamilyTime == null || effectiveCommitWeeks == null
     ) return;
@@ -1385,6 +1453,7 @@ function NewTaskPanel({
       onSuccess();
     } catch (err) {
       console.error('[NewTaskPanel] family submit error:', err);
+      Alert.alert('建立失敗', err instanceof Error ? err.message : '請稍後再試');
       setFamilySubmitting(false);
     }
   }
@@ -2286,6 +2355,13 @@ const PROPOSAL_REJECT_REASONS = [
   '幣值建議不合理',
 ];
 
+const WISH_REJECT_REASONS = [
+  '幣值設定太高',
+  '想再和孩子討論',
+  '不符合家庭規則',
+  '這個時間點不適合',
+];
+
 // ── 兌換待審 card ──
 
 function WishApprovalCard({
@@ -2295,7 +2371,7 @@ function WishApprovalCard({
   wish: ChildWishItem;
   onApprove: (id: string) => Promise<void>;
 }) {
-  const [state, setState] = useState<'idle' | 'approved' | 'rejected'>('idle');
+  const [state, setState] = useState<'idle' | 'confirming' | 'approved' | 'rejected'>('idle');
   const [submitting, setSubmitting] = useState(false);
 
   const waitedHours = dayjs().diff(dayjs(wish.created_at), 'hour');
@@ -2314,10 +2390,13 @@ function WishApprovalCard({
     }
   };
 
-  const handleReject = async () => {
+  const handleReject = async (reason: string) => {
     setSubmitting(true);
     try {
-      await supabase.from('reward_items').update({ is_active: false }).eq('id', wish.id);
+      await supabase
+        .from('reward_items')
+        .update({ is_active: false, parent_note: reason })
+        .eq('id', wish.id);
       setState('rejected');
     } catch {
       // stay idle on error
@@ -2367,25 +2446,50 @@ function WishApprovalCard({
         <CoinSmIcon size={14} />
         <Text style={styles.wishCoinText}>{wish.coin_cost} 幣</Text>
       </View>
-      <View style={styles.proposalActions}>
-        <TouchableOpacity
-          style={[styles.proposalApproveBtn, submitting && { opacity: 0.5 }]}
-          onPress={() => void handleApprove()}
-          disabled={submitting}
-          activeOpacity={0.8}
-        >
-          <CheckSmIcon size={13} color="#fff" />
-          <Text style={styles.proposalApproveBtnText}>同意上架</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.proposalRejectBtn, submitting && { opacity: 0.5 }]}
-          onPress={() => void handleReject()}
-          disabled={submitting}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.proposalRejectBtnText}>拒絕</Text>
-        </TouchableOpacity>
-      </View>
+
+      {state === 'idle' && (
+        <View style={styles.proposalActions}>
+          <TouchableOpacity
+            style={[styles.proposalApproveBtn, submitting && { opacity: 0.5 }]}
+            onPress={() => void handleApprove()}
+            disabled={submitting}
+            activeOpacity={0.8}
+          >
+            <CheckSmIcon size={13} color="#fff" />
+            <Text style={styles.proposalApproveBtnText}>同意上架</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.proposalRejectBtn, submitting && { opacity: 0.5 }]}
+            onPress={() => setState('confirming')}
+            disabled={submitting}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.proposalRejectBtnText}>拒絕</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {state === 'confirming' && (
+        <View style={styles.rejectPanel}>
+          <Text style={styles.rejectPanelTitle}>選擇拒絕原因</Text>
+          <View style={styles.rejectReasonList}>
+            {WISH_REJECT_REASONS.map(r => (
+              <TouchableOpacity
+                key={r}
+                style={[styles.rejectReasonBtn, submitting && { opacity: 0.5 }]}
+                onPress={() => void handleReject(r)}
+                disabled={submitting}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.rejectReasonText}>{r}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TouchableOpacity onPress={() => setState('idle')} style={styles.rejectCancelBtn}>
+            <Text style={styles.rejectCancelText}>取消</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
@@ -2631,10 +2735,17 @@ function PendingItemsPanel({
 
 export default function ParentHomeTablet() {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
   const { childId, childName, allChildren, setSelectedChild } = useSelectedChild();
 
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [rightMode, setRightMode] = useState<'pending' | 'assign' | 'newTask'>('pending');
+
+  // Reset right panel when selected child changes to prevent cross-child confusion
+  useEffect(() => {
+    setRightMode('pending');
+  }, [childId]);
+
   useEffect(() => {
     async function loadFamily() {
       try {
@@ -2666,19 +2777,33 @@ export default function ParentHomeTablet() {
     child,
     spendingBalance,
     weekCoinDelta,
-    goal,
     todayTasks,
     loading,
     error,
     refresh,
   } = useParentDashboard(childId);
 
+  const {
+    items: ltItems,
+    totalActive: ltTotalActive,
+    loading: ltLoading,
+    refresh: ltRefresh,
+  } = useLongTermTasks(childId);
+
   useFocusEffect(
     useCallback(() => {
       refresh();
+      ltRefresh();
       void refreshRedemption();
-    }, [refresh, refreshRedemption]),
+    }, [refresh, ltRefresh, refreshRedemption]),
   );
+
+  const handleViewAllLongTerm = useCallback(() => {
+    // ParentHomeTablet renders inside the bottom-tab navigator, so navigating
+    // directly switches to the sibling "Manage" tab. getParent() would target
+    // the outer Stack (which has no "Manage" screen) and silently fail.
+    navigation.navigate('Manage' as never);
+  }, [navigation]);
 
   const doneToday = todayTasks.filter(t => t.status === 'done').length;
   const totalToday = todayTasks.length;
@@ -2717,6 +2842,7 @@ export default function ParentHomeTablet() {
           doneToday={doneToday}
           totalToday={totalToday}
           spendingBalance={spendingBalance}
+          onAddChild={() => navigation.navigate('AddChild')}
         />
 
         {/* ── Main area ── */}
@@ -2734,7 +2860,12 @@ export default function ParentHomeTablet() {
             weekCoinDelta={weekCoinDelta}
           />
 
-          {goal != null && <GoalCard goal={goal} />}
+          <LongTermTaskCard
+            items={ltItems}
+            totalActive={ltTotalActive}
+            loading={ltLoading}
+            onViewAll={handleViewAllLongTerm}
+          />
 
           <TodayTaskPanel
             tasks={todayTasks}
@@ -3115,116 +3246,134 @@ const styles = StyleSheet.create({
     color: ParentColors.success,
   },
 
-  // ── Goal card ──
-  goalCard: {
-    backgroundColor: '#FBEFDF',
-    borderWidth: 1,
-    borderColor: '#F0D5AE',
+  // ── Long-term task card ──
+  ltCard: {
+    backgroundColor: ParentColors.bgSurface,
     borderRadius: ParentRadii.lg,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
     padding: ParentSpacing.cardPad,
+    ...ParentShadows.card,
   },
-  goalHeader: {
+  ltHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    justifyContent: 'space-between',
     marginBottom: 12,
   },
-  goalIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: ParentRadii.sm,
-    backgroundColor: '#F0D5AE',
+  ltHeaderLeft: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
+    gap: 6,
   },
-  goalMid: {
-    flex: 1,
-    minWidth: 0,
-  },
-  goalEyebrow: {
+  ltEyebrow: {
     fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.eyebrow,
-    fontWeight: ParentFontWeights.bold,
-    color: ParentColors.clay500,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-    marginBottom: 2,
-  },
-  goalName: {
-    fontFamily: ParentFonts.display,
-    fontSize: ParentFontSizes.h3,
+    fontSize: ParentFontSizes.sm,
     fontWeight: ParentFontWeights.semi,
     color: ParentColors.fgPrimary,
   },
-  goalRight: {
-    alignItems: 'flex-end',
-    flexShrink: 0,
-    paddingLeft: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(255,255,255,0.7)',
-    borderWidth: 1,
-    borderColor: 'rgba(201,119,50,0.2)',
-    borderRadius: ParentRadii.md,
+  ltCountChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: ParentColors.ivory200,
+    borderRadius: ParentRadii.pill,
   },
-  goalRemainingLabel: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.eyebrow,
-    color: ParentColors.fgMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.3,
-    marginBottom: 2,
-  },
-  goalRemainingNum: {
+  ltCountText: {
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.xs,
-    color: ParentColors.clay500,
+    color: ParentColors.fgMuted,
   },
-  goalRemainingAccent: {
-    fontFamily: ParentFonts.mono,
-    fontSize: ParentFontSizes.pMeta,
-    fontWeight: ParentFontWeights.bold,
-    color: ParentColors.clay500,
+  ltEmpty: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    gap: 4,
   },
-  goalMetLabel: {
+  ltEmptyText: {
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.sm,
-    fontWeight: ParentFontWeights.bold,
-    color: ParentColors.success,
+    color: ParentColors.fgMuted,
   },
-  goalEta: {
+  ltEmptyMeta: {
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgMuted,
-    marginTop: 2,
+    color: ParentColors.ink400,
+    textAlign: 'center',
   },
-  goalProgressTrack: {
-    height: 6,
-    backgroundColor: 'rgba(201,119,50,0.2)',
+  ltItems: {
+    gap: 0,
+  },
+  ltItem: {
+    paddingVertical: 10,
+    gap: 6,
+  },
+  ltItemDivider: {
+    borderTopWidth: 1,
+    borderTopColor: ParentColors.borderSoft,
+  },
+  ltItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  ltTypeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: ParentRadii.sm,
+    flexShrink: 0,
+  },
+  ltTypeEmoji: {
+    fontSize: 11,
+  },
+  ltTypeLabel: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.semi,
+  },
+  ltItemName: {
+    flex: 1,
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.pMeta,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgPrimary,
+  },
+  ltProgressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  ltProgressTrack: {
+    flex: 1,
+    height: 4,
+    backgroundColor: ParentColors.ivory200,
     borderRadius: ParentRadii.pill,
     overflow: 'hidden',
   },
-  goalProgressFill: {
+  ltProgressFill: {
     height: '100%',
-    backgroundColor: ParentColors.clay500,
+    backgroundColor: ParentColors.accent,
     borderRadius: ParentRadii.pill,
   },
-  goalFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 8,
-  },
-  goalProgress: {
+  ltProgressLabel: {
     fontFamily: ParentFonts.mono,
     fontSize: ParentFontSizes.xs,
     color: ParentColors.fgMuted,
+    flexShrink: 0,
   },
-  goalPct: {
-    fontFamily: ParentFonts.mono,
+  ltFooter: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: ParentColors.borderSoft,
+    alignItems: 'flex-end',
+  },
+  ltViewAll: {
+    fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.xs,
-    color: ParentColors.clay500,
-    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.accent,
+    fontWeight: ParentFontWeights.semi,
   },
 
   // ── Task panel ──
@@ -3393,16 +3542,6 @@ const styles = StyleSheet.create({
     color: ParentColors.fgSecondary,
     fontWeight: ParentFontWeights.medium,
   },
-  taskRemindBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: ParentRadii.sm,
-  },
-  taskRemindText: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgMuted,
-  },
 
   // ── Status pill ──
   pill: {
@@ -3444,12 +3583,20 @@ const styles = StyleSheet.create({
     backgroundColor: ParentColors.ink900,
     borderColor: ParentColors.ink900,
   },
+  markOptionChipComplete: {
+    backgroundColor: ParentColors.success,
+    borderColor: ParentColors.success,
+  },
   markOptionText: {
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.sm,
     color: ParentColors.fgSecondary,
   },
   markOptionTextSelected: {
+    color: '#fff',
+    fontWeight: ParentFontWeights.semi,
+  },
+  markOptionTextComplete: {
     color: '#fff',
     fontWeight: ParentFontWeights.semi,
   },

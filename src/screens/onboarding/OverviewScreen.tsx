@@ -82,13 +82,9 @@ export default function OverviewScreen() {
         rewardName,
         coinCost: goalCoinCost,
       });
-      if (isOnboarding) {
-        navigation.dispatch(
-          CommonActions.reset({ index: 0, routes: [{ name: 'ParentTab' }] })
-        );
-      } else {
-        navigation.pop(3);
-      }
+      navigation.dispatch(
+        CommonActions.reset({ index: 0, routes: [{ name: 'ParentTab' }] })
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : '發生未知錯誤';
       Alert.alert('設定失敗', msg);

@@ -5,6 +5,15 @@
 
 ---
 
+## 平台策略（重要）
+
+**家長端以平板（≥768px）為唯一開發目標。** 手機版家長端（< 768px）不再維護。
+- 平板端用 `ParentHomeTablet`、`ParentWeeklyTablet`、`ParentManageTablet`
+- 手機版的 `ParentDashboardScreen`、`ParentWeeklyReportScreen` 保留但不再加功能
+- 所有家長端新功能只做平板 UI
+
+---
+
 ## 系統定位
 
 **Shadow Wallet（影子貨幣錢包）** 是一個家庭教養行動 App。

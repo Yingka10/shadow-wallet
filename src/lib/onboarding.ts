@@ -152,6 +152,63 @@ export async function signUpUser(email: string, password: string): Promise<void>
 
 // ── 寫入 Supabase ─────────────────────────────────────────────
 
+export interface AddChildInput {
+  familyId: string;
+  childNickname: string;
+  /** ISO 格式：YYYY-MM-DD */
+  childBirthDate: string;
+  /** 4 位數字 PIN，孩子登入用 */
+  childPin?: string;
+}
+
+export interface AddChildResult {
+  childId: string;
+  ageGroup: AgeGroup;
+}
+
+/**
+ * 已登入家長新增第二個（或更多）孩子到現有家庭。
+ * 不建立 family / parent，只建立 child + child_profile + wallet(s)。
+ */
+export async function addChildToFamily(input: AddChildInput): Promise<AddChildResult> {
+  const { familyId, childNickname, childBirthDate, childPin } = input;
+
+  const ageGroup = calcAgeGroup(childBirthDate);
+  const accountType: AccountType = ageGroup === '9-12' ? 'DOUBLE' : 'SINGLE';
+
+  const { data: childData, error: childError } = await supabase
+    .from('children')
+    .insert({
+      family_id: familyId,
+      nickname: childNickname,
+      birth_date: childBirthDate,
+      age_group: ageGroup,
+      account_type: accountType,
+      ...(childPin ? { pin_code: childPin } : {}),
+    })
+    .select('id')
+    .single();
+  if (childError) throw new Error(`建立孩子資料失敗：${childError.message}`);
+  const childId = childData.id;
+
+  const { error: profileError } = await supabase.from('child_profiles').insert({
+    child_id: childId,
+    motivation_level: 'external' as MotivationLevel,
+  });
+  if (profileError) throw new Error(`建立孩子設定失敗：${profileError.message}`);
+
+  const walletInserts: { child_id: string; wallet_type: WalletType; balance: number }[] = [
+    { child_id: childId, wallet_type: 'spending', balance: 0 },
+    ...(accountType === 'DOUBLE'
+      ? [{ child_id: childId, wallet_type: 'saving' as WalletType, balance: 0 }]
+      : []),
+  ];
+  const { error: walletError } = await supabase.from('wallets').insert(walletInserts);
+  if (walletError) throw new Error(`建立錢包失敗：${walletError.message}`);
+
+  return { childId, ageGroup };
+}
+
 export interface OnboardingInput {
   parentName: string;
   familyName: string;

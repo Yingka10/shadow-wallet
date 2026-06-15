@@ -25,7 +25,7 @@ import {
   ParentRadii,
   ParentFonts,
 } from '../../constants/parentTheme';
-import type { TaskCategory, DayType } from '../../types/database';
+import type { TaskCategory } from '../../types/database';
 
 // ---------------------------------------------------------------------------
 // Icons
@@ -120,7 +120,7 @@ function Stepper({
     if (isNaN(val)) {
       setText(String(value));
     } else {
-      const clamped = Math.max(min, val);
+      const clamped = Math.max(min, Math.min(max, val));
       onChange(clamped);
       setText(String(clamped));
     }
@@ -148,7 +148,7 @@ function Stepper({
       </View>
       <TouchableOpacity
         style={styles.stepperBtn}
-        onPress={() => onChange(value + step)}
+        onPress={() => onChange(Math.min(max, value + step))}
         activeOpacity={0.6}
       >
         <View style={styles.stepperBtnMinus} />
@@ -169,8 +169,11 @@ export default function ParentTaskCreateScreen() {
 
   const [name, setName] = useState('');
   const [cat, setCat] = useState<TaskCategory>('A');
-  const [diff, setDiff] = useState(1);
-  const [freq, setFreq] = useState<DayType>('both');
+  const [taskMode, setTaskMode] = useState<'recurring' | 'deadline'>('recurring');
+  const [selectedDays, setSelectedDays] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
+  const [dueYear, setDueYear] = useState(() => new Date(Date.now() + 30 * 86400000).getFullYear());
+  const [dueMonth, setDueMonth] = useState(() => new Date(Date.now() + 30 * 86400000).getMonth() + 1);
+  const [dueDay, setDueDay] = useState(() => new Date(Date.now() + 30 * 86400000).getDate());
   const [rewardN, setRewardN] = useState(5);
   const [rewardM, setRewardM] = useState(15);
   const [rewardOverride, setRewardOverride] = useState<'auto' | 'coins' | 'time'>('auto');
@@ -209,6 +212,10 @@ export default function ParentTaskCreateScreen() {
       Alert.alert('提示', '請至少選擇一位適用孩子');
       return;
     }
+    if (taskMode === 'recurring' && selectedDays.length === 0) {
+      Alert.alert('提示', '請至少選擇一天執行日期');
+      return;
+    }
 
     setSaving(true);
     try {
@@ -227,9 +234,13 @@ export default function ParentTaskCreateScreen() {
           family_id: parent.family_id,
           name: name.trim(),
           category: cat,
-          day_type: freq,
+          day_type: taskMode === 'recurring' ? 'custom' : 'once',
+          recurrence_days: taskMode === 'recurring' ? selectedDays : null,
+          due_date: taskMode === 'deadline'
+            ? `${dueYear}-${String(dueMonth).padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`
+            : null,
           base_time_min: baseTimeMin,
-          difficulty: diff,
+          difficulty: 1,
           time_saving_min: useTime ? rewardM : 0,
           coin_override: coinOverride,
           is_active: true,
@@ -341,37 +352,6 @@ export default function ParentTaskCreateScreen() {
             </View>
           </FormGroup>
 
-          {/* Difficulty */}
-          <FormGroup label="難度">
-            <View style={styles.grid3}>
-              {[1, 2, 3].map(n => {
-                const active = diff === n;
-                const label = n === 1 ? '簡單' : n === 2 ? '中等' : '困難';
-                return (
-                  <TouchableOpacity
-                    key={n}
-                    style={[styles.diffOption, active && styles.diffOptionActive]}
-                    onPress={() => setDiff(n)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.diffDots}>
-                      {[1, 2, 3].map(d => (
-                        <View
-                          key={d}
-                          style={[
-                            styles.diffDot,
-                            { backgroundColor: d <= n ? (active ? '#FFFFFF' : ParentColors.teal400) : (active ? 'rgba(255,255,255,0.3)' : ParentColors.ivory300) }
-                          ]}
-                        />
-                      ))}
-                    </View>
-                    <Text style={[styles.diffOptionText, active && styles.diffOptionTextActive]}>{label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </FormGroup>
-
           {/* Reward */}
           <FormGroup label="獎勵設定" hint={isMilestone ? '里程碑任務不發獎勵' : null}>
             {!isMilestone && (
@@ -451,23 +431,49 @@ export default function ParentTaskCreateScreen() {
           </FormGroup>
 
           {/* Frequency */}
-          <FormGroup label="執行頻率">
-            <View style={styles.grid3}>
-              {(['both', 'weekday', 'weekend'] as const).map(f => {
-                const active = freq === f;
-                const lbl = f === 'both' ? '每日' : f === 'weekday' ? '平日' : '週末';
+          <FormGroup label="執行方式">
+            <View style={styles.grid2}>
+              {(['recurring', 'deadline'] as const).map(mode => {
+                const active = taskMode === mode;
+                const lbl = mode === 'recurring' ? '週期任務' : '期限任務';
                 return (
                   <TouchableOpacity
-                    key={f}
-                    style={[styles.freqOption, active && styles.freqOptionActive]}
-                    onPress={() => setFreq(f as DayType)}
+                    key={mode}
+                    style={[styles.catOption, active && styles.catOptionActive]}
+                    onPress={() => setTaskMode(mode)}
                     activeOpacity={0.7}
                   >
-                    <Text style={[styles.freqOptionText, active && styles.freqOptionTextActive]}>{lbl}</Text>
+                    <Text style={[styles.catOptionText, active && styles.catOptionTextActive]}>{lbl}</Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
+            {taskMode === 'recurring' && (
+              <View style={styles.dayPickerRow}>
+                {['日', '一', '二', '三', '四', '五', '六'].map((lbl, idx) => {
+                  const on = selectedDays.includes(idx);
+                  return (
+                    <TouchableOpacity
+                      key={idx}
+                      style={[styles.dayBtn, on && styles.dayBtnActive]}
+                      onPress={() => setSelectedDays(prev =>
+                        on ? prev.filter(d => d !== idx) : [...prev, idx].sort((a, b) => a - b)
+                      )}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.dayBtnText, on && styles.dayBtnTextActive]}>週{lbl}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+            {taskMode === 'deadline' && (
+              <View style={styles.deadlineRow}>
+                <Stepper value={dueYear} onChange={setDueYear} min={2024} max={2030} step={1} suffix="年" />
+                <Stepper value={dueMonth} onChange={setDueMonth} min={1} max={12} step={1} suffix="月" />
+                <Stepper value={dueDay} onChange={setDueDay} min={1} max={31} step={1} suffix="日" />
+              </View>
+            )}
           </FormGroup>
 
           {/* Applies to */}
@@ -684,57 +690,39 @@ const styles = StyleSheet.create({
   catOptionTextActive: {
     color: '#FFFFFF',
   },
-  diffOption: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
-    borderRadius: 12,
-    paddingVertical: 10,
-    alignItems: 'center',
-    gap: 4,
-  },
-  diffOptionActive: {
-    backgroundColor: ParentColors.ink900,
-    borderColor: ParentColors.ink900,
-  },
-  diffDots: {
+  dayPickerRow: {
     flexDirection: 'row',
-    gap: 3,
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 10,
   },
-  diffDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  diffOptionText: {
-    fontSize: 13,
-    fontWeight: ParentFontWeights.medium,
-    color: ParentColors.ink700,
-  },
-  diffOptionTextActive: {
-    color: '#FFFFFF',
-  },
-  freqOption: {
-    flex: 1,
+  dayBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: ParentColors.borderSoft,
-    borderRadius: 12,
-    paddingVertical: 10,
     alignItems: 'center',
   },
-  freqOptionActive: {
-    backgroundColor: ParentColors.ink900,
-    borderColor: ParentColors.ink900,
+  dayBtnActive: {
+    backgroundColor: ParentColors.teal500,
+    borderColor: ParentColors.teal500,
   },
-  freqOptionText: {
-    fontSize: 13,
+  dayBtnText: {
+    fontSize: 12,
     fontWeight: ParentFontWeights.medium,
     color: ParentColors.ink700,
   },
-  freqOptionTextActive: {
+  dayBtnTextActive: {
     color: '#FFFFFF',
+  },
+  deadlineRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+    alignItems: 'center',
+    flexWrap: 'wrap',
   },
   rewardOverrideRow: {
     flexDirection: 'row',
