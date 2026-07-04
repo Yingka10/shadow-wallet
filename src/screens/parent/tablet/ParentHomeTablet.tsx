@@ -30,6 +30,10 @@ import {
   type LongTermTaskItem,
 } from '../../../hooks/useLongTermTasks';
 import {
+  useFamilyChildSummaries,
+  type ChildSummary,
+} from '../../../hooks/useFamilyChildSummaries';
+import {
   useParentRedemption,
   type RedemptionRequest,
   type ChildWishItem,
@@ -142,15 +146,6 @@ function GiftIcon({ size = 11, color = ParentColors.clay500 }: { size?: number; 
   );
 }
 
-function AlertIcon({ size = 11, color = ParentColors.warn }: { size?: number; color?: string }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M12 9v5M12 17.5v.5" stroke={color} strokeWidth={2} strokeLinecap="round" />
-      <Path d="M10.29 4.86L2.9 18a2 2 0 001.71 3h14.78a2 2 0 001.71-3L13.71 4.86a2 2 0 00-3.42 0z" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-    </Svg>
-  );
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Category metadata (mirrors ParentDashboardScreen)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -195,7 +190,7 @@ function computeAge(birthDate: string): number {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Left sidebar: child switcher + today's briefing
+// Left sidebar: child roster (each child shows today's progress + balance)
 // ─────────────────────────────────────────────────────────────────────────────
 
 type ChildOption = { id: string; nickname: string };
@@ -204,29 +199,23 @@ function ChildSwitcherSidebar({
   allChildren,
   childId,
   setSelectedChild,
-  doneToday,
-  totalToday,
-  spendingBalance,
-  onAddChild,
+  summaries,
 }: {
   allChildren: ChildOption[];
   childId: string;
   setSelectedChild: (c: ChildOption) => void;
-  doneToday: number;
-  totalToday: number;
-  spendingBalance: number;
-  onAddChild: () => void;
+  summaries: Record<string, ChildSummary>;
 }) {
-  const pct = totalToday > 0 ? Math.round((doneToday / totalToday) * 100) : 0;
-
   return (
     <View style={styles.sidebar}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* ── Child list ── */}
+        {/* ── Child roster ── */}
         <Text style={styles.sidebarEyebrow}>孩子</Text>
         <View style={styles.childList}>
           {allChildren.map((c) => {
             const active = c.id === childId;
+            const sum = summaries[c.id] ?? { doneToday: 0, totalToday: 0, balance: 0 };
+            const pct = sum.totalToday > 0 ? Math.round((sum.doneToday / sum.totalToday) * 100) : 0;
             return (
               <TouchableOpacity
                 key={c.id}
@@ -240,58 +229,27 @@ function ChildSwitcherSidebar({
                   </Text>
                 </View>
                 <View style={styles.childCardInfo}>
-                  <Text style={[styles.childCardName, active && styles.childCardNameActive]} numberOfLines={1}>
-                    {c.nickname}
-                  </Text>
-                  {active && (
-                    <View style={styles.childProgressRow}>
-                      <Text style={styles.childProgressText}>
-                        {doneToday}/{totalToday}
-                      </Text>
-                      <View style={styles.childProgressTrack}>
-                        <View style={[styles.childProgressFill, { width: `${pct}%` as `${number}%` }]} />
-                      </View>
+                  <View style={styles.childCardTopRow}>
+                    <Text style={[styles.childCardName, active && styles.childCardNameActive]} numberOfLines={1}>
+                      {c.nickname}
+                    </Text>
+                    <View style={styles.childBalanceChip}>
+                      <CoinSmIcon size={11} color="#A87800" />
+                      <Text style={styles.childBalanceText}>{sum.balance}</Text>
                     </View>
-                  )}
+                  </View>
+                  <View style={styles.childProgressRow}>
+                    <Text style={styles.childProgressText}>
+                      {sum.doneToday}/{sum.totalToday}
+                    </Text>
+                    <View style={styles.childProgressTrack}>
+                      <View style={[styles.childProgressFill, { width: `${pct}%` as `${number}%` }]} />
+                    </View>
+                  </View>
                 </View>
               </TouchableOpacity>
             );
           })}
-
-          <TouchableOpacity
-            style={styles.addChildBtn}
-            activeOpacity={0.7}
-            onPress={onAddChild}
-          >
-            <Text style={styles.addChildText}>＋ 新增孩子</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.sidebarDivider} />
-
-        {/* ── Today's briefing (derived from hook data) ── */}
-        <Text style={styles.sidebarEyebrow}>今天的快訊</Text>
-        <View style={styles.briefingCard}>
-          <View style={styles.briefingRow}>
-            <CoinSmIcon size={14} color="#A87800" />
-            <Text style={styles.briefingText}>
-              撲滿 <Text style={styles.briefingAccent}>{spendingBalance} 枚</Text>
-            </Text>
-          </View>
-          <View style={[styles.briefingRow, { marginTop: 6 }]}>
-            <CheckSmIcon size={11} color={ParentColors.success} />
-            <Text style={styles.briefingText}>
-              今日完成 <Text style={styles.briefingAccent}>{doneToday}/{totalToday}</Text> 件任務
-            </Text>
-          </View>
-          {doneToday < totalToday && (
-            <View style={[styles.briefingRow, { marginTop: 6 }]}>
-              <AlertIcon size={11} color={ParentColors.warn} />
-              <Text style={[styles.briefingText, { color: ParentColors.warn }]}>
-                還有 {totalToday - doneToday} 件待完成
-              </Text>
-            </View>
-          )}
         </View>
       </ScrollView>
     </View>
@@ -332,7 +290,6 @@ function OverviewStrip({
             <Text style={styles.overviewName}>{nickname}</Text>
             <Text style={styles.overviewAge}>{age} 歲</Text>
           </View>
-          <Text style={styles.overviewSubtitle}>家長視角 · 今天</Text>
         </View>
       </View>
 
@@ -2790,12 +2747,16 @@ export default function ParentHomeTablet() {
     refresh: ltRefresh,
   } = useLongTermTasks(childId);
 
+  const childIds = allChildren.map(c => c.id);
+  const { summaries: childSummaries, refresh: refreshSummaries } = useFamilyChildSummaries(childIds);
+
   useFocusEffect(
     useCallback(() => {
       refresh();
       ltRefresh();
       void refreshRedemption();
-    }, [refresh, ltRefresh, refreshRedemption]),
+      refreshSummaries();
+    }, [refresh, ltRefresh, refreshRedemption, refreshSummaries]),
   );
 
   const handleViewAllLongTerm = useCallback(() => {
@@ -2839,10 +2800,7 @@ export default function ParentHomeTablet() {
           allChildren={allChildren}
           childId={childId}
           setSelectedChild={setSelectedChild}
-          doneToday={doneToday}
-          totalToday={totalToday}
-          spendingBalance={spendingBalance}
-          onAddChild={() => navigation.navigate('AddChild')}
+          summaries={childSummaries}
         />
 
         {/* ── Main area ── */}
@@ -2977,11 +2935,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     marginBottom: 8,
   },
-  sidebarDivider: {
-    height: 1,
-    backgroundColor: ParentColors.borderSoft,
-    marginVertical: 16,
-  },
   childList: {
     gap: 6,
   },
@@ -3024,7 +2977,26 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  childCardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+  },
+  childBalanceChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    flexShrink: 0,
+  },
+  childBalanceText: {
+    fontFamily: ParentFonts.mono,
+    fontSize: ParentFontSizes.xs,
+    color: '#A87800',
+    fontWeight: ParentFontWeights.semi,
+  },
   childCardName: {
+    flex: 1,
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.pMeta,
     color: ParentColors.fgMuted,
@@ -3057,45 +3029,6 @@ const styles = StyleSheet.create({
     backgroundColor: ParentColors.accent,
     borderRadius: ParentRadii.pill,
   },
-  addChildBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: ParentRadii.md,
-    borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
-    borderStyle: 'dashed',
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  addChildText: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgMuted,
-  },
-
-  // ── Today's briefing ──
-  briefingCard: {
-    backgroundColor: ParentColors.bgSurfaceWarm,
-    borderRadius: ParentRadii.md,
-    padding: 12,
-    gap: 0,
-  },
-  briefingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  briefingText: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgMuted,
-    flex: 1,
-  },
-  briefingAccent: {
-    fontWeight: ParentFontWeights.bold,
-    color: ParentColors.fgSecondary,
-  },
-
   // ── Main area ──
   mainArea: {
     flex: 1,
@@ -3152,12 +3085,6 @@ const styles = StyleSheet.create({
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.pMeta,
     color: ParentColors.fgMuted,
-  },
-  overviewSubtitle: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgMuted,
-    marginTop: 2,
   },
   overviewDivider: {
     width: 1,

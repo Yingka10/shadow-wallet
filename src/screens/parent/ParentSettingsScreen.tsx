@@ -174,14 +174,17 @@ type SettingRowProps = {
   right?: React.ReactNode;
   tone?: 'normal' | 'danger';
   isLast?: boolean;
+  onPress?: () => void;
 };
 
-function SettingRow({ icon, label, sub, chev, right, tone = 'normal', isLast = false }: SettingRowProps) {
+function SettingRow({ icon, label, sub, chev, right, tone = 'normal', isLast = false, onPress }: SettingRowProps) {
   const isDanger = tone === 'danger';
   return (
     <TouchableOpacity
       style={[styles.settingRow, !isLast && styles.settingRowDivider]}
       activeOpacity={0.7}
+      onPress={onPress}
+      disabled={!onPress}
     >
       {icon && (
         <View style={[styles.settingIcon, isDanger && styles.settingIconDanger]}>
@@ -348,6 +351,7 @@ export default function ParentSettingsScreen() {
               label="新增孩子"
               sub="目前 2 位"
               chev
+              onPress={() => navigation.navigate('AddChild')}
             />
             <SettingRow
               icon={<FlagIcon size={16} color={ParentColors.teal500} />}
