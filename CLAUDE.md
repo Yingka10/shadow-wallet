@@ -2,6 +2,8 @@
 
 > Claude Code 每次啟動自動讀取此檔案。
 > 此專案所有 coding 決策都在這個脈絡下進行。
+> **系統現況(哪些做了、哪些是斷的)以 `AUDIT_2026-07.md` 為準;MASTER.md 是設計意圖,不是現況。**
+> 本檔 2026-07-04 依審計結果修正過一輪;之後的規則:哪個 PR 讓敘述變真/變假,就在同一個 PR 更新對應段落(只由 A 改)。
 
 ---
 
@@ -81,13 +83,15 @@
 
 ```
 核心帳號：families, parents, children, child_profiles
-任務系統：tasks, task_completions, overrides
-幣值系統：wallets, transactions, reward_items
+任務系統：tasks, child_tasks, task_completions, overrides, system_task_templates
+幣值系統：wallets, transactions, reward_items, redemption_requests
 長期任務：long_term_goals, time_savings
-回饋系統：weekly_reports, monthly_reports, credit_logs
+回饋系統：weekly_reports, monthly_reports, growth_moments, parent_observations, credit_logs
 手足關係：sibling_relations
 事件記錄：intervention_log
 ```
+
+注意：`credit_logs`、`sibling_relations` 目前零使用（AUDIT 1-C）；`setup_child_tasks`、`my_parent_id`、`my_family_id`、`settle_weekly_interest` 四個 DB 函數只存在 live DB、不在 migrations（回填中，AUDIT P1-7）。
 
 ### intervention_log 說明
 
@@ -95,7 +99,7 @@ append-only 業務事件記錄，服務 audit log 頁、週報/月報統計、�
 關鍵設計：
 - `context_snapshot jsonb`：觸發當下的指標快照，讓 AI 問答重建因果不需回算歷史
 - `ai_suggested` / `parent_decision` jsonb：保留 AI 建議 vs 家長實際決定的對比
-- `override_id`：家長標記事件同時寫 `overrides`（金流真相）與此表（可追溯事件），兩表在同一 transaction 內寫入
+- `override_id`：**設計意圖**是家長標記同時寫 `overrides` 與此表、同一 transaction。**現況並非如此**：`parentMarkTask` 完全沒寫 intervention_log，全表 0 列（AUDIT 3-3 #14、5-9 #5）；P1-2 的 `mark_task_atomic` RPC 會兌現這條
 - ON DELETE RESTRICT（family_id、child_id）：保護 audit log 不被連帶刪除；未來實作 GDPR 個資刪除前需先匿名化本表 log
 
 ---
@@ -157,20 +161,20 @@ type BaumrindType =
   | 'free_fatigue'         // 低要求 × 低回應
 ```
 
-### 利息結算（週日自動）
-```typescript
-// 儲蓄帳戶（wallet_type='saving'）
-interest = Math.round(balance * 0.05)
-// 寫一筆 Transaction（type='interest'）
+### 利息結算
+```sql
+-- 實況（live RPC settle_weekly_interest，AUDIT 5-9 #2）：
+-- 利率不是寫死 5%，存於 wallets.interest_rate 欄位
+interest = round(balance * wallets.interest_rate)
+-- 寫一筆 Transaction（type='interest'）
 ```
+⚠️ 現況：**無 cron 排程（從未自動跑過）、無 idempotency（跑一次加息一次）、無雙週判斷**。P1-8 會重寫此 RPC（用 last_interest_at 做間隔判斷）並排 cron。在那之前**不要手動呼叫它**。
 
 ### 棄坑偵測
 ```typescript
-// 第一層（3天）：孩子端顯示溫和詢問卡，不通知家長
-// 第二層（7天）：週報加入警示
-// 第三層（14天）：建議暫停
-// 觸發時機：App 開啟時執行
+// 設計：三層（3天孩子端詢問卡 / 7天週報警示 / 14天建議暫停）
 ```
+⚠️ 現況(AUDIT 3-2 #12):後端 `supabase/functions/detect-abandonment/` 存在(寫 weekly_reports.abandonment_tier + intervention_log),但 **cron 未排、前端三層 UI 全未實作、abandonment_tier 無人讀取**。「App 開啟時執行」的舊描述不成立;`lib/abandonDetection.ts` 不存在也不會建(邏輯在 Edge Function)。
 
 ---
 
@@ -236,13 +240,15 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=你的 anon key
 
 ## 目前進度
 
-- [x] 流程一：問卷與 Profile 生成
-- [x] 流程一：兌換目標設定
-- [x] 流程一：初始任務推薦
-- [x] 流程二：孩子端每日循環（6-9 歲）
-- [x] 流程二：家長端 Override + 臨時任務
-- [x] 流程三：週報生成（模板字串）
-- [ ] 流程三：棄坑偵測（lib/abandonDetection.ts 尚未建立）
+> 細項與斷點以 `AUDIT_2026-07.md` 為準;行動清單見 `TEAM_PLAN_2026-07.md`。
+
+- [x] 流程一：問卷與 Profile 生成、兌換目標設定、初始任務推薦
+- [x] 流程二：孩子端每日循環（6-9 歲）＋ 家長端 Override（非原子,P1-2 RPC 化中）＋ 臨時任務
+- [x] 流程二：長期任務 habit / skill / family（skill 孩子端詳情是殼、challenge 未做）
+- [x] 流程三：週報生成（Gemini,手動觸發;cron 未排 → P1-8）
+- [ ] 流程二：許願→定價核可→兌換（定價缺失,鏈是斷的 → P0-2）
+- [ ] 流程二：孩子提案審核閘門（目前直接上架 → P0-1）
+- [ ] 流程三：棄坑偵測（後端 Edge Fn 有;cron 與前端三層 UI 皆無）
 - [ ] 整合測試
 
-> 每完成一個模組，把對應的 [ ] 改成 [x]
+> 每完成一個模組，把對應的 [ ] 改成 [x]（只由 A 改本檔）
