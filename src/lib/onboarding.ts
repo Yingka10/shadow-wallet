@@ -227,73 +227,33 @@ export interface OnboardingResult {
 }
 
 /**
- * 執行完整的初始設定流程（帳號建立已在第一步完成）：
- * 1. 建立 family
- * 2. 建立 parent（含 baumrind_type）
- * 3. 建立 child（含 age_group、account_type）
- * 4. 建立 child_profile（motivation_level = 'external'）
- * 5. 建立錢包（9-12 歲建兩個，其他建一個）
+ * 執行完整的初始設定流程（帳號建立已在第一步完成）。
+ * 五段寫入（family/parent/child/child_profile/wallets）透過 RPC `submit_onboarding`
+ * 在單一 transaction 內完成，中途失敗全部回滾（P1-5，取代舊版無 transaction 的多段 insert）。
  */
 export async function submitOnboarding(input: OnboardingInput): Promise<OnboardingResult> {
-  const { parentName, familyName, answers, childNickname, childBirthDate } = input;
+  const { parentName, familyName, answers, childNickname, childBirthDate, childPin } = input;
 
   // 使用第一步驟 signUpUser() 建立的 session
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('請先完成帳號建立步驟');
-  const userId = user.id;
 
-  // 1. 建立 family
-  const { data: familyData, error: familyError } = await supabase
-    .from('families')
-    .insert({ family_name: familyName })
-    .select('id')
-    .single();
-  if (familyError) throw new Error(`建立家庭失敗：${familyError.message}`);
-  const familyId = familyData.id;
-
-  // 3. 建立 parent
   const baumrindType = calcBaumrindType(answers);
-  const { error: parentError } = await supabase.from('parents').insert({
-    family_id: familyId,
-    user_id: userId,
-    name: parentName,
-    baumrind_type: baumrindType,
-  });
-  if (parentError) throw new Error(`建立家長資料失敗：${parentError.message}`);
-
-  // 4. 建立 child
   const ageGroup = calcAgeGroup(childBirthDate);
   const accountType: AccountType = ageGroup === '9-12' ? 'DOUBLE' : 'SINGLE';
-  const { data: childData, error: childError } = await supabase
-    .from('children')
-    .insert({
-      family_id: familyId,
-      nickname: childNickname,
-      birth_date: childBirthDate,
-      age_group: ageGroup,
-      account_type: accountType,
-    })
-    .select('id')
-    .single();
-  if (childError) throw new Error(`建立孩子資料失敗：${childError.message}`);
-  const childId = childData.id;
 
-  // 5. 建立 child_profile
-  const { error: profileError } = await supabase.from('child_profiles').insert({
-    child_id: childId,
-    motivation_level: 'external' as MotivationLevel,
+  const { data, error } = await supabase.rpc('submit_onboarding', {
+    p_family_name: familyName,
+    p_parent_name: parentName,
+    p_baumrind_type: baumrindType,
+    p_child_nickname: childNickname,
+    p_child_birth_date: childBirthDate,
+    p_child_age_group: ageGroup,
+    p_child_account_type: accountType,
+    p_child_pin: childPin ?? null,
   });
-  if (profileError) throw new Error(`建立孩子設定失敗：${profileError.message}`);
+  if (error) throw new Error(`初始設定失敗：${error.message}`);
 
-  // 6. 建立錢包
-  const walletInserts: { child_id: string; wallet_type: WalletType; balance: number }[] = [
-    { child_id: childId, wallet_type: 'spending', balance: 0 },
-    ...(accountType === 'DOUBLE'
-      ? [{ child_id: childId, wallet_type: 'saving' as WalletType, balance: 0 }]
-      : []),
-  ];
-  const { error: walletError } = await supabase.from('wallets').insert(walletInserts);
-  if (walletError) throw new Error(`建立錢包失敗：${walletError.message}`);
-
-  return { familyId, childId, ageGroup };
+  const result = data as { familyId: string; childId: string };
+  return { familyId: result.familyId, childId: result.childId, ageGroup };
 }

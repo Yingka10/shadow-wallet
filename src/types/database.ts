@@ -806,6 +806,38 @@ export interface Database {
         Args: Record<string, never>;
         Returns: string;
       };
+      mark_task_atomic: {
+        Args: {
+          p_task_id: string;
+          p_child_id: string;
+          p_override_type: 'partial' | 'none' | 'renegotiate';
+          p_adjusted_coin: number;
+          p_note?: string | null;
+        };
+        Returns: { completionId: string; overrideId: string; coinEarned: number };
+      };
+      review_redemption_request: {
+        Args: {
+          p_request_id: string;
+          p_decision: 'approve' | 'reject';
+          p_adjusted_coins?: number | null;
+          p_parent_note?: string | null;
+        };
+        Returns: { ok?: boolean; error?: string; status?: string; finalCoins?: number };
+      };
+      submit_onboarding: {
+        Args: {
+          p_family_name: string;
+          p_parent_name: string;
+          p_baumrind_type: string;
+          p_child_nickname: string;
+          p_child_birth_date: string;
+          p_child_age_group: string;
+          p_child_account_type: string;
+          p_child_pin?: string | null;
+        };
+        Returns: { familyId: string; childId: string };
+      };
       setup_child_tasks: {
         Args: {
           p_family_id: string;
