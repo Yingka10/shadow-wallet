@@ -774,6 +774,26 @@ export interface Database {
         Args: { base_time_min: number; difficulty: number; coin_override: number | null };
         Returns: number;
       };
+      complete_task: {
+        Args: {
+          p_task_id: string;
+          p_child_id: string;
+          p_completed_at: string;
+          p_is_prerequisite_met: boolean;
+          p_goal_id?: string | null;
+        };
+        Returns: {
+          error?: string;
+          completionId?: string;
+          coinEarned?: number;
+          timeSavedMin?: number;
+          milestone?: { goalId: string; day: number; coinReward: number } | null;
+        };
+      };
+      redeem_wish: {
+        Args: { p_child_id: string; p_item_id: string; p_cost: number };
+        Returns: { ok?: boolean; error?: string };
+      };
       settle_weekly_interest: {
         Args: Record<string, never>;
         Returns: undefined;
