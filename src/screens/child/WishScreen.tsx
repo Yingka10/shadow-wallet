@@ -14,6 +14,7 @@ import type { RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../../../App';
 import BottomNav from '../../components/BottomNav';
+import GradientBackground from '../../components/child/GradientBackground';
 import WishTreeComponent from '../../components/WishTreeComponent';
 import WishModalComponent from '../../components/WishModalComponent';
 import { CoinIcon } from '../../components/icons/TaskIcons';
@@ -40,7 +41,7 @@ type WishItem = {
   reward_type: string;
 };
 
-type TabKey = 'privilege' | 'item';
+type TabKey = 'item' | 'privilege';
 
 function formatNumber(value: number): string {
   return value.toLocaleString('zh-TW');
@@ -58,26 +59,27 @@ export default function WishScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [wishModalVisible, setWishModalVisible] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabKey>('privilege');
+  const [activeTab, setActiveTab] = useState<TabKey>('item');
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const balance = spending?.balance ?? 0;
 
-  const filteredWishes = useMemo(() => {
-    return wishes.filter(item => item.child_id === null || item.child_id === childId);
-  }, [childId, wishes]);
-
-  const privilegeList = useMemo(
-    () => filteredWishes.filter(w => w.reward_type === 'privilege'),
-    [filteredWishes],
+  const filteredWishes = useMemo(
+    () => wishes.filter(item => item.child_id === null || item.child_id === childId),
+    [childId, wishes],
   );
+
   const itemList = useMemo(
     () => filteredWishes.filter(w => w.reward_type !== 'privilege'),
     [filteredWishes],
   );
+  const privilegeList = useMemo(
+    () => filteredWishes.filter(w => w.reward_type === 'privilege'),
+    [filteredWishes],
+  );
 
   const displayList = useMemo(() => {
-    const list = activeTab === 'privilege' ? privilegeList : itemList;
+    const list = activeTab === 'item' ? itemList : privilegeList;
     return [...list].sort((a, b) => {
       const aReady = a.parent_approved && a.coin_cost > 0 && balance >= a.coin_cost;
       const bReady = b.parent_approved && b.coin_cost > 0 && balance >= b.coin_cost;
@@ -85,7 +87,15 @@ export default function WishScreen() {
       if (!aReady && bReady) return 1;
       return 0;
     });
-  }, [activeTab, privilegeList, itemList, balance]);
+  }, [activeTab, itemList, privilegeList, balance]);
+
+  // 第一個可兌換的願望（用來顯示熟果提示泡泡）
+  const ripeFruitItem = useMemo(
+    () =>
+      filteredWishes.find(w => w.parent_approved && w.coin_cost > 0 && balance >= w.coin_cost) ??
+      null,
+    [filteredWishes, balance],
+  );
 
   useEffect(() => {
     void loadChild();
@@ -153,16 +163,12 @@ export default function WishScreen() {
             filter: `family_id=eq.${child.familyId}`,
           },
           () => {
-            if (isMounted) {
-              void loadWishes(child.familyId);
-            }
+            if (isMounted) void loadWishes(child.familyId);
           },
         )
         .subscribe();
 
-      if (isMounted) {
-        channelRef.current = channel;
-      }
+      if (isMounted) channelRef.current = channel;
     };
 
     setupSubscription();
@@ -186,9 +192,7 @@ export default function WishScreen() {
         .single();
 
       if (error) throw error;
-      if (data) {
-        setChild({ familyId: data.family_id, nickname: data.nickname });
-      }
+      if (data) setChild({ familyId: data.family_id, nickname: data.nickname });
     } catch (err) {
       console.error('[WishScreen] loadChild error:', err);
     }
@@ -216,39 +220,14 @@ export default function WishScreen() {
           .eq('id', wishId);
 
         if (error) throw error;
-
-        if (child?.familyId) {
-          await loadWishes(child.familyId);
-        }
+        if (child?.familyId) await loadWishes(child.familyId);
       } catch (err) {
         console.error('[WishScreen] handleRemoveWish error:', err);
-        Alert.alert('刪除失敗', err instanceof Error ? err.message : '請稍後再試');
+        Alert.alert('取消失敗', err instanceof Error ? err.message : '請稍後再試');
       }
     },
     [child?.familyId, loadWishes],
   );
-
-  // ── 預留：改為家長審核流程時取消這段註解 ────────────────────────────
-  // const handleRedeemWithParentApproval = useCallback(
-  //   async (item: WishItem) => {
-  //     try {
-  //       const { error } = await supabase.from('redemption_requests').insert({
-  //         family_id: child?.familyId,
-  //         child_id: childId,
-  //         name: item.name,
-  //         coin_cost: item.coin_cost,
-  //         status: 'pending',
-  //       });
-  //       if (error) throw error;
-  //       Alert.alert('申請送出！', '等爸媽確認後就可以換了 🎉');
-  //     } catch (err) {
-  //       console.error('[WishScreen] handleRedeemWithParentApproval error:', err);
-  //       Alert.alert('送出失敗', err instanceof Error ? err.message : '請稍後再試');
-  //     }
-  //   },
-  //   [child, childId],
-  // );
-  // ─────────────────────────────────────────────────────────────────────
 
   const handleRedeem = useCallback(
     (item: WishItem) => {
@@ -264,20 +243,20 @@ export default function WishScreen() {
               try {
                 const { data, error } = await supabase.rpc('redeem_wish', {
                   p_child_id: childId,
-                  p_item_id:  item.id,
-                  p_cost:     item.coin_cost,
+                  p_item_id: item.id,
+                  p_cost: item.coin_cost,
                 });
 
                 if (error) throw error;
 
-                const result = data as { ok?: boolean; error?: string };
+                const result = data as { ok?: boolean; error?: string } | null;
 
-                if (result.error === 'already_redeemed') {
+                if (result?.error === 'already_redeemed') {
                   Alert.alert('已兌換', '這個願望已經換過了喔！');
                   return;
                 }
-                if (result.error === 'insufficient_balance') {
-                  Alert.alert('金幣不足', '金幣數量不夠喔！');
+                if (result?.error === 'insufficient_balance') {
+                  Alert.alert('金幣不足', '金幣數量不夠喔，再努力一下！');
                   return;
                 }
 
@@ -305,7 +284,6 @@ export default function WishScreen() {
         Alert.alert('資料還在載入', '請稍後再試');
         return;
       }
-
       if (!wishText.trim()) {
         Alert.alert('請說出或輸入願望', '例如：去書店挑一本繪本');
         return;
@@ -325,11 +303,7 @@ export default function WishScreen() {
         });
 
         if (error) throw error;
-
-        if (child?.familyId) {
-          await loadWishes(child.familyId);
-        }
-
+        if (child?.familyId) await loadWishes(child.familyId);
         Alert.alert('許願成功！', '許願樹已經收到你的願望了 ✨');
       } catch (err) {
         console.error('[WishScreen] handleWishModalSubmit error:', err);
@@ -341,119 +315,136 @@ export default function WishScreen() {
     [child, childId, loadWishes],
   );
 
-  function WishCard({ item }: { item: WishItem }) {
+  // ── 單筆願望行 ──────────────────────────────────────────────
+  function WishRow({ item, isLast }: { item: WishItem; isLast: boolean }) {
     const isReady = item.parent_approved && item.coin_cost > 0 && balance >= item.coin_cost;
     const isPending = item.added_by === 'child' && !item.parent_approved;
-    const isPrivilege = item.reward_type === 'privilege';
-    const emoji = isPrivilege ? '👑' : '🎁';
+    const shortfall = item.coin_cost - balance;
 
     return (
-      <View
-        style={[
-          styles.card,
-          isReady && styles.cardReady,
-          !isReady && !isPending && styles.cardDimmed,
-        ]}
-      >
-        <View style={styles.cardRow}>
-          {/* 名稱（含 emoji icon） */}
-          <Text style={styles.cardName} numberOfLines={1} ellipsizeMode="tail">
-            {emoji} {item.name}
-          </Text>
+      <View style={[styles.row, !isLast && styles.rowBorder]}>
+        {/* 名稱 */}
+        <Text style={styles.rowName} numberOfLines={1}>
+          {item.name}
+        </Text>
 
-          {/* 金幣 */}
-          <View style={[styles.coinBadge, !item.parent_approved && styles.coinBadgeDim]}>
-            <CoinIcon size={11} />
-            <Text style={[styles.coinBadgeText, !item.parent_approved && styles.coinBadgeTextDim]}>
-              {item.coin_cost > 0 ? formatNumber(item.coin_cost) : '?'}
-            </Text>
-          </View>
+        {/* 右側狀態區 */}
+        <View style={styles.rowRight}>
+          {isPending ? (
+            // 等爸媽定價 + 取消
+            <>
+              <View style={styles.pendingChip}>
+                <Text style={styles.pendingChipText}>等爸媽定價</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.btnCancel}
+                onPress={() => handleRemoveWish(item.id)}
+                activeOpacity={0.75}
+              >
+                <Text style={styles.btnCancelText}>取消</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            // 已定價：顯示金幣數
+            <>
+              <View style={styles.coinRow}>
+                <CoinIcon size={14} />
+                <Text style={styles.coinText}>{formatNumber(item.coin_cost)}</Text>
+              </View>
 
-          {/* 兌換 / 取消 按鈕 */}
-          {isReady ? (
-            <TouchableOpacity
-              style={styles.btnRedeem}
-              onPress={() => handleRedeem(item)}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.btnRedeemText}>兌換</Text>
-            </TouchableOpacity>
-          ) : isPending ? (
-            <TouchableOpacity
-              style={styles.btnCancel}
-              onPress={() => handleRemoveWish(item.id)}
-              activeOpacity={0.75}
-            >
-              <Text style={styles.btnCancelText}>取消</Text>
-            </TouchableOpacity>
-          ) : null}
+              {isReady ? (
+                <TouchableOpacity
+                  style={styles.btnRedeem}
+                  onPress={() => handleRedeem(item)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.btnRedeemText}>兌換</Text>
+                </TouchableOpacity>
+              ) : (
+                <Text style={styles.shortfallText}>還差 {formatNumber(shortfall)}</Text>
+              )}
+            </>
+          )}
         </View>
       </View>
     );
   }
 
-  function renderWishCard(item: WishItem) {
-    return <WishCard key={item.id} item={item} />;
-  }
-
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      {/* 許願樹 Hero 區域 */}
-      <View style={styles.treeSection}>
-        {/* 金幣餘額 chip */}
-        <TouchableOpacity
-          style={styles.coinChip}
-          onPress={() => navigation.navigate('Wallet', { childId })}
-          activeOpacity={0.85}
-        >
-          <CoinIcon size={18} />
-          <Text style={styles.coinChipText}>{formatNumber(balance)}</Text>
-        </TouchableOpacity>
+      <GradientBackground />
 
-        {/* 裝飾背景泡泡 */}
-        <View style={styles.treeDecoration}>
-          <View style={styles.pebble1} />
-          <View style={styles.pebble2} />
-          <View style={styles.pebble3} />
+      {/* ── Hero 許願樹區 ───────────────────────────────────── */}
+      <View style={styles.heroSection}>
+        {/* 標題列 */}
+        <View style={styles.heroHeader}>
+          <Text style={styles.heroTitle}>✨ 許願樹</Text>
+          <TouchableOpacity
+            style={styles.coinChip}
+            onPress={() => navigation.navigate('Wallet', { childId })}
+            activeOpacity={0.85}
+          >
+            <CoinIcon size={16} />
+            <Text style={styles.coinChipText}>{formatNumber(balance)}</Text>
+          </TouchableOpacity>
         </View>
 
-        <Text style={styles.treeTitle}>✨ 許願樹</Text>
-        <WishTreeComponent onPress={() => setWishModalVisible(true)} size={150} />
+        {/* 大樹 */}
+        <WishTreeComponent
+          onPress={() => setWishModalVisible(true)}
+          size={150}
+          hasRipeFruit={ripeFruitItem !== null}
+        />
 
+        {/* 熟果提示泡泡 */}
+        {ripeFruitItem && (
+          <View style={styles.ripeBubble}>
+            <Text style={styles.ripeBubbleText}>
+              「{ripeFruitItem.name}」熟了，可以兌換囉！
+            </Text>
+          </View>
+        )}
+
+        {/* 許願按鈕 */}
         <TouchableOpacity
           style={styles.wishBtn}
           onPress={() => setWishModalVisible(true)}
           activeOpacity={0.85}
+          disabled={saving}
         >
-          <Text style={styles.wishBtnText}>🌟 許一個願望</Text>
+          <Text style={styles.wishBtnText}>✨ 許一個願望</Text>
         </TouchableOpacity>
       </View>
 
-      {/* 列表區域 */}
+      {/* ── 列表區 ─────────────────────────────────────────── */}
       <View style={styles.listSection}>
-        {/* Tab 切換 */}
-        <View style={styles.tabs}>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'privilege' && styles.tabActive]}
-            onPress={() => setActiveTab('privilege')}
-            activeOpacity={0.75}
-          >
-            <Text style={[styles.tabText, activeTab === 'privilege' && styles.tabTextActive]}>
-              👑 特權
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'item' && styles.tabActive]}
-            onPress={() => setActiveTab('item')}
-            activeOpacity={0.75}
-          >
-            <Text style={[styles.tabText, activeTab === 'item' && styles.tabTextActive]}>
-              🎁 獎品
-            </Text>
-          </TouchableOpacity>
+        {/* Segmented tabs */}
+        <View style={styles.segmentWrap}>
+          <View style={styles.segment}>
+            <TouchableOpacity
+              style={[styles.segTab, activeTab === 'item' && styles.segTabActive]}
+              onPress={() => setActiveTab('item')}
+              activeOpacity={0.75}
+            >
+              <Text style={[styles.segTabText, activeTab === 'item' && styles.segTabTextActive]}>
+                禮物
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.segTab, activeTab === 'privilege' && styles.segTabActive]}
+              onPress={() => setActiveTab('privilege')}
+              activeOpacity={0.75}
+            >
+              <Text
+                style={[styles.segTabText, activeTab === 'privilege' && styles.segTabTextActive]}
+              >
+                特權
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* 卡片列表 */}
+        {/* 清單 */}
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
@@ -461,32 +452,30 @@ export default function WishScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={handleRefresh}
-              tintColor={Colors.coral500}
+              tintColor={Colors.leaf500}
             />
           }
           showsVerticalScrollIndicator={false}
         >
           {loading || walletLoading ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyIcon}>🌱</Text>
-              <Text style={styles.emptyText}>載入中⋯</Text>
+            <View style={styles.emptyWrap}>
+              <Text style={styles.emptyText}>載入中…</Text>
             </View>
           ) : displayList.length > 0 ? (
-            <View style={styles.cardList}>
-              {displayList.map(item => renderWishCard(item))}
+            <View style={styles.listWrap}>
+              {displayList.map((item, index) => (
+                <WishRow key={item.id} item={item} isLast={index === displayList.length - 1} />
+              ))}
             </View>
           ) : (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyIcon}>
-                {activeTab === 'privilege' ? '👑' : '🎁'}
-              </Text>
+            <View style={styles.emptyWrap}>
               <Text style={styles.emptyTitle}>
                 {activeTab === 'privilege' ? '還沒有特權' : '願望池是空的'}
               </Text>
               <Text style={styles.emptyText}>
                 {activeTab === 'privilege'
-                  ? '點上面的許願樹，告訴它你想要什麼特權吧！'
-                  : '快去點上面的許願樹，許下你的第一個願望！'}
+                  ? '點上面的許願樹，許下你想要的特權吧！'
+                  : '快去點許願樹，許下你的第一個願望！'}
               </Text>
               <TouchableOpacity
                 style={styles.emptyBtn}
@@ -494,7 +483,7 @@ export default function WishScreen() {
                 activeOpacity={0.85}
               >
                 <Text style={styles.emptyBtnText}>
-                  {activeTab === 'privilege' ? '👑 許一個特權' : '🌟 許一個願望'}
+                  {activeTab === 'privilege' ? '許一個特權' : '許一個願望'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -525,32 +514,30 @@ export default function WishScreen() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: Colors.bgCanvas,
+    backgroundColor: 'transparent',
   },
 
-  /* ── Tree hero ── */
-  treeSection: {
-    backgroundColor: Colors.bgSurfaceWarm,
-    paddingTop: 12,
-    paddingBottom: 20,
-    paddingHorizontal: 24,
+  // ── Hero ───────────────────────────────────────────────────
+  heroSection: {
+    paddingTop: 8,
+    paddingBottom: 16,
+    paddingHorizontal: 20,
     alignItems: 'center',
-    borderBottomWidth: 0.5,
-    borderBottomColor: Colors.borderSoft,
-    position: 'relative',
-    overflow: 'hidden',
   },
-  treeTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#6a8040',
-    letterSpacing: 0.5,
+  heroHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
     marginBottom: 4,
   },
+  heroTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.leaf600,
+    letterSpacing: 0.3,
+  },
   coinChip: {
-    position: 'absolute',
-    top: 14,
-    right: 16,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
@@ -560,54 +547,41 @@ const styles = StyleSheet.create({
     paddingRight: 11,
     borderRadius: 999,
     shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.10,
+    shadowRadius: 8,
     elevation: 3,
-    zIndex: 10,
   },
   coinChipText: {
     fontSize: 14,
     fontWeight: '800',
     color: Colors.gold700,
   },
-  treeDecoration: {
-    position: 'absolute',
-    inset: 0,
-    pointerEvents: 'none',
-  } as never,
-  pebble1: {
-    position: 'absolute',
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    backgroundColor: 'rgba(160,200,80,0.07)',
-    top: -30,
-    left: -25,
+  ripeBubble: {
+    backgroundColor: Colors.bgSurface,
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginTop: 4,
+    marginBottom: 8,
+    shadowColor: Colors.shadowWarm,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 2,
+    maxWidth: '85%',
   },
-  pebble2: {
-    position: 'absolute',
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: 'rgba(160,200,80,0.06)',
-    bottom: -10,
-    right: 15,
-  },
-  pebble3: {
-    position: 'absolute',
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: 'rgba(245,184,0,0.05)',
-    top: 10,
-    left: '40%',
+  ripeBubbleText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.ink700,
+    textAlign: 'center',
   },
   wishBtn: {
-    marginTop: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 32,
-    borderRadius: 24,
+    marginTop: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 40,
+    borderRadius: 28,
     backgroundColor: Colors.coral500,
     shadowColor: Colors.shadowWarm,
     shadowOffset: { width: 0, height: 4 },
@@ -617,151 +591,149 @@ const styles = StyleSheet.create({
   },
   wishBtnText: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
     letterSpacing: 0.3,
   },
 
-  /* ── List section ── */
+  // ── 列表區 ─────────────────────────────────────────────────
   listSection: {
     flex: 1,
-    backgroundColor: Colors.bgCanvas,
     paddingTop: 12,
   },
 
-  /* ── Tabs ── */
-  tabs: {
+  // ── Segmented control ──────────────────────────────────────
+  segmentWrap: {
+    paddingHorizontal: 20,
+    marginBottom: 8,
+  },
+  segment: {
     flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 16,
-    marginBottom: 12,
+    backgroundColor: Colors.cream200,
+    borderRadius: 12,
+    padding: 3,
   },
-  tab: {
+  segTab: {
     flex: 1,
-    paddingVertical: 9,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: Colors.borderSoft,
+    paddingVertical: 7,
+    borderRadius: 9,
     alignItems: 'center',
+  },
+  segTabActive: {
     backgroundColor: Colors.bgSurface,
+    shadowColor: Colors.shadowWarm,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.10,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  tabActive: {
-    backgroundColor: Colors.coral500,
-    borderColor: Colors.coral500,
-  },
-  tabText: {
+  segTabText: {
     fontSize: 13,
-    color: Colors.ink500,
     fontWeight: '600',
+    color: Colors.ink500,
   },
-  tabTextActive: {
-    color: '#fff',
-    fontWeight: '700',
+  segTabTextActive: {
+    color: Colors.ink900,
+    fontWeight: '800',
   },
 
-  /* ── Scroll + cards ── */
+  // ── ScrollView ─────────────────────────────────────────────
   scroll: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
   },
-  cardList: {
-    gap: 10,
+  listWrap: {
+    marginTop: 4,
   },
 
-  /* ── Card ── */
-  card: {
-    backgroundColor: Colors.bgSurface,
-    borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.07,
-    shadowRadius: 6,
-    elevation: 2,
+  // ── 願望行 ─────────────────────────────────────────────────
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    gap: 10,
   },
-  cardReady: {
-    borderWidth: 1,
-    borderColor: Colors.gold300,
-    shadowColor: Colors.shadowGold,
-    shadowOpacity: 0.18,
+  rowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.hairline,
   },
-  cardDimmed: {
-    opacity: 0.42,
+  rowName: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '700',
+    color: Colors.ink900,
   },
-  cardRow: {
+  rowRight: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 0,
   },
-  cardName: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.ink900,
-  },
-  coinBadge: {
+  coinRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    backgroundColor: Colors.gold100,
-    borderRadius: 8,
-    paddingVertical: 3,
-    paddingHorizontal: 7,
-    flexShrink: 0,
   },
-  coinBadgeDim: {
-    backgroundColor: Colors.cream200,
-  },
-  coinBadgeText: {
-    fontSize: 11,
+  coinText: {
+    fontSize: 15,
     fontWeight: '700',
     color: Colors.gold700,
+    fontVariant: ['tabular-nums'],
   },
-  coinBadgeTextDim: {
+  shortfallText: {
+    fontSize: 12,
+    fontWeight: '600',
     color: Colors.ink300,
   },
 
-  /* ── Action buttons ── */
-  btnRedeem: {
-    paddingVertical: 5,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    backgroundColor: Colors.gold100,
+  // ── 待定價 chip ────────────────────────────────────────────
+  pendingChip: {
     borderWidth: 1,
-    borderColor: Colors.gold300,
-    flexShrink: 0,
+    borderColor: Colors.bark300,
+    borderRadius: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  pendingChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.bark500,
+  },
+
+  // ── 兌換按鈕 ───────────────────────────────────────────────
+  btnRedeem: {
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: Colors.coral500,
   },
   btnRedeemText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
-    color: Colors.gold700,
+    color: '#fff',
   },
+
+  // ── 取消按鈕 ───────────────────────────────────────────────
   btnCancel: {
     paddingVertical: 5,
     paddingHorizontal: 10,
-    borderRadius: 10,
-    backgroundColor: 'rgba(240,140,106,0.08)',
+    borderRadius: 8,
     borderWidth: 0.5,
-    borderColor: 'rgba(240,140,106,0.25)',
-    flexShrink: 0,
+    borderColor: Colors.borderSoft,
   },
   btnCancelText: {
-    fontSize: 11,
-    color: Colors.coral600,
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.ink500,
   },
 
-  /* ── Empty state ── */
-  emptyState: {
-    paddingVertical: 44,
+  // ── 空狀態 ─────────────────────────────────────────────────
+  emptyWrap: {
+    paddingVertical: 40,
     alignItems: 'center',
     paddingHorizontal: 24,
-  },
-  emptyIcon: {
-    fontSize: 48,
-    marginBottom: 12,
   },
   emptyTitle: {
     fontSize: 16,
@@ -792,7 +764,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
   },
+
   bottomPad: {
-    height: 20,
+    height: 24,
   },
 });
