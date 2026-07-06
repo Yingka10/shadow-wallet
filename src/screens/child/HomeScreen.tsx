@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Circle } from 'react-native-svg';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
@@ -24,11 +25,15 @@ import TaskCard from '../../components/TaskCard';
 import BottomNav from '../../components/BottomNav';
 import TaskCompleteModal from '../../components/TaskCompleteModal';
 import FeedbackAnimation, { type FeedbackType } from '../../components/FeedbackAnimation';
+import GradientBackground from '../../components/child/GradientBackground';
+import SectionHeader from '../../components/child/SectionHeader';
+import GrowthScene from '../../components/child/GrowthScene';
+import GroundWash from '../../components/child/GroundWash';
 import { CoinIcon } from '../../components/icons/TaskIcons';
 import { completeTask, createChildTask } from '../../lib/taskActions';
 import { supabase } from '../../lib/supabase';
 import { Colors } from '../../constants/colors';
-import { webFullHeight } from '../../constants/webStyles';
+import { webScreen } from '../../constants/webStyles';
 import type { AgeGroup, Task } from '../../types/database';
 
 type HomeRoute = RouteProp<RootStackParamList, 'Home'>;
@@ -44,7 +49,6 @@ type ChildMeta = {
 
 const TASK_DIFF_OPTIONS = [1, 1.5, 2, 2.5, 3];
 
-
 function getGreeting(): string {
   const h = new Date().getHours();
   if (h < 12) return '早安';
@@ -52,17 +56,30 @@ function getGreeting(): string {
   return '晚安';
 }
 
-function getSubGreeting(remaining: number, total: number): string {
-  if (total === 0 || remaining === 0) return '今天全部完成了！太厲害！';
-  return `今天有 ${remaining} 件事等你開動`;
+// 太陽 —— hero 右上角，鎖定值＝提案 artifact（淡金，不是暖橘）
+function Sun() {
+  return (
+    <Svg width={30} height={30} viewBox="0 0 30 30">
+      <Circle cx={15} cy={15} r={12} fill={Colors.gold300} opacity={0.9} />
+    </Svg>
+  );
 }
 
-function SectionLabel({ title }: { title: string }) {
+// 今天完成進度小環
+function TodayRing({ done, total, size = 20 }: { done: number; total: number; size?: number }) {
+  const pct = total > 0 ? done / total : 0;
+  const r = 7;
+  const c = 2 * Math.PI * r;
   return (
-    <View style={styles.sectionLabel}>
-      <Text style={styles.sectionLabelText}>{title}</Text>
-      <View style={styles.sectionLabelLine} />
-    </View>
+    <Svg width={size} height={size} viewBox="0 0 20 20">
+      <Circle cx={10} cy={10} r={r} fill="none" stroke={Colors.leaf100} strokeWidth={3} />
+      <Circle
+        cx={10} cy={10} r={r} fill="none"
+        stroke={Colors.leaf500} strokeWidth={3}
+        strokeDasharray={c} strokeDashoffset={c * (1 - pct)}
+        strokeLinecap="round" transform="rotate(-90 10 10)"
+      />
+    </Svg>
   );
 }
 
@@ -92,13 +109,11 @@ export default function HomeScreen() {
   const dutyTasks = shortTermTasks.filter(t => t.category === 'A' || t.category === 'B');
   const contributionTasks = shortTermTasks.filter(t => t.category === 'C');
 
-  const allCount = dutyTasks.length + contributionTasks.length + longTermTasks.length;
-  const doneCount = [...dutyTasks, ...contributionTasks, ...longTermTasks].filter(t => t.isCompleted).length;
-  const remaining = allCount - doneCount;
+  const todayTasks = [...dutyTasks, ...contributionTasks];
+  const todayDone = todayTasks.filter(t => t.isCompleted).length;
+  const todayTotal = todayTasks.length;
 
-  const hasDiscountableTasks =
-    !isPrerequisiteMet && contributionTasks.some(t => !t.isCompleted);
-
+  const allCount = todayTotal + longTermTasks.length;
   const isEmpty = allCount === 0 && !loading;
 
   useEffect(() => {
@@ -213,39 +228,67 @@ export default function HomeScreen() {
     refresh();
   }, [refresh]);
 
-  return (
-    <SafeAreaView style={[styles.safe, webFullHeight]} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.greeting}>{getGreeting()}，小探險家！</Text>
-          <Text style={styles.greetSub}>{getSubGreeting(remaining, allCount)}</Text>
-        </View>
-        <TouchableOpacity
-          style={styles.coinPill}
-          onPress={() => navigation.navigate('Wallet', { childId })}
-          accessibilityLabel={`前往撲滿，金幣餘額 ${coinBalance}`}
-        >
-          <CoinIcon size={28} />
-          <Text style={styles.coinCount}>{coinBalance}</Text>
-        </TouchableOpacity>
-      </View>
+  const nickname = childMeta?.nickname ?? '小朋友';
 
-      {/* Scroll content */}
+  return (
+    <View style={webScreen}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <GradientBackground />
+
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={Colors.coral500} />
+          <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={Colors.accent} />
         }
         showsVerticalScrollIndicator={false}
       >
-        {/* 長期任務 */}
+        {/* ── Hero —— 一幅場景：地面貫穿全寬，樹和文字都站在上面 ─────── */}
+        <View style={styles.hero}>
+          <View style={styles.groundBand}>
+            <GroundWash />
+          </View>
+
+          <View style={styles.heroLeft}>
+            <Text style={styles.heroHello}>{getGreeting()}，</Text>
+            <Text style={styles.heroName}>{nickname}！</Text>
+            <TouchableOpacity
+              style={styles.heroCoin}
+              onPress={() => navigation.navigate('Wallet', { childId })}
+              activeOpacity={0.8}
+              accessibilityLabel={`前往撲滿，金幣餘額 ${coinBalance}`}
+            >
+              <CoinIcon size={34} />
+              <Text style={styles.heroCoinNum}>{coinBalance}</Text>
+              <Text style={styles.heroCoinUnit}>金幣</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity
+            style={styles.heroRight}
+            activeOpacity={0.85}
+            onPress={() => navigation.navigate('Wish', { childId })}
+            accessibilityLabel="前往許願樹"
+          >
+            <View style={styles.sun}><Sun /></View>
+            <GrowthScene size={150} />
+          </TouchableOpacity>
+        </View>
+
+        {/* 今天進度膠囊 */}
+        {todayTotal > 0 && (
+          <View style={styles.todayPill}>
+            <TodayRing done={todayDone} total={todayTotal} />
+            <Text style={styles.todayPillText}>今天 {todayDone}/{todayTotal}</Text>
+          </View>
+        )}
+
+        {/* ── 長期挑戰 —— 置頂，唯一有進度條 ──────────────────────────── */}
         {longTermTasks.length > 0 && (
           <View style={styles.section}>
-            <SectionLabel title="長期任務" />
+            <SectionHeader title="我的長期挑戰" />
             {loading ? (
-              <ActivityIndicator color={Colors.coral500} />
+              <ActivityIndicator color={Colors.accent} style={styles.sectionLoading} />
             ) : (
               longTermTasks.map(task => (
                 task.goal ? (
@@ -268,18 +311,10 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Prerequisite nudge banner */}
-        {hasDiscountableTasks && (
-          <View style={styles.prereqBanner}>
-            <View style={styles.nudgeDot} />
-            <Text style={styles.prereqText}>先完成本分任務，解鎖完整金幣！</Text>
-          </View>
-        )}
-
-        {/* 週期任務 (Task-A + Task-B) */}
+        {/* ── 今天要做的 (Task-A + Task-B) ─────────────────────────────── */}
         {dutyTasks.length > 0 && (
           <View style={styles.section}>
-            <SectionLabel title="週期任務" />
+            <SectionHeader title="今天要做的" meta={`${dutyTasks.filter(t => !t.isCompleted).length} 件`} />
             {dutyTasks.map(task => (
               <TaskCard
                 key={task.id}
@@ -292,10 +327,10 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* 即時任務 (Task-C) */}
+        {/* ── 多做加分 (Task-C) ────────────────────────────────────────── */}
         {contributionTasks.length > 0 && (
           <View style={styles.section}>
-            <SectionLabel title="即時任務" />
+            <SectionHeader title="多做加分" />
             {contributionTasks.map(task => (
               <TaskCard
                 key={task.id}
@@ -313,19 +348,17 @@ export default function HomeScreen() {
         {isEmpty && (
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>今天全部完成了！</Text>
-            <Text style={styles.emptySub}>你今天超棒的！</Text>
+            <Text style={styles.emptySub}>你今天超棒的</Text>
           </View>
         )}
 
-        <View style={styles.addTaskCard}>
-          <View style={styles.addTaskTextBlock}>
-            <Text style={styles.addTaskTitle}>新增任務</Text>
-            <Text style={styles.addTaskSub}>想多加一件今天的事？把它放進清單裡。</Text>
+        {/* 新增任務 —— 清單尾入口 */}
+        <TouchableOpacity style={styles.addRow} onPress={openAddTask} activeOpacity={0.6}>
+          <View style={styles.addPlus}>
+            <Text style={styles.addPlusText}>＋</Text>
           </View>
-          <TouchableOpacity style={styles.addTaskBtn} onPress={openAddTask} activeOpacity={0.85}>
-            <Text style={styles.addTaskBtnText}>＋ 新增</Text>
-          </TouchableOpacity>
-        </View>
+          <Text style={styles.addRowText}>新增一件今天的事</Text>
+        </TouchableOpacity>
 
         <View style={styles.bottomPad} />
       </ScrollView>
@@ -481,179 +514,163 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </Modal>
     </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: Colors.bgCanvas,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    backgroundColor: 'rgba(255, 248, 238, 0.85)',
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 14,
-    borderRadius: 24,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    elevation: 4,
-  },
-  headerLeft: {
-    flex: 1,
-  },
-  greeting: {
-    fontWeight: '800',
-    fontSize: 22,
-    color: Colors.ink900,
-    lineHeight: 26,
-  },
-  greetSub: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.ink500,
-    marginTop: 2,
-  },
-  coinPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: Colors.bgSurface,
-    paddingVertical: 6,
-    paddingLeft: 6,
-    paddingRight: 14,
-    borderRadius: 999,
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    elevation: 3,
-  },
-  coinCount: {
-    fontWeight: '800',
-    fontSize: 17,
-    color: Colors.gold700,
+    backgroundColor: Colors.gradientPage[0],
   },
   scroll: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     paddingTop: 4,
   },
-  prereqBanner: {
+
+  // ── Hero ──────────────────────────────────────────────────────────────
+  hero: {
+    position: 'relative',
+    flexDirection: 'row',
+    minHeight: 168,
+  },
+  groundBand: {
+    position: 'absolute',
+    left: -20,
+    right: -20,
+    bottom: 0,
+    height: 96,
+    zIndex: 0,
+  },
+  heroLeft: {
+    flex: 1,
+    paddingTop: 6,
+    zIndex: 1,
+  },
+  heroHello: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.bark700,
+  },
+  heroName: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: Colors.ink900,
+    marginTop: -2,
+  },
+  heroCoin: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    marginTop: 14,
+  },
+  heroCoinNum: {
+    fontSize: 40,
+    fontWeight: '800',
+    color: Colors.ink900,
+    fontVariant: ['tabular-nums'],
+    lineHeight: 44,
+  },
+  heroCoinUnit: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.bark700,
+  },
+  heroRight: {
+    width: 150,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    zIndex: 1,
+  },
+  sun: {
+    position: 'absolute',
+    top: 6,
+    right: 4,
+    zIndex: 2,
+  },
+
+  // 今天進度膠囊
+  todayPill: {
+    alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: Colors.coral100,
+    backgroundColor: Colors.bgSurface,
     borderRadius: 999,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    paddingVertical: 8,
+    paddingLeft: 10,
+    paddingRight: 16,
+    marginTop: 2,
     marginBottom: 18,
+    shadowColor: Colors.shadowWarm,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 3,
   },
-  nudgeDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.coral500,
+  todayPillText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: Colors.ink900,
+    fontVariant: ['tabular-nums'],
   },
-  prereqText: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.coral700,
-  },
+
   section: {
-    marginBottom: 24,
+    marginBottom: 22,
   },
-  sectionLabel: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-    marginTop: 4,
-  },
-  sectionLabelText: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: Colors.ink500,
-    letterSpacing: 1,
-  },
-  sectionLabelLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: 'rgba(95,60,30,0.12)',
+  sectionLoading: {
+    paddingVertical: 20,
   },
   emptyState: {
     alignItems: 'center',
-    paddingTop: 72,
+    paddingTop: 40,
   },
   emptyTitle: {
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: '800',
     color: Colors.ink900,
     marginBottom: 8,
   },
   emptySub: {
-    fontSize: 16,
-    color: Colors.ink500,
+    fontSize: 15,
+    color: Colors.bark700,
     fontWeight: '500',
   },
-  addTaskCard: {
+
+  // 新增任務 —— 清單尾入口
+  addRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
+    gap: 14,
+    paddingVertical: 14,
     marginTop: 4,
-    marginBottom: 8,
-    backgroundColor: Colors.bgSurface,
-    borderRadius: 20,
-    paddingVertical: 16,
-    paddingHorizontal: 18,
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 3,
   },
-  addTaskTextBlock: {
-    flex: 1,
+  addPlus: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 2,
+    borderColor: Colors.leaf300,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  addTaskTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: Colors.ink900,
-    marginBottom: 4,
+  addPlusText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.leaf600,
+    marginTop: -1,
   },
-  addTaskSub: {
-    fontSize: 13,
-    color: Colors.ink500,
-    lineHeight: 18,
+  addRowText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.leaf700,
   },
-  addTaskBtn: {
-    backgroundColor: Colors.coral500,
-    borderRadius: 999,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.16,
-    shadowRadius: 10,
-    elevation: 2,
-  },
-  addTaskBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '800',
-    fontSize: 13,
-  },
+
+  // ── Add-task modal ──────────────────────────────────────────────────────
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(59,42,30,0.35)',
@@ -703,7 +720,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   input: {
-    backgroundColor: Colors.bgCanvas,
+    backgroundColor: Colors.cream50,
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -723,13 +740,13 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingVertical: 12,
     alignItems: 'center',
-    backgroundColor: Colors.bgCanvas,
+    backgroundColor: Colors.cream50,
     borderWidth: 1,
     borderColor: Colors.borderSoft,
   },
   segmentBtnActive: {
-    backgroundColor: Colors.coral100,
-    borderColor: Colors.coral300,
+    backgroundColor: Colors.leaf50,
+    borderColor: Colors.leaf300,
   },
   segmentText: {
     fontSize: 14,
@@ -737,10 +754,10 @@ const styles = StyleSheet.create({
     color: Colors.ink700,
   },
   segmentTextActive: {
-    color: Colors.coral700,
+    color: Colors.leaf700,
   },
   hintPill: {
-    backgroundColor: Colors.bgCanvas,
+    backgroundColor: Colors.cream50,
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -763,7 +780,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 14,
     alignItems: 'center',
-    backgroundColor: Colors.bgCanvas,
+    backgroundColor: Colors.cream50,
     borderWidth: 1,
     borderColor: Colors.borderSoft,
   },
@@ -781,7 +798,7 @@ const styles = StyleSheet.create({
   },
   submitBtn: {
     marginTop: 4,
-    backgroundColor: Colors.coral500,
+    backgroundColor: Colors.accent,
     borderRadius: 18,
     paddingVertical: 14,
     alignItems: 'center',

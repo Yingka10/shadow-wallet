@@ -118,7 +118,7 @@ function SunIcon({ size = 14, color = ParentColors.ink700 }: { size?: number; co
   );
 }
 
-function HourglassSmIcon({ size = 14, color = ParentColors.teal500 }: { size?: number; color?: string }) {
+function HourglassSmIcon({ size = 14, color = ParentColors.pine500 }: { size?: number; color?: string }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -153,7 +153,7 @@ function GiftIcon({ size = 11, color = ParentColors.clay500 }: { size?: number; 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const TASK_CAT_META: Record<TaskCategory, { label: string; tint: string; fg: string; icon: React.ReactElement<any> }> = {
   A: { label: '生活自理',   tint: '#EAE4D7', fg: ParentColors.ink700,  icon: <SunIcon /> },
-  B: { label: '家庭本分',   tint: '#EAF0EE', fg: ParentColors.teal500, icon: <HourglassSmIcon /> },
+  B: { label: '家庭本分',   tint: '#EAF0EE', fg: ParentColors.pine500, icon: <HourglassSmIcon /> },
   C: { label: '貢獻',       tint: '#FAF1E7', fg: ParentColors.clay500, icon: <SparkleSmIcon /> },
   D: { label: '成長',       tint: '#F4EBF0', fg: ParentColors.plum500, icon: <FlagIcon color={ParentColors.plum500} /> },
 };
@@ -342,7 +342,7 @@ function OverviewStrip({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const GOAL_TYPE_META: Record<LongTermType, { emoji: string; label: string; tint: string; fg: string }> = {
   habit:     { emoji: '🌱', label: '習慣養成', tint: '#E8F2E6', fg: ParentColors.success },
-  skill:     { emoji: '📚', label: '技能學習', tint: '#EAF0EE', fg: ParentColors.teal500 },
+  skill:     { emoji: '📚', label: '技能學習', tint: '#EAF0EE', fg: ParentColors.pine500 },
   family:    { emoji: '🏠', label: '家庭責任', tint: '#EAE4D7', fg: ParentColors.ink500 },
   challenge: { emoji: '🏆', label: '自我挑戰', tint: '#FAF1E7', fg: ParentColors.clay500 },
 };
@@ -2532,8 +2532,8 @@ function RedemptionProposalCard({
       ) : null}
 
       <View style={[styles.proposalAiBanner, ai.verdict === 'high' ? styles.proposalAiBannerHigh : styles.proposalAiBannerOk]}>
-        <SparkleSmIcon size={11} color={ai.verdict === 'high' ? ParentColors.warn : ParentColors.teal500} />
-        <Text style={[styles.proposalAiText, { color: ai.verdict === 'high' ? '#B87A00' : ParentColors.teal500 }]} numberOfLines={3}>
+        <SparkleSmIcon size={11} color={ai.verdict === 'high' ? ParentColors.warn : ParentColors.pine500} />
+        <Text style={[styles.proposalAiText, { color: ai.verdict === 'high' ? '#B87A00' : ParentColors.pine500 }]} numberOfLines={3}>
           {ai.reason}{ai.suggestedCoins != null ? ` 建議 ${ai.suggestedCoins} 幣` : ''}
         </Text>
       </View>
@@ -2949,8 +2949,8 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   childCardActive: {
-    backgroundColor: ParentColors.teal50,
-    borderColor: ParentColors.teal200,
+    backgroundColor: ParentColors.pine50,
+    borderColor: ParentColors.pine200,
   },
   childAvatar: {
     width: 36,
@@ -3060,7 +3060,7 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: ParentColors.teal500,
+    backgroundColor: ParentColors.pine500,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -3442,7 +3442,7 @@ const styles = StyleSheet.create({
   taskTimeReward: {
     fontFamily: ParentFonts.mono,
     fontSize: ParentFontSizes.xs,
-    color: ParentColors.teal500,
+    color: ParentColors.pine500,
     fontWeight: ParentFontWeights.bold,
   },
   taskRewardDash: {
@@ -3596,7 +3596,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 7,
     borderRadius: ParentRadii.sm,
-    backgroundColor: ParentColors.teal500,
+    backgroundColor: ParentColors.pine500,
   },
   markConfirmBtnDisabled: {
     opacity: 0.4,
@@ -3637,7 +3637,7 @@ const styles = StyleSheet.create({
   footerBtnNavy: {
     flex: 1,
     paddingVertical: 13,
-    backgroundColor: ParentColors.teal500,
+    backgroundColor: ParentColors.pine500,
     borderRadius: ParentRadii.md,
     alignItems: 'center',
     justifyContent: 'center',
@@ -3828,8 +3828,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   proposalAiBannerOk: {
-    backgroundColor: ParentColors.teal50,
-    borderColor: ParentColors.teal200,
+    backgroundColor: ParentColors.pine50,
+    borderColor: ParentColors.pine200,
   },
   proposalAiBannerHigh: {
     backgroundColor: '#FBF1DC',
@@ -3895,7 +3895,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 5,
     paddingVertical: 10,
-    backgroundColor: ParentColors.teal500,
+    backgroundColor: ParentColors.pine500,
     borderRadius: ParentRadii.md,
   },
   proposalApproveBtnText: {
@@ -4273,7 +4273,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   newTaskRewardCardActive: {
-    borderColor: ParentColors.teal500,
+    borderColor: ParentColors.pine500,
     borderWidth: 2,
   },
   newTaskRewardTitle: {
@@ -4290,7 +4290,7 @@ const styles = StyleSheet.create({
   newTaskAiHint: {
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.xs,
-    color: ParentColors.teal500,
+    color: ParentColors.pine500,
   },
   newTaskAiHintLoading: {
     fontFamily: ParentFonts.body,
@@ -4354,8 +4354,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   newTaskDayBtnActive: {
-    backgroundColor: ParentColors.teal500,
-    borderColor: ParentColors.teal500,
+    backgroundColor: ParentColors.pine500,
+    borderColor: ParentColors.pine500,
   },
   newTaskDayBtnText: {
     fontFamily: ParentFonts.body,
@@ -4395,7 +4395,7 @@ const styles = StyleSheet.create({
   newTaskPrimaryBtn: {
     marginTop: 4,
     paddingVertical: 14,
-    backgroundColor: ParentColors.teal500,
+    backgroundColor: ParentColors.pine500,
     borderRadius: ParentRadii.md,
     alignItems: 'center',
     justifyContent: 'center',
@@ -4492,8 +4492,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   habitDayCardActive: {
-    borderColor: ParentColors.teal500,
-    backgroundColor: ParentColors.teal50,
+    borderColor: ParentColors.pine500,
+    backgroundColor: ParentColors.pine50,
   },
   habitDayCardNum: {
     fontFamily: ParentFonts.display,
@@ -4501,7 +4501,7 @@ const styles = StyleSheet.create({
     color: ParentColors.fgPrimary,
   },
   habitDayCardNumActive: {
-    color: ParentColors.teal500,
+    color: ParentColors.pine500,
   },
   habitCoinRow: {
     flexDirection: 'row',
@@ -4614,6 +4614,6 @@ const styles = StyleSheet.create({
   skillAddText: {
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.sm,
-    color: ParentColors.teal500,
+    color: ParentColors.pine500,
   },
 });
