@@ -6,7 +6,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,7 +15,8 @@ import type { StackNavigationProp } from '@react-navigation/stack';
 import dayjs from 'dayjs';
 import type { RootStackParamList } from '../../../App';
 import BottomNav from '../../components/BottomNav';
-import { CoinIcon, TargetIcon, WalletIcon, WaveIcon } from '../../components/icons/TaskIcons';
+import GradientBackground from '../../components/child/GradientBackground';
+import { CoinIcon } from '../../components/icons/TaskIcons';
 import { Colors } from '../../constants/colors';
 import { supabase } from '../../lib/supabase';
 import { useWallet } from '../../hooks/useWallet';
@@ -24,10 +24,6 @@ import type { Transaction } from '../../types/database';
 
 type WalletRoute = RouteProp<RootStackParamList, 'Wallet'>;
 type Nav = StackNavigationProp<RootStackParamList, 'Wallet'>;
-
-type ChildData = {
-  nickname: string;
-};
 
 type LedgerTone = 'earn' | 'spend' | 'interest' | 'adjust';
 
@@ -48,43 +44,33 @@ function formatNumber(value: number): string {
   return value.toLocaleString('zh-TW');
 }
 
+const DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
+
 function formatLedgerDate(createdAt: string): string {
   const now = dayjs();
   const created = dayjs(createdAt);
   const diffDays = now.startOf('day').diff(created.startOf('day'), 'day');
 
-  if (diffDays <= 0) return '今天';
+  if (diffDays === 0) return `今天 ${created.format('HH:mm')}`;
   if (diffDays === 1) return '昨天';
-  if (diffDays < 7) return `${diffDays} 天前`;
+  if (diffDays < 7) return `星期${DAY_NAMES[created.day()]}`;
   return created.format('M/D');
 }
 
 function getLedgerTitle(tx: Transaction, taskName?: string): string {
-  if (tx.reference_type === 'task_completion' && taskName) {
-    return taskName;
-  }
-
-  if (tx.reference_type === 'long_term_goal_milestone') {
-    return '長期目標獎勵';
-  }
-
-  if (tx.type === 'interest') {
-    return '利息入帳';
-  }
-
-  if (tx.type === 'redeem') {
-    return '兌換願望';
-  }
-
-  if (tx.type === 'deduct') {
-    return '扣除金幣';
-  }
-
-  if (tx.type === 'adjust') {
-    return '家長調整';
-  }
-
+  if (tx.reference_type === 'task_completion' && taskName) return taskName;
+  if (tx.reference_type === 'long_term_goal_milestone') return '長期目標獎勵';
+  if (tx.type === 'interest') return '利息入帳';
+  if (tx.type === 'redeem') return '換到：願望達成';
+  if (tx.type === 'deduct') return '扣除金幣';
+  if (tx.type === 'adjust') return '家長調整';
   return tx.note ?? '撲滿紀錄';
+}
+
+function getLedgerSubtitle(tx: Transaction, walletType: 'spending' | 'saving'): string {
+  const dateStr = formatLedgerDate(tx.created_at);
+  if (tx.type === 'interest') return `${dateStr} · 存錢撲滿`;
+  return dateStr;
 }
 
 function getLedgerTone(tx: Transaction): LedgerTone {
@@ -95,10 +81,7 @@ function getLedgerTone(tx: Transaction): LedgerTone {
 }
 
 function getLedgerAmount(tx: Transaction): number {
-  if (tx.type === 'redeem' || tx.type === 'deduct') {
-    return -Math.abs(tx.amount);
-  }
-
+  if (tx.type === 'redeem' || tx.type === 'deduct') return -Math.abs(tx.amount);
   return tx.amount;
 }
 
@@ -108,7 +91,6 @@ export default function WalletScreen() {
   const { childId } = route.params;
 
   const { spending, saving, loading: walletLoading, refresh: refreshWallet } = useWallet(childId);
-  const [child, setChild] = useState<ChildData | null>(null);
   const [ledger, setLedger] = useState<LedgerItem[]>([]);
   const [loadingLedger, setLoadingLedger] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -121,29 +103,8 @@ export default function WalletScreen() {
   }, [saving, spending]);
 
   useEffect(() => {
-    void loadChild();
-  }, [childId]);
-
-  useEffect(() => {
     void loadLedger();
   }, [walletSummaries, childId]);
-
-  async function loadChild() {
-    try {
-      const { data, error } = await supabase
-        .from('children')
-        .select('nickname')
-        .eq('id', childId)
-        .single();
-
-      if (error) throw error;
-      if (data) {
-        setChild({ nickname: data.nickname });
-      }
-    } catch (err) {
-      console.error('[WalletScreen] loadChild error:', err);
-    }
-  }
 
   const loadLedger = useCallback(async () => {
     setLoadingLedger(true);
@@ -154,12 +115,14 @@ export default function WalletScreen() {
         return;
       }
 
+      const walletTypeMap = new Map(walletSummaries.map(w => [w.id, w.type]));
+
       const { data: transactionRows, error: transactionError } = await supabase
         .from('transactions')
         .select('id, wallet_id, amount, type, reference_id, reference_type, note, created_at')
         .in('wallet_id', walletIds)
         .order('created_at', { ascending: false })
-        .limit(12);
+        .limit(20);
 
       if (transactionError) throw transactionError;
 
@@ -202,19 +165,15 @@ export default function WalletScreen() {
       }
 
       const items = (transactionRows ?? []).map(row => {
-        const transaction = row as Transaction;
-        const taskName = transaction.reference_id
-          ? completionTitleMap.get(transaction.reference_id)
-          : undefined;
-
-        const amount = getLedgerAmount(transaction);
-
+        const tx = row as Transaction;
+        const taskName = tx.reference_id ? completionTitleMap.get(tx.reference_id) : undefined;
+        const walletType = walletTypeMap.get(tx.wallet_id) ?? 'spending';
         return {
-          id: transaction.id,
-          title: getLedgerTitle(transaction, taskName),
-          subtitle: formatLedgerDate(transaction.created_at),
-          amount,
-          tone: getLedgerTone(transaction),
+          id: tx.id,
+          title: getLedgerTitle(tx, taskName),
+          subtitle: getLedgerSubtitle(tx, walletType),
+          amount: getLedgerAmount(tx),
+          tone: getLedgerTone(tx),
         } satisfies LedgerItem;
       });
 
@@ -230,130 +189,117 @@ export default function WalletScreen() {
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await Promise.all([refreshWallet(), loadLedger(), loadChild()]);
+      await Promise.all([refreshWallet(), loadLedger()]);
     } finally {
       setRefreshing(false);
     }
-  }, [loadChild, loadLedger, refreshWallet]);
+  }, [loadLedger, refreshWallet]);
 
   const spendingBalance = spending?.balance ?? 0;
   const savingBalance = saving?.balance ?? 0;
+  const savingInterestRate = saving?.interest_rate ?? 5;
+
+  const isLoading = walletLoading || loadingLedger;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.greeting}>早安，{child?.nickname ?? '小探險家'}！</Text>
-          <Text style={styles.greetSub}>把金幣收進撲滿，再慢慢長大。</Text>
-        </View>
-        <TouchableOpacity
-          style={styles.headerChip}
-          onPress={() => navigation.navigate('Home', { childId })}
-          activeOpacity={0.85}
-        >
-          <CoinIcon size={24} />
-          <Text style={styles.headerChipText}>{formatNumber(spendingBalance)}</Text>
-        </TouchableOpacity>
-      </View>
+      <GradientBackground />
 
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={Colors.coral500} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={Colors.leaf500}
+          />
+        }
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.heroCard}>
-          <Text style={styles.heroBadgeText}>我的撲滿</Text>
-          <View style={styles.heroValueRow}>
-            <View style={styles.heroIconWrap}>
-              <CoinIcon size={36} />
-            </View>
-            <Text style={styles.heroValue}>{formatNumber(spendingBalance)}</Text>
-          </View>
-        </View>
+        {/* 頁標題 */}
+        <Text style={styles.pageTitle}>我的撲滿</Text>
 
-        <View style={styles.summaryRow}>
-          <View style={styles.summaryCard}>
-            <View style={styles.summaryIconWrap}>
-              <WalletIcon size={24} />
+        {/* 兩個錢包卡 */}
+        <View style={styles.walletRow}>
+          {/* 花用撲滿 */}
+          <View style={styles.walletCard}>
+            <Text style={styles.walletLabel}>花用撲滿</Text>
+            <View style={styles.walletAmountRow}>
+              <CoinIcon size={22} />
+              <Text style={styles.walletAmount}>{formatNumber(spendingBalance)}</Text>
             </View>
-            <Text style={styles.summaryValue}>{formatNumber(spendingBalance)}</Text>
-            <Text style={styles.summaryLabel}>花用撲滿</Text>
-            <Text style={styles.summaryMeta}>可直接拿來換願望</Text>
+            <Text style={styles.walletMeta}>拿來換願望</Text>
           </View>
 
-          <View style={[styles.summaryCard, styles.summaryCardSaving]}>
-            <View style={styles.summaryIconWrapSaving}>
-              <TargetIcon size={24} />
+          {/* 存錢撲滿 */}
+          <View style={[styles.walletCard, styles.walletCardSaving]}>
+            <Text style={styles.walletLabel}>存錢撲滿</Text>
+            <View style={styles.walletAmountRow}>
+              <CoinIcon size={22} />
+              <Text style={styles.walletAmount}>{formatNumber(savingBalance)}</Text>
             </View>
-            <Text style={styles.summaryValue}>{formatNumber(savingBalance)}</Text>
-            <Text style={styles.summaryLabel}>存錢撲滿</Text>
-            <Text style={styles.summaryMeta}>
-              {saving ? `利息 ${saving.interest_rate}%` : '還沒有存錢目標'}
+            <Text style={styles.walletMeta}>
+              利息 {savingInterestRate}%・每週日長大
             </Text>
           </View>
         </View>
 
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>最近的紀錄</Text>
-            <WaveIcon />
+        {/* 最近紀錄區塊 */}
+        <Text style={styles.sectionTitle}>最近的紀錄</Text>
+
+        {isLoading ? (
+          <View style={styles.loadingWrap}>
+            <ActivityIndicator size="large" color={Colors.leaf500} />
+            <Text style={styles.loadingText}>撲滿正在整理中…</Text>
           </View>
-
-          {walletLoading || loadingLedger ? (
-            <View style={styles.loadingCard}>
-              <ActivityIndicator size="large" color={Colors.coral500} />
-              <Text style={styles.loadingText}>撲滿正在整理中…</Text>
-            </View>
-          ) : ledger.length > 0 ? (
-            <View style={styles.ledgerCard}>
-              {ledger.map(item => {
-                const isPositive = item.amount >= 0;
-
-                return (
-                  <View key={item.id} style={styles.ledgerRow}>
-                    <View
-                      style={[
-                        styles.ledgerIconWrap,
-                        item.tone === 'earn' && styles.ledgerIconEarn,
-                        item.tone === 'spend' && styles.ledgerIconSpend,
-                        item.tone === 'interest' && styles.ledgerIconInterest,
-                        item.tone === 'adjust' && styles.ledgerIconAdjust,
-                      ]}
-                    >
-                      {item.tone === 'spend' ? (
-                        <WalletIcon size={22} color={Colors.coral600} />
-                      ) : item.tone === 'interest' ? (
-                        <TargetIcon size={22} color={Colors.gold700} />
-                      ) : (
-                        <CoinIcon size={22} />
-                      )}
-                    </View>
-
-                    <View style={styles.ledgerMid}>
-                      <Text style={styles.ledgerTitle} numberOfLines={1}>
-                        {item.title}
-                      </Text>
-                      <Text style={styles.ledgerSub}>{item.subtitle}</Text>
-                    </View>
-
-                    <Text style={[styles.ledgerAmount, isPositive ? styles.ledgerAmountPos : styles.ledgerAmountNeg]}>
-                      {isPositive ? '+' : '-'}{formatNumber(Math.abs(item.amount))}
-                    </Text>
+        ) : ledger.length === 0 ? (
+          <View style={styles.emptyWrap}>
+            <Text style={styles.emptyTitle}>還沒有紀錄</Text>
+            <Text style={styles.emptySub}>完成一次任務，就會看到金幣進出。</Text>
+          </View>
+        ) : (
+          <View style={styles.ledgerList}>
+            {ledger.map((item, index) => {
+              const isPositive = item.amount >= 0;
+              const isLast = index === ledger.length - 1;
+              return (
+                <View
+                  key={item.id}
+                  style={[styles.ledgerRow, !isLast && styles.ledgerRowBorder]}
+                >
+                  {/* 圓圈圖示 */}
+                  <View
+                    style={[
+                      styles.circleIcon,
+                      isPositive ? styles.circleIconPos : styles.circleIconNeg,
+                    ]}
+                  >
+                    <Text style={styles.circleIconText}>{isPositive ? '+' : '−'}</Text>
                   </View>
-                );
-              })}
-            </View>
-          ) : (
-            <View style={styles.emptyState}>
-              <View style={styles.emptyIconWrap}>
-                <WalletIcon size={32} />
-              </View>
-              <Text style={styles.emptyTitle}>還沒有紀錄</Text>
-              <Text style={styles.emptySub}>完成一次任務，就會看到金幣進出。</Text>
-            </View>
-          )}
-        </View>
+
+                  {/* 標題與副標 */}
+                  <View style={styles.ledgerMid}>
+                    <Text style={styles.ledgerTitle} numberOfLines={1}>
+                      {item.title}
+                    </Text>
+                    <Text style={styles.ledgerSub}>{item.subtitle}</Text>
+                  </View>
+
+                  {/* 金額 */}
+                  <Text
+                    style={[
+                      styles.ledgerAmount,
+                      isPositive ? styles.ledgerAmountPos : styles.ledgerAmountNeg,
+                    ]}
+                  >
+                    {isPositive ? '+' : '−'}{formatNumber(Math.abs(item.amount))}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
 
         <View style={styles.bottomPad} />
       </ScrollView>
@@ -361,13 +307,9 @@ export default function WalletScreen() {
       <BottomNav
         activeTab="wallet"
         onTabPress={tab => {
-          if (tab === 'home') {
-            navigation.navigate('Home', { childId });
-          } else if (tab === 'wish') {
-            navigation.navigate('Wish', { childId });
-          } else if (tab === 'profile') {
-            navigation.navigate('Profile', { childId });
-          }
+          if (tab === 'home') navigation.navigate('Home', { childId });
+          else if (tab === 'wish') navigation.navigate('Wish', { childId });
+          else if (tab === 'profile') navigation.navigate('Profile', { childId });
         }}
       />
     </SafeAreaView>
@@ -377,253 +319,126 @@ export default function WalletScreen() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: Colors.bgCanvas,
+    backgroundColor: 'transparent',
   },
   scroll: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingHorizontal: 20,
+    paddingTop: 20,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 12,
-    backgroundColor: 'rgba(255, 248, 238, 0.88)',
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 14,
-    borderRadius: 24,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    elevation: 4,
-  },
-  headerLeft: {
-    flex: 1,
-  },
-  greeting: {
+
+  // ── 頁標題 ──────────────────────────────────────────────────
+  pageTitle: {
+    fontSize: 26,
     fontWeight: '800',
-    fontSize: 22,
     color: Colors.ink900,
-    lineHeight: 26,
+    marginBottom: 18,
   },
-  greetSub: {
+
+  // ── 錢包卡片 ────────────────────────────────────────────────
+  walletRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 28,
+  },
+  walletCard: {
+    flex: 1,
+    backgroundColor: Colors.cream50,
+    borderRadius: 18,
+    paddingVertical: 16,
+    paddingHorizontal: 14,
+    shadowColor: Colors.shadowWarm,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.10,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  walletCardSaving: {
+    backgroundColor: Colors.cream100,
+  },
+  walletLabel: {
     fontSize: 13,
-    fontWeight: '600',
-    color: Colors.ink500,
-    marginTop: 2,
+    fontWeight: '700',
+    color: Colors.ink700,
+    marginBottom: 8,
   },
-  headerChip: {
+  walletAmountRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: Colors.bgSurface,
-    paddingVertical: 6,
-    paddingLeft: 6,
-    paddingRight: 12,
-    borderRadius: 999,
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    elevation: 3,
-  },
-  headerChipText: {
-    fontWeight: '800',
-    fontSize: 16,
-    color: Colors.gold700,
-  },
-  heroCard: {
-    backgroundColor: Colors.gold100,
-    borderRadius: 20,
-    paddingVertical: 24,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    elevation: 4,
-    marginBottom: 14,
-    minHeight: 150,
-  },
-  heroBadgeText: {
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-    color: Colors.coral600,
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  heroValueRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  heroIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'transparent',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  heroValue: {
-    fontSize: 44,
-    fontWeight: '800',
-    color: Colors.gold700,
-    lineHeight: 48,
-    fontVariant: ['tabular-nums'],
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 14,
-  },
-  summaryCard: {
-    flex: 1,
-    backgroundColor: Colors.bgSurface,
-    borderRadius: 20,
-    padding: 16,
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.14,
-    shadowRadius: 16,
-    elevation: 3,
-  },
-  summaryCardSaving: {
-    backgroundColor: Colors.cream100,
-  },
-  summaryIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    backgroundColor: Colors.gold100,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  summaryIconWrapSaving: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    backgroundColor: Colors.cream50,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  summaryValue: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: Colors.ink900,
-    fontVariant: ['tabular-nums'],
-    marginBottom: 2,
-  },
-  summaryLabel: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.ink700,
-  },
-  summaryMeta: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.ink500,
-    marginTop: 4,
-    lineHeight: 16,
-  },
-  section: {
     marginBottom: 6,
   },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  sectionTitle: {
-    fontSize: 20,
+  walletAmount: {
+    fontSize: 28,
     fontWeight: '800',
     color: Colors.ink900,
+    fontVariant: ['tabular-nums'],
+    lineHeight: 32,
   },
-  loadingCard: {
-    backgroundColor: Colors.bgSurface,
-    borderRadius: 20,
-    minHeight: 160,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 3,
-  },
-  loadingText: {
-    fontSize: 14,
-    fontWeight: '700',
+  walletMeta: {
+    fontSize: 11,
+    fontWeight: '600',
     color: Colors.ink500,
+    lineHeight: 15,
   },
-  ledgerCard: {
-    backgroundColor: Colors.bgSurface,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 3,
+
+  // ── 區塊標題 ────────────────────────────────────────────────
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: Colors.ink900,
+    marginBottom: 4,
+  },
+
+  // ── 交易列表 ────────────────────────────────────────────────
+  ledgerList: {
+    marginTop: 4,
   },
   ledgerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(95, 60, 30, 0.08)',
+    gap: 14,
+    paddingVertical: 14,
   },
-  ledgerIconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
+  ledgerRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.hairline,
+  },
+  circleIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
-  ledgerIconEarn: {
-    backgroundColor: Colors.gold100,
+  circleIconPos: {
+    backgroundColor: Colors.gold500,
   },
-  ledgerIconSpend: {
-    backgroundColor: Colors.coral100,
+  circleIconNeg: {
+    backgroundColor: Colors.coral500,
   },
-  ledgerIconInterest: {
-    backgroundColor: Colors.cream100,
-  },
-  ledgerIconAdjust: {
-    backgroundColor: Colors.sky100,
+  circleIconText: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    lineHeight: 24,
   },
   ledgerMid: {
     flex: 1,
     minWidth: 0,
   },
   ledgerTitle: {
-    fontSize: 16,
-    fontWeight: '800',
+    fontSize: 15,
+    fontWeight: '700',
     color: Colors.ink900,
-    lineHeight: 21,
+    lineHeight: 20,
   },
   ledgerSub: {
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '500',
     color: Colors.ink500,
     marginTop: 2,
   },
@@ -638,41 +453,37 @@ const styles = StyleSheet.create({
   ledgerAmountNeg: {
     color: Colors.coral600,
   },
-  emptyState: {
-    backgroundColor: Colors.bgSurface,
-    borderRadius: 20,
-    paddingVertical: 28,
-    paddingHorizontal: 20,
+
+  // ── 狀態 ───────────────────────────────────────────────────
+  loadingWrap: {
+    paddingVertical: 48,
     alignItems: 'center',
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 3,
+    gap: 12,
   },
-  emptyIconWrap: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
-    backgroundColor: Colors.cream100,
+  loadingText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.ink500,
+  },
+  emptyWrap: {
+    paddingVertical: 48,
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
   },
   emptyTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '800',
-    color: Colors.ink900,
+    color: Colors.ink700,
   },
   emptySub: {
     marginTop: 6,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '500',
     color: Colors.ink500,
     textAlign: 'center',
     lineHeight: 18,
   },
+
   bottomPad: {
-    height: 20,
+    height: 24,
   },
 });
