@@ -880,12 +880,12 @@ const styles = StyleSheet.create({
     paddingTop: 4,
   },
   hero: {
-    minHeight: 342,
+    minHeight: 220,
     borderBottomLeftRadius: 30,
     borderBottomRightRadius: 30,
     marginHorizontal: -16,
     paddingHorizontal: 26,
-    paddingTop: 28,
+    paddingTop: 14,
     overflow: 'hidden',
   },
   heroCopy: {
@@ -894,16 +894,16 @@ const styles = StyleSheet.create({
   },
   greeting: {
     color: HOME.textPrimary,
-    fontSize: 30,
+    fontSize: 26,
     fontWeight: '900',
-    lineHeight: 40,
+    lineHeight: 36,
   },
   tagline: {
     color: HOME.textPrimary,
-    fontSize: 17,
+    fontSize: 14,
     fontWeight: '600',
-    marginTop: 14,
-    lineHeight: 25,
+    marginTop: 8,
+    lineHeight: 21,
   },
   diaryBadge: {
     position: 'absolute',
@@ -933,7 +933,7 @@ const styles = StyleSheet.create({
   treeTouch: {
     position: 'absolute',
     right: -36,
-    bottom: 18,
+    bottom: -8,
     zIndex: 3,
   },
   treeWrap: {
@@ -954,7 +954,7 @@ const styles = StyleSheet.create({
   coinCardTouch: {
     position: 'absolute',
     left: 30,
-    top: 126,
+    top: 94,
     width: 172,
     zIndex: 7,
   },
@@ -1102,7 +1102,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: HOME.textPrimary,
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: '900',
   },
   sectionAction: {
@@ -1119,7 +1119,7 @@ const styles = StyleSheet.create({
   },
   goalCard: {
     width: 164,
-    minHeight: 180,
+    minHeight: 156,
     backgroundColor: HOME.card,
     borderRadius: 22,
     padding: 14,
@@ -1132,11 +1132,11 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   goalArt: {
-    height: 64,
+    height: 54,
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 13,
+    marginBottom: 10,
   },
   goalArt_piano: {
     backgroundColor: '#F3E9DC',
@@ -1155,16 +1155,16 @@ const styles = StyleSheet.create({
   },
   goalTitle: {
     color: HOME.textPrimary,
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '900',
-    marginBottom: 5,
+    marginBottom: 4,
   },
   goalDays: {
     color: HOME.textPrimary,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
     fontVariant: ['tabular-nums'],
-    marginBottom: 10,
+    marginBottom: 7,
   },
   goalTrack: {
     height: 9,
@@ -1190,12 +1190,12 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   taskRow: {
-    minHeight: 86,
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderBottomWidth: 1,
     borderBottomColor: HOME.border,
   },
@@ -1203,10 +1203,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(168,198,134,0.12)',
   },
   checkbox: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 2.5,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 2,
     borderColor: '#A99580',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1218,12 +1218,12 @@ const styles = StyleSheet.create({
   },
   checkboxCheck: {
     color: '#FFFFFF',
-    fontSize: 19,
+    fontSize: 14,
     fontWeight: '900',
   },
   taskEmoji: {
-    width: 38,
-    fontSize: 28,
+    width: 28,
+    fontSize: 20,
     textAlign: 'center',
   },
   taskCopy: {
@@ -1232,9 +1232,9 @@ const styles = StyleSheet.create({
   },
   taskName: {
     color: HOME.textPrimary,
-    fontSize: 17,
+    fontSize: 13,
     fontWeight: '800',
-    lineHeight: 23,
+    lineHeight: 17,
   },
   taskNameDone: {
     color: HOME.textSecondary,
@@ -1242,20 +1242,20 @@ const styles = StyleSheet.create({
   },
   taskReward: {
     color: HOME.textSecondary,
-    fontSize: 13,
+    fontSize: 10,
     fontWeight: '700',
-    marginTop: 5,
+    marginTop: 1,
   },
   taskRewardValue: {
-    minWidth: 56,
-    minHeight: 36,
+    minWidth: 48,
+    minHeight: 28,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
   },
   taskCoinText: {
     color: '#8B572A',
-    fontSize: 17,
+    fontSize: 14,
     fontWeight: '900',
     fontVariant: ['tabular-nums'],
   },

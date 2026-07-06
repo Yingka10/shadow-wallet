@@ -2693,7 +2693,7 @@ export default function ParentHomeTablet() {
         <View style={styles.mainAreaWrap}>
         <ScrollView
           style={[styles.mainArea, webMouseDraggableScroll]}
-          contentContainerStyle={[styles.mainContent, { paddingTop: insets.top + 16 }]}
+          contentContainerStyle={[styles.mainContent, { paddingTop: insets.top + 16, paddingBottom: 140 }]}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.mainHeader}>
@@ -2747,7 +2747,7 @@ export default function ParentHomeTablet() {
         <View style={styles.rightColWrap}>
         <ScrollView
           style={[styles.rightCol, webMouseDraggableScroll]}
-          contentContainerStyle={[styles.rightColContent, { paddingTop: insets.top + 16 }]}
+          contentContainerStyle={[styles.mainContent, { paddingTop: insets.top + 16, paddingBottom: 140 }]}
           showsVerticalScrollIndicator={false}
         >
           {rightMode === 'newTask' ? (
@@ -2933,14 +2933,16 @@ const styles = StyleSheet.create({
 
   // ── Overview strip ──
   // ── 單一孩子概覽（p-oneline）：安靜的一行，不是卡片 ──
-  oneline: {
+oneline: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    backgroundColor: ParentColors.bgRail,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    // 💡 修改：移除 backgroundColor: ParentColors.bgRail
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    paddingHorizontal: 4,                 
+    paddingVertical: 12,
     marginVertical: 10,
   },
   onelineItem: {
@@ -3471,7 +3473,7 @@ const styles = StyleSheet.create({
   },
   reqAiUrgent: {
     fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
+    fontSize: ParentFontSizes.sm,
     lineHeight: 18,
     color: ParentColors.error,
     marginTop: 3,
@@ -3539,10 +3541,10 @@ const styles = StyleSheet.create({
   // ── Shared action buttons ──
   proposalActions: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 12,
   },
   proposalApproveBtn: {
-    flex: 7,
+    flex: 1,
     minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
@@ -3559,7 +3561,7 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   proposalRejectBtn: {
-    flex: 3,
+    flex: 1,
     minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
