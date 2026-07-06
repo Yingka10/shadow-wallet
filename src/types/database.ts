@@ -796,7 +796,13 @@ export interface Database {
       };
       settle_weekly_interest: {
         Args: Record<string, never>;
-        Returns: undefined;
+        Returns: {
+          ok: boolean;
+          walletsPaid: number;
+          walletsZeroInterest: number;
+          totalInterest: number;
+          settledAt: string;
+        };
       };
       my_family_id: {
         Args: Record<string, never>;

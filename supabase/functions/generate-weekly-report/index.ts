@@ -7,8 +7,13 @@
  *
  * Writes to weekly_reports:
  *   - motivation_observation: 2-3 sentence AI insight
- *   - ai_suggestions: JSON { suggestions: [...], affirmations: [...] }
+ *   - ai_suggestions: JSON { suggestions: [...], affirmations: [...], used_fallback }
  *   - task_adjustments: JSON { recommendations: [...] } (WF-4 appends abandonment_tier here)
+ *
+ * Degradation (P1-8): if Gemini fails or returns malformed JSON,
+ * computeFallbackInsight() produces the same shape from data already fetched
+ * for the prompt — no throw ever propagates out of processChild, so a report
+ * is always written for the week (MASTER §三).
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -126,6 +131,55 @@ action 只能是 "adjust_reminder", "increase_difficulty", "add_contribution" �
   return JSON.parse(cleaned) as GeminiInsightResult;
 }
 
+/**
+ * Deterministic, non-AI fallback — used when Gemini fails or returns
+ * malformed JSON. Computes the same shape from data already in `ctx`, so the
+ * caller (processChild) never needs to change how it consumes the result.
+ * This is a safety net, not a creative-writing replacement (MASTER §三:
+ * 可降級,AI 失敗仍輸出 deterministic 指標).
+ */
+function computeFallbackInsight(ctx: WeeklyContext): GeminiInsightResult {
+  const categories: TaskCategory[] = ['A', 'B', 'C', 'D'];
+  const totalDone = categories.reduce((s, c) => s + ctx.taskCounts[c].done, 0);
+  const totalTasks = categories.reduce((s, c) => s + ctx.taskCounts[c].total, 0);
+  const completionRate = totalTasks > 0 ? totalDone / totalTasks : 0;
+
+  // Weakest category = lowest completion rate among categories with at least one task.
+  const weakest = categories
+    .filter(c => ctx.taskCounts[c].total > 0)
+    .sort((a, b) =>
+      (ctx.taskCounts[a].done / ctx.taskCounts[a].total) - (ctx.taskCounts[b].done / ctx.taskCounts[b].total))[0]
+    ?? 'B';
+
+  const motivation_observation = totalTasks === 0
+    ? '這週還沒有任務紀錄，可以和孩子一起看看有沒有想嘗試的新任務。'
+    : completionRate >= 0.8
+      ? `這週完成了 ${totalDone}/${totalTasks} 項任務，表現穩定，是值得肯定的一週。`
+      : completionRate >= 0.5
+        ? `這週完成了 ${totalDone}/${totalTasks} 項任務，有進展但還有進步空間，可以聊聊卡關的地方。`
+        : `這週完成了 ${totalDone}/${totalTasks} 項任務，比較吃力，建議找時間了解孩子這週遇到的狀況。`;
+
+  return {
+    motivation_observation,
+    suggestions: [
+      { body: '確認提醒時間是否符合孩子的作息，太早或太晚都容易被忽略。', actionLabel: '調整提醒', action: 'adjust_reminder' },
+      { body: '如果任務常常很快完成，可以試著調高一點難度維持挑戰感。', actionLabel: '調整難度', action: 'increase_difficulty' },
+      { body: '找一件孩子擅長的事，鼓勵他多做一點家庭貢獻任務。', actionLabel: '增加任務', action: 'add_contribution' },
+    ],
+    affirmations: [
+      '這週辛苦了，繼續保持！',
+      '你的努力我們都看在眼裡。',
+      '一步一步來，你做得很好。',
+    ],
+    task_recommendations: [
+      {
+        category: weakest,
+        suggestion: `Task-${weakest} 這週完成率較低，可以和孩子討論是不是任務難度或時間安排需要調整。`,
+      },
+    ],
+  };
+}
+
 function getIsoWeekStart(date: Date): string {
   // Get Monday of the ISO week containing `date`
   const d = new Date(date);
@@ -221,7 +275,16 @@ async function processChild(
     coinSpendCount: redeemTxs.length,
   };
 
-  const insight = await generateInsight(ctx);
+  let insight: GeminiInsightResult;
+  let usedFallback: boolean;
+  try {
+    insight = await generateInsight(ctx);
+    usedFallback = false;
+  } catch (err) {
+    console.warn(`[generate-weekly-report] AI failed for child ${childId}, using fallback:`, err);
+    insight = computeFallbackInsight(ctx);
+    usedFallback = true;
+  }
 
   // Preserve abandonment_tier (and any other fields) written by detect-abandonment
   const existingAdjustments =
@@ -237,6 +300,7 @@ async function processChild(
       ai_suggestions: {
         suggestions: insight.suggestions,
         affirmations: insight.affirmations,
+        used_fallback: usedFallback,
       },
       task_adjustments: {
         ...existingAdjustments,

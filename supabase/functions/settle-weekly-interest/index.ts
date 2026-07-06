@@ -16,13 +16,13 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     );
 
-    const { error } = await supabase.rpc('settle_weekly_interest');
+    const { data, error } = await supabase.rpc('settle_weekly_interest');
     if (error) throw error;
 
-    console.log('[settle-weekly-interest] completed at', new Date().toISOString());
+    console.log('[settle-weekly-interest] completed:', JSON.stringify(data));
 
     return new Response(
-      JSON.stringify({ ok: true, settledAt: new Date().toISOString() }),
+      JSON.stringify(data),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   } catch (err) {
