@@ -111,6 +111,12 @@ export const ParentColors = {
   // 側欄上的前景（深底反白）
   onSidebar:       '#FFFFFF',
   onSidebarMuted:  'rgba(255, 255, 255, 0.66)',
+  pickActiveBg:    'rgba(255, 255, 255, 0.14)',   // 側欄選中列的疊色（深底玻璃感，非拿去做別的用途）
+  pickAllAvatarBg: '#ECF2ED',   // 「全家」大頭貼底色（淺，跟孩子色系區分）
+
+  // 申請審核卡（req-card）圖示底色 —— 兌換=gold、任務提案=green，別互換
+  reqIconGold:  '#FBF0D9',
+  reqIconGreen: '#EAF2E4',
 
   // 前景（淺底）
   fgPrimary:   '#1C1B17',   // ink900

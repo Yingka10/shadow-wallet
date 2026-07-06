@@ -35,6 +35,7 @@ import {
   ParentColors,
   ParentFontWeights,
   ParentFonts,
+  ParentShadows,
 } from '../../constants/parentTheme';
 
 // ---------------------------------------------------------------------------
@@ -175,39 +176,32 @@ function TabletTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
 
   return (
-    <View style={[ts.bar, { paddingBottom: insets.bottom || 0, height: 84 + (insets.bottom || 0) }]}>
-      {TABLET_TABS.map((tab) => {
-        const routeIdx = state.routes.findIndex((r) => r.name === tab.routeName);
-        const active = state.index === routeIdx;
-        const iconColor = active ? '#fff' : ParentColors.ink400;
+    <View style={[ts.wrap, { bottom: 16 + (insets.bottom || 0) }]}>
+      <View style={ts.bar}>
+        {TABLET_TABS.map((tab) => {
+          const routeIdx = state.routes.findIndex((r) => r.name === tab.routeName);
+          const active = state.index === routeIdx;
+          const iconColor = active ? '#fff' : ParentColors.ink400;
 
-        return (
-          <TouchableOpacity
-            key={tab.routeName}
-            style={ts.item}
-            activeOpacity={0.75}
-            onPress={() => navigation.dispatch(CommonActions.navigate(tab.routeName))}
-          >
-            {/* Active top indicator */}
-            {active && (
-              <View style={ts.indicatorWrap}>
-                <View style={ts.indicator} />
+          return (
+            <TouchableOpacity
+              key={tab.routeName}
+              style={[ts.item, active && ts.itemActive]}
+              activeOpacity={0.75}
+              onPress={() => navigation.dispatch(CommonActions.navigate(tab.routeName))}
+            >
+              <View style={[ts.iconBox, active && ts.iconBoxActive]}>
+                {tab.renderIcon(iconColor, 20)}
               </View>
-            )}
 
-            {/* Icon box */}
-            <View style={[ts.iconBox, active && ts.iconBoxActive]}>
-              {tab.renderIcon(iconColor, 20)}
-            </View>
-
-            {/* Label + sub */}
-            <View style={ts.labelCol}>
-              <Text style={[ts.label, active && ts.labelActive]}>{tab.label}</Text>
-              <Text style={ts.sub}>{tab.sub}</Text>
-            </View>
-          </TouchableOpacity>
-        );
-      })}
+              <View style={ts.labelCol}>
+                <Text style={[ts.label, active && ts.labelActive]}>{tab.label}</Text>
+                <Text style={ts.sub}>{tab.sub}</Text>
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -308,38 +302,41 @@ export default function ParentTabNavigator() {
 // ---------------------------------------------------------------------------
 
 const ts = StyleSheet.create({
+  wrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 16,
+    alignItems: 'center',
+    pointerEvents: 'box-none',
+  },
   bar: {
+    width: '56%',
+    minWidth: 520,
+    maxWidth: 600,
+    minHeight: 84,
     flexDirection: 'row',
     alignItems: 'stretch',
     justifyContent: 'center',
-    backgroundColor: 'rgba(250,248,245,0.97)',
-    borderTopWidth: 1,
-    borderTopColor: ParentColors.borderSoft,
+    backgroundColor: 'rgba(250,248,245,0.86)',
+    borderRadius: 36,
+    borderWidth: 1,
+    borderColor: 'rgba(28,27,23,0.08)',
+    padding: 8,
+    ...ParentShadows.card,
   },
   item: {
     flex: 1,
-    maxWidth: 280,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,
-    paddingHorizontal: 20,
+    paddingHorizontal: 14,
+    borderRadius: 28,
     position: 'relative',
   },
-  // Centered top indicator: full-width abs container + centered dot
-  indicatorWrap: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-  },
-  indicator: {
-    width: 42,
-    height: 2,
-    backgroundColor: ParentColors.accent,
-    borderBottomLeftRadius: 2,
-    borderBottomRightRadius: 2,
+  itemActive: {
+    backgroundColor: 'rgba(44,74,61,0.08)',
   },
   iconBox: {
     width: 40,
@@ -371,9 +368,11 @@ const ts = StyleSheet.create({
     fontSize: 11,
     color: ParentColors.fgMuted,
     marginTop: 2,
-    letterSpacing: 0.04,
+    letterSpacing: 0,
   },
 });
+
+export const parentTabletTabStyles = ts;
 
 // ---------------------------------------------------------------------------
 // Styles — Phone tab bar

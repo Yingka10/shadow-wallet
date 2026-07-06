@@ -487,6 +487,175 @@ const frStyles = StyleSheet.create({
 });
 
 // ---------------------------------------------------------------------------
+// SkillGoalView — 技能學習類的孩子端階段詳情
+// ---------------------------------------------------------------------------
+
+function SkillGoalView({ goal, taskName }: { goal: LongTermGoal; taskName: string }) {
+  const levels = goal.level_definitions ?? [];
+  const totalLevels = Math.max(goal.level_count ?? levels.length, 1);
+  const currentLevel = Math.min(goal.current_level ?? 0, totalLevels);
+  const progressPct = Math.min((currentLevel / totalLevels) * 100, 100);
+  const targetMonths = goal.total_days ? Math.max(1, Math.round(goal.total_days / 30)) : null;
+
+  return (
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={skillStyles.heroCard}>
+        <Text style={skillStyles.heroLabel}>🎹 技能挑戰</Text>
+        <Text style={skillStyles.heroTitle} numberOfLines={2}>{taskName}</Text>
+        <Text style={skillStyles.heroSub}>第 {currentLevel} / {totalLevels} 級</Text>
+        {targetMonths ? <Text style={skillStyles.heroMeta}>約 {targetMonths} 個月</Text> : null}
+        <View style={skillStyles.progressTrack}>
+          <View style={[skillStyles.progressFill, { width: `${progressPct}%` as any }]} />
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionLabel}>成長階段</Text>
+        <View style={skillStyles.levelCard}>
+          {levels.length > 0 ? (
+            levels.map((level, index) => {
+              const isDone = index < currentLevel;
+              const isCurrent = index === currentLevel;
+              return (
+                <View key={String(level.id ?? index)} style={skillStyles.levelRow}>
+                  <View
+                    style={[
+                      skillStyles.levelDot,
+                      isDone && skillStyles.levelDotDone,
+                      isCurrent && skillStyles.levelDotCurrent,
+                    ]}
+                  >
+                    <Text style={skillStyles.levelDotText}>{isDone ? '✓' : index + 1}</Text>
+                  </View>
+                  <View style={skillStyles.levelCopy}>
+                    <Text style={skillStyles.levelName} numberOfLines={2}>
+                      {String(level.name ?? `第 ${index + 1} 級`)}
+                    </Text>
+                    <Text style={skillStyles.levelReward}>完成可獲得 {Number(level.coin ?? 0)} 幣</Text>
+                  </View>
+                </View>
+              );
+            })
+          ) : (
+            <Text style={skillStyles.emptyText}>這個技能挑戰還沒有設定階段</Text>
+          )}
+        </View>
+      </View>
+    </ScrollView>
+  );
+}
+
+const skillStyles = StyleSheet.create({
+  heroCard: {
+    backgroundColor: Colors.sage100,
+    borderRadius: 24,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: Colors.sage200,
+  },
+  heroLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: Colors.sage600,
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  heroTitle: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: Colors.ink900,
+    lineHeight: 32,
+    marginBottom: 6,
+  },
+  heroSub: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: Colors.ink700,
+  },
+  heroMeta: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.fgMuted,
+    marginTop: 3,
+  },
+  progressTrack: {
+    height: 12,
+    borderRadius: 999,
+    backgroundColor: Colors.cream200,
+    overflow: 'hidden',
+    marginTop: 16,
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: Colors.sage400,
+  },
+  levelCard: {
+    backgroundColor: Colors.bgSurface,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: Colors.borderSoft,
+    padding: 14,
+    gap: 12,
+  },
+  levelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  levelDot: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.cream200,
+    borderWidth: 1,
+    borderColor: Colors.borderSoft,
+  },
+  levelDotDone: {
+    backgroundColor: Colors.sage400,
+    borderColor: Colors.sage400,
+  },
+  levelDotCurrent: {
+    backgroundColor: Colors.gold100,
+    borderColor: Colors.gold300,
+  },
+  levelDotText: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: Colors.ink700,
+  },
+  levelCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  levelName: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: Colors.ink900,
+    lineHeight: 22,
+  },
+  levelReward: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.fgMuted,
+    marginTop: 3,
+  },
+  emptyText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.fgMuted,
+    textAlign: 'center',
+    paddingVertical: 16,
+  },
+});
+
+// ---------------------------------------------------------------------------
 // Screen
 // ---------------------------------------------------------------------------
 
@@ -600,7 +769,9 @@ export default function LongTermDetailScreen() {
         <ActivityIndicator color={Colors.gold500} style={styles.loader} />
       ) : error ? (
         <Text style={styles.errorText}>{error}</Text>
-      ) : !goal ? null : goal.goal_type === 'family' ? (
+      ) : !goal ? null : goal.goal_type === 'skill' ? (
+        <SkillGoalView goal={goal} taskName={taskName} />
+      ) : goal.goal_type === 'family' ? (
         <FamilyRoleView goal={goal} task={task!} taskName={taskName} />
       ) : goal.goal_type !== 'habit' ? (
         <View style={styles.comingSoon}>

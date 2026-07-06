@@ -1,0 +1,15 @@
+env: load .env
+env: export EXPO_PUBLIC_SUPABASE_URL EXPO_PUBLIC_SUPABASE_ANON_KEY
+Starting project at C:\Users\jenny\app\shadow-wallet
+Starting Metro Bundler
+Waiting on http://localhost:8083
+Logs for your project will appear below.
+Web Bundled 2461ms index.ts (1452 modules)
+Web .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 98.4% (1440/1452)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 119ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 128ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console

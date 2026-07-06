@@ -1,6 +1,7 @@
 // Shadow Wallet · Parent Tablet — Tab 1 首頁 (Dashboard)
-// Layout: left sidebar (child switcher + briefing) │ main area (overview strip + goal + tasks) │ right column (static placeholder)
-// Data: useParentDashboard + useSelectedChild — no new hooks, no new Supabase queries.
+// Layout (v13 IA)：暖松側欄(GrowBook 品牌 + 孩子切換器) │ 白中欄(申請審核=決策主場 + 今天做完的 + 長期挑戰)
+//   │ 石色右欄(AI 教養顧問 + 週報連結)。申請審核用 useParentRedemption 過濾到目前選中的孩子。
+// Data: useParentDashboard + useParentRedemption + useSelectedChild。
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -13,7 +14,7 @@ import {
   StyleSheet,
   Alert,
 } from 'react-native';
-import Svg, { Path, Circle } from 'react-native-svg';
+import Svg, { Path, Circle, Rect } from 'react-native-svg';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,16 +24,11 @@ import { useSelectedChild } from '../../../context/SelectedChildContext';
 import {
   useParentDashboard,
   type DashboardTask,
-  type DashboardTaskStatus,
 } from '../../../hooks/useParentDashboard';
 import {
   useLongTermTasks,
   type LongTermTaskItem,
 } from '../../../hooks/useLongTermTasks';
-import {
-  useFamilyChildSummaries,
-  type ChildSummary,
-} from '../../../hooks/useFamilyChildSummaries';
 import {
   useParentRedemption,
   type RedemptionRequest,
@@ -62,6 +58,7 @@ import {
   ParentFontSizes,
   ParentFontWeights,
 } from '../../../constants/parentTheme';
+import { webMouseDraggableScroll, webTabletScreen } from '../../../constants/webStyles';
 import type { TaskCategory, LongTermType } from '../../../types/database';
 import dayjs from 'dayjs';
 
@@ -106,18 +103,6 @@ function FlagIcon({ size = 13, color = ParentColors.clay500 }: { size?: number; 
   );
 }
 
-function SunIcon({ size = 14, color = ParentColors.ink700 }: { size?: number; color?: string }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Circle cx={12} cy={12} r={4} stroke={color} strokeWidth={2} />
-      <Path
-        d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
-        stroke={color} strokeWidth={2} strokeLinecap="round"
-      />
-    </Svg>
-  );
-}
-
 function HourglassSmIcon({ size = 14, color = ParentColors.pine500 }: { size?: number; color?: string }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -146,47 +131,14 @@ function GiftIcon({ size = 11, color = ParentColors.clay500 }: { size?: number; 
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Category metadata (mirrors ParentDashboardScreen)
-// ─────────────────────────────────────────────────────────────────────────────
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const TASK_CAT_META: Record<TaskCategory, { label: string; tint: string; fg: string; icon: React.ReactElement<any> }> = {
-  A: { label: '生活自理',   tint: '#EAE4D7', fg: ParentColors.ink700,  icon: <SunIcon /> },
-  B: { label: '家庭本分',   tint: '#EAF0EE', fg: ParentColors.pine500, icon: <HourglassSmIcon /> },
-  C: { label: '貢獻',       tint: '#FAF1E7', fg: ParentColors.clay500, icon: <SparkleSmIcon /> },
-  D: { label: '成長',       tint: '#F4EBF0', fg: ParentColors.plum500, icon: <FlagIcon color={ParentColors.plum500} /> },
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Status pill (mirrors ParentDashboardScreen)
-// ─────────────────────────────────────────────────────────────────────────────
-
-type PillTone = 'sage' | 'neutral' | 'warn' | 'clay';
-
-const PILL_STYLE: Record<PillTone, { bg: string; text: string }> = {
-  sage:    { bg: '#E8F2E6', text: ParentColors.success },
-  neutral: { bg: ParentColors.ivory200, text: ParentColors.ink500 },
-  warn:    { bg: '#FBF1DC', text: ParentColors.warn },
-  clay:    { bg: '#FAF1E7', text: ParentColors.clay500 },
-};
-
-function StatusPill({ tone, label, icon }: { tone: PillTone; label: string; icon?: React.ReactElement }) {
-  const s = PILL_STYLE[tone];
+// 任務提案 —— req-ic.green 用的「方框＋加號」圖示
+function TaskPlusIcon({ size = 17, color = ParentColors.leaf700 }: { size?: number; color?: string }) {
   return (
-    <View style={[styles.pill, { backgroundColor: s.bg }]}>
-      {icon}
-      <Text style={[styles.pillText, { color: s.text }]}>{label}</Text>
-    </View>
+    <Svg width={size} height={size} viewBox="0 0 20 20" fill="none">
+      <Rect x={3.5} y={3} width={13} height={14} rx={2} stroke={color} strokeWidth={1.7} />
+      <Path d="M10 7v6M7 10h6" stroke={color} strokeWidth={1.7} strokeLinecap="round" />
+    </Svg>
   );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-function computeAge(birthDate: string): number {
-  return dayjs().diff(dayjs(birthDate), 'year');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -195,63 +147,72 @@ function computeAge(birthDate: string): number {
 
 type ChildOption = { id: string; nickname: string };
 
+// 品牌小樹 icon —— 側欄品牌行用，鎖定樣式＝提案 artifact .p-brand svg
+function BrandTreeIcon() {
+  return (
+    <Svg width={13} height={15} viewBox="0 0 16 18">
+      <Path d="M7 11.5v5" stroke="#C9A05C" strokeWidth={1.8} strokeLinecap="round" />
+      <Circle cx={8} cy={6.5} r={4.6} fill="#8FC65C" />
+      <Circle cx={4.6} cy={8.6} r={3} fill="#7CB84A" />
+      <Circle cx={11.4} cy={8.6} r={3} fill="#6BA63C" />
+      <Circle cx={10.6} cy={5} r={1.5} fill="#F2A93B" />
+    </Svg>
+  );
+}
+
+const CHILD_AVATAR_TINTS = [ParentColors.clay500, ParentColors.sage500, ParentColors.plum500];
+
+/**
+ * 左側欄 —— 暖松品牌欄（鎖定樣式＝ .p-side）：GrowBook 品牌 + 孩子切換器。
+ * 選中孩子＝白色 14% 疊色；徽章＝該孩子待處理事項數（申請審核用，不是分數/餘額)。
+ */
 function ChildSwitcherSidebar({
   allChildren,
   childId,
   setSelectedChild,
-  summaries,
+  pendingCounts,
 }: {
   allChildren: ChildOption[];
   childId: string;
   setSelectedChild: (c: ChildOption) => void;
-  summaries: Record<string, ChildSummary>;
+  pendingCounts: Record<string, number>;
 }) {
   return (
     <View style={styles.sidebar}>
+      <View style={styles.sidebarBrand}>
+        <BrandTreeIcon />
+        <Text style={styles.sidebarBrandText}>GrowBook</Text>
+      </View>
+      <Text style={styles.sidebarBrandSub}>成長帳本</Text>
+
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* ── Child roster ── */}
-        <Text style={styles.sidebarEyebrow}>孩子</Text>
-        <View style={styles.childList}>
-          {allChildren.map((c) => {
-            const active = c.id === childId;
-            const sum = summaries[c.id] ?? { doneToday: 0, totalToday: 0, balance: 0 };
-            const pct = sum.totalToday > 0 ? Math.round((sum.doneToday / sum.totalToday) * 100) : 0;
-            return (
-              <TouchableOpacity
-                key={c.id}
-                style={[styles.childCard, active && styles.childCardActive]}
-                onPress={() => setSelectedChild(c)}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.childAvatar, active && styles.childAvatarActive]}>
-                  <Text style={[styles.childAvatarText, active && styles.childAvatarTextActive]}>
-                    {c.nickname.charAt(0)}
-                  </Text>
+        {allChildren.map((c, i) => {
+          const active = c.id === childId;
+          const count = pendingCounts[c.id] ?? 0;
+          return (
+            <TouchableOpacity
+              key={c.id}
+              style={[styles.pick, active && styles.pickActive]}
+              onPress={() => setSelectedChild(c)}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.pickAvatar, { backgroundColor: CHILD_AVATAR_TINTS[i % CHILD_AVATAR_TINTS.length] }]}>
+                <Text style={styles.pickAvatarText}>{c.nickname.charAt(0)}</Text>
+              </View>
+              <Text style={[styles.pickName, active && styles.pickNameActive]} numberOfLines={1}>
+                {c.nickname}
+              </Text>
+              {count > 0 && (
+                <View style={styles.pickBadge}>
+                  <Text style={styles.pickBadgeText}>{count}</Text>
                 </View>
-                <View style={styles.childCardInfo}>
-                  <View style={styles.childCardTopRow}>
-                    <Text style={[styles.childCardName, active && styles.childCardNameActive]} numberOfLines={1}>
-                      {c.nickname}
-                    </Text>
-                    <View style={styles.childBalanceChip}>
-                      <CoinSmIcon size={11} color="#A87800" />
-                      <Text style={styles.childBalanceText}>{sum.balance}</Text>
-                    </View>
-                  </View>
-                  <View style={styles.childProgressRow}>
-                    <Text style={styles.childProgressText}>
-                      {sum.doneToday}/{sum.totalToday}
-                    </Text>
-                    <View style={styles.childProgressTrack}>
-                      <View style={[styles.childProgressFill, { width: `${pct}%` as `${number}%` }]} />
-                    </View>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
+
+      <Text style={styles.sidebarNote}>切換後，右邊只顯示這個孩子的事</Text>
     </View>
   );
 }
@@ -260,76 +221,34 @@ function ChildSwitcherSidebar({
 // Overview strip (ChildHeaderStrip equivalent)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function OverviewStrip({
-  nickname,
-  birthDate,
+/**
+ * 單一孩子概覽 —— 安靜的一行（鎖定樣式＝ .p-oneline），不是卡片。
+ * 只顯示真實資料：撲滿餘額+本週增減、今天完成度。不編造「本週狀態：整體穩定」這類假訊號。
+ */
+function POneline({
   doneToday,
   totalToday,
   spendingBalance,
   weekCoinDelta,
 }: {
-  nickname: string;
-  birthDate: string;
   doneToday: number;
   totalToday: number;
   spendingBalance: number;
   weekCoinDelta: number;
 }) {
-  const age = computeAge(birthDate);
   const pct = totalToday > 0 ? Math.round((doneToday / totalToday) * 100) : 0;
-
   return (
-    <View style={styles.overviewStrip}>
-      {/* Name + role */}
-      <View style={styles.overviewNameBlock}>
-        <View style={styles.overviewAvatar}>
-          <Text style={styles.overviewAvatarText}>{nickname.charAt(0)}</Text>
+    <View style={styles.oneline}>
+      <Text style={styles.onelineItem}>
+        <Text style={styles.onelineNum}>{spendingBalance}</Text> 幣
+        {weekCoinDelta !== 0 ? `（本週 ${weekCoinDelta > 0 ? '+' : ''}${weekCoinDelta}）` : ''}
+      </Text>
+      <View style={styles.onelineSep} />
+      <View style={styles.onelineMiniRow}>
+        <Text style={styles.onelineItem}>今天 <Text style={styles.onelineNum}>{doneToday}/{totalToday}</Text></Text>
+        <View style={styles.onelineMini}>
+          <View style={[styles.onelineMiniFill, { width: `${pct}%` as `${number}%` }]} />
         </View>
-        <View style={{ marginLeft: 14 }}>
-          <View style={styles.overviewNameRow}>
-            <Text style={styles.overviewName}>{nickname}</Text>
-            <Text style={styles.overviewAge}>{age} 歲</Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.overviewDivider} />
-
-      {/* Today progress */}
-      <View style={styles.overviewStatBlock}>
-        <Text style={styles.overviewEyebrow}>今日任務</Text>
-        <View style={styles.overviewNumRow}>
-          <Text style={styles.overviewNum}>{doneToday}</Text>
-          <Text style={styles.overviewNumOf}> / {totalToday}</Text>
-          <Text style={styles.overviewPct}> 完成{pct}%</Text>
-        </View>
-        <View style={styles.overviewProgressTrack}>
-          <View style={[styles.overviewProgressFill, { width: `${pct}%` as `${number}%` }]} />
-        </View>
-      </View>
-
-      <View style={styles.overviewDivider} />
-
-      {/* Wallet */}
-      <View style={styles.overviewStatBlock}>
-        <Text style={styles.overviewEyebrow}>撲滿餘額</Text>
-        <View style={styles.overviewNumRow}>
-          <CoinSmIcon size={20} color="#A87800" />
-          <Text style={[styles.overviewNum, { color: '#A87800', marginLeft: 6 }]}>{spendingBalance}</Text>
-        </View>
-        <Text style={styles.overviewDeltaText}>本週 +{weekCoinDelta} 幣</Text>
-      </View>
-
-      <View style={styles.overviewDivider} />
-
-      {/* Weekly status — derived */}
-      <View style={[styles.overviewStatBlock, { flex: 1 }]}>
-        <Text style={styles.overviewEyebrow}>本週狀態</Text>
-        <View style={styles.weekStatusPill}>
-          <View style={styles.weekStatusDot} />
-          <Text style={styles.weekStatusLabel}>整體穩定</Text>
-        </View>
-        <Text style={styles.overviewDeltaText}>完成率 {pct}%</Text>
       </View>
     </View>
   );
@@ -339,14 +258,10 @@ function OverviewStrip({
 // Long-term task card
 // ─────────────────────────────────────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const GOAL_TYPE_META: Record<LongTermType, { emoji: string; label: string; tint: string; fg: string }> = {
-  habit:     { emoji: '🌱', label: '習慣養成', tint: '#E8F2E6', fg: ParentColors.success },
-  skill:     { emoji: '📚', label: '技能學習', tint: '#EAF0EE', fg: ParentColors.pine500 },
-  family:    { emoji: '🏠', label: '家庭責任', tint: '#EAE4D7', fg: ParentColors.ink500 },
-  challenge: { emoji: '🏆', label: '自我挑戰', tint: '#FAF1E7', fg: ParentColors.clay500 },
-};
-
+/**
+ * 長期挑戰 —— 扁平清單（鎖定樣式＝ .t-grp + .p-lt），不是卡片、不用 emoji 分類徽章。
+ * 每列：名稱 + 進度說明 + chevron，下面一條進度條。
+ */
 function LongTermTaskCard({
   items,
   totalActive,
@@ -359,17 +274,11 @@ function LongTermTaskCard({
   onViewAll: () => void;
 }) {
   return (
-    <View style={styles.ltCard}>
-      <View style={styles.ltHeader}>
-        <View style={styles.ltHeaderLeft}>
-          <FlagIcon size={14} color={ParentColors.clay500} />
-          <Text style={styles.ltEyebrow}>長期任務</Text>
-        </View>
-        {totalActive > 0 && (
-          <View style={styles.ltCountChip}>
-            <Text style={styles.ltCountText}>{totalActive} 個進行中</Text>
-          </View>
-        )}
+    <View style={styles.ltSection}>
+      <View style={styles.tGrp}>
+        <Text style={styles.tGrpLabel}>長期挑戰</Text>
+        <View style={styles.tGrpLine} />
+        {totalActive > 0 && <Text style={styles.tGrpCount}>{totalActive} 項進行中</Text>}
       </View>
 
       {loading ? (
@@ -380,148 +289,38 @@ function LongTermTaskCard({
           <Text style={styles.ltEmptyMeta}>在「管理」Tab 建立習慣養成或技能學習任務</Text>
         </View>
       ) : (
-        <View style={styles.ltItems}>
-          {items.map((item, i) => {
-            const meta = GOAL_TYPE_META[item.goalType] ?? {
-              emoji: '🎯', label: '長期任務', tint: '#EEE', fg: ParentColors.fgMuted,
-            };
-            return (
-              <View key={item.id} style={[styles.ltItem, i > 0 && styles.ltItemDivider]}>
-                <View style={styles.ltItemHeader}>
-                  <View style={[styles.ltTypeBadge, { backgroundColor: meta.tint }]}>
-                    <Text style={styles.ltTypeEmoji}>{meta.emoji}</Text>
-                    <Text style={[styles.ltTypeLabel, { color: meta.fg }]}>{meta.label}</Text>
-                  </View>
-                  <Text style={styles.ltItemName} numberOfLines={1}>{item.name}</Text>
-                </View>
-                <View style={styles.ltProgressRow}>
-                  <View style={styles.ltProgressTrack}>
-                    <View style={[styles.ltProgressFill, { width: `${item.progressPct}%` as `${number}%` }]} />
-                  </View>
-                  <Text style={styles.ltProgressLabel}>{item.progressLabel}</Text>
-                </View>
-              </View>
-            );
-          })}
-        </View>
-      )}
-
-      <TouchableOpacity style={styles.ltFooter} onPress={onViewAll} activeOpacity={0.7}>
-        <Text style={styles.ltViewAll}>前往管理頁查看全部 →</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Task row
-// ─────────────────────────────────────────────────────────────────────────────
-
-function TaskRow({
-  task,
-  isLast,
-  childId,
-  onMarked,
-}: {
-  task: DashboardTask;
-  isLast: boolean;
-  childId: string;
-  onMarked: () => void;
-}) {
-  const cat = TASK_CAT_META[task.cat];
-
-  const statusConfig: Record<DashboardTaskStatus, { tone: PillTone; label: string; icon?: React.ReactElement }> = {
-    done:    { tone: 'sage',    label: '已完成', icon: <CheckSmIcon /> },
-    pending: { tone: 'neutral', label: task.cat === 'D' ? '待孩子打卡' : '待完成' },
-    missed:  { tone: 'warn',    label: '今日未做' },
-    review:  { tone: 'clay',    label: '待審核' },
-  };
-  const st = statusConfig[task.status];
-  const isDone = task.status === 'done';
-  const [markOpen, setMarkOpen] = useState(false);
-
-  return (
-    <View style={!isLast ? styles.taskRowDivider : undefined}>
-      <View style={styles.taskRow}>
-        {/* Completion circle */}
-        <View style={[styles.taskCheckCircle, isDone && styles.taskCheckCircleDone]}>
-          {isDone && <CheckSmIcon size={13} color="#fff" />}
-        </View>
-
-        {/* Name + chips */}
-        <View style={styles.taskInfo}>
-          <Text
-            style={[styles.taskName, task.status === 'missed' && styles.taskNameMissed]}
-            numberOfLines={1}
-          >
-            {task.name}
-          </Text>
-          <View style={styles.taskMeta}>
-            <View style={[styles.taskCatChip, { backgroundColor: cat.tint }]}>
-              {React.cloneElement(cat.icon as React.ReactElement<any>, { size: 11, color: cat.fg })}
-              <Text style={[styles.taskCatLabel, { color: cat.fg }]}>{cat.label}</Text>
-            </View>
-            {task.completedAt != null && (
-              <View style={styles.taskTimeChip}>
-                <ClockSmIcon size={10} color={ParentColors.fgMuted} />
-                <Text style={styles.taskTimeText}>{task.completedAt} 完成</Text>
-              </View>
-            )}
-          </View>
-        </View>
-
-        {/* Reward */}
-        <View style={styles.taskRewardWrap}>
-          {task.reward != null ? (
-            task.reward.kind === 'coins' ? (
-              <View style={styles.taskCoinRow}>
-                <CoinSmIcon size={14} color="#A87800" />
-                <Text style={styles.taskCoinText}>{task.reward.amount}</Text>
-              </View>
-            ) : (
-              <Text style={styles.taskTimeReward}>+{task.reward.amount}分</Text>
-            )
-          ) : (
-            <Text style={styles.taskRewardDash}>—</Text>
-          )}
-        </View>
-
-        {/* Status pill */}
-        <StatusPill tone={st.tone} label={st.label} icon={st.icon} />
-
-        {/* Action button */}
-        <View style={styles.taskAction}>
+        items.map((item, i) => (
           <TouchableOpacity
-            style={[styles.taskActionBtn, markOpen && styles.taskActionBtnActive]}
-            onPress={() => setMarkOpen(v => !v)}
-            activeOpacity={0.7}
+            key={item.id}
+            style={[styles.pLt, i > 0 && styles.pLtDivider]}
+            onPress={onViewAll}
+            activeOpacity={0.6}
           >
-            <Text style={[styles.taskActionText, markOpen && styles.taskActionTextActive]}>
-              {markOpen ? '收起' : '標記'}
-            </Text>
+            <View style={styles.pLtTop}>
+              <Text style={styles.pLtName} numberOfLines={1}>{item.name}</Text>
+              <Text style={styles.pLtMeta}>{item.progressLabel}</Text>
+              <Chevron />
+            </View>
+            <View style={styles.pLtTrack}>
+              <View style={[styles.pLtFill, { width: `${item.progressPct}%` as `${number}%` }]} />
+            </View>
           </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* MarkPanel expands below the row */}
-      {markOpen && (
-        <MarkPanel
-          task={task}
-          childId={childId}
-          isDone={isDone}
-          onSuccess={() => {
-            setMarkOpen(false);
-            onMarked();
-          }}
-          onCancel={() => setMarkOpen(false)}
-        />
+        ))
       )}
     </View>
   );
 }
 
+function Chevron({ color = ParentColors.ink300 }: { color?: string }) {
+  return (
+    <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
+      <Path d="M9 6l6 6-6 6" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// MarkPanel — inline override UI rendered below a done TaskRow
+// MarkPanel — inline override UI rendered below a done task row
 // ─────────────────────────────────────────────────────────────────────────────
 
 type ExtendedOpt = MarkOption | 'complete';
@@ -710,64 +509,113 @@ function MarkPanel({
 // Today's task panel
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * 今日做完的 —— 扁平清單（鎖定樣式＝ .t-grp + .t-row.done）。
+ * 信任制：首頁只顯示「做完的」，還沒做的不上首頁（見「⋯」旁的說明）。
+ * 家長介入＝事後 override：每列常駐「⋯」點開 MarkPanel（退回/調整），不用滑動也找得到。
+ * 指派/建立任務移到清單尾的安靜連結，不再是主要 CTA（決策主場是申請審核）。
+ */
 function TodayTaskPanel({
   tasks,
-  doneToday,
-  totalToday,
   onAssignTask,
   onNewTask,
   childId,
   onMarked,
+  onViewRecords,
 }: {
   tasks: DashboardTask[];
-  doneToday: number;
-  totalToday: number;
   onAssignTask: () => void;
   onNewTask: () => void;
   childId: string;
   onMarked: () => void;
+  onViewRecords: () => void;
 }) {
-  const todayLabel = dayjs().format('MM/DD dd');
+  const doneTasks = tasks.filter(t => t.status === 'done');
 
   return (
-    <View style={styles.taskPanel}>
-      {/* Action buttons (moved above 今日任務) */}
-      <View style={styles.taskFooter}>
-        <TouchableOpacity style={styles.footerBtnBrass} activeOpacity={0.8} onPress={onAssignTask}>
-          <Text style={styles.footerBtnText}>＋ 指派任務</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.footerBtnNavy} activeOpacity={0.8} onPress={onNewTask}>
-          <Text style={styles.footerBtnText}>＋ 建立新任務</Text>
-        </TouchableOpacity>
+    <View>
+      <View style={styles.tGrp}>
+        <Text style={styles.tGrpLabel}>今天做完的</Text>
+        <View style={styles.tGrpLine} />
       </View>
 
-      {/* Section header */}
-      <View style={styles.sectionHeader}>
-        <View>
-          <Text style={styles.sectionEyebrow}>任務清單</Text>
-          <Text style={styles.sectionTitle}>今日任務</Text>
-        </View>
-        <View style={styles.sectionMeta}>
-          <ClockSmIcon size={13} color={ParentColors.fgMuted} />
-          <Text style={styles.sectionMetaText}>{todayLabel} · 共 {totalToday} 件 · {doneToday} 件已完成</Text>
-        </View>
-      </View>
-
-      {/* Task list */}
-      {tasks.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyText}>今日沒有任務</Text>
+      {doneTasks.length === 0 ? (
+        <View style={styles.ltEmpty}>
+          <Text style={styles.ltEmptyText}>今天還沒有完成紀錄</Text>
         </View>
       ) : (
-        tasks.map((t, i) => (
-          <TaskRow
+        doneTasks.map((t, i) => (
+          <DoneTaskRow
             key={t.id}
             task={t}
-            isLast={i === tasks.length - 1}
+            isLast={i === doneTasks.length - 1}
             childId={childId}
             onMarked={onMarked}
           />
         ))
+      )}
+
+      <Text style={styles.tMore}>還沒做的和過往紀錄，都在 <Text style={styles.tMoreLink} onPress={onViewRecords}>成長紀錄</Text> 裡</Text>
+
+      <View style={styles.quietLinkRow}>
+        <TouchableOpacity style={styles.quietLink} onPress={onAssignTask} activeOpacity={0.75}>
+          <Text style={styles.quietLinkText}>＋ 指派任務</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.quietLink} onPress={onNewTask} activeOpacity={0.75}>
+          <Text style={styles.quietLinkText}>＋ 建立新任務</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+/** 今日做完的單列——勾圈＋名稱＋金額/時間＋完成時間＋「⋯」（點開下方 MarkPanel 可退回/調整）。 */
+function DoneTaskRow({
+  task,
+  isLast,
+  childId,
+  onMarked,
+}: {
+  task: DashboardTask;
+  isLast: boolean;
+  childId: string;
+  onMarked: () => void;
+}) {
+  const [markOpen, setMarkOpen] = useState(false);
+
+  return (
+    <View style={!isLast ? styles.tRowDivider : undefined}>
+      <View style={styles.tRow}>
+        <View style={styles.tRowCkp}>
+          <CheckSmIcon size={11} color="#fff" />
+        </View>
+        <Text style={styles.tRowTask} numberOfLines={1}>{task.name}</Text>
+        {task.reward != null && (
+          task.reward.kind === 'coins' ? (
+            <Text style={styles.tRowAmt}>＋{task.reward.amount}</Text>
+          ) : (
+            <Text style={styles.tRowAmtTs}>省{task.reward.amount}分</Text>
+          )
+        )}
+        {task.completedAt != null && (
+          <Text style={styles.tRowAmtTs}>{task.completedAt}</Text>
+        )}
+        <TouchableOpacity
+          onPress={() => setMarkOpen(v => !v)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={styles.tRowMore}>{markOpen ? '×' : '⋯'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      {markOpen && (
+        <MarkPanel
+          task={task}
+          childId={childId}
+          isDone
+          onSuccess={() => { setMarkOpen(false); onMarked(); }}
+          onCancel={() => setMarkOpen(false)}
+        />
       )}
     </View>
   );
@@ -2388,20 +2236,22 @@ function WishApprovalCard({
   }
 
   return (
-    <View style={styles.wishCard}>
-      <View style={styles.wishCardHeader}>
-        <View style={[styles.waitPill, isLongWait ? styles.waitPillUrgent : styles.waitPillNormal]}>
-          <ClockSmIcon size={10} color={isLongWait ? ParentColors.error : ParentColors.fgMuted} />
-          <Text style={[styles.waitPillText, isLongWait && { color: ParentColors.error }]}>
-            已等 {waitLabel}
-          </Text>
+    <View style={styles.reqCard}>
+      <View style={styles.reqTopRow}>
+        <View style={[styles.reqIc, { backgroundColor: ParentColors.reqIconGold }]}>
+          <GiftIcon size={17} color={ParentColors.amber700} />
         </View>
-        <Text style={styles.wishDateText}>{dayjs(wish.created_at).format('M/D HH:mm')}</Text>
-      </View>
-      <Text style={styles.wishName}>{wish.name}</Text>
-      <View style={styles.wishCoinRow}>
-        <CoinSmIcon size={14} />
-        <Text style={styles.wishCoinText}>{wish.coin_cost} 幣</Text>
+        <View style={styles.reqBody}>
+          <Text style={[styles.reqType, { color: ParentColors.amber700 }]}>願望待審 · {waitLabel}前</Text>
+          <Text style={styles.reqTitle} numberOfLines={1}>{wish.name}</Text>
+          {isLongWait && (
+            <Text style={styles.reqAiUrgent}>已等 {waitLabel}，孩子可能還在等回覆</Text>
+          )}
+        </View>
+        <View style={styles.reqPrice}>
+          <Text style={styles.reqPriceNum}>{wish.coin_cost}</Text>
+          <Text style={styles.reqPriceUnit}>幣</Text>
+        </View>
       </View>
 
       {state === 'idle' && (
@@ -2519,24 +2369,31 @@ function RedemptionProposalCard({
   }
 
   return (
-    <View style={styles.proposalCard}>
-      <Text style={styles.proposalCardName}>{request.name}</Text>
-      <Text style={styles.proposalCardMeta}>
-        {dayjs(request.created_at).format('M/D HH:mm')} · 孩子提案
-      </Text>
+    <View style={styles.reqCard}>
+      <View style={styles.reqTopRow}>
+        <View style={[styles.reqIc, { backgroundColor: ParentColors.reqIconGold }]}>
+          <CoinSmIcon size={18} color={ParentColors.amber700} />
+        </View>
+        <View style={styles.reqBody}>
+          <Text style={[styles.reqType, { color: ParentColors.amber700 }]}>
+            兌換申請 · {dayjs(request.created_at).format('M/D HH:mm')}
+          </Text>
+          <Text style={styles.reqTitle} numberOfLines={1}>{request.name}</Text>
+          <Text style={[styles.reqAi, ai.verdict === 'high' && styles.reqAiWarn]} numberOfLines={1}>
+            ✦ AI：{ai.reason}
+          </Text>
+        </View>
+        <View style={styles.reqPrice}>
+          <Text style={styles.reqPriceNum}>{coinValue}</Text>
+          <Text style={styles.reqPriceUnit}>幣</Text>
+        </View>
+      </View>
 
       {request.description ? (
         <View style={styles.proposalKidNote}>
           <Text style={styles.proposalKidNoteText}>「{request.description}」</Text>
         </View>
       ) : null}
-
-      <View style={[styles.proposalAiBanner, ai.verdict === 'high' ? styles.proposalAiBannerHigh : styles.proposalAiBannerOk]}>
-        <SparkleSmIcon size={11} color={ai.verdict === 'high' ? ParentColors.warn : ParentColors.pine500} />
-        <Text style={[styles.proposalAiText, { color: ai.verdict === 'high' ? '#B87A00' : ParentColors.pine500 }]} numberOfLines={3}>
-          {ai.reason}{ai.suggestedCoins != null ? ` 建議 ${ai.suggestedCoins} 幣` : ''}
-        </Text>
-      </View>
 
       <View style={styles.proposalCoinRow}>
         <Text style={styles.proposalCoinLabel}>核准幣值</Text>
@@ -2606,6 +2463,11 @@ function RedemptionProposalCard({
 
 // ── Right column panel ──
 
+/**
+ * 申請審核 —— 家長的唯一決策主場（鎖定樣式＝提案 artifact「THE parent decision surface」）。
+ * 呼叫端已把 pendingRequests/childWishes 過濾到目前選中的孩子；這裡純渲染 req-card 清單，
+ * 不再有自己的大標題/子區塊 chrome（標題由呼叫端的「有 N 件申請等你」負責）。
+ */
 function PendingItemsPanel({
   pendingRequests,
   childWishes,
@@ -2621,67 +2483,75 @@ function PendingItemsPanel({
 }) {
   const pendingWishes = childWishes.filter(w => !w.parent_approved);
 
+  if (pendingWishes.length === 0 && pendingRequests.length === 0) {
+    return (
+      <View style={styles.reqEmpty}>
+        <Text style={styles.reqEmptyText}>目前沒有申請，孩子的兌換/願望申請會出現在這裡</Text>
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.pendingPanel}>
-      <View style={styles.sectionHeader}>
-        <View>
-          <Text style={styles.sectionEyebrow}>待處理事項</Text>
-          <Text style={styles.sectionTitle}>需要你處理</Text>
-        </View>
+    <View>
+      {pendingWishes.map(w => (
+        <WishApprovalCard key={w.id} wish={w} onApprove={approveChildWish} />
+      ))}
+      {pendingRequests.map(req => (
+        <RedemptionProposalCard
+          key={req.id}
+          request={req}
+          onApprove={approveRequest}
+          onReject={rejectRequest}
+        />
+      ))}
+    </View>
+  );
+}
+
+function SendIcon() {
+  return (
+    <Svg width={11} height={11} viewBox="0 0 12 12" fill="none">
+      <Path d="M2 6h8M7 3l3 3-3 3" stroke="#FFF" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+const ADVISOR_PROMPTS = [
+  (name: string) => `${name}最近有什麼要注意的嗎？`,
+  (name: string) => `${name}的任務量這週要調整嗎？`,
+];
+
+/**
+ * AI 教養顧問 —— 右欄的主要內容（鎖定樣式＝ .t-ask），取代原本的「本週統計」。
+ * 目前沒有開放式問答的後端端點（aiAgent.ts 只有分類/幣值建議等窄用途函式），
+ * 所以先做視覺骨架＋誠實的「即將推出」提示，不假裝已經能對話。
+ */
+function AdvisorPanel({ childName, onOpenWeekly }: { childName: string; onOpenWeekly: () => void }) {
+  const notReady = () => Alert.alert('AI 諮詢即將推出', '這裡之後會接上能看到任務與紀錄的教養顧問。');
+  return (
+    <View>
+      <Text style={styles.advisorTitle}>AI 教養顧問</Text>
+      <Text style={styles.advisorSub}>正看著{childName}的紀錄，問題會帶著脈絡回答</Text>
+
+      <View style={styles.advisorPrompts}>
+        {ADVISOR_PROMPTS.map((p, i) => (
+          <TouchableOpacity key={i} style={styles.advisorPrompt} onPress={notReady} activeOpacity={0.7}>
+            <Text style={styles.advisorPromptMark}>✦</Text>
+            <Text style={styles.advisorPromptText}>{p(childName)}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
-      {/* 兌換待審 */}
-      <View style={styles.pendingSubSection}>
-        <View style={styles.pendingSubHead}>
-          <View style={[styles.pendingSubIcon, { backgroundColor: '#FAF1E7' }]}>
-            <GiftIcon size={11} color={ParentColors.clay500} />
-          </View>
-          <Text style={styles.pendingSubLabel}>兌換待審</Text>
-          <View style={styles.pendingSubLine} />
-          <Text style={styles.pendingSubNote}>孩子許願 · 設定幣值後上架</Text>
+      <TouchableOpacity style={styles.advisorBox} onPress={notReady} activeOpacity={0.7}>
+        <Text style={styles.advisorBoxText}>想問{childName}的什麼…</Text>
+        <View style={styles.advisorSend}>
+          <SendIcon />
         </View>
-        {pendingWishes.length === 0 ? (
-          <View style={styles.pendingEmpty}>
-            <Text style={styles.pendingEmptyTitle}>目前沒有待審兌換</Text>
-            <Text style={styles.pendingEmptyMeta}>孩子的兌換申請會出現在這裡。</Text>
-          </View>
-        ) : (
-          <View style={{ gap: 10 }}>
-            {pendingWishes.map(w => (
-              <WishApprovalCard key={w.id} wish={w} onApprove={approveChildWish} />
-            ))}
-          </View>
-        )}
-      </View>
+      </TouchableOpacity>
 
-      {/* 任務提案 */}
-      <View style={styles.pendingSubSection}>
-        <View style={styles.pendingSubHead}>
-          <View style={[styles.pendingSubIcon, { backgroundColor: '#F4EBF0' }]}>
-            <SparkleSmIcon size={11} color={ParentColors.plum500} />
-          </View>
-          <Text style={styles.pendingSubLabel}>任務提案</Text>
-          <View style={styles.pendingSubLine} />
-          <Text style={styles.pendingSubNote}>孩子提案完成的事 · 同意後發幣</Text>
-        </View>
-        {pendingRequests.length === 0 ? (
-          <View style={styles.pendingEmpty}>
-            <Text style={styles.pendingEmptyTitle}>目前沒有待審提案</Text>
-            <Text style={styles.pendingEmptyMeta}>孩子有新提案時，會在這裡出現。</Text>
-          </View>
-        ) : (
-          <View style={{ gap: 10 }}>
-            {pendingRequests.map(req => (
-              <RedemptionProposalCard
-                key={req.id}
-                request={req}
-                onApprove={approveRequest}
-                onReject={rejectRequest}
-              />
-            ))}
-          </View>
-        )}
-      </View>
+      <Text style={styles.railLink}>
+        本週的數字，週日的 <Text style={styles.railLinkAction} onPress={onOpenWeekly}>週報</Text> 會整理好
+      </Text>
     </View>
   );
 }
@@ -2747,16 +2617,12 @@ export default function ParentHomeTablet() {
     refresh: ltRefresh,
   } = useLongTermTasks(childId);
 
-  const childIds = allChildren.map(c => c.id);
-  const { summaries: childSummaries, refresh: refreshSummaries } = useFamilyChildSummaries(childIds);
-
   useFocusEffect(
     useCallback(() => {
       refresh();
       ltRefresh();
       void refreshRedemption();
-      refreshSummaries();
-    }, [refresh, ltRefresh, refreshRedemption, refreshSummaries]),
+    }, [refresh, ltRefresh, refreshRedemption]),
   );
 
   const handleViewAllLongTerm = useCallback(() => {
@@ -2766,8 +2632,26 @@ export default function ParentHomeTablet() {
     navigation.navigate('Manage' as never);
   }, [navigation]);
 
+  const handleViewRecords = useCallback(() => {
+    navigation.navigate('Weekly' as never);
+  }, [navigation]);
+
   const doneToday = todayTasks.filter(t => t.status === 'done').length;
   const totalToday = todayTasks.length;
+
+  // 申請審核：過濾到目前選中的孩子（單一孩子視圖 — 全家彙總是之後的功能）
+  const unapprovedWishes = childWishes.filter(w => !w.parent_approved);
+  const childPendingWishes = unapprovedWishes.filter(w => w.child_id === childId);
+  const childPendingRequests = pendingRequests.filter(r => r.child_id === childId);
+  const childPendingCount = childPendingWishes.length + childPendingRequests.length;
+
+  // 側欄徽章：每個孩子各自的待處理數量
+  const pendingCounts: Record<string, number> = {};
+  for (const c of allChildren) {
+    pendingCounts[c.id] =
+      unapprovedWishes.filter(w => w.child_id === c.id).length +
+      pendingRequests.filter(r => r.child_id === c.id).length;
+  }
 
   if (loading) {
     return (
@@ -2788,10 +2672,10 @@ export default function ParentHomeTablet() {
     );
   }
 
-  const nickname  = child?.nickname  ?? childName;
-  const birthDate = child?.birth_date ?? dayjs().subtract(8, 'year').toISOString();
+  const nickname = child?.nickname ?? childName;
 
   return (
+    <View style={webTabletScreen}>
     <View style={[styles.root, { paddingBottom: insets.bottom }]}>
       <View style={styles.columns}>
 
@@ -2800,18 +2684,40 @@ export default function ParentHomeTablet() {
           allChildren={allChildren}
           childId={childId}
           setSelectedChild={setSelectedChild}
-          summaries={childSummaries}
+          pendingCounts={pendingCounts}
         />
 
-        {/* ── Main area ── */}
+        {/* ── Main area —— 申請審核＝決策主場 ──
+             外層固定 flex:1 的純 View 決定寬度，內層 ScrollView 只管捲動，
+             不讓 ScrollView 自己參與 row 的寬度分配（react-native-web 不可靠）。 */}
+        <View style={styles.mainAreaWrap}>
         <ScrollView
-          style={styles.mainArea}
+          style={[styles.mainArea, webMouseDraggableScroll]}
           contentContainerStyle={[styles.mainContent, { paddingTop: insets.top + 16 }]}
           showsVerticalScrollIndicator={false}
         >
-          <OverviewStrip
-            nickname={nickname}
-            birthDate={birthDate}
+          <View style={styles.mainHeader}>
+            <Text style={styles.mainHeaderDate}>
+              {dayjs().format('M 月 D 日 dddd')} · {nickname}
+            </Text>
+            <Text style={styles.mainHeaderTitle}>
+              {childPendingCount > 0 ? (
+                <>有 <Text style={styles.mainHeaderTitleNum}>{childPendingCount}</Text> 件申請等你</>
+              ) : (
+                '目前沒有待審申請'
+              )}
+            </Text>
+          </View>
+
+          <PendingItemsPanel
+            pendingRequests={childPendingRequests}
+            childWishes={childPendingWishes}
+            approveRequest={approveRequest}
+            rejectRequest={rejectRequest}
+            approveChildWish={approveChildWish}
+          />
+
+          <POneline
             doneToday={doneToday}
             totalToday={totalToday}
             spendingBalance={spendingBalance}
@@ -2827,18 +2733,20 @@ export default function ParentHomeTablet() {
 
           <TodayTaskPanel
             tasks={todayTasks}
-            doneToday={doneToday}
-            totalToday={totalToday}
             onAssignTask={() => setRightMode('assign')}
             onNewTask={() => setRightMode('newTask')}
             childId={childId}
             onMarked={refresh}
+            onViewRecords={handleViewRecords}
           />
         </ScrollView>
+        </View>
 
-        {/* ── Right column ── */}
+        {/* ── Right column —— AI 教養顧問（純參考，不是決策） ──
+             同理：外層固定寬 208 的純 View，內層 ScrollView 只管捲動。 */}
+        <View style={styles.rightColWrap}>
         <ScrollView
-          style={styles.rightCol}
+          style={[styles.rightCol, webMouseDraggableScroll]}
           contentContainerStyle={[styles.rightColContent, { paddingTop: insets.top + 16 }]}
           showsVerticalScrollIndicator={false}
         >
@@ -2857,17 +2765,13 @@ export default function ParentHomeTablet() {
               onDone={() => { setRightMode('pending'); refresh(); }}
             />
           ) : (
-            <PendingItemsPanel
-              pendingRequests={pendingRequests}
-              childWishes={childWishes}
-              approveRequest={approveRequest}
-              rejectRequest={rejectRequest}
-              approveChildWish={approveChildWish}
-            />
+            <AdvisorPanel childName={nickname} onOpenWeekly={handleViewRecords} />
           )}
         </ScrollView>
+        </View>
 
       </View>
+    </View>
     </View>
   );
 }
@@ -2914,125 +2818,112 @@ const styles = StyleSheet.create({
   columns: {
     flex: 1,
     flexDirection: 'row',
+    width: '100%',
   },
 
   // ── Left sidebar ──
   sidebar: {
-    width: '22%',
-    maxWidth: 240,
-    backgroundColor: ParentColors.bgSurface,
-    borderRightWidth: 1,
-    borderRightColor: ParentColors.borderSoft,
-    paddingHorizontal: ParentSpacing[4],
+    flexBasis: '18%',
+    minWidth: 156,
+    maxWidth: 220,
+    flexGrow: 0,
+    flexShrink: 0,
+    backgroundColor: ParentColors.bgSidebar,
+    paddingHorizontal: ParentSpacing[3],
     paddingTop: ParentSpacing[5],
+    paddingBottom: ParentSpacing[4],
   },
-  sidebarEyebrow: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.eyebrow,
-    fontWeight: ParentFontWeights.bold,
-    color: ParentColors.fgMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 8,
-  },
-  childList: {
-    gap: 6,
-  },
-  childCard: {
+  sidebarBrand: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 6,
+  },
+  sidebarBrandText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.eyebrow,
+    fontWeight: ParentFontWeights.black,
+    color: ParentColors.onSidebarMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  sidebarBrandSub: {
+    fontFamily: ParentFonts.display,
+    fontSize: 16,
+    fontWeight: ParentFontWeights.black,
+    color: ParentColors.onSidebar,
+    marginTop: 5,
+    marginBottom: 18,
+  },
+  pick: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
     paddingHorizontal: 10,
-    paddingVertical: 10,
-    borderRadius: ParentRadii.md,
-    borderWidth: 1,
-    borderColor: 'transparent',
+    paddingVertical: 9,
+    borderRadius: 12,
+    marginBottom: 2,
   },
-  childCardActive: {
-    backgroundColor: ParentColors.pine50,
-    borderColor: ParentColors.pine200,
+  pickActive: {
+    backgroundColor: ParentColors.pickActiveBg,
   },
-  childAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: ParentColors.bgSurfaceWarm,
+  pickAvatar: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
-  childAvatarActive: {
-    backgroundColor: ParentColors.accent,
-  },
-  childAvatarText: {
+  pickAvatarText: {
     fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.base,
+    fontSize: ParentFontSizes.xs,
     fontWeight: ParentFontWeights.bold,
-    color: ParentColors.fgMuted,
-  },
-  childAvatarTextActive: {
     color: '#fff',
   },
-  childCardInfo: {
-    flex: 1,
-    minWidth: 0,
-  },
-  childCardTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 6,
-  },
-  childBalanceChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    flexShrink: 0,
-  },
-  childBalanceText: {
-    fontFamily: ParentFonts.mono,
-    fontSize: ParentFontSizes.xs,
-    color: '#A87800',
-    fontWeight: ParentFontWeights.semi,
-  },
-  childCardName: {
+  pickName: {
     flex: 1,
     fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.pMeta,
-    color: ParentColors.fgMuted,
-  },
-  childCardNameActive: {
+    fontSize: 13.5,
     fontWeight: ParentFontWeights.semi,
-    color: ParentColors.accent,
+    color: ParentColors.onSidebarMuted,
   },
-  childProgressRow: {
-    flexDirection: 'row',
+  pickNameActive: {
+    color: ParentColors.onSidebar,
+  },
+  pickBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 5,
+    backgroundColor: ParentColors.amber300,
     alignItems: 'center',
-    gap: 6,
-    marginTop: 4,
-  },
-  childProgressText: {
-    fontFamily: ParentFonts.mono,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgMuted,
+    justifyContent: 'center',
     flexShrink: 0,
   },
-  childProgressTrack: {
-    flex: 1,
-    height: 3,
-    backgroundColor: ParentColors.ivory200,
-    borderRadius: ParentRadii.pill,
-    overflow: 'hidden',
+  pickBadgeText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 10.5,
+    fontWeight: ParentFontWeights.black,
+    color: ParentColors.bgSidebar,
   },
-  childProgressFill: {
-    height: '100%',
-    backgroundColor: ParentColors.accent,
-    borderRadius: ParentRadii.pill,
+  sidebarNote: {
+    marginTop: 'auto',
+    fontFamily: ParentFonts.body,
+    fontSize: 10,
+    lineHeight: 15,
+    color: 'rgba(255, 255, 255, 0.4)',
   },
   // ── Main area ──
+  // 外層純 View 決定寬度（flex:1, flexShrink:1）；ScrollView 只 flex:1 填滿，不參與寬度分配。
+  mainAreaWrap: {
+    flex: 1,
+    flexBasis: '58%',
+    flexShrink: 1,
+    minWidth: 0,
+    backgroundColor: ParentColors.bgCanvas,
+  },
   mainArea: {
     flex: 1,
-    backgroundColor: ParentColors.bgCanvas,
   },
   mainContent: {
     paddingHorizontal: ParentSpacing.cardPadLg,
@@ -3041,174 +2932,55 @@ const styles = StyleSheet.create({
   },
 
   // ── Overview strip ──
-  overviewStrip: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    backgroundColor: ParentColors.bgSurface,
-    borderRadius: ParentRadii.lg,
-    borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
-    padding: ParentSpacing.cardPad,
-    ...ParentShadows.card,
-  },
-  overviewNameBlock: {
+  // ── 單一孩子概覽（p-oneline）：安靜的一行，不是卡片 ──
+  oneline: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexShrink: 0,
+    gap: 14,
+    backgroundColor: ParentColors.bgRail,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginVertical: 10,
   },
-  overviewAvatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: ParentColors.pine500,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  overviewAvatarText: {
+  onelineItem: {
     fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xl,
-    fontWeight: ParentFontWeights.bold,
-    color: '#fff',
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: ParentColors.fgSecondary,
+    fontVariant: ['tabular-nums'],
   },
-  overviewNameRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 6,
-  },
-  overviewName: {
-    fontFamily: ParentFonts.display,
-    fontSize: ParentFontSizes.h2,
-    fontWeight: ParentFontWeights.bold,
+  onelineNum: {
+    fontSize: 18,
+    fontWeight: ParentFontWeights.black,
     color: ParentColors.fgPrimary,
   },
-  overviewAge: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.pMeta,
-    color: ParentColors.fgMuted,
-  },
-  overviewDivider: {
+  onelineSep: {
     width: 1,
     alignSelf: 'stretch',
-    backgroundColor: ParentColors.borderSoft,
-    marginHorizontal: 18,
+    backgroundColor: ParentColors.borderMedium,
   },
-  overviewStatBlock: {
-    justifyContent: 'center',
-    minWidth: 120,
-    flexShrink: 0,
-  },
-  overviewEyebrow: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.eyebrow,
-    fontWeight: ParentFontWeights.bold,
-    color: ParentColors.fgMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-    marginBottom: 4,
-  },
-  overviewNumRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    flexWrap: 'wrap',
-  },
-  overviewNum: {
-    fontFamily: ParentFonts.mono,
-    fontSize: ParentFontSizes.h1,
-    fontWeight: ParentFontWeights.bold,
-    color: ParentColors.fgPrimary,
-  },
-  overviewNumOf: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.pMeta,
-    color: ParentColors.fgMuted,
-  },
-  overviewPct: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgMuted,
-    marginLeft: 6,
-  },
-  overviewProgressTrack: {
-    height: 5,
-    backgroundColor: ParentColors.ivory200,
-    borderRadius: ParentRadii.pill,
-    overflow: 'hidden',
-    marginTop: 8,
-    width: '100%',
-  },
-  overviewProgressFill: {
-    height: '100%',
-    backgroundColor: ParentColors.accent,
-    borderRadius: ParentRadii.pill,
-  },
-  overviewDeltaText: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgMuted,
-    marginTop: 4,
-  },
-  weekStatusPill: {
+  onelineMiniRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    backgroundColor: '#E8F2E6',
-    borderWidth: 1,
-    borderColor: '#C9DDD0',
-    borderRadius: ParentRadii.pill,
-    marginBottom: 4,
+    gap: 6,
   },
-  weekStatusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: ParentColors.success,
+  onelineMini: {
+    width: 44,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: ParentColors.borderMedium,
+    overflow: 'hidden',
   },
-  weekStatusLabel: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    fontWeight: ParentFontWeights.semi,
-    color: ParentColors.success,
+  onelineMiniFill: {
+    height: '100%',
+    borderRadius: 2,
+    backgroundColor: ParentColors.done,
   },
 
   // ── Long-term task card ──
-  ltCard: {
-    backgroundColor: ParentColors.bgSurface,
-    borderRadius: ParentRadii.lg,
-    borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
-    padding: ParentSpacing.cardPad,
-    ...ParentShadows.card,
-  },
-  ltHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  ltHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  ltEyebrow: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.sm,
-    fontWeight: ParentFontWeights.semi,
-    color: ParentColors.fgPrimary,
-  },
-  ltCountChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    backgroundColor: ParentColors.ivory200,
-    borderRadius: ParentRadii.pill,
-  },
-  ltCountText: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgMuted,
+  ltSection: {
+    marginBottom: 6,
   },
   ltEmpty: {
     paddingVertical: 16,
@@ -3226,264 +2998,170 @@ const styles = StyleSheet.create({
     color: ParentColors.ink400,
     textAlign: 'center',
   },
-  ltItems: {
-    gap: 0,
+
+  // ── 扁平區塊標頭（t-grp）：長期挑戰／今天做完的 共用 ──
+  tGrp: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 14,
+    marginBottom: 2,
   },
-  ltItem: {
-    paddingVertical: 10,
+  tGrpLabel: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    fontWeight: ParentFontWeights.black,
+    letterSpacing: 0.4,
+    color: ParentColors.fgSecondary,
+  },
+  tGrpLine: {
+    flex: 1,
+    borderTopWidth: 1,
+    borderTopColor: ParentColors.borderMedium,
+  },
+  tGrpCount: {
+    fontFamily: ParentFonts.body,
+    fontSize: 11,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgMuted,
+  },
+
+  // ── 長期挑戰列（p-lt）──
+  pLt: {
+    paddingVertical: 9,
     gap: 6,
   },
-  ltItemDivider: {
+  pLtDivider: {
     borderTopWidth: 1,
     borderTopColor: ParentColors.borderSoft,
   },
-  ltItemHeader: {
+  pLtTop: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
-  ltTypeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: ParentRadii.sm,
-    flexShrink: 0,
-  },
-  ltTypeEmoji: {
-    fontSize: 11,
-  },
-  ltTypeLabel: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    fontWeight: ParentFontWeights.semi,
-  },
-  ltItemName: {
+  pLtName: {
     flex: 1,
     fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.pMeta,
-    fontWeight: ParentFontWeights.semi,
+    fontSize: 15,
+    fontWeight: ParentFontWeights.bold,
     color: ParentColors.fgPrimary,
   },
-  ltProgressRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  ltProgressTrack: {
-    flex: 1,
-    height: 4,
-    backgroundColor: ParentColors.ivory200,
-    borderRadius: ParentRadii.pill,
-    overflow: 'hidden',
-  },
-  ltProgressFill: {
-    height: '100%',
-    backgroundColor: ParentColors.accent,
-    borderRadius: ParentRadii.pill,
-  },
-  ltProgressLabel: {
+  pLtMeta: {
     fontFamily: ParentFonts.mono,
-    fontSize: ParentFontSizes.xs,
+    fontSize: 11,
+    fontWeight: ParentFontWeights.medium,
     color: ParentColors.fgMuted,
     flexShrink: 0,
   },
-  ltFooter: {
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: ParentColors.borderSoft,
-    alignItems: 'flex-end',
+  pLtTrack: {
+    height: 5,
+    borderRadius: ParentRadii.pill,
+    backgroundColor: ParentColors.borderMedium,
+    overflow: 'hidden',
   },
-  ltViewAll: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.accent,
-    fontWeight: ParentFontWeights.semi,
+  pLtFill: {
+    height: '100%',
+    borderRadius: ParentRadii.pill,
+    backgroundColor: ParentColors.done,
   },
 
   // ── Task panel ──
-  taskPanel: {
-    backgroundColor: ParentColors.bgSurface,
-    borderRadius: ParentRadii.lg,
-    borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
-    padding: ParentSpacing.cardPadLg,
-    ...ParentShadows.card,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  sectionEyebrow: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.eyebrow,
-    fontWeight: ParentFontWeights.bold,
-    color: ParentColors.fgMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-    marginBottom: 2,
-  },
-  sectionTitle: {
-    fontFamily: ParentFonts.display,
-    fontSize: ParentFontSizes.h3,
-    fontWeight: ParentFontWeights.semi,
-    color: ParentColors.fgPrimary,
-  },
-  sectionMeta: {
+  // ── 今天做完的（t-row done） ──
+  tRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 10,
+    paddingVertical: 9,
   },
-  sectionMetaText: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgMuted,
-  },
-  emptyState: {
-    paddingVertical: 28,
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.sm,
-    color: ParentColors.fgMuted,
-  },
-
-  // ── Task row ──
-  taskRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingVertical: 14,
-  },
-  taskRowDivider: {
+  tRowDivider: {
     borderBottomWidth: 1,
     borderBottomColor: ParentColors.borderSoft,
   },
-  taskCheckCircle: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
-    borderColor: ParentColors.borderSoft,
+  tRowCkp: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: ParentColors.done,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
-  taskCheckCircleDone: {
-    backgroundColor: ParentColors.success,
-    borderWidth: 0,
-    borderStyle: 'solid',
-  },
-  taskInfo: {
+  tRowTask: {
     flex: 1,
     minWidth: 0,
-  },
-  taskName: {
     fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.pBody,
-    fontWeight: ParentFontWeights.semi,
+    fontSize: 15,
+    fontWeight: ParentFontWeights.bold,
     color: ParentColors.fgPrimary,
   },
-  taskNameMissed: {
-    opacity: 0.4,
+  tRowAmt: {
+    fontFamily: ParentFonts.mono,
+    fontSize: 13,
+    fontWeight: ParentFontWeights.medium,
+    color: ParentColors.fgMuted,
+    flexShrink: 0,
   },
-  taskMeta: {
+  tRowAmtTs: {
+    fontFamily: ParentFonts.mono,
+    fontSize: 12,
+    color: ParentColors.fgMuted,
+    flexShrink: 0,
+  },
+  tRowMore: {
+    fontSize: 15,
+    color: ParentColors.fgMuted,
+    paddingHorizontal: 2,
+  },
+  tMore: {
+    marginTop: 10,
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    color: ParentColors.fgSecondary,
+  },
+  tMoreLink: {
+    color: ParentColors.accent,
+    fontWeight: ParentFontWeights.semi,
+    textDecorationLine: 'underline',
+  },
+  quietLinkRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginTop: 5,
+    marginTop: 12,
     flexWrap: 'wrap',
   },
-  taskCatChip: {
+  quietLink: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: ParentRadii.pill,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: ParentColors.borderMedium,
+    backgroundColor: ParentColors.bgSurfaceWarm,
   },
-  taskCatLabel: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    fontWeight: ParentFontWeights.semi,
-  },
-  taskTimeChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  taskTimeText: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgMuted,
-  },
-  taskRewardWrap: {
-    width: 60,
-    alignItems: 'flex-end',
-    flexShrink: 0,
-  },
-  taskCoinRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  taskCoinText: {
-    fontFamily: ParentFonts.mono,
-    fontSize: ParentFontSizes.pMeta,
-    fontWeight: ParentFontWeights.bold,
-    color: '#A87800',
-  },
-  taskTimeReward: {
-    fontFamily: ParentFonts.mono,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.pine500,
-    fontWeight: ParentFontWeights.bold,
-  },
-  taskRewardDash: {
+  quietLinkText: {
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.sm,
-    color: ParentColors.fgMuted,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.accent,
   },
-  taskAction: {
-    width: 56,
-    alignItems: 'flex-end',
-    flexShrink: 0,
-  },
-  taskActionBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: ParentRadii.sm,
-    borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
-    backgroundColor: ParentColors.bgSurface,
-  },
-  taskActionText: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgSecondary,
-    fontWeight: ParentFontWeights.medium,
+  quietLinkSep: {
+    fontSize: 12,
+    color: ParentColors.ink300,
   },
 
-  // ── Status pill ──
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: ParentRadii.pill,
-    flexShrink: 0,
+  // ── 申請審核空狀態 ──
+  reqEmpty: {
+    paddingVertical: 20,
+    paddingHorizontal: 4,
   },
-  pillText: {
+  reqEmptyText: {
     fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    fontWeight: ParentFontWeights.semi,
+    fontSize: 13,
+    color: ParentColors.fgMuted,
   },
 
   // ── Mark panel ──
@@ -3607,203 +3285,127 @@ const styles = StyleSheet.create({
     fontWeight: ParentFontWeights.bold,
     color: '#fff',
   },
-  taskActionBtnActive: {
-    backgroundColor: ParentColors.bgSurfaceWarm,
-    borderColor: ParentColors.ink900,
-  },
-  taskActionTextActive: {
-    color: ParentColors.ink900,
-    fontWeight: ParentFontWeights.semi,
-  },
-
-  // ── Task footer buttons ──
-  taskFooter: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 18,
-    paddingBottom: 18,
-    borderBottomWidth: 1,
-    borderBottomColor: ParentColors.borderSoft,
-    borderStyle: 'dashed',
-  },
-  footerBtnBrass: {
-    flex: 1,
-    paddingVertical: 13,
-    backgroundColor: '#C97735',
-    borderRadius: ParentRadii.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  footerBtnNavy: {
-    flex: 1,
-    paddingVertical: 13,
-    backgroundColor: ParentColors.pine500,
-    borderRadius: ParentRadii.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  footerBtnText: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.sm,
-    fontWeight: ParentFontWeights.bold,
-    color: '#fff',
-  },
-
   // ── Right column ──
-  rightCol: {
-    width: '28%',
-    maxWidth: 300,
-    backgroundColor: ParentColors.bgSurface,
+  // 外層純 View 決定寬度（固定 208, flexGrow/Shrink:0）；ScrollView 只 flex:1 填滿。
+  rightColWrap: {
+    flexBasis: '24%',
+    minWidth: 260,
+    maxWidth: 340,
+    flexGrow: 0,
+    flexShrink: 1,
+    backgroundColor: ParentColors.bgRail,
     borderLeftWidth: 1,
-    borderLeftColor: ParentColors.borderSoft,
+    borderLeftColor: ParentColors.borderMedium,
+  },
+  rightCol: {
+    flex: 1,
   },
   rightColContent: {
-    padding: ParentSpacing.cardPad,
+    padding: 16,
     gap: 16,
   },
-  pendingPanel: {
-    gap: 16,
+  // ── AI 教養顧問（t-ask） ──
+  advisorTitle: {
+    fontFamily: ParentFonts.body,
+    fontSize: 16,
+    fontWeight: ParentFontWeights.black,
+    color: ParentColors.fgPrimary,
+    marginBottom: 6,
   },
-  pendingSubSection: {
-    gap: 10,
+  advisorSub: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.pMeta,
+    lineHeight: 20,
+    color: ParentColors.fgSecondary,
+    marginBottom: 12,
   },
-  pendingSubHead: {
+  advisorPrompts: {
+    gap: 8,
+    marginBottom: 12,
+  },
+  advisorPrompt: {
+    flexDirection: 'row',
+    gap: 8,
+    backgroundColor: '#EFF3EE',
+    borderWidth: 1,
+    borderColor: 'rgba(44,74,61,0.16)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  advisorPromptMark: {
+    fontFamily: ParentFonts.body,
+    fontSize: 11,
+    color: ParentColors.accent,
+  },
+  advisorPromptText: {
+    flex: 1,
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.bgSidebar,
+    lineHeight: 18,
+  },
+  advisorBox: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  pendingSubIcon: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
+    backgroundColor: ParentColors.bgSurface,
     borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
+    borderColor: ParentColors.borderMedium,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  advisorBoxText: {
+    flex: 1,
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.pMeta,
+    color: ParentColors.fgMuted,
+  },
+  advisorSend: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    backgroundColor: ParentColors.bgSidebar,
     alignItems: 'center',
     justifyContent: 'center',
-    flexShrink: 0,
   },
-  pendingSubLabel: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.sm,
-    fontWeight: ParentFontWeights.bold,
-    color: ParentColors.fgPrimary,
-    flexShrink: 0,
-  },
-  pendingSubLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: ParentColors.borderSoft,
-  },
-  pendingSubNote: {
+  railLink: {
+    marginTop: 12,
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgMuted,
-    flexShrink: 0,
+    lineHeight: 18,
+    color: ParentColors.fgSecondary,
   },
-  pendingEmpty: {
-    paddingVertical: 18,
-    paddingHorizontal: 14,
-    backgroundColor: ParentColors.bgSurfaceWarm,
-    borderRadius: ParentRadii.md,
-    borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
-    borderStyle: 'dashed',
-    gap: 3,
-  },
-  pendingEmptyTitle: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.sm,
+  railLinkAction: {
+    color: ParentColors.accent,
     fontWeight: ParentFontWeights.semi,
-    color: ParentColors.fgMuted,
+    textDecorationLine: 'underline',
   },
-  pendingEmptyMeta: {
+  // ── 主欄標頭：日期 + 「有 N 件申請等你」 ──
+  mainHeader: {
+    marginBottom: 4,
+  },
+  mainHeaderDate: {
     fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.ink300,
+    fontSize: 11,
+    fontWeight: ParentFontWeights.bold,
+    letterSpacing: 0.3,
+    color: ParentColors.fgMuted,
+    marginBottom: 2,
   },
-
+  mainHeaderTitle: {
+    fontFamily: ParentFonts.display,
+    fontSize: 23,
+    fontWeight: ParentFontWeights.black,
+    letterSpacing: 0,
+    color: ParentColors.fgPrimary,
+  },
+  mainHeaderTitleNum: {
+    color: ParentColors.amber700,
+  },
   // ── Wish approval card ──
-  wishCard: {
-    backgroundColor: ParentColors.bgSurface,
-    borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
-    borderRadius: ParentRadii.lg,
-    padding: 14,
-    gap: 8,
-  },
-  wishCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  waitPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: ParentRadii.pill,
-    borderWidth: 1,
-  },
-  waitPillNormal: {
-    backgroundColor: ParentColors.bgSurfaceWarm,
-    borderColor: ParentColors.borderSoft,
-  },
-  waitPillUrgent: {
-    backgroundColor: '#FBE8E4',
-    borderColor: '#F0CFC7',
-  },
-  waitPillText: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    fontWeight: ParentFontWeights.semi,
-    color: ParentColors.fgMuted,
-  },
-  wishDateText: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgMuted,
-  },
-  wishName: {
-    fontFamily: ParentFonts.display,
-    fontSize: ParentFontSizes.pBody,
-    fontWeight: ParentFontWeights.semi,
-    color: ParentColors.fgPrimary,
-  },
-  wishCoinRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  wishCoinText: {
-    fontFamily: ParentFonts.mono,
-    fontSize: ParentFontSizes.pMeta,
-    fontWeight: ParentFontWeights.bold,
-    color: '#A87800',
-  },
-
-  // ── Redemption proposal card ──
-  proposalCard: {
-    backgroundColor: ParentColors.bgSurface,
-    borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
-    borderRadius: ParentRadii.lg,
-    padding: 14,
-    gap: 8,
-  },
-  proposalCardName: {
-    fontFamily: ParentFonts.display,
-    fontSize: ParentFontSizes.h3,
-    fontWeight: ParentFontWeights.semi,
-    color: ParentColors.fgPrimary,
-    lineHeight: 22,
-  },
-  proposalCardMeta: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgMuted,
-    marginTop: -4,
-  },
   proposalKidNote: {
     paddingVertical: 10,
     paddingHorizontal: 12,
@@ -3819,27 +3421,78 @@ const styles = StyleSheet.create({
     color: ParentColors.fgSecondary,
     lineHeight: 20,
   },
-  proposalAiBanner: {
+  // ── req-card —— 申請審核卡（THE 家長決策主場，鎖定樣式＝提案 artifact .req-card）──
+  reqCard: {
+    backgroundColor: ParentColors.bgSurface,
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 10,
+    ...ParentShadows.card,
+  },
+  reqTopRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 6,
-    padding: 10,
-    borderRadius: ParentRadii.md,
-    borderWidth: 1,
+    alignItems: 'center',
+    gap: 11,
   },
-  proposalAiBannerOk: {
-    backgroundColor: ParentColors.pine50,
-    borderColor: ParentColors.pine200,
+  reqIc: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
-  proposalAiBannerHigh: {
-    backgroundColor: '#FBF1DC',
-    borderColor: '#E8D0A0',
-  },
-  proposalAiText: {
+  reqBody: {
     flex: 1,
+    minWidth: 0,
+  },
+  reqType: {
+    fontFamily: ParentFonts.body,
+    fontSize: 9.5,
+    fontWeight: ParentFontWeights.black,
+    letterSpacing: 1,
+  },
+  reqTitle: {
+    fontFamily: ParentFonts.body,
+    fontSize: 15,
+    fontWeight: ParentFontWeights.black,
+    color: ParentColors.fgPrimary,
+    marginTop: 1,
+  },
+  reqAi: {
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.xs,
-    lineHeight: 17,
+    lineHeight: 18,
+    color: ParentColors.pine400,
+    marginTop: 1,
+  },
+  reqAiWarn: {
+    color: ParentColors.amber700,
+  },
+  reqAiUrgent: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    lineHeight: 18,
+    color: ParentColors.error,
+    marginTop: 3,
+  },
+  reqPrice: {
+    flexShrink: 0,
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 2,
+  },
+  reqPriceNum: {
+    fontFamily: ParentFonts.display,
+    fontSize: 18,
+    fontWeight: ParentFontWeights.black,
+    color: ParentColors.amber700,
+    fontVariant: ['tabular-nums'],
+  },
+  reqPriceUnit: {
+    fontFamily: ParentFonts.body,
+    fontSize: 10,
+    color: ParentColors.fgMuted,
   },
   proposalCoinRow: {
     flexDirection: 'row',
@@ -3889,12 +3542,13 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   proposalApproveBtn: {
-    flex: 1,
+    flex: 7,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 5,
-    paddingVertical: 10,
+    paddingVertical: 0,
     backgroundColor: ParentColors.pine500,
     borderRadius: ParentRadii.md,
   },
@@ -3905,8 +3559,12 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   proposalRejectBtn: {
+    flex: 3,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 0,
     borderRadius: ParentRadii.md,
     borderWidth: 1,
     borderColor: ParentColors.borderSoft,
@@ -4617,3 +4275,5 @@ const styles = StyleSheet.create({
     color: ParentColors.pine500,
   },
 });
+
+export const parentHomeTabletStyles = styles;

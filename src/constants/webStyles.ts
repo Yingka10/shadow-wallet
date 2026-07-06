@@ -23,3 +23,19 @@ export const webFullHeight: ViewStyle = Platform.OS === 'web'
 export const webScreen: ViewStyle = Platform.OS === 'web'
   ? { height: windowHeight, overflow: 'hidden', maxWidth: 440, width: '100%', alignSelf: 'center' }
   : { flex: 1 };
+
+/** 家長端平板三欄 console 最外層容器：固定視窗高 + 滿寬自適應。 */
+export const webTabletScreen: ViewStyle = Platform.OS === 'web'
+  ? { height: windowHeight, overflow: 'hidden', width: '100%' }
+  : { flex: 1 };
+
+/** Web ScrollView：讓平板預覽有可拖曳/可滑動的滑鼠 affordance。 */
+export const webMouseDraggableScroll: ViewStyle = Platform.OS === 'web'
+  ? ({
+      cursor: 'grab',
+      userSelect: 'none',
+      touchAction: 'pan-y',
+      overscrollBehavior: 'contain',
+      scrollbarWidth: 'thin',
+    } as unknown as ViewStyle)
+  : {};
