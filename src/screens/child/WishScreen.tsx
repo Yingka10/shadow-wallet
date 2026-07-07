@@ -250,54 +250,6 @@ export default function WishScreen() {
     [child?.familyId, loadWishes],
   );
 
-  const handleRedeemLegacy = useCallback(
-    (item: WishItem) => {
-      Alert.alert(
-        '確認兌換',
-        `確定要用 ${formatNumber(item.coin_cost)} 枚金幣換「${item.name}」嗎？`,
-        [
-          { text: '取消', style: 'cancel' },
-          {
-            text: '確定兌換',
-            style: 'default',
-            onPress: async () => {
-              try {
-                const { data, error } = await supabase.rpc('redeem_wish', {
-                  p_child_id: childId,
-                  p_item_id: item.id,
-                  p_cost: item.coin_cost,
-                });
-
-                if (error) throw error;
-
-                const result = data as { ok?: boolean; error?: string } | null;
-
-                if (result?.error === 'already_redeemed') {
-                  Alert.alert('已兌換', '這個願望已經換過了喔！');
-                  return;
-                }
-                if (result?.error === 'insufficient_balance') {
-                  Alert.alert('金幣不足', '金幣數量不夠喔，再努力一下！');
-                  return;
-                }
-
-                await Promise.all([
-                  refreshWallet(),
-                  child?.familyId ? loadWishes(child.familyId) : Promise.resolve(),
-                ]);
-
-                Alert.alert('兌換成功！', `「${item.name}」換到了！記得去找爸媽領取喔 🎉`);
-              } catch (err) {
-                console.error('[WishScreen] handleRedeem error:', err);
-                Alert.alert('兌換失敗', err instanceof Error ? err.message : '請稍後再試');
-              }
-            },
-          },
-        ],
-      );
-    },
-    [child, childId, loadWishes, refreshWallet],
-  );
 
   const handleRedeem = useCallback((item: WishItem) => {
     setRedeemError(null);
