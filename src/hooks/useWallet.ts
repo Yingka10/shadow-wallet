@@ -39,13 +39,13 @@ export function useWallet(childId: string): UseWalletResult {
     let isMounted = true;
 
     const setup = async () => {
-      await fetchAll();
-
       if (channelRef.current) {
         channelRef.current.unsubscribe();
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
+
+      await fetchAll();
 
       if (!isMounted) return;
 
