@@ -1,4 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+import isoWeek from 'dayjs/plugin/isoWeek';
 import { supabase } from '../lib/supabase';
 import {
   pauseLongTermGoal,
@@ -6,6 +10,12 @@ import {
   deleteLongTermGoal,
 } from '../lib/taskActions';
 import type { LongTermType, GoalStatus } from '../types/database';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+dayjs.extend(isoWeek);
+
+const TZ = 'Asia/Taipei';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -19,6 +29,8 @@ export type LongTermGoalItem = {
   status: GoalStatus;
   progressPct: number;
   progressLabel: string;
+  weeklyCompleted: number;
+  previousWeeklyCompleted: number;
 };
 
 export type ParentLongTermGoalsData = {
@@ -127,14 +139,45 @@ export function useParentLongTermGoals(childId: string): ParentLongTermGoalsData
       }
 
       const taskIds = validGoals.map(g => g.task_id);
-      const { data: tasks, error: tasksErr } = await supabase
-        .from('tasks')
-        .select('id, name')
-        .in('id', taskIds);
+      const weekStart = dayjs().tz(TZ).startOf('isoWeek');
+      const weekEnd = weekStart.endOf('isoWeek');
+      const prevStart = weekStart.subtract(1, 'week');
+      const prevEnd = weekEnd.subtract(1, 'week');
 
-      if (tasksErr) throw tasksErr;
+      const [tasksRes, weeklyCompletionsRes, previousCompletionsRes] = await Promise.all([
+        supabase
+          .from('tasks')
+          .select('id, name')
+          .in('id', taskIds),
+        supabase
+          .from('task_completions')
+          .select('task_id')
+          .eq('child_id', childId)
+          .in('task_id', taskIds)
+          .gte('completed_at', weekStart.toISOString())
+          .lte('completed_at', weekEnd.toISOString()),
+        supabase
+          .from('task_completions')
+          .select('task_id')
+          .eq('child_id', childId)
+          .in('task_id', taskIds)
+          .gte('completed_at', prevStart.toISOString())
+          .lte('completed_at', prevEnd.toISOString()),
+      ]);
 
-      const nameMap = new Map((tasks ?? []).map(t => [t.id, t.name as string]));
+      if (tasksRes.error) throw tasksRes.error;
+      if (weeklyCompletionsRes.error) throw weeklyCompletionsRes.error;
+      if (previousCompletionsRes.error) throw previousCompletionsRes.error;
+
+      const nameMap = new Map((tasksRes.data ?? []).map(t => [t.id, t.name as string]));
+      const weeklyDoneByTask = new Map<string, number>();
+      const previousDoneByTask = new Map<string, number>();
+      for (const completion of weeklyCompletionsRes.data ?? []) {
+        weeklyDoneByTask.set(completion.task_id, (weeklyDoneByTask.get(completion.task_id) ?? 0) + 1);
+      }
+      for (const completion of previousCompletionsRes.data ?? []) {
+        previousDoneByTask.set(completion.task_id, (previousDoneByTask.get(completion.task_id) ?? 0) + 1);
+      }
 
       setItems(validGoals.map(g => {
         const { pct, label } = deriveProgress(g);
@@ -146,6 +189,8 @@ export function useParentLongTermGoals(childId: string): ParentLongTermGoalsData
           status: g.status,
           progressPct: pct,
           progressLabel: label,
+          weeklyCompleted: weeklyDoneByTask.get(g.task_id) ?? 0,
+          previousWeeklyCompleted: previousDoneByTask.get(g.task_id) ?? 0,
         };
       }));
     } catch (err) {

@@ -39,6 +39,7 @@ export type ParentMonthlyReportData = {
 
 type RawLTG = {
   id: string;
+  task_id: string;
   goal_type: string;
   total_days: number | null;
   current_day: number;
@@ -93,6 +94,7 @@ function mapGoal(g: RawLTG): LongTermGoalProgress {
 
   return {
     id: g.id,
+    taskId: g.task_id,
     goalType: g.goal_type,
     taskName: g.tasks?.name ?? '(未知任務)',
     current,
@@ -101,6 +103,8 @@ function mapGoal(g: RawLTG): LongTermGoalProgress {
     nextMilestone,
     milestoneReward,
     noProgressThisWeek: false,
+    weeklyCompleted: 0,
+    previousWeeklyCompleted: 0,
     status: g.status,
   };
 }
@@ -207,7 +211,7 @@ export function useParentMonthlyReport(childId: string): ParentMonthlyReportData
           .maybeSingle(),
         supabase
           .from('long_term_goals')
-          .select('id, goal_type, total_days, current_day, level_count, current_level, target_value, current_value, value_unit, checkpoint_rewards, last_active_date, status, tasks(name)')
+          .select('id, task_id, goal_type, total_days, current_day, level_count, current_level, target_value, current_value, value_unit, checkpoint_rewards, last_active_date, status, tasks(name)')
           .eq('child_id', childId)
           .eq('status', 'active'),
       ]);

@@ -44,10 +44,20 @@ import { parentTabletTabStyles } from '../../ParentTabNavigator';
 import { taskIconBubbleStyles } from '../home/homeIcons';
 import { weekSummaryStyles } from '../home/WeekSummary';
 import { parentSidebarStyles } from '../ParentSidebar';
+import { parentTaskManagementTabletStyles } from '../ParentTaskManagementTablet';
 
 const homeSource = fs.readFileSync(path.join(__dirname, '..', 'ParentHomeTablet.tsx'), 'utf8');
 const summarySource = fs.readFileSync(path.join(__dirname, '..', 'home', 'WeekSummary.tsx'), 'utf8');
 const weeklySource = fs.readFileSync(path.join(__dirname, '..', 'ParentWeeklyTablet.tsx'), 'utf8');
+const manageSource = fs.readFileSync(path.join(__dirname, '..', 'ParentManageTablet.tsx'), 'utf8');
+const taskManagementPath = path.join(__dirname, '..', 'ParentTaskManagementTablet.tsx');
+const taskManagementSource = fs.existsSync(taskManagementPath)
+  ? fs.readFileSync(taskManagementPath, 'utf8')
+  : '';
+const rewardManagementPath = path.join(__dirname, '..', 'ParentRewardManagementTablet.tsx');
+const rewardManagementSource = fs.existsSync(rewardManagementPath)
+  ? fs.readFileSync(rewardManagementPath, 'utf8')
+  : '';
 
 describe('ParentHomeTablet layout tokens', () => {
   it('uses the full tablet viewport instead of a fixed preview width', () => {
@@ -177,15 +187,17 @@ describe('ParentHomeTablet layout tokens', () => {
     expect(reqCard.elevation).toBe(0);
   });
 
-  it('shows the coin/time/review stats via the shared week summary card styles', () => {
+  it('shows only coin/task/time stats in the shared week summary card', () => {
     const cellNum = StyleSheet.flatten(weekSummaryStyles.cellNum);
     const cellLabel = StyleSheet.flatten(weekSummaryStyles.cellLabel);
 
     expect(cellNum.fontWeight).toBe(ParentFontWeights.bold);
     expect(cellLabel.color).toBeTruthy();
-    expect(summarySource).toContain('任務回顧');
+    expect(summarySource).not.toContain('attentionCount');
+    expect(summarySource).not.toContain('任務回顧');
     expect(summarySource).not.toContain('需要關注');
     expect(summarySource).not.toContain('需要幫助');
+    expect(homeSource).not.toContain('attentionCount={attentionCount}');
   });
 
   it('uses parent-facing, non-pressuring copy on the home screen', () => {
@@ -214,7 +226,6 @@ describe('ParentHomeTablet layout tokens', () => {
 
   it('shares one sidebar component across all three tablet tabs', () => {
     const sidebarSource = fs.readFileSync(path.join(__dirname, '..', 'ParentSidebar.tsx'), 'utf8');
-    const manageSource = fs.readFileSync(path.join(__dirname, '..', 'ParentManageTablet.tsx'), 'utf8');
 
     // activeTab 決定「主要功能」哪一項顯示選中，讓三個 tab 都能共用同一份側欄。
     expect(sidebarSource).toContain("activeTab === 'home'");
@@ -244,5 +255,68 @@ describe('ParentHomeTablet layout tokens', () => {
     expect(weeklySource).not.toContain('落後');
     expect(weeklySource).not.toContain('需改善');
     expect(weeklySource).not.toContain('表現不佳');
+  });
+
+  it('adds a standalone tablet task management page backed by real parent data', () => {
+    expect(fs.existsSync(taskManagementPath)).toBe(true);
+    expect(manageSource).toContain('ParentTaskManagementTablet');
+
+    expect(taskManagementSource).toContain('useParentTaskList');
+    expect(taskManagementSource).toContain('useParentLongTermGoals');
+    expect(taskManagementSource).toContain('日常任務');
+    expect(taskManagementSource).toContain('長期挑戰');
+    expect(taskManagementSource).toContain('暫停中');
+    expect(taskManagementSource).toContain('封存紀錄');
+    expect(taskManagementSource).toContain('幣值參考');
+    expect(taskManagementSource).toContain('管理提醒');
+    expect(taskManagementSource).toContain('最近調整');
+    expect(taskManagementSource).toContain('長期挑戰提醒');
+    expect(taskManagementSource).toContain('本週變化');
+    expect(taskManagementSource).toContain('里程碑設定');
+    expect(taskManagementSource).toContain('暫停提醒');
+    expect(taskManagementSource).toContain('管理建議');
+
+    expect(taskManagementSource).not.toContain('mockTasks');
+    expect(taskManagementSource).not.toContain('假資料');
+    expect(taskManagementSource).not.toContain('落後');
+    expect(taskManagementSource).not.toContain('失敗');
+    expect(taskManagementSource).not.toContain('表現不佳');
+  });
+
+  it('balances task management typography with the shared sidebar', () => {
+    const taskTitle = StyleSheet.flatten(parentTaskManagementTabletStyles.title);
+    const taskSubtitle = StyleSheet.flatten(parentTaskManagementTabletStyles.subtitle);
+    const brand = StyleSheet.flatten(parentSidebarStyles.sidebarBrandText);
+    const sidebarTitle = StyleSheet.flatten(parentSidebarStyles.sidebarBrandSub);
+    const childName = StyleSheet.flatten(parentSidebarStyles.pickName);
+    const navText = StyleSheet.flatten(parentSidebarStyles.sidebarNavText);
+    const subText = StyleSheet.flatten(parentSidebarStyles.sidebarSubText);
+
+    expect(taskTitle.fontSize).toBeLessThanOrEqual(28);
+    expect(taskTitle.fontSize).toBeGreaterThanOrEqual(26);
+    expect(taskSubtitle.fontSize).toBeGreaterThanOrEqual(15);
+    expect(brand.fontSize).toBeGreaterThanOrEqual(14);
+    expect(sidebarTitle.fontSize).toBeGreaterThanOrEqual(19);
+    expect(childName.fontSize).toBeGreaterThanOrEqual(15);
+    expect(navText.fontSize).toBeGreaterThanOrEqual(15);
+    expect(subText.fontSize).toBeGreaterThanOrEqual(14);
+  });
+
+  it('adds a standalone tablet reward management page with the approved four-state structure', () => {
+    expect(fs.existsSync(rewardManagementPath)).toBe(true);
+    expect(manageSource).toContain('ParentRewardManagementTablet');
+
+    expect(rewardManagementSource).toContain('RewardManageTab');
+    expect(rewardManagementSource).toContain('待處理');
+    expect(rewardManagementSource).toContain('進行中');
+    expect(rewardManagementSource).toContain('已完成');
+    expect(rewardManagementSource).toContain('已結束');
+    expect(rewardManagementSource).toContain('最近 6 個月');
+    expect(rewardManagementSource).toContain('最近 90 天');
+    expect(rewardManagementSource).toContain('查看較早紀錄');
+    expect(rewardManagementSource).toContain('類型圖示');
+    expect(rewardManagementSource).toContain('parent_approved');
+    expect(rewardManagementSource).not.toContain('設計提醒');
+    expect(rewardManagementSource).not.toContain('商品圖');
   });
 });

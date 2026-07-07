@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Switch,
   StyleSheet,
+  useWindowDimensions,
 } from 'react-native';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
 import { useNavigation } from '@react-navigation/native';
@@ -18,6 +19,7 @@ import {
   ParentRadii,
   ParentShadows,
 } from '../../constants/parentTheme';
+import ParentSettingsTablet from './tablet/ParentSettingsTablet';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -279,6 +281,10 @@ function LockMethodPicker({
 export default function ParentSettingsScreen() {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+
+  // 家長端平板為唯一開發目標：寬螢幕走 console 版設定，手機維持原單欄版。
+  if (width >= 768) return <ParentSettingsTablet />;
 
   const [lockMethod, setLockMethod] = useState<LockMethod>('密碼');
   const [notifPending, setNotifPending] = useState(true);

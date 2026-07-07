@@ -36,6 +36,13 @@ export default function WishTreeComponent({
     new Animated.Value(0),
     new Animated.Value(0),
     new Animated.Value(0),
+    new Animated.Value(0),
+    new Animated.Value(0),
+  ]).current;
+  const sparkleAnims = useRef([
+    new Animated.Value(0),
+    new Animated.Value(0),
+    new Animated.Value(0),
   ]).current;
 
   useEffect(() => {
@@ -63,8 +70,8 @@ export default function WishTreeComponent({
   // 飄葉（非 calm 才跑）
   useEffect(() => {
     if (calm) return;
-    const durations = [4200, 5100, 4600];
-    const delays = [0, 1600, 900];
+    const durations = [4200, 5100, 4600, 4900, 5400];
+    const delays = [0, 1600, 900, 2400, 400];
     const timers: ReturnType<typeof setTimeout>[] = [];
     leafAnims.forEach((anim, i) => {
       const startAnim = () => {
@@ -76,9 +83,35 @@ export default function WishTreeComponent({
     return () => timers.forEach(clearTimeout);
   }, [leafAnims, calm]);
 
+  // 閃亮 sparkle（非 calm 才跑，繞樹冠呼吸閃爍）
+  useEffect(() => {
+    if (calm) return;
+    const durations = [1400, 1700, 1500];
+    const delays = [0, 500, 1000];
+    const loops: Animated.CompositeAnimation[] = [];
+    sparkleAnims.forEach((anim, i) => {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.delay(delays[i]),
+          Animated.timing(anim, { toValue: 1, duration: durations[i], easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+          Animated.timing(anim, { toValue: 0, duration: durations[i], easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        ]),
+      );
+      loops.push(loop);
+      loop.start();
+    });
+    return () => loops.forEach(loop => loop.stop());
+  }, [sparkleAnims, calm]);
+
   const glowScale = glowAnim.interpolate({ inputRange: [0.4, 1], outputRange: [0.94, 1.06] });
   const leafOffsets = leafAnims.map(a => a.interpolate({ inputRange: [0, 1], outputRange: [0, -size * 1.2] }));
   const leafRotates = leafAnims.map(a => a.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '120deg'] }));
+  const sparklePositions = [
+    { left: size * -0.08, top: size * 0.06 },
+    { left: size * 0.98, top: size * 0.22 },
+    { left: size * 0.62, top: size * -0.06 },
+  ];
+  const sparkleScales = sparkleAnims.map(a => a.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.1] }));
 
   const tree = useImage ? (
     <Image
@@ -121,20 +154,42 @@ export default function WishTreeComponent({
       )}
       <View style={styles.treeWrap}>{tree}</View>
 
-      {!calm && [0, 1, 2].map(i => (
+      {!calm && [0, 1, 2, 3, 4].map(i => (
         <Animated.View
           key={i}
           style={[
             styles.leafParticle,
             {
-              left: size * (0.2 + i * 0.3),
+              left: size * (0.06 + i * 0.22),
               top: size * 0.7,
-              backgroundColor: [Colors.leaf400, Colors.leaf300, Colors.leaf500][i],
+              backgroundColor: [Colors.leaf400, Colors.leaf300, Colors.leaf500, Colors.leaf450, Colors.leaf200][i],
               transform: [{ translateY: leafOffsets[i] }, { rotate: leafRotates[i] }],
               opacity: leafAnims[i].interpolate({ inputRange: [0, 0.1, 0.9, 1], outputRange: [0, 0.5, 0.25, 0] }),
             },
           ]}
         />
+      ))}
+
+      {!calm && [0, 1, 2].map(i => (
+        <Animated.View
+          key={`sparkle-${i}`}
+          style={[
+            styles.sparkle,
+            {
+              left: sparklePositions[i].left,
+              top: sparklePositions[i].top,
+              opacity: sparkleAnims[i].interpolate({ inputRange: [0, 1], outputRange: [0.15, 0.95] }),
+              transform: [{ scale: sparkleScales[i] }],
+            },
+          ]}
+        >
+          <Svg width={14} height={14} viewBox="0 0 24 24">
+            <Path
+              d="M12 2l1.6 5.5L19 9l-4 3.8 1 5.5L12 15.6 8 18.3l1-5.5L5 9l5.4-1.5z"
+              fill={Colors.gold300}
+            />
+          </Svg>
+        </Animated.View>
       ))}
     </View>
   );
@@ -166,6 +221,10 @@ const styles = StyleSheet.create({
     width: 6,
     height: 4,
     borderRadius: 1000,
+    pointerEvents: 'none',
+  },
+  sparkle: {
+    position: 'absolute',
     pointerEvents: 'none',
   },
 });

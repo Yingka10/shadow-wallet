@@ -17,7 +17,9 @@ import BottomNav from '../../components/BottomNav';
 import GradientBackground from '../../components/child/GradientBackground';
 import WishTreeComponent from '../../components/WishTreeComponent';
 import WishModalComponent from '../../components/WishModalComponent';
+import ProgressBar from '../../components/child/ProgressBar';
 import { CoinIcon } from '../../components/icons/TaskIcons';
+import { BookIcon, MovieIcon, CardIcon, ComicIcon, BasketIcon, GiftIcon } from '../../components/icons/WishIcons';
 import { Colors } from '../../constants/colors';
 import { webMouseDraggableScroll, webScreen } from '../../constants/webStyles';
 import { supabase } from '../../lib/supabase';
@@ -46,6 +48,16 @@ type TabKey = 'item' | 'privilege';
 
 function formatNumber(value: number): string {
   return value.toLocaleString('zh-TW');
+}
+
+// 願望圖示 —— 依名稱關鍵字猜種類，純展示層判斷，資料庫沒有 icon 欄位
+function getWishIconMeta(name: string) {
+  if (/繪本|書|閱讀/.test(name)) return { Icon: BookIcon, ...Colors.wishIcon.book };
+  if (/電影|片/.test(name)) return { Icon: MovieIcon, ...Colors.wishIcon.movie };
+  if (/卡牌|寶可夢|卡片/.test(name)) return { Icon: CardIcon, ...Colors.wishIcon.card };
+  if (/漫畫/.test(name)) return { Icon: ComicIcon, ...Colors.wishIcon.comic };
+  if (/野餐|公園/.test(name)) return { Icon: BasketIcon, ...Colors.wishIcon.basket };
+  return { Icon: GiftIcon, ...Colors.wishIcon.gift };
 }
 
 export default function WishScreen() {
@@ -316,27 +328,38 @@ export default function WishScreen() {
     [child, childId, loadWishes],
   );
 
-  // ── 單筆願望行 ──────────────────────────────────────────────
-  function WishRow({ item, isLast }: { item: WishItem; isLast: boolean }) {
+  // ── 單張願望卡片 ────────────────────────────────────────────
+  function WishCard({ item }: { item: WishItem }) {
     const isReady = item.parent_approved && item.coin_cost > 0 && balance >= item.coin_cost;
     const isPending = item.added_by === 'child' && !item.parent_approved;
+    const saved = Math.max(0, Math.min(balance, item.coin_cost));
+    const pct = item.coin_cost > 0 ? (saved / item.coin_cost) * 100 : 0;
     const shortfall = item.coin_cost - balance;
+    const { Icon, bg, fg } = getWishIconMeta(item.name);
 
     return (
-      <View style={[styles.row, !isLast && styles.rowBorder]}>
-        {/* 名稱 */}
-        <Text style={styles.rowName} numberOfLines={1}>
-          {item.name}
-        </Text>
+      <View style={styles.card}>
+        <View style={styles.cardTopRow}>
+          <View style={[styles.cardIcon, { backgroundColor: bg }]}>
+            <Icon size={22} color={fg} />
+          </View>
 
-        {/* 右側狀態區 */}
-        <View style={styles.rowRight}>
-          {isPending ? (
-            // 等爸媽定價 + 取消
-            <>
-              <View style={styles.pendingChip}>
-                <Text style={styles.pendingChipText}>等爸媽定價</Text>
-              </View>
+          <View style={styles.cardBody}>
+            <Text style={styles.cardName} numberOfLines={1}>
+              {item.name}
+            </Text>
+            {isPending ? (
+              <Text style={styles.cardPendingText}>等爸媽定價</Text>
+            ) : (
+              <Text style={styles.cardSub}>
+                已存 <Text style={styles.cardSubSaved}>{formatNumber(saved)}</Text>/
+                {formatNumber(item.coin_cost)} 枚
+              </Text>
+            )}
+          </View>
+
+          <View style={styles.cardAction}>
+            {isPending ? (
               <TouchableOpacity
                 style={styles.btnCancel}
                 onPress={() => handleRemoveWish(item.id)}
@@ -344,29 +367,27 @@ export default function WishScreen() {
               >
                 <Text style={styles.btnCancelText}>取消</Text>
               </TouchableOpacity>
-            </>
-          ) : (
-            // 已定價：顯示金幣數
-            <>
-              <View style={styles.coinRow}>
-                <CoinIcon size={14} />
-                <Text style={styles.coinText}>{formatNumber(item.coin_cost)}</Text>
+            ) : isReady ? (
+              <TouchableOpacity
+                style={styles.btnRedeem}
+                onPress={() => handleRedeem(item)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.btnRedeemText}>兌換</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.btnSave}>
+                <Text style={styles.btnSaveText}>再存 {formatNumber(shortfall)}</Text>
               </View>
-
-              {isReady ? (
-                <TouchableOpacity
-                  style={styles.btnRedeem}
-                  onPress={() => handleRedeem(item)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.btnRedeemText}>兌換</Text>
-                </TouchableOpacity>
-              ) : (
-                <Text style={styles.shortfallText}>還差 {formatNumber(shortfall)}</Text>
-              )}
-            </>
-          )}
+            )}
+          </View>
         </View>
+
+        {!isPending && (
+          <View style={styles.cardProgressWrap}>
+            <ProgressBar pct={pct} height={6} from={Colors.leaf400} to={Colors.leaf600} track={Colors.cream200} />
+          </View>
+        )}
       </View>
     );
   }
@@ -374,7 +395,7 @@ export default function WishScreen() {
   return (
     <View style={webScreen}>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <GradientBackground />
+        <GradientBackground colors={Colors.gradientPageWish} stops={Colors.gradientPageWishStops} />
 
         {/* ── Hero 許願樹區 ───────────────────────────────────── */}
         <View style={styles.heroSection}>
@@ -422,28 +443,24 @@ export default function WishScreen() {
       <View style={styles.listSection}>
         {/* Segmented tabs */}
         <View style={styles.segmentWrap}>
-          <View style={styles.segment}>
-            <TouchableOpacity
-              style={[styles.segTab, activeTab === 'item' && styles.segTabActive]}
-              onPress={() => setActiveTab('item')}
-              activeOpacity={0.75}
-            >
-              <Text style={[styles.segTabText, activeTab === 'item' && styles.segTabTextActive]}>
-                禮物
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.segTab, activeTab === 'privilege' && styles.segTabActive]}
-              onPress={() => setActiveTab('privilege')}
-              activeOpacity={0.75}
-            >
-              <Text
-                style={[styles.segTabText, activeTab === 'privilege' && styles.segTabTextActive]}
-              >
-                特權
-              </Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            style={[styles.segTab, activeTab === 'item' && styles.segTabActive]}
+            onPress={() => setActiveTab('item')}
+            activeOpacity={0.75}
+          >
+            <Text style={[styles.segTabText, activeTab === 'item' && styles.segTabTextActive]}>
+              禮物
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.segTab, activeTab === 'privilege' && styles.segTabActive]}
+            onPress={() => setActiveTab('privilege')}
+            activeOpacity={0.75}
+          >
+            <Text style={[styles.segTabText, activeTab === 'privilege' && styles.segTabTextActive]}>
+              特權
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* 清單 */}
@@ -465,8 +482,8 @@ export default function WishScreen() {
             </View>
           ) : displayList.length > 0 ? (
             <View style={styles.listWrap}>
-              {displayList.map((item, index) => (
-                <WishRow key={item.id} item={item} isLast={index === displayList.length - 1} />
+              {displayList.map(item => (
+                <WishCard key={item.id} item={item} />
               ))}
             </View>
           ) : (
@@ -605,38 +622,33 @@ const styles = StyleSheet.create({
     paddingTop: 12,
   },
 
-  // ── Segmented control ──────────────────────────────────────
+  // ── Segmented control（獨立 pill 並排，非灰底滑動軌）────────
   segmentWrap: {
-    paddingHorizontal: 20,
-    marginBottom: 8,
-  },
-  segment: {
     flexDirection: 'row',
-    backgroundColor: Colors.cream200,
-    borderRadius: 12,
-    padding: 3,
+    gap: 10,
+    paddingHorizontal: 20,
+    marginBottom: 10,
   },
   segTab: {
     flex: 1,
-    paddingVertical: 7,
-    borderRadius: 9,
+    paddingVertical: 9,
+    borderRadius: 20,
     alignItems: 'center',
+    backgroundColor: Colors.cream200,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
   },
   segTabActive: {
     backgroundColor: Colors.bgSurface,
-    shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.10,
-    shadowRadius: 4,
-    elevation: 2,
+    borderColor: Colors.leaf600,
   },
   segTabText: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
     color: Colors.ink500,
   },
   segTabTextActive: {
-    color: Colors.ink900,
+    color: Colors.leaf700,
     fontWeight: '800',
   },
 
@@ -649,67 +661,68 @@ const styles = StyleSheet.create({
   },
   listWrap: {
     marginTop: 4,
+    gap: 12,
   },
 
-  // ── 願望行 ─────────────────────────────────────────────────
-  row: {
+  // ── 願望卡片 ───────────────────────────────────────────────
+  card: {
+    backgroundColor: Colors.bgSurface,
+    borderRadius: 18,
+    padding: 12,
+    shadowColor: Colors.shadowWarm,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    elevation: 2,
+  },
+  cardTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
-    gap: 10,
+    gap: 12,
   },
-  rowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.hairline,
+  cardIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
-  rowName: {
+  cardBody: {
     flex: 1,
+  },
+  cardName: {
     fontSize: 15,
     fontWeight: '700',
     color: Colors.ink900,
+    marginBottom: 3,
   },
-  rowRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flexShrink: 0,
+  cardSub: {
+    fontSize: 12.5,
+    color: Colors.ink500,
   },
-  coinRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
+  cardSubSaved: {
+    color: Colors.leaf700,
+    fontWeight: '800',
   },
-  coinText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.gold700,
-    fontVariant: ['tabular-nums'],
-  },
-  shortfallText: {
+  cardPendingText: {
     fontSize: 12,
     fontWeight: '600',
-    color: Colors.ink300,
-  },
-
-  // ── 待定價 chip ────────────────────────────────────────────
-  pendingChip: {
-    borderWidth: 1,
-    borderColor: Colors.bark300,
-    borderRadius: 8,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-  },
-  pendingChipText: {
-    fontSize: 11,
-    fontWeight: '600',
     color: Colors.bark500,
+  },
+  cardAction: {
+    flexShrink: 0,
+    marginLeft: 4,
+  },
+  cardProgressWrap: {
+    marginTop: 10,
   },
 
   // ── 兌換按鈕 ───────────────────────────────────────────────
   btnRedeem: {
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 10,
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+    borderRadius: 12,
     backgroundColor: Colors.coral500,
   },
   btnRedeemText: {
@@ -718,11 +731,24 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
 
+  // ── 再存 pill ──────────────────────────────────────────────
+  btnSave: {
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: Colors.cream200,
+  },
+  btnSaveText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.ink500,
+  },
+
   // ── 取消按鈕 ───────────────────────────────────────────────
   btnCancel: {
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 10,
     borderWidth: 0.5,
     borderColor: Colors.borderSoft,
   },

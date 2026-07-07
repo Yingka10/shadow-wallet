@@ -17,6 +17,8 @@ export type TaskListItem = {
   reward: { kind: 'coins'; amount: number } | { kind: 'time'; amount: number } | null;
   isLongTerm: boolean;
   isActive: boolean;    // child_tasks.is_active
+  childTaskCreatedAt: string;
+  taskCreatedAt: string;
 };
 
 export type ParentTaskListData = {
@@ -85,7 +87,7 @@ export function useParentTaskList(childId: string): ParentTaskListData {
       const [childRes, ctRes, completionsRes] = await Promise.all([
         supabase.from('children').select('*').eq('id', childId).single(),
         // Fetch all child_tasks (active + inactive) so we can show the stopped list
-        supabase.from('child_tasks').select('id, task_id, is_active').eq('child_id', childId),
+        supabase.from('child_tasks').select('id, task_id, is_active, created_at').eq('child_id', childId),
         supabase.from('task_completions')
           .select('task_id')
           .eq('child_id', childId)
@@ -134,6 +136,8 @@ export function useParentTaskList(childId: string): ParentTaskListData {
           reward:      deriveReward(task),
           isLongTerm:  task.is_long_term,
           isActive:    ct.is_active,
+          childTaskCreatedAt: ct.created_at,
+          taskCreatedAt: task.created_at,
         };
 
         if (ct.is_active) {

@@ -81,6 +81,13 @@ export const Colors = {
   gradientPage: ['#DCEFC8', '#E9F1DA', '#FFF8EE', '#FFF8EE'],
   gradientPageStops: [0, 0.22, 0.46, 1],
 
+  // 許願頁專用漸層 —— 跟目前 HomeScreen.tsx 本地 HOME 色盤的底色對齊（2026-07-07
+  // 使用者截圖比對回饋：許願頁比首頁明顯偏橘）。HomeScreen 現在已經不吃上面那組
+  // gradientPage（另一人重刷首頁時改用自己的本地色盤），兩邊要視覺一致就得對齊
+  // 這組值，不是再調 gradientPage 本身（會連動影響 Wallet 頁）。
+  gradientPageWish: ['#F8F6F1', '#FFFDF8', '#FFF8EE'],
+  gradientPageWishStops: [0, 0.58, 1],
+
   // ── 語義別名（新程式優先用這層）──────────────────────────
   bgCanvas:      '#FFF8EE',   // 漸層退化的平色底（不支援漸層時）
   bgSurface:     '#FFFFFF',
@@ -144,4 +151,16 @@ export const Colors = {
   bgDuty:         '#C8E4F0',
   bgDutyAlt:      '#D4E8C8',
   bgContribution: '#FFF0BF',
+
+  // ── 願望圖示圓 wishIcon — 許願卡片左側圖示圓底色，跟上面 @deprecated 的
+  // 任務分類色（sky/sage/lilac）用途不同：這裡純粹是禮物種類的視覺區分，
+  // 不代表任務分類，之後新增種類直接往這個小色盤加就好。
+  wishIcon: {
+    book:   { bg: '#E1EFC9', fg: '#5E9A32' },   // leaf100 / leaf600
+    movie:  { bg: '#DCEEF5', fg: '#5994B3' },
+    card:   { bg: '#FDECCB', fg: '#C6811F' },   // fruit100 / fruit700
+    comic:  { bg: '#EAE0F5', fg: '#8467AD' },
+    basket: { bg: '#E3EFDA', fg: '#5E9A32' },
+    gift:   { bg: '#FFE3D6', fg: '#B5552F' },   // coral100 / coral700，fallback
+  },
 };

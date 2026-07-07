@@ -52,6 +52,7 @@ export type GrowthMoment = {
 
 export type LongTermGoalProgress = {
   id: string;
+  taskId: string;
   goalType: string;
   taskName: string;
   current: number;
@@ -60,6 +61,41 @@ export type LongTermGoalProgress = {
   nextMilestone: string | null;
   milestoneReward: number | null;
   noProgressThisWeek: boolean;
+  weeklyCompleted: number;
+  previousWeeklyCompleted: number;
+  status: string;
+};
+
+// 「查看完整紀錄」四個分頁各自的一列
+export type WeeklyTaskRecord = {
+  id: string;
+  dateLabel: string;
+  taskName: string;
+  coinEarned: number;
+  status: string;
+};
+
+export type WeeklyCoinRecord = {
+  id: string;
+  dateLabel: string;
+  label: string;
+  amount: number;
+  isIncome: boolean;
+};
+
+export type WeeklyTimeSavingRecord = {
+  id: string;
+  dateLabel: string;
+  minutes: number;
+  taskName: string;
+  poolLabel: string;
+};
+
+export type WeeklyRedemptionRecord = {
+  id: string;
+  dateLabel: string;
+  name: string;
+  coinCost: number;
   status: string;
 };
 
@@ -69,13 +105,19 @@ export type ParentWeeklyReportData = {
   weekRange: string;
   totalTasks: number;
   checkIns: number;
+  timeSavedMin: number;
   aiInsight: string;
+  dialoguePrompt: string;
   activity: WeeklyActivityBar[];
   coinFlow: WeeklyCoinFlow;
   suggestions: WeeklySuggestion[];
   moments: GrowthMoment[];
   affirmations: string[];
   longTermGoals: LongTermGoalProgress[];
+  taskRecords: WeeklyTaskRecord[];
+  coinRecords: WeeklyCoinRecord[];
+  timeSavingRecords: WeeklyTimeSavingRecord[];
+  redemptionRecords: WeeklyRedemptionRecord[];
   aiReady: boolean;
   loading: boolean;
   error: string | null;
@@ -115,6 +157,7 @@ function getWeekBounds(offset: number) {
 
 type RawLTG = {
   id: string;
+  task_id: string;
   goal_type: string;
   total_days: number | null;
   current_day: number;
@@ -129,7 +172,12 @@ type RawLTG = {
   tasks: { name: string } | null;
 };
 
-function mapGoalProgress(g: RawLTG, weekStart: dayjs.Dayjs): LongTermGoalProgress {
+function mapGoalProgress(
+  g: RawLTG,
+  weekStart: dayjs.Dayjs,
+  weeklyDoneByTask: Map<string, number>,
+  previousDoneByTask: Map<string, number>,
+): LongTermGoalProgress {
   let current = 0;
   let target = 0;
   let unit = '';
@@ -175,6 +223,7 @@ function mapGoalProgress(g: RawLTG, weekStart: dayjs.Dayjs): LongTermGoalProgres
 
   return {
     id: g.id,
+    taskId: g.task_id,
     goalType: g.goal_type,
     taskName: g.tasks?.name ?? '(未知任務)',
     current,
@@ -183,6 +232,8 @@ function mapGoalProgress(g: RawLTG, weekStart: dayjs.Dayjs): LongTermGoalProgres
     nextMilestone,
     milestoneReward,
     noProgressThisWeek,
+    weeklyCompleted: weeklyDoneByTask.get(g.task_id) ?? 0,
+    previousWeeklyCompleted: previousDoneByTask.get(g.task_id) ?? 0,
     status: g.status,
   };
 }
@@ -207,10 +258,16 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
   const [moments, setMoments] = useState<GrowthMoment[]>([]);
   const [totalTasks, setTotalTasks] = useState(0);
   const [checkIns, setCheckIns] = useState(0);
+  const [timeSavedMin, setTimeSavedMin] = useState(0);
   const [aiInsight, setAiInsight] = useState(PENDING_INSIGHT);
   const [suggestions, setSuggestions] = useState<WeeklySuggestion[]>(PENDING_SUGGESTIONS);
   const [affirmations, setAffirmations] = useState<string[]>(PENDING_AFFIRMATIONS);
+  const [dialoguePrompt, setDialoguePrompt] = useState('');
   const [longTermGoals, setLongTermGoals] = useState<LongTermGoalProgress[]>([]);
+  const [taskRecords, setTaskRecords] = useState<WeeklyTaskRecord[]>([]);
+  const [coinRecords, setCoinRecords] = useState<WeeklyCoinRecord[]>([]);
+  const [timeSavingRecords, setTimeSavingRecords] = useState<WeeklyTimeSavingRecord[]>([]);
+  const [redemptionRecords, setRedemptionRecords] = useState<WeeklyRedemptionRecord[]>([]);
   const [aiReady, setAiReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -229,17 +286,25 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
       const { start, end } = getWeekBounds(weekOffset);
       const startISO = start.toISOString();
       const endISO = end.toISOString();
+      const prevStartISO = start.subtract(1, 'week').toISOString();
+      const prevEndISO = end.subtract(1, 'week').toISOString();
       const weekStartDate = start.format('YYYY-MM-DD');
 
-      const [childRes, ctRes, completionsRes, walletRes] = await Promise.all([
+      const [childRes, ctRes, completionsRes, previousCompletionsRes, walletRes] = await Promise.all([
         supabase.from('children').select('nickname, family_id').eq('id', childId).single(),
         supabase.from('child_tasks').select('task_id').eq('child_id', childId).eq('is_active', true),
         supabase
           .from('task_completions')
-          .select('task_id, coin_earned, completed_at')
+          .select('id, task_id, coin_earned, time_saved_min, completed_at, status, tasks(name)')
           .eq('child_id', childId)
           .gte('completed_at', startISO)
           .lte('completed_at', endISO),
+        supabase
+          .from('task_completions')
+          .select('task_id')
+          .eq('child_id', childId)
+          .gte('completed_at', prevStartISO)
+          .lte('completed_at', prevEndISO),
         supabase
           .from('wallets')
           .select('id')
@@ -254,23 +319,26 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
 
       const taskIds = (ctRes.data ?? []).map(r => r.task_id);
       const completionData = completionsRes.data ?? [];
+      const previousCompletionData = previousCompletionsRes.data ?? [];
       setCheckIns(completionData.length);
+      setTimeSavedMin(completionData.reduce((sum, c) => sum + (c.time_saved_min ?? 0), 0));
 
       const walletId = walletRes.data?.id ?? null;
 
-      const [tasksRes, txRes, momentRes, reportRes, ltgRes] = await Promise.all([
+      const [tasksRes, txRes, momentRes, reportRes, ltgRes, timeSavingsRes, redemptionRes] = await Promise.all([
         taskIds.length > 0
           ? supabase.from('tasks').select('id, category').in('id', taskIds).eq('is_active', true)
           : Promise.resolve({ data: [] as { id: string; category: string }[], error: null }),
         walletId
           ? supabase
               .from('transactions')
-              .select('amount, type')
+              .select('id, amount, type, note, created_at, reference_id, reference_type')
               .eq('wallet_id', walletId)
               .in('type', ['earn', 'redeem'])
               .gte('created_at', startISO)
               .lte('created_at', endISO)
-          : Promise.resolve({ data: [] as { amount: number; type: string }[], error: null }),
+              .order('created_at', { ascending: false })
+          : Promise.resolve({ data: [] as { id: string; amount: number; type: string; note: string | null; created_at: string; reference_id: string | null; reference_type: string | null }[], error: null }),
         supabase
           .from('growth_moments')
           .select('id, title, body, created_at')
@@ -289,9 +357,23 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
           : Promise.resolve({ data: null, error: null }),
         supabase
           .from('long_term_goals')
-          .select('id, goal_type, total_days, current_day, level_count, current_level, target_value, current_value, value_unit, checkpoint_rewards, last_active_date, status, tasks(name)')
+          .select('id, task_id, goal_type, total_days, current_day, level_count, current_level, target_value, current_value, value_unit, checkpoint_rewards, last_active_date, status, tasks(name)')
           .eq('child_id', childId)
           .eq('status', 'active'),
+        supabase
+          .from('time_savings')
+          .select('id, minutes_saved, pool_type, created_at, completion_id')
+          .eq('child_id', childId)
+          .gte('created_at', startISO)
+          .lte('created_at', endISO)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('redemption_requests')
+          .select('id, name, coin_cost, status, created_at')
+          .eq('child_id', childId)
+          .gte('created_at', startISO)
+          .lte('created_at', endISO)
+          .order('created_at', { ascending: false }),
       ]);
 
       if (tasksRes.error) throw tasksRes.error;
@@ -349,6 +431,7 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
         ai_suggestions: {
           suggestions?: WeeklySuggestion[];
           affirmations?: string[];
+          dialogue?: string;
         } | null;
       } | null;
 
@@ -356,11 +439,13 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
         setAiInsight(report.motivation_observation);
         setSuggestions(report.ai_suggestions?.suggestions ?? PENDING_SUGGESTIONS);
         setAffirmations(report.ai_suggestions?.affirmations ?? PENDING_AFFIRMATIONS);
+        setDialoguePrompt(report.ai_suggestions?.dialogue ?? '');
         setAiReady(true);
       } else {
         setAiInsight(PENDING_INSIGHT);
         setSuggestions(PENDING_SUGGESTIONS);
         setAffirmations(PENDING_AFFIRMATIONS);
+        setDialoguePrompt('');
         setAiReady(false);
       }
 
@@ -368,7 +453,133 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
       // Cast via unknown: Relationships:[] in database.ts means the TS type doesn't
       // know about the tasks FK, but the runtime join works if the DB FK exists.
       const rawLTGs = (ltgRes.data ?? []) as unknown as RawLTG[];
-      setLongTermGoals(rawLTGs.map(g => mapGoalProgress(g, start)));
+      const weeklyDoneByTask = new Map<string, number>();
+      const previousDoneByTask = new Map<string, number>();
+      for (const c of completionData) {
+        weeklyDoneByTask.set(c.task_id, (weeklyDoneByTask.get(c.task_id) ?? 0) + 1);
+      }
+      for (const c of previousCompletionData) {
+        previousDoneByTask.set(c.task_id, (previousDoneByTask.get(c.task_id) ?? 0) + 1);
+      }
+      setLongTermGoals(rawLTGs.map(g => mapGoalProgress(g, start, weeklyDoneByTask, previousDoneByTask)));
+
+      // ── 「查看完整紀錄」四分頁清單 ───────────────────────────────────────────
+      // 先建立「id → 真實名稱」對照表，讓每一筆紀錄都能顯示任務／獎勵的真名。
+      type RawCompletionRow = {
+        id: string;
+        completed_at: string;
+        coin_earned: number | null;
+        status: string;
+        tasks: { name: string } | { name: string }[] | null;
+      };
+      const pickTaskName = (t: RawCompletionRow['tasks']): string =>
+        Array.isArray(t) ? (t[0]?.name ?? '任務') : (t?.name ?? '任務');
+      const completionRows = completionData as unknown as RawCompletionRow[];
+
+      // completion_id → 任務名（本週完成的任務都在這裡）
+      const completionNameMap = new Map<string, string>();
+      for (const c of completionRows) completionNameMap.set(c.id, pickTaskName(c.tasks));
+      // goal_id → 長期任務名（里程碑獎勵用）
+      const goalNameMap = new Map<string, string>();
+      for (const g of rawLTGs) goalNameMap.set(g.id, g.tasks?.name ?? '長期任務');
+      // redemption request_id → 獎勵名
+      type RawRedemption = { id: string; name: string; coin_cost: number; status: string; created_at: string };
+      const redemptionRows = (redemptionRes.data ?? []) as RawRedemption[];
+      const requestNameMap = new Map<string, string>();
+      for (const r of redemptionRows) requestNameMap.set(r.id, r.name);
+
+      type RawTx = {
+        id: string; amount: number; type: string; note: string | null;
+        created_at: string; reference_id: string | null; reference_type: string | null;
+      };
+      const txRows = txData as RawTx[];
+
+      // reward_item 兌換（redeem_wish 路徑）需要另外查名字
+      const rewardItemIds = txRows
+        .filter(t => t.reference_type === 'reward_item' && t.reference_id)
+        .map(t => t.reference_id as string);
+      const rewardItemNameMap = new Map<string, string>();
+      if (rewardItemIds.length > 0) {
+        const { data: riData } = await supabase
+          .from('reward_items')
+          .select('id, name')
+          .in('id', rewardItemIds);
+        for (const r of (riData ?? []) as { id: string; name: string }[]) {
+          rewardItemNameMap.set(r.id, r.name);
+        }
+      }
+
+      // 任務紀錄 ← task_completions（真任務名）
+      setTaskRecords(
+        completionRows
+          .slice()
+          .sort((a, b) => b.completed_at.localeCompare(a.completed_at))
+          .map(c => ({
+            id: c.id,
+            dateLabel: dayjs(c.completed_at).tz(TZ).format('M/D HH:mm'),
+            taskName: pickTaskName(c.tasks),
+            coinEarned: c.coin_earned ?? 0,
+            status: c.status,
+          })),
+      );
+
+      // 成長幣 ← transactions（依 reference 顯示真名：任務獎勵／里程碑／獎勵兌換）
+      const TX_LABEL: Record<string, string> = {
+        earn: '任務獎勵', redeem: '獎勵兌換', deduct: '扣除', interest: '利息', adjust: '調整',
+      };
+      const resolveTxLabel = (t: RawTx): string => {
+        const ref = t.reference_id ?? '';
+        switch (t.reference_type) {
+          case 'task_completion':
+            return completionNameMap.get(ref) ?? TX_LABEL.earn;
+          case 'long_term_goal_milestone':
+            return `${goalNameMap.get(ref) ?? '長期任務'} · 里程碑獎勵`;
+          case 'reward_item':
+            return rewardItemNameMap.get(ref) ?? TX_LABEL.redeem;
+          case 'redemption_request':
+            return requestNameMap.get(ref) ?? TX_LABEL.redeem;
+          default:
+            return t.note?.trim() || TX_LABEL[t.type] || '成長幣異動';
+        }
+      };
+      setCoinRecords(
+        txRows.map(t => ({
+          id: t.id,
+          dateLabel: dayjs(t.created_at).tz(TZ).format('M/D HH:mm'),
+          label: resolveTxLabel(t),
+          amount: Math.abs(t.amount),
+          isIncome: t.type === 'earn',
+        })),
+      );
+
+      // 時間儲蓄 ← time_savings（顯示產生時間的任務真名）
+      const POOL_LABEL: Record<string, string> = {
+        family_time: '家庭時間', game_time: '遊戲時間',
+      };
+      type RawTimeSaving = { id: string; minutes_saved: number; pool_type: string; created_at: string; completion_id: string | null };
+      setTimeSavingRecords(
+        ((timeSavingsRes.data ?? []) as RawTimeSaving[]).map(t => ({
+          id: t.id,
+          dateLabel: dayjs(t.created_at).tz(TZ).format('M/D HH:mm'),
+          minutes: t.minutes_saved,
+          taskName: (t.completion_id && completionNameMap.get(t.completion_id)) || '家庭本分任務',
+          poolLabel: POOL_LABEL[t.pool_type] ?? '時間儲蓄',
+        })),
+      );
+
+      // 獎勵兌換 ← redemption_requests（真獎勵名）
+      const REDEMPTION_STATUS: Record<string, string> = {
+        pending: '審核中', approved: '已核准', rejected: '未通過',
+      };
+      setRedemptionRecords(
+        redemptionRows.map(r => ({
+          id: r.id,
+          dateLabel: dayjs(r.created_at).tz(TZ).format('M/D HH:mm'),
+          name: r.name,
+          coinCost: r.coin_cost,
+          status: REDEMPTION_STATUS[r.status] ?? r.status,
+        })),
+      );
     } catch (err) {
       console.error('[useParentWeeklyReport] fetch error:', err);
       setError('資料載入失敗，請稍後再試');
@@ -407,13 +618,19 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     weekRange,
     totalTasks,
     checkIns,
+    timeSavedMin,
     aiInsight,
+    dialoguePrompt,
     activity,
     coinFlow,
     suggestions,
     moments,
     affirmations,
     longTermGoals,
+    taskRecords,
+    coinRecords,
+    timeSavingRecords,
+    redemptionRecords,
     aiReady,
     loading,
     error,

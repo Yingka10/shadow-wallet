@@ -38,6 +38,13 @@ const MANAGE_SUB_ITEMS: { label: string; key: ManageSection | 'settings' }[] = [
 
 const CHILD_AVATAR_TINTS = [ParentColors.clay500, ParentColors.sage500, ParentColors.plum500];
 
+const READABLE_MANAGE_SUB_ITEMS: { label: string; key: ManageSection | 'settings' }[] = [
+  { label: '任務管理', key: 'tasks' },
+  { label: '獎勵管理', key: 'rewards' },
+  { label: '帳本紀錄', key: 'history' },
+  { label: '設定', key: 'settings' },
+];
+
 // 品牌小樹 icon —— 側欄品牌行用，鎖定樣式＝提案 artifact .p-brand svg
 function BrandTreeIcon() {
   return (
@@ -59,6 +66,7 @@ function BrandTreeIcon() {
  */
 export function ParentSidebar({
   activeTab,
+  activeManageSection,
   allChildren,
   childId,
   setSelectedChild,
@@ -69,6 +77,7 @@ export function ParentSidebar({
   onAddChild,
 }: {
   activeTab: ParentSidebarActiveTab;
+  activeManageSection?: ManageSection | 'settings';
   allChildren: ChildOption[];
   childId: string;
   setSelectedChild: (c: ChildOption) => void;
@@ -78,7 +87,7 @@ export function ParentSidebar({
   onNavigateManage: (section?: ManageSection | 'settings') => void;
   onAddChild: () => void;
 }) {
-  const [manageOpen, setManageOpen] = useState(false);
+  const [manageOpen, setManageOpen] = useState(activeTab === 'manage');
   const [promoVisible, setPromoVisible] = useState(true);
 
   return (
@@ -157,15 +166,30 @@ export function ParentSidebar({
 
         {manageOpen && (
           <View style={styles.sidebarSubList}>
-            {MANAGE_SUB_ITEMS.map(item => (
+            {READABLE_MANAGE_SUB_ITEMS.map(item => (
               <TouchableOpacity
                 key={item.key}
-                style={styles.sidebarSubItem}
+                style={[
+                  styles.sidebarSubItem,
+                  activeManageSection === item.key && styles.sidebarSubItemActive,
+                ]}
                 onPress={() => onNavigateManage(item.key)}
                 activeOpacity={0.7}
               >
-                <View style={styles.sidebarSubDot} />
-                <Text style={styles.sidebarSubText}>{item.label}</Text>
+                <View
+                  style={[
+                    styles.sidebarSubDot,
+                    activeManageSection === item.key && styles.sidebarSubDotActive,
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.sidebarSubText,
+                    activeManageSection === item.key && styles.sidebarSubTextActive,
+                  ]}
+                >
+                  {item.label}
+                </Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -213,7 +237,7 @@ export const parentSidebarStyles = StyleSheet.create({
   },
   sidebarBrandText: {
     fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.eyebrow,
+    fontSize: ParentFontSizes.sm,
     fontWeight: ParentFontWeights.black,
     color: ParentColors.onSidebarMuted,
     textTransform: 'uppercase',
@@ -221,7 +245,7 @@ export const parentSidebarStyles = StyleSheet.create({
   },
   sidebarBrandSub: {
     fontFamily: ParentFonts.display,
-    fontSize: 16,
+    fontSize: ParentFontSizes.xl,
     fontWeight: ParentFontWeights.black,
     color: ParentColors.onSidebar,
     marginTop: 5,
@@ -256,7 +280,7 @@ export const parentSidebarStyles = StyleSheet.create({
   pickName: {
     flex: 1,
     fontFamily: ParentFonts.body,
-    fontSize: 14,
+    fontSize: ParentFontSizes.pBody,
     fontWeight: ParentFontWeights.semi,
     color: ParentColors.onSidebarMuted,
   },
@@ -281,7 +305,7 @@ export const parentSidebarStyles = StyleSheet.create({
   },
   sidebarKicker: {
     fontFamily: ParentFonts.body,
-    fontSize: 11,
+    fontSize: ParentFontSizes.pMeta,
     fontWeight: ParentFontWeights.bold,
     color: ParentColors.onSidebarFaint,
     marginBottom: 6,
@@ -304,7 +328,7 @@ export const parentSidebarStyles = StyleSheet.create({
   },
   addChildText: {
     fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.pMeta,
+    fontSize: ParentFontSizes.sm,
     fontWeight: ParentFontWeights.semi,
     color: ParentColors.onSidebarMuted,
   },
@@ -318,7 +342,7 @@ export const parentSidebarStyles = StyleSheet.create({
   },
   sidebarNavKicker: {
     fontFamily: ParentFonts.body,
-    fontSize: 11,
+    fontSize: ParentFontSizes.pMeta,
     fontWeight: ParentFontWeights.bold,
     color: 'rgba(255, 255, 255, 0.52)',
     marginBottom: 2,
@@ -337,7 +361,7 @@ export const parentSidebarStyles = StyleSheet.create({
   sidebarNavText: {
     flex: 1,
     fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.sm,
+    fontSize: ParentFontSizes.pBody,
     fontWeight: ParentFontWeights.semi,
     color: 'rgba(255, 255, 255, 0.68)',
   },
@@ -364,17 +388,27 @@ export const parentSidebarStyles = StyleSheet.create({
     borderRadius: 9,
     paddingHorizontal: 10,
   },
+  sidebarSubItemActive: {
+    backgroundColor: ParentColors.pickActiveBg,
+  },
   sidebarSubDot: {
     width: 4,
     height: 4,
     borderRadius: 2,
     backgroundColor: ParentColors.onSidebarFaint,
   },
+  sidebarSubDotActive: {
+    backgroundColor: ParentColors.onSidebar,
+  },
   sidebarSubText: {
     fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.pMeta,
+    fontSize: ParentFontSizes.sm,
     fontWeight: ParentFontWeights.medium,
     color: ParentColors.onSidebarMuted,
+  },
+  sidebarSubTextActive: {
+    color: ParentColors.onSidebar,
+    fontWeight: ParentFontWeights.bold,
   },
   sidebarPromo: {
     marginTop: 'auto',

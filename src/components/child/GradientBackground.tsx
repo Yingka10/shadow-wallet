@@ -12,10 +12,16 @@ import { Colors } from '../../constants/colors';
  * 沒把上一頁卸載就疊了新的一頁），固定字串 id 的 <LinearGradient> 在 web 上會撞名，
  * 導致其中一頁的漸層渲染失敗、整片只剩單一底色（曾經回上一頁看到「全綠」就是這個）。
  */
-export default function GradientBackground() {
+interface Props {
+  /** 覆寫預設漸層色（不傳＝維持鎖定值 Colors.gradientPage） */
+  colors?: readonly string[];
+  stops?: readonly number[];
+}
+
+export default function GradientBackground({ colors: colorsProp, stops: stopsProp }: Props = {}) {
   const gid = useId();
-  const colors = Colors.gradientPage;
-  const stops = Colors.gradientPageStops;
+  const colors = colorsProp ?? Colors.gradientPage;
+  const stops = stopsProp ?? Colors.gradientPageStops;
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       <Svg width="100%" height="100%">

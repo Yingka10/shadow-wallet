@@ -15,7 +15,7 @@ import {
   StyleSheet,
   useWindowDimensions,
 } from 'react-native';
-import Svg, { Path, Circle } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,7 +24,6 @@ import { useSelectedChild } from '../../../context/SelectedChildContext';
 import {
   useParentWeeklyReport,
   type WeeklyActivityBar,
-  type WeeklySuggestion,
   type GrowthMoment,
   type LongTermGoalProgress,
 } from '../../../hooks/useParentWeeklyReport';
@@ -44,6 +43,14 @@ import {
 import { webTabletScreen } from '../../../constants/webStyles';
 import type { TaskCategory } from '../../../types/database';
 import { ParentSidebar, type ManageSection } from './ParentSidebar';
+import {
+  IconBubble,
+  TaskIconBubble,
+  CoinIcon,
+  CheckSquareIcon,
+  ClockIcon,
+  BellIcon,
+} from './home/homeIcons';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -63,14 +70,6 @@ const CAT_META: Record<TaskCategory, { label: string; color: string; tint: strin
   C: { label: '貢獻',     color: ParentColors.clay500, tint: '#FAF1E7' },
   D: { label: '成長',     color: ParentColors.plum500, tint: '#F4EBF0' },
 };
-
-const GOAL_TYPE_META: Record<string, { label: string; color: string; tint: string }> = {
-  habit:          { label: '習慣', color: ParentColors.teal500,  tint: ParentColors.teal50 },
-  skill:          { label: '技能', color: ParentColors.plum500,  tint: '#F4EBF0' },
-  challenge:      { label: '挑戰', color: ParentColors.clay500,  tint: '#FAF1E7' },
-  responsibility: { label: '責任', color: ParentColors.sage500,  tint: '#EFF4EC' },
-};
-const GOAL_TYPE_FALLBACK = { label: '長期', color: ParentColors.fgMuted, tint: ParentColors.bgSurfaceWarm };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SVG icons
@@ -133,52 +132,114 @@ function MinusIcon({ size = 11, color = ParentColors.error }: { size?: number; c
 // Sub-components
 // ─────────────────────────────────────────────────────────────────────────────
 
-function CompletionRing({ pct }: { pct: number }) {
-  const r = 26;
-  const circumference = 2 * Math.PI * r;
-  const dashOffset = circumference * (1 - pct / 100);
+function MetricTile({ label, value, note, tone = 'neutral', icon }: {
+  label: string;
+  value: string;
+  note: string;
+  tone?: 'neutral' | 'green' | 'orange';
+  icon?: React.ReactNode;
+}) {
+  const toneStyle =
+    tone === 'green' ? s.metricValueGreen :
+    tone === 'orange' ? s.metricValueOrange :
+    null;
+
   return (
-    <Svg width={64} height={64} viewBox="0 0 64 64">
-      <Circle
-        cx={32} cy={32} r={r}
-        fill="none"
-        stroke={ParentColors.borderMedium}
-        strokeWidth={5}
-      />
-      <Circle
-        cx={32} cy={32} r={r}
-        fill="none"
-        stroke={ParentColors.accent}
-        strokeWidth={5}
-        strokeDasharray={circumference}
-        strokeDashoffset={dashOffset}
-        strokeLinecap="round"
-        transform="rotate(-90 32 32)"
-      />
-    </Svg>
+    <View style={s.metricTile}>
+      {icon != null && <View style={s.metricIconWrap}>{icon}</View>}
+      <Text style={s.metricLabel}>{label}</Text>
+      <Text style={[s.metricValue, toneStyle]}>{value}</Text>
+      <Text style={s.metricNote}>{note}</Text>
+    </View>
   );
 }
 
-function CategoryProgressRow({ bar }: { bar: WeeklyActivityBar }) {
-  const meta = CAT_META[bar.cat];
-  const pct = bar.total > 0 ? Math.round((bar.done / bar.total) * 100) : 0;
+function formatWeeklyChange(goal: LongTermGoalProgress) {
+  if (goal.weeklyCompleted === 0) {
+    return '本週尚未開始｜查看調整建議';
+  }
+  const unit = goal.unit || '次';
+  const delta = goal.weeklyCompleted - goal.previousWeeklyCompleted;
+  const compare =
+    delta > 0 ? `比上週多 ${delta} ${unit}` :
+    delta < 0 ? '和上週的節奏不同' :
+    '與上週差不多';
+  return `本週完成 ${goal.weeklyCompleted} ${unit}｜${compare}`;
+}
+
+function LongTermGoalCard({ goal }: { goal: LongTermGoalProgress }) {
+  const hasProgress = goal.target > 0;
+  const pct = hasProgress ? Math.min(100, Math.round((goal.current / goal.target) * 100)) : 0;
+  const progressText = hasProgress
+    ? `累積第 ${goal.current} / ${goal.target} ${goal.unit}`
+    : '持續進行中';
+  const weeklyText = formatWeeklyChange(goal);
+  const isQuiet = goal.weeklyCompleted === 0;
+
   return (
-    <View style={s.catRow}>
-      <View style={s.catLabelRow}>
-        <View style={[s.catBadge, { backgroundColor: meta.color }]}>
-          <Text style={s.catBadgeLetter}>{bar.cat}</Text>
-        </View>
-        <Text style={s.catLabel}>{meta.label}</Text>
-        <View style={s.spacer} />
-        <Text style={s.catCount}>
-          {bar.done}
-          <Text style={s.catCountSub}> / {bar.total}</Text>
+    <View style={s.ltgGoalCard}>
+      <TaskIconBubble name={goal.taskName} size={38} />
+      <View style={s.ltgGoalMain}>
+        <Text style={s.ltgTaskName} numberOfLines={1}>{goal.taskName}</Text>
+        <Text style={s.ltgMetaLine}>
+          {progressText}｜<Text style={isQuiet ? s.ltgAdjustText : s.ltgStableText}>{weeklyText}</Text>
         </Text>
-        <Text style={s.catPct}>{pct}%</Text>
       </View>
-      <View style={[s.progressTrack, { backgroundColor: meta.tint }]}>
-        <View style={[s.progressFill, { width: `${pct}%`, backgroundColor: meta.color }]} />
+      <View style={s.ltgProgressArea}>
+        <View style={s.ltgProgressTrack}>
+          <View style={[s.ltgProgressFill, { width: `${pct}%` }]} />
+        </View>
+        <Text style={s.ltgPct}>{pct}%</Text>
       </View>
+      <ChevRightIcon size={14} color={ParentColors.fgMuted} />
+    </View>
+  );
+}
+
+type ReviewPrompt = {
+  title: string;
+  prompt: string;
+  tone: 'green' | 'orange';
+};
+
+function ReviewPromptCard({ item }: { item: ReviewPrompt }) {
+  return (
+    <View style={s.reviewPromptRow}>
+      <View style={[s.reviewPromptDot, item.tone === 'orange' && s.reviewPromptDotOrange]}>
+        {item.tone === 'orange'
+          ? <BellIcon size={18} color={ParentColors.warn} />
+          : <CheckSquareIcon size={18} color={ParentColors.teal500} />}
+      </View>
+      <View style={s.reviewPromptBody}>
+        <Text style={s.reviewPromptTitle}>{item.title}</Text>
+        <Text style={s.reviewPromptText}>{item.prompt}</Text>
+      </View>
+    </View>
+  );
+}
+
+function DialogueCard({ childName, dialoguePrompt, aiReady }: {
+  childName: string;
+  dialoguePrompt: string;
+  aiReady: boolean;
+}) {
+  const isAi = aiReady && dialoguePrompt.trim().length > 0;
+  const text = isAi
+    ? dialoguePrompt
+    : `這週我看到${childName || '你'}有持續累積，也有把一些事情慢慢做完，這點很棒。\n\n至於還沒有開始的目標，我想聽聽看，\n你覺得現在最難開始的是哪一段？`;
+  return (
+    <View style={s.dialogueCard}>
+      <View style={s.dialogueHeader}>
+        <View style={s.dialogueIcon}>
+          <SparkleIcon size={13} color={ParentColors.success} />
+        </View>
+        <Text style={s.sectionTitle}>和孩子聊聊</Text>
+      </View>
+      <Text style={s.dialogueLabel}>{isAi ? 'AI 建議的對話起頭：' : '可以這樣開場：'}</Text>
+      <Text style={s.dialogueText}>{text}</Text>
+      <Text style={s.dialogueFootnote}>
+        {isAi ? 'AI 依本週紀錄提供的對話起點，家長可自行調整' : '依本週紀錄整理的對話起點，家長可自行調整'}
+      </Text>
     </View>
   );
 }
@@ -216,76 +277,31 @@ function MomentItem({ moment }: { moment: GrowthMoment }) {
   );
 }
 
-function ObservationCard({ sg }: { sg: WeeklySuggestion }) {
+function WeeklyRecordRow({ title, meta, right, rightTone }: {
+  title: string;
+  meta?: string;
+  right?: string;
+  rightTone?: 'in' | 'out' | 'muted';
+}) {
+  const rightColor =
+    rightTone === 'in' ? ParentColors.success :
+    rightTone === 'out' ? ParentColors.error :
+    ParentColors.fgSecondary;
   return (
-    <View style={s.obsCard}>
-      <Text style={s.obsBody}>{sg.body}</Text>
-      {sg.actionLabel ? (
-        <View style={s.obsActionRow}>
-          <SparkleIcon size={10} color={ParentColors.accent} />
-          <Text style={s.obsActionLabel}>{sg.actionLabel}</Text>
-        </View>
-      ) : null}
+    <View style={s.recRow}>
+      <View style={s.recMain}>
+        <Text style={s.recTitle} numberOfLines={1}>{title}</Text>
+        {meta ? <Text style={s.recMeta}>{meta}</Text> : null}
+      </View>
+      {right ? <Text style={[s.recRight, { color: rightColor }]}>{right}</Text> : null}
     </View>
   );
 }
 
-function LongTermGoalCard({ goal }: { goal: LongTermGoalProgress }) {
-  const meta = GOAL_TYPE_META[goal.goalType] ?? GOAL_TYPE_FALLBACK;
-  const hasProgress = goal.target > 0;
-  const pct = hasProgress ? Math.min(100, Math.round((goal.current / goal.target) * 100)) : 0;
-  const diff = hasProgress ? goal.target - goal.current : 0;
-
+function RecordEmpty({ text }: { text: string }) {
   return (
-    <View style={s.ltgGoalCard}>
-      <View style={[s.ltgGoalAccent, { backgroundColor: meta.color }]} />
-      <View style={s.ltgGoalInner}>
-        {/* Header: type chip + task name + no-progress badge */}
-        <View style={s.ltgGoalHeader}>
-          <View style={[s.ltgTypePill, { backgroundColor: meta.tint }]}>
-            <Text style={[s.ltgTypePillLabel, { color: meta.color }]}>{meta.label}</Text>
-          </View>
-          <Text style={s.ltgTaskName} numberOfLines={1}>{goal.taskName}</Text>
-          {goal.noProgressThisWeek && (
-            <View style={s.ltgNoProgressBadge}>
-              <Text style={s.ltgNoProgressBadgeText}>本週無進展</Text>
-            </View>
-          )}
-        </View>
-
-        {/* Progress section or responsibility placeholder */}
-        {hasProgress ? (
-          <View style={s.ltgProgressSection}>
-            <View style={s.ltgScoreRow}>
-              <Text style={s.ltgScore}>
-                {goal.current}
-                <Text style={s.ltgScoreSub}> / {goal.target} {goal.unit}</Text>
-              </Text>
-              <Text style={s.ltgPct}>{pct}%</Text>
-              {diff > 0 && (
-                <Text style={s.ltgScoreDiff}>差 {diff} {goal.unit}</Text>
-              )}
-            </View>
-            <View style={[s.ltgProgressTrack, { backgroundColor: meta.tint }]}>
-              <View style={[s.ltgProgressFill, { width: `${pct}%`, backgroundColor: meta.color }]} />
-            </View>
-          </View>
-        ) : (
-          <Text style={s.ltgResponsibilityText}>持續進行中</Text>
-        )}
-
-        {/* Milestone footer */}
-        <View style={s.ltgMilestoneRow}>
-          <Text style={s.ltgMilestoneLabel} numberOfLines={1}>
-            {goal.nextMilestone != null ? `下一里程碑：${goal.nextMilestone}` : '無階段里程碑'}
-          </Text>
-          {goal.milestoneReward != null && (
-            <View style={[s.ltgRewardBadge, { backgroundColor: meta.tint }]}>
-              <Text style={[s.ltgRewardBadgeText, { color: meta.color }]}>+{goal.milestoneReward}</Text>
-            </View>
-          )}
-        </View>
-      </View>
+    <View style={s.obsPending}>
+      <Text style={s.obsPendingText}>{text}</Text>
     </View>
   );
 }
@@ -547,15 +563,18 @@ export default function ParentWeeklyTablet() {
 
   const {
     childName, weekLabel, weekRange,
-    totalTasks, checkIns,
-    aiInsight, aiReady,
-    activity, coinFlow,
-    suggestions, moments, affirmations, longTermGoals,
+    timeSavedMin,
+    aiInsight, aiReady, dialoguePrompt,
+    activity, coinFlow, suggestions,
+    moments, longTermGoals,
+    taskRecords, coinRecords, timeSavingRecords, redemptionRecords,
     loading, error,
     canGoBack, canGoForward,
     goBack, goForward,
     refresh, requestAiRefresh,
   } = useParentWeeklyReport(childId);
+
+  const [recordTab, setRecordTab] = useState(0);
 
   useFocusEffect(
     useCallback(() => { refresh(); }, [refresh]),
@@ -588,10 +607,52 @@ export default function ParentWeeklyTablet() {
     );
   }
 
-  const overallDone  = activity.reduce((sum, b) => sum + b.done, 0);
-  const overallTotal = activity.reduce((sum, b) => sum + b.total, 0);
-  const overallPct   = overallTotal > 0 ? Math.round((overallDone / overallTotal) * 100) : 0;
-  const netCoin      = coinFlow.income - coinFlow.spend;
+  const recordedTasks = activity.reduce((sum, b) => sum + b.done, 0);
+  const netCoin = coinFlow.income - coinFlow.spend;
+  const topActivity = [...activity].sort((a, b) => b.done - a.done)[0];
+  const topActivityLabel = topActivity != null && topActivity.done > 0
+    ? CAT_META[topActivity.cat].label
+    : '日常任務';
+  const quietGoal = longTermGoals.find(goal => goal.weeklyCompleted === 0);
+  const steadyGoals = longTermGoals.filter(goal => goal.weeklyCompleted > 0);
+  const summaryText = aiReady
+    ? aiInsight
+    : `${childName || '孩子'}這週完成了 ${recordedTasks} 件任務，${topActivityLabel}有持續累積。\n${quietGoal ? `${quietGoal.taskName}這週尚未開始，週末可以一起看看，這個目標現在是否還適合。` : '可以挑一件孩子覺得順利的事，一起回顧是什麼讓它比較容易開始。'}`;
+  const reviewPrompts: ReviewPrompt[] = [
+    ...steadyGoals.slice(0, 2).map(goal => ({
+      title: `${goal.taskName}持續累積`,
+      prompt: `可以一起看看，下一個小里程碑想怎麼慶祝。`,
+      tone: 'green' as const,
+    })),
+    quietGoal != null ? {
+      title: `${quietGoal.taskName}還沒有開始`,
+      prompt: '可以一起確認：要不要先從比較容易的一步開始？',
+      tone: 'orange' as const,
+    } : null,
+    moments[0] != null ? {
+      title: moments[0].title,
+      prompt: moments[0].body ?? '可以問問他：這週什麼地方讓這件事變得比較容易？',
+      tone: 'green' as const,
+    } : null,
+  ].filter((item): item is ReviewPrompt => item != null).slice(0, 3);
+  const safeReviewPrompts = reviewPrompts.length > 0
+    ? reviewPrompts
+    : [{
+        title: `${childName || '孩子'}這週完成了 ${recordedTasks} 件任務`,
+        prompt: '可以問問他：這週哪一件事做起來最順？',
+        tone: 'green' as const,
+      }];
+  // AI 產生的回顧建議（後端 weekly_reports.ai_suggestions）優先；沒有才落回上面的模板
+  const aiReviewPrompts: ReviewPrompt[] = suggestions
+    .map(sg => ({
+      title: sg.taskName?.trim() || sg.actionLabel || '本週建議',
+      prompt: sg.body,
+      tone: (sg.action === 'adjust_reminder' ? 'orange' : 'green') as ReviewPrompt['tone'],
+    }))
+    .slice(0, 3);
+  const displayReviewPrompts = aiReady && aiReviewPrompts.length > 0
+    ? aiReviewPrompts
+    : safeReviewPrompts;
 
   return (
     <View style={webTabletScreen}>
@@ -672,19 +733,6 @@ export default function ParentWeeklyTablet() {
               <RefreshIcon />
               <Text style={s.refreshLabel}>重新整理</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={handleAiRefresh}
-              disabled={aiRefreshing}
-              style={[s.aiRefreshNavBtn, aiRefreshing && s.aiRefreshNavBtnLoading]}
-            >
-              {aiRefreshing
-                ? <ActivityIndicator size="small" color={ParentColors.accent} />
-                : <SparkleIcon />}
-              <Text style={s.aiRefreshNavLabel}>
-                {aiRefreshing ? '生成中…' : '重新整理 AI'}
-              </Text>
-            </TouchableOpacity>
           </View>
 
           {aiRefreshError && (
@@ -713,97 +761,70 @@ export default function ParentWeeklyTablet() {
           {/* Content */}
           {!loading && !error && (
             <>
-              {/* AI 編輯室札記 */}
-              <View style={s.card}>
-                <View style={s.accentBar} />
-                <View style={s.cardInner}>
-                  <View style={s.aiEyebrowRow}>
-                    <SparkleIcon />
-                    <Text style={s.aiEyebrow}>AI · 編輯室札記</Text>
-                    <TouchableOpacity
-                      onPress={handleAiRefresh}
-                      disabled={aiRefreshing}
-                      style={[s.aiRefreshBtn, aiRefreshing && s.aiRefreshBtnLoading]}
-                    >
-                      {aiRefreshing
-                        ? <ActivityIndicator size="small" color={ParentColors.accent} />
-                        : <RefreshIcon size={11} />}
-                      <Text style={s.aiRefreshBtnLabel}>
-                        {aiRefreshing ? '生成中' : aiReady ? '重新生成' : '生成報告'}
-                      </Text>
-                    </TouchableOpacity>
+              <View style={s.summaryCard}>
+                <View style={s.statsHeaderRow}>
+                  <View>
+                    <Text style={s.eyebrow}>週報 · {weekRange}</Text>
+                    <Text style={s.sectionTitle}>本週整理</Text>
                   </View>
-                  <Text style={s.aiBody}>{aiInsight}</Text>
-                  <View style={s.aiFooter}>
-                    <Text style={s.aiFooterText}>{childName} · 週報 · {weekRange}</Text>
-                    <Text style={s.aiFooterText}>AI 觀察，供參考</Text>
-                  </View>
+                  <TouchableOpacity
+                    onPress={handleAiRefresh}
+                    disabled={aiRefreshing}
+                    style={[s.aiRefreshBtn, aiRefreshing && s.aiRefreshBtnLoading]}
+                  >
+                    {aiRefreshing
+                      ? <ActivityIndicator size="small" color={ParentColors.accent} />
+                      : <RefreshIcon size={11} />}
+                    <Text style={s.aiRefreshBtnLabel}>
+                      {aiRefreshing ? '生成中' : '重新產生摘要'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={s.summaryText}>{summaryText}</Text>
+                <View style={s.summaryFooter}>
+                  <Text style={s.aiFooterText}>{childName || '孩子'} · {weekLabel}</Text>
+                  <Text style={s.aiFooterText}>AI 整理 · 供參考</Text>
                 </View>
               </View>
 
-              {/* 本週數據 */}
               <View style={s.card}>
-                <View style={s.statsHeaderRow}>
-                  <View>
-                    <Text style={s.eyebrow}>本週數據</Text>
-                    <Text style={s.sectionTitle}>任務與幣值</Text>
-                  </View>
-                  <Text style={s.statsMeta}>
-                    完成 {overallDone} / {overallTotal} 件 · 結餘 {netCoin >= 0 ? '+' : ''}{netCoin} 幣
-                  </Text>
-                </View>
-
-                <View style={s.statsGrid}>
-                  {/* Col 1: overall completion */}
-                  <View style={s.statsColLeft}>
-                    <Text style={s.colEyebrow}>整體完成率</Text>
-                    <View style={s.ringRow}>
-                      <CompletionRing pct={overallPct} />
-                      <View>
-                        <Text style={s.ringPct}>{overallPct}%</Text>
-                        <Text style={s.ringMeta}>{overallDone} / {overallTotal} 件</Text>
-                      </View>
-                    </View>
-                    <View style={s.checkInsRow}>
-                      <Text style={s.checkInsNum}>{checkIns}</Text>
-                      <Text style={s.checkInsMeta}>次打卡 · {totalTasks} 個任務</Text>
-                    </View>
-                  </View>
-
-                  {/* Col 2: ABCD breakdown */}
-                  <View style={[s.statsCol, s.statsColBorder]}>
-                    <Text style={s.colEyebrow}>ABCD 分類</Text>
-                    <View style={s.catList}>
-                      {activity.map(bar => (
-                        <CategoryProgressRow key={bar.cat} bar={bar} />
-                      ))}
-                    </View>
-                  </View>
-
-                  {/* Col 3: coin flow */}
-                  <View style={[s.statsCol, s.statsColBorder]}>
-                    <Text style={s.colEyebrow}>幣值收支</Text>
-                    <View style={s.coinNetRow}>
-                      <Text style={[s.coinNet, { color: netCoin >= 0 ? ParentColors.success : ParentColors.error }]}>
-                        {netCoin >= 0 ? '+' : ''}{netCoin}
-                      </Text>
-                      <Text style={s.coinNetMeta}>幣 · 本週結餘</Text>
-                    </View>
-                    <View style={s.coinRows}>
-                      <CoinDeltaRow
-                        tone="in"
-                        label="收入"
-                        amount={coinFlow.income}
-                        note={`任務獎勵 × ${coinFlow.incomeFrom}`}
-                      />
-                      <CoinDeltaRow
-                        tone="out"
-                        label="支出"
-                        amount={coinFlow.spend}
-                        note={`兌換 × ${coinFlow.spendFrom}`}
-                      />
-                    </View>
-                  </View>
+                <Text style={s.sectionTitle}>本週紀錄概覽</Text>
+                {/* 本週投入分布 */}
+                <View style={s.metricGrid}>
+                  <MetricTile
+                    label="已記錄任務"
+                    value={`${recordedTasks} 件`}
+                    note="本週完成紀錄"
+                    icon={
+                      <IconBubble bg={ParentColors.tintLeaf}>
+                        <CheckSquareIcon size={18} color={ParentColors.leaf700} />
+                      </IconBubble>
+                    }
+                  />
+                  <MetricTile
+                    label="成長幣變化"
+                    value={`${netCoin >= 0 ? '+' : ''}${netCoin} 枚`}
+                    note="本週變化"
+                    tone={netCoin >= 0 ? 'green' : 'neutral'}
+                    icon={
+                      <IconBubble bg={ParentColors.tintGold}>
+                        <CoinIcon size={18} color={ParentColors.gold700} />
+                      </IconBubble>
+                    }
+                  />
+                  {timeSavedMin > 0 && (
+                    <MetricTile
+                      label="時間儲蓄"
+                      value={`+${timeSavedMin} 分鐘`}
+                      note="本週累積"
+                      tone="green"
+                      icon={
+                        <IconBubble bg={ParentColors.tintPine}>
+                          <ClockIcon size={18} color={ParentColors.pine400} />
+                        </IconBubble>
+                      }
+                    />
+                  )}
                 </View>
               </View>
 
@@ -831,70 +852,95 @@ export default function ParentWeeklyTablet() {
                 )}
               </View>
 
-              {/* 本週觀察 — always visible, pending state when AI not ready */}
               <View style={s.card}>
                 <View style={s.statsHeaderRow}>
                   <View>
-                    <Text style={s.eyebrow}>值得注意的模式</Text>
-                    <Text style={s.sectionTitle}>本週觀察</Text>
+                    <Text style={s.eyebrow}>親子回顧</Text>
+                    <Text style={s.sectionTitle}>這週值得一起回顧</Text>
                   </View>
-                  <Text style={s.statsMeta}>
-                    {aiReady && suggestions.length > 0
-                      ? `${suggestions.length} 項 · 每項附建議行動`
-                      : 'AI 生成中'}
-                  </Text>
                 </View>
-                {!aiReady && (
-                  <View style={s.obsPending}>
-                    <Text style={s.obsPendingText}>
-                      AI 觀察在週日深夜自動生成，或點擊「重新整理 AI」立即生成。
-                    </Text>
-                  </View>
-                )}
-                {aiReady && suggestions.length === 0 && (
-                  <View style={s.obsPending}>
-                    <Text style={s.obsPendingText}>本週節奏穩定，沒有需要特別關注的模式。</Text>
-                  </View>
-                )}
-                {aiReady && suggestions.length > 0 && (
-                  <View style={s.obsList}>
-                    {suggestions.map((sg, i) => (
-                      <ObservationCard key={i} sg={sg} />
-                    ))}
-                  </View>
-                )}
+                <View style={s.reviewPromptList}>
+                  {displayReviewPrompts.map((item, i) => (
+                    <ReviewPromptCard key={`${item.title}-${i}`} item={item} />
+                  ))}
+                </View>
               </View>
 
-              {/* 鼓勵話語 — always shown (pending affirmations or AI-generated) */}
-              {affirmations.length > 0 && (
-                <View style={s.affirmCard}>
-                  <View style={s.affirmHeader}>
-                    <SparkleIcon color={ParentColors.teal400} />
-                    <Text style={s.affirmEyebrow}>給孩子的話</Text>
-                    {!aiReady && <Text style={s.affirmPendingBadge}>每週固定</Text>}
-                  </View>
-                  <View style={s.affirmList}>
-                    {affirmations.map((a, i) => (
-                      <View key={i} style={[s.affirmItem, i > 0 && s.affirmItemBorder]}>
-                        <Text style={s.affirmText}>{a}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              )}
+              <DialogueCard childName={childName} dialoguePrompt={dialoguePrompt} aiReady={aiReady} />
 
-              {/* 成長亮點 */}
-              {moments.length > 0 && (
-                <View style={s.card}>
-                  <Text style={s.eyebrow}>成長紀錄</Text>
-                  <Text style={s.sectionTitle}>本週亮點</Text>
-                  <View style={s.momentList}>
-                    {moments.map(m => (
-                      <MomentItem key={m.id} moment={m} />
-                    ))}
+              <View style={s.card}>
+                <View style={s.statsHeaderRow}>
+                  <View>
+                    <Text style={s.eyebrow}>完整紀錄</Text>
+                    <Text style={s.sectionTitle}>查看完整紀錄</Text>
                   </View>
                 </View>
-              )}
+                <View style={s.recordTabs}>
+                  {['任務紀錄', '成長幣', '時間儲蓄', '獎勵兌換'].map((tab, i) => (
+                    <TouchableOpacity
+                      key={tab}
+                      onPress={() => setRecordTab(i)}
+                      style={[s.recordTab, i === recordTab && s.recordTabActive]}
+                    >
+                      <Text style={[s.recordTabText, i === recordTab && s.recordTabTextActive]}>{tab}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <View style={s.recordList}>
+                  {recordTab === 0 && (
+                    taskRecords.length > 0
+                      ? taskRecords.map(r => (
+                          <WeeklyRecordRow
+                            key={r.id}
+                            title={r.taskName}
+                            meta={r.status === 'flagged' ? `${r.dateLabel} · 待確認` : r.dateLabel}
+                            right={r.coinEarned > 0 ? `+${r.coinEarned} 枚` : undefined}
+                            rightTone="in"
+                          />
+                        ))
+                      : <RecordEmpty text="本週還沒有任務完成紀錄。" />
+                  )}
+                  {recordTab === 1 && (
+                    coinRecords.length > 0
+                      ? coinRecords.map(r => (
+                          <WeeklyRecordRow
+                            key={r.id}
+                            title={r.label}
+                            meta={r.dateLabel}
+                            right={`${r.isIncome ? '+' : '-'}${r.amount} 枚`}
+                            rightTone={r.isIncome ? 'in' : 'out'}
+                          />
+                        ))
+                      : <RecordEmpty text="本週沒有成長幣異動。" />
+                  )}
+                  {recordTab === 2 && (
+                    timeSavingRecords.length > 0
+                      ? timeSavingRecords.map(r => (
+                          <WeeklyRecordRow
+                            key={r.id}
+                            title={r.taskName}
+                            meta={`${r.dateLabel} · ${r.poolLabel}`}
+                            right={`+${r.minutes} 分鐘`}
+                            rightTone="in"
+                          />
+                        ))
+                      : <RecordEmpty text="本週沒有時間儲蓄紀錄。" />
+                  )}
+                  {recordTab === 3 && (
+                    redemptionRecords.length > 0
+                      ? redemptionRecords.map(r => (
+                          <WeeklyRecordRow
+                            key={r.id}
+                            title={r.name}
+                            meta={`${r.dateLabel} · ${r.status}`}
+                            right={`-${r.coinCost} 枚`}
+                            rightTone="out"
+                          />
+                        ))
+                      : <RecordEmpty text="本週沒有獎勵兌換紀錄。" />
+                  )}
+                </View>
+              </View>
             </>
           )}
         </ScrollView>
@@ -970,9 +1016,10 @@ const s = StyleSheet.create({
   },
   pageTitle: {
     fontFamily: ParentFonts.display,
-    fontSize: 26,
+    fontSize: ParentFontSizes.h1,
     fontWeight: ParentFontWeights.bold,
     color: ParentColors.fgPrimary,
+    letterSpacing: -0.5,
   },
   titleMeta: {
     fontFamily: ParentFonts.body,
@@ -1081,6 +1128,89 @@ const s = StyleSheet.create({
     padding: 24,
     overflow: 'hidden',
     ...ParentShadows.card,
+  },
+  summaryCard: {
+    backgroundColor: ParentColors.bgSurface,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.xl,
+    padding: 24,
+    overflow: 'hidden',
+    ...ParentShadows.card,
+  },
+  summaryText: {
+    fontFamily: ParentFonts.display,
+    fontSize: 18,
+    lineHeight: 31,
+    color: ParentColors.fgSecondary,
+  },
+  summaryFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 18,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: ParentColors.borderMedium,
+  },
+  weeklyOverviewGrid: {
+    flexDirection: 'row',
+    gap: 24,
+  },
+  weeklyMetricsCol: {
+    flex: 1.75,
+    minWidth: 0,
+  },
+  distributionCol: {
+    flex: 1,
+    minWidth: 260,
+    paddingLeft: 24,
+    borderLeftWidth: 1,
+    borderLeftColor: ParentColors.borderSoft,
+    gap: 16,
+  },
+  metricGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 14,
+  },
+  metricTile: {
+    flex: 1,
+    minWidth: 128,
+    padding: 14,
+    backgroundColor: ParentColors.bgSurface,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.md,
+  },
+  metricIconWrap: {
+    marginBottom: 12,
+  },
+  metricLabel: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgMuted,
+  },
+  metricValue: {
+    fontFamily: ParentFonts.display,
+    fontSize: 25,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgPrimary,
+    marginTop: 9,
+  },
+  metricValueGreen: {
+    color: ParentColors.success,
+  },
+  metricValueOrange: {
+    color: ParentColors.warn,
+  },
+  metricNote: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    color: ParentColors.fgMuted,
+    marginTop: 5,
   },
 
   // ── AI note card ──────────────────────────────────────────────────────────
@@ -1289,7 +1419,7 @@ const s = StyleSheet.create({
     fontFamily: ParentFonts.body,
     fontSize: 10,
     fontWeight: ParentFontWeights.bold,
-    color: '#fff',
+    color: ParentColors.fgSecondary,
   },
   catLabel: {
     fontFamily: ParentFonts.body,
@@ -1299,7 +1429,7 @@ const s = StyleSheet.create({
   },
   catCount: {
     fontFamily: ParentFonts.display,
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: ParentFontWeights.bold,
     color: ParentColors.fgPrimary,
   },
@@ -1317,13 +1447,14 @@ const s = StyleSheet.create({
     textAlign: 'right',
   },
   progressTrack: {
-    height: 3,
-    borderRadius: 2,
+    height: 5,
+    borderRadius: ParentRadii.pill,
+    backgroundColor: ParentColors.bgSurfaceWarm,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    borderRadius: 2,
+    borderRadius: ParentRadii.pill,
   },
 
   // Coin flow
@@ -1503,11 +1634,44 @@ const s = StyleSheet.create({
   },
   ltgGoalCard: {
     flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
     backgroundColor: ParentColors.bgSurface,
-    borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
-    borderRadius: ParentRadii.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: ParentColors.borderSoft,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
     overflow: 'hidden',
+  },
+  ltgGoalIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  ltgGoalIconText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 15,
+    fontWeight: ParentFontWeights.bold,
+  },
+  ltgGoalMain: {
+    flex: 1,
+    minWidth: 0,
+    gap: 5,
+  },
+  ltgMetaLine: {
+    fontFamily: ParentFonts.body,
+    fontSize: 13,
+    lineHeight: 20,
+    color: ParentColors.fgMuted,
+  },
+  ltgStableText: {
+    color: ParentColors.success,
+  },
+  ltgAdjustText: {
+    color: ParentColors.warn,
   },
   ltgGoalAccent: {
     width: 3,
@@ -1536,9 +1700,8 @@ const s = StyleSheet.create({
     fontWeight: ParentFontWeights.bold,
   },
   ltgTaskName: {
-    flex: 1,
     fontFamily: ParentFonts.body,
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: ParentFontWeights.semi,
     color: ParentColors.fgPrimary,
   },
@@ -1580,7 +1743,12 @@ const s = StyleSheet.create({
   ltgPct: {
     fontFamily: ParentFonts.body,
     fontSize: 12,
-    color: ParentColors.fgMuted,
+    color: ParentColors.success,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: ParentRadii.sm,
+    backgroundColor: ParentColors.teal50,
+    overflow: 'hidden',
   },
   ltgScoreDiff: {
     fontFamily: ParentFonts.body,
@@ -1589,13 +1757,22 @@ const s = StyleSheet.create({
     marginLeft: 'auto' as unknown as number,
   },
   ltgProgressTrack: {
-    height: 4,
-    borderRadius: 2,
+    width: 180,
+    height: 6,
+    borderRadius: ParentRadii.pill,
+    backgroundColor: ParentColors.bgSurfaceWarm,
     overflow: 'hidden',
   },
   ltgProgressFill: {
     height: '100%',
-    borderRadius: 2,
+    borderRadius: ParentRadii.pill,
+    backgroundColor: ParentColors.success,
+  },
+  ltgProgressArea: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flexShrink: 0,
   },
   ltgResponsibilityText: {
     fontFamily: ParentFonts.body,
@@ -1642,6 +1819,161 @@ const s = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
     color: ParentColors.fgMuted,
+  },
+  reviewPromptList: {
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.md,
+    overflow: 'hidden',
+  },
+  reviewPromptRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: ParentColors.borderSoft,
+    backgroundColor: ParentColors.bgSurface,
+  },
+  reviewPromptDot: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: ParentColors.teal50,
+    borderWidth: 1,
+    borderColor: ParentColors.teal100,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reviewPromptDotOrange: {
+    backgroundColor: '#FBF1DC',
+    borderColor: '#EFCDA6',
+  },
+  reviewPromptBody: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
+  },
+  reviewPromptTitle: {
+    fontFamily: ParentFonts.body,
+    fontSize: 15,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgPrimary,
+  },
+  reviewPromptText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 13,
+    lineHeight: 20,
+    color: ParentColors.fgSecondary,
+  },
+  dialogueCard: {
+    backgroundColor: ParentColors.bgSurface,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.xl,
+    padding: 24,
+    ...ParentShadows.card,
+  },
+  dialogueHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 14,
+  },
+  dialogueIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: ParentColors.teal50,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dialogueLabel: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    color: ParentColors.fgMuted,
+    marginBottom: 8,
+  },
+  dialogueText: {
+    fontFamily: ParentFonts.display,
+    fontSize: 16,
+    lineHeight: 28,
+    color: ParentColors.fgSecondary,
+  },
+  dialogueFootnote: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    color: ParentColors.fgMuted,
+    marginTop: 14,
+  },
+  recordTabs: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.pill,
+    overflow: 'hidden',
+    backgroundColor: ParentColors.bgSurfaceWarm,
+    marginBottom: 12,
+  },
+  recordTab: {
+    minWidth: 128,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  recordTabActive: {
+    backgroundColor: ParentColors.accent,
+  },
+  recordTabText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 13,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgMuted,
+  },
+  recordTabTextActive: {
+    color: '#fff',
+  },
+  recordList: {
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.md,
+    overflow: 'hidden',
+  },
+  recRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: ParentColors.borderSoft,
+    backgroundColor: ParentColors.bgSurface,
+  },
+  recMain: {
+    flex: 1,
+    minWidth: 0,
+    gap: 3,
+  },
+  recTitle: {
+    fontFamily: ParentFonts.body,
+    fontSize: 14,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgPrimary,
+  },
+  recMeta: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    color: ParentColors.fgMuted,
+  },
+  recRight: {
+    fontFamily: ParentFonts.display,
+    fontSize: 14,
+    fontWeight: ParentFontWeights.bold,
+    flexShrink: 0,
   },
   obsList: {
     gap: 12,

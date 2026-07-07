@@ -74,6 +74,7 @@ async function callGemini(prompt: string): Promise<string> {
 
 type GeminiInsightResult = {
   motivation_observation: string;
+  dialogue: string;
   suggestions: Array<{
     body: string;
     actionLabel: string;
@@ -109,6 +110,7 @@ ${catLines}
 請回傳 JSON（不含其他文字）：
 {
   "motivation_observation": "2-3句對孩子這週表現的觀察，語氣溫暖，提到具體行為",
+  "dialogue": "一段可以直接對孩子說出口的開場白（2-3句、60字內），用第一人稱『我』的口吻，先肯定這週看到的具體表現，再用一個開放式問題邀請孩子聊聊還沒開始或卡關的地方，語氣溫暖不說教",
   "suggestions": [
     {"body": "具體建議（40字內）", "actionLabel": "按鈕文字（5字內）", "action": "adjust_reminder"},
     {"body": "具體建議（40字內）", "actionLabel": "按鈕文字（5字內）", "action": "increase_difficulty"},
@@ -159,8 +161,15 @@ function computeFallbackInsight(ctx: WeeklyContext): GeminiInsightResult {
         ? `這週完成了 ${totalDone}/${totalTasks} 項任務，有進展但還有進步空間，可以聊聊卡關的地方。`
         : `這週完成了 ${totalDone}/${totalTasks} 項任務，比較吃力，建議找時間了解孩子這週遇到的狀況。`;
 
+  const dialogue = totalTasks === 0
+    ? '這週我們還沒開始記錄，我想聽聽看，有沒有你會想試試看的任務？我們可以一起挑一個。'
+    : completionRate >= 0.5
+      ? '這週我有看到你把好幾件事慢慢完成，這點很棒。想問問你，這週哪一件事做起來最順、哪一件比較卡？'
+      : '這週好像有點吃力，沒關係。我想聽你說說看，這週最難開始的是哪一段？我們一起想辦法。';
+
   return {
     motivation_observation,
+    dialogue,
     suggestions: [
       { body: '確認提醒時間是否符合孩子的作息，太早或太晚都容易被忽略。', actionLabel: '調整提醒', action: 'adjust_reminder' },
       { body: '如果任務常常很快完成，可以試著調高一點難度維持挑戰感。', actionLabel: '調整難度', action: 'increase_difficulty' },
@@ -300,6 +309,7 @@ async function processChild(
       ai_suggestions: {
         suggestions: insight.suggestions,
         affirmations: insight.affirmations,
+        dialogue: insight.dialogue ?? '',
         used_fallback: usedFallback,
       },
       task_adjustments: {

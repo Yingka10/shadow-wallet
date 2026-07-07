@@ -32,9 +32,7 @@ import {
 } from '../../../hooks/useLongTermTasks';
 import {
   useParentRedemption,
-  type RedemptionRequest,
   type ChildWishItem,
-  getAiResult,
 } from '../../../hooks/useParentRedemption';
 import {
   parentMarkTask,
@@ -65,6 +63,7 @@ import {
   SunIcon,
   BellIcon,
   ChevronDownIcon,
+  ChartNavIcon,
   RobotIcon,
   StarIcon,
   SlidersIcon,
@@ -2143,13 +2142,6 @@ function XIcon({ size = 14, color = ParentColors.error }: { size?: number; color
   );
 }
 
-const PROPOSAL_REJECT_REASONS = [
-  '已經包含在原本任務裡',
-  '不符合家庭規則',
-  '想再和孩子討論',
-  '幣值建議不合理',
-];
-
 const WISH_REJECT_REASONS = [
   '幣值設定太高',
   '想再和孩子討論',
@@ -2157,7 +2149,7 @@ const WISH_REJECT_REASONS = [
   '這個時間點不適合',
 ];
 
-// ── 兌換待審 card ──
+// ── 願望核准 card ──
 
 function WishApprovalCard({
   wish,
@@ -2231,7 +2223,7 @@ function WishApprovalCard({
     <View style={styles.reqCard}>
       <View style={styles.reqTopRow}>
         <View style={styles.reqIllust}>
-          <Illustration kind="rewardChest" size={68} />
+          <Illustration kind="rewardChest" size={52} />
         </View>
         <View style={styles.reqBody}>
           <Text style={styles.reqTitle} numberOfLines={1}>{wish.name}</Text>
@@ -2265,7 +2257,7 @@ function WishApprovalCard({
             disabled={submitting}
             activeOpacity={0.8}
           >
-            <Text style={styles.proposalRejectBtnText}>暫不處理</Text>
+            <Text style={styles.proposalRejectBtnText}>婉拒／調整</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -2295,194 +2287,28 @@ function WishApprovalCard({
   );
 }
 
-// ── 任務提案 card ──
-
-function RedemptionProposalCard({
-  request,
-  onApprove,
-  onReject,
-}: {
-  request: RedemptionRequest;
-  onApprove: (id: string, adjustedCoins?: number) => Promise<void>;
-  onReject: (id: string, note: string) => Promise<void>;
-}) {
-  const ai = getAiResult(request);
-  const [coinValue, setCoinValue] = useState(ai.suggestedCoins ?? request.coin_cost);
-  const [state, setState] = useState<'idle' | 'rejecting' | 'approved' | 'rejected'>('idle');
-  const [submitting, setSubmitting] = useState(false);
-
-  const handleApprove = async () => {
-    setSubmitting(true);
-    try {
-      await onApprove(request.id, coinValue);
-      setState('approved');
-    } catch {
-      // stay idle on error
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleReject = async (reason: string) => {
-    setSubmitting(true);
-    try {
-      await onReject(request.id, reason);
-      setState('rejected');
-    } catch {
-      // stay idle on error
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  if (state === 'approved') {
-    return (
-      <View style={[styles.proposalDoneCard, styles.proposalDoneApproved]}>
-        <CheckSmIcon size={18} color={ParentColors.success} />
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.proposalDoneTitle, { color: ParentColors.success }]}>
-            已同意 · 「{request.name}」
-          </Text>
-          <Text style={styles.proposalDoneMeta}>+{coinValue} 幣已入帳。</Text>
-        </View>
-      </View>
-    );
-  }
-
-  if (state === 'rejected') {
-    return (
-      <View style={[styles.proposalDoneCard, styles.proposalDoneRejected]}>
-        <XIcon size={18} color={ParentColors.error} />
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.proposalDoneTitle, { color: ParentColors.error }]}>
-            已拒絕 · 「{request.name}」
-          </Text>
-        </View>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.reqCard}>
-      <View style={styles.reqTopRow}>
-        <View style={styles.reqIllust}>
-          <Illustration kind="rewardChest" size={68} />
-        </View>
-        <View style={styles.reqBody}>
-          <Text style={styles.reqTitle} numberOfLines={1}>{request.name}</Text>
-          <Text style={styles.reqMeta}>
-            兌換申請 · {dayjs(request.created_at).format('M/D HH:mm')}
-          </Text>
-          <Text style={[styles.reqAi, ai.verdict === 'high' && styles.reqAiWarn]} numberOfLines={1}>
-            ✦ AI：{ai.reason}
-          </Text>
-        </View>
-        <View style={styles.reqPrice}>
-          <Text style={styles.reqPriceNum}>{coinValue}</Text>
-          <Text style={styles.reqPriceUnit}>幣</Text>
-        </View>
-      </View>
-
-      {request.description ? (
-        <View style={styles.proposalKidNote}>
-          <Text style={styles.proposalKidNoteText}>「{request.description}」</Text>
-        </View>
-      ) : null}
-
-      <View style={styles.proposalCoinRow}>
-        <Text style={styles.proposalCoinLabel}>建議幣值</Text>
-        <View style={styles.proposalCoinInputWrap}>
-          <CoinSmIcon size={14} />
-          <TextInput
-            style={styles.proposalCoinInput}
-            value={String(coinValue)}
-            onChangeText={v => {
-              const n = parseInt(v, 10);
-              if (!isNaN(n) && n >= 0) setCoinValue(n);
-              else if (v === '') setCoinValue(0);
-            }}
-            keyboardType="number-pad"
-            maxLength={4}
-          />
-          <Text style={styles.proposalCoinUnit}>成長幣</Text>
-        </View>
-      </View>
-
-      {state === 'idle' && (
-        <View style={styles.proposalActions}>
-          <TouchableOpacity
-            style={[styles.proposalApproveBtn, submitting && { opacity: 0.5 }]}
-            onPress={() => void handleApprove()}
-            disabled={submitting}
-            activeOpacity={0.8}
-          >
-            <CheckSmIcon size={13} color="#fff" />
-            <Text style={styles.proposalApproveBtnText}>加入獎勵清單</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.proposalRejectBtn, submitting && { opacity: 0.5 }]}
-            onPress={() => setState('rejecting')}
-            disabled={submitting}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.proposalRejectBtnText}>暫不處理</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {state === 'rejecting' && (
-        <View style={styles.rejectPanel}>
-          <Text style={styles.rejectPanelTitle}>選擇拒絕原因</Text>
-          <View style={styles.rejectReasonList}>
-            {PROPOSAL_REJECT_REASONS.map(r => (
-              <TouchableOpacity
-                key={r}
-                style={[styles.rejectReasonBtn, submitting && { opacity: 0.5 }]}
-                onPress={() => void handleReject(r)}
-                disabled={submitting}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.rejectReasonText}>{r}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          <TouchableOpacity onPress={() => setState('idle')} style={styles.rejectCancelBtn}>
-            <Text style={styles.rejectCancelText}>取消</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-    </View>
-  );
-}
-
 // ── Right column panel ──
 
 /**
  * 申請審核 —— 家長的唯一決策主場（鎖定樣式＝提案 artifact「THE parent decision surface」）。
- * 呼叫端已把 pendingRequests/childWishes 過濾到目前選中的孩子；這裡純渲染 req-card 清單，
+ * 呼叫端已把 childWishes 過濾到目前選中的孩子；這裡純渲染 req-card 清單，
  * 不再有自己的大標題/子區塊 chrome（標題由呼叫端的「有 N 件申請等你」負責）。
  */
 function PendingItemsPanel({
-  pendingRequests,
   childWishes,
-  approveRequest,
-  rejectRequest,
   approveChildWish,
   childName,
 }: {
-  pendingRequests: RedemptionRequest[];
   childWishes: ChildWishItem[];
-  approveRequest: (id: string, adjustedCoins?: number) => Promise<void>;
-  rejectRequest: (id: string, note: string) => Promise<void>;
   approveChildWish: (id: string) => Promise<void>;
   childName: string;
 }) {
   const pendingWishes = childWishes.filter(w => !w.parent_approved);
 
-  if (pendingWishes.length === 0 && pendingRequests.length === 0) {
+  if (pendingWishes.length === 0) {
     return (
       <View style={styles.reqEmpty}>
-        <Text style={styles.reqEmptyText}>目前沒有申請，孩子的兌換/願望申請會出現在這裡</Text>
+        <Text style={styles.reqEmptyText}>目前沒有申請，孩子的願望申請會出現在這裡</Text>
       </View>
     );
   }
@@ -2491,14 +2317,6 @@ function PendingItemsPanel({
     <View>
       {pendingWishes.map(w => (
         <WishApprovalCard key={w.id} wish={w} onApprove={approveChildWish} childName={childName} />
-      ))}
-      {pendingRequests.map(req => (
-        <RedemptionProposalCard
-          key={req.id}
-          request={req}
-          onApprove={approveRequest}
-          onReject={rejectRequest}
-        />
       ))}
     </View>
   );
@@ -2510,10 +2328,63 @@ const ADVISOR_PROMPTS: { icon: React.ReactElement; text: (name: string) => strin
   { icon: <GiftLineIcon size={14} color={ParentColors.clay500} />, text: () => '這個獎勵目標適合設定多少幣？' },
 ];
 
+function InfoDotIcon({ size = 13, color = ParentColors.fgMuted }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={1.8} />
+      <Path d="M12 11v5.5" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Circle cx={12} cy={7.6} r={1.1} fill={color} />
+    </Svg>
+  );
+}
+
+function BanIcon({ size = 15, color = ParentColors.fgSecondary }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={1.8} />
+      <Path d="M6.5 6.5l11 11" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/** 依目前已載入的長期挑戰／今日任務狀況組出一段誠實、以真實資料為本的重點整理（非開放式 LLM 對話）。 */
+export function buildAdvisorReply({
+  childName,
+  ltItems,
+  doneToday,
+  totalToday,
+}: {
+  childName: string;
+  ltItems: LongTermTaskItem[];
+  doneToday: number;
+  totalToday: number;
+}): string {
+  const active = ltItems.filter(i => i.progressPct < 100);
+  const started = [...active].filter(i => i.progressPct > 0).sort((a, b) => b.progressPct - a.progressPct);
+  const notStarted = active.filter(i => i.progressPct === 0);
+
+  const lines: string[] = [];
+  lines.push(
+    totalToday > 0
+      ? `整體來看，${childName}今天完成了 ${doneToday}/${totalToday} 項任務。`
+      : `整體來看，${childName}最近的紀錄還在累積中。`,
+  );
+
+  if (started[0]) {
+    lines.push(`「${started[0].name}」持續進行中，維持得不錯 ✨`);
+  }
+
+  if (notStarted[0]) {
+    lines.push(`需要留意的是「${notStarted[0].name}」還沒開始，可以找個時間陪${childName}一起啟動看看。`);
+  }
+
+  lines.push(`我會持續關注${childName}的紀錄，有新的進展再告訴你！`);
+  return lines.join('\n\n');
+}
+
 /**
  * AI 教養顧問 —— 右欄的主要內容（鎖定樣式＝ .t-ask），取代原本的「本週統計」。
- * 目前沒有開放式問答的後端端點（aiAgent.ts 只有分類/幣值建議等窄用途函式），
- * 所以先做視覺骨架＋誠實的「即將推出」提示，不假裝已經能對話。
+ * 點快捷提問／輸入框會帶著問題文字打開 AdvisorSideSheet 展開對話。
  */
 function AdvisorPanel({
   childName,
@@ -2522,7 +2393,7 @@ function AdvisorPanel({
 }: {
   childName: string;
   onOpenWeekly: () => void;
-  onOpenAdvisor: () => void;
+  onOpenAdvisor: (prompt?: string) => void;
 }) {
   return (
     <View style={styles.advisorCard}>
@@ -2538,14 +2409,19 @@ function AdvisorPanel({
 
       <View style={styles.advisorPrompts}>
         {ADVISOR_PROMPTS.map((p, i) => (
-          <TouchableOpacity key={i} style={styles.advisorPrompt} onPress={onOpenAdvisor} activeOpacity={0.7}>
+          <TouchableOpacity
+            key={i}
+            style={styles.advisorPrompt}
+            onPress={() => onOpenAdvisor(p.text(childName))}
+            activeOpacity={0.7}
+          >
             {p.icon}
             <Text style={styles.advisorPromptText}>{p.text(childName)}</Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      <TouchableOpacity style={styles.advisorBox} onPress={onOpenAdvisor} activeOpacity={0.7}>
+      <TouchableOpacity style={styles.advisorBox} onPress={() => onOpenAdvisor()} activeOpacity={0.7}>
         <Text style={styles.advisorBoxText}>想問{childName}的什麼…</Text>
         <View style={styles.advisorSend}>
           <SendArrowIcon size={12} />
@@ -2559,51 +2435,143 @@ function AdvisorPanel({
   );
 }
 
+type AdvisorChatMessage = { role: 'parent' | 'ai'; text: string; at: string };
+
+/**
+ * 展開後的 AI 諮詢對話面板：頭像式訊息串＋快捷後續動作＋輸入框。
+ * 三個預設提問（ADVISOR_PROMPTS）用 buildAdvisorReply 依真實資料組回覆，
+ * 誠實但不是開放式 LLM——自由輸入的問題會得到同一份誠實整理，不假裝能回答任何問題。
+ */
 function AdvisorSideSheet({
   childName,
+  parentName,
+  initialPrompt,
+  ltItems,
+  doneToday,
+  totalToday,
   onClose,
   onOpenWeekly,
 }: {
   childName: string;
+  parentName: string;
+  initialPrompt?: string;
+  ltItems: LongTermTaskItem[];
+  doneToday: number;
+  totalToday: number;
   onClose: () => void;
   onOpenWeekly: () => void;
 }) {
-  const notReady = () => Alert.alert('AI 諮詢即將推出', '這裡之後會接上能看到任務與紀錄的教養顧問。');
+  const buildReply = useCallback(
+    () => buildAdvisorReply({ childName, ltItems, doneToday, totalToday }),
+    [childName, ltItems, doneToday, totalToday],
+  );
+
+  const [messages, setMessages] = useState<AdvisorChatMessage[]>(() =>
+    initialPrompt
+      ? [
+          { role: 'parent', text: initialPrompt, at: dayjs().format('HH:mm') },
+          { role: 'ai', text: buildReply(), at: dayjs().format('HH:mm') },
+        ]
+      : [],
+  );
+  const [input, setInput] = useState('');
+
+  const handleSend = () => {
+    const text = input.trim();
+    if (!text) return;
+    setInput('');
+    setMessages(prev => [
+      ...prev,
+      { role: 'parent', text, at: dayjs().format('HH:mm') },
+      { role: 'ai', text: buildReply(), at: dayjs().format('HH:mm') },
+    ]);
+  };
+
+  const notReady = () => Alert.alert('即將推出', '這個功能還在準備中。');
 
   return (
     <View style={styles.advisorSheetLayer} pointerEvents="box-none">
       <TouchableOpacity style={styles.advisorSheetScrim} onPress={onClose} activeOpacity={1} />
       <View style={styles.advisorSideSheet}>
-        <View style={styles.advisorSheetHeader}>
-          <View>
-            <Text style={styles.advisorSheetEyebrow}>情境感知顧問</Text>
-            <Text style={styles.advisorSheetTitle}>和 {childName} 的紀錄一起看</Text>
+        <View style={styles.chatHeader}>
+          <View style={styles.chatHeaderAvatar}>
+            <RobotIcon size={18} color={ParentColors.pine500} />
+          </View>
+          <View style={styles.chatHeaderText}>
+            <Text style={styles.chatHeaderTitle}>AI 教養顧問</Text>
+            <View style={styles.chatHeaderSubRow}>
+              <Text style={styles.chatHeaderSub} numberOfLines={1}>正在參考：{childName}｜本週任務與紀錄</Text>
+              <InfoDotIcon size={12} />
+            </View>
           </View>
           <TouchableOpacity style={styles.advisorSheetClose} onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={styles.advisorSheetCloseText}>×</Text>
+            <XIcon size={13} color={ParentColors.fgSecondary} />
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.advisorSheetCopy}>
-          我會優先參考目前畫面上的申請、長期挑戰與今天完成紀錄，再協助你決定要鼓勵、調整或暫緩。
-        </Text>
+        <ScrollView style={styles.chatScroll} contentContainerStyle={styles.chatScrollContent}>
+          {messages.length === 0 ? (
+            <Text style={styles.chatEmptyText}>想問{childName}的什麼都可以，我會依目前的紀錄幫你整理重點。</Text>
+          ) : (
+            messages.map((m, i) =>
+              m.role === 'parent' ? (
+                <View key={i} style={styles.chatParentRow}>
+                  <View style={styles.chatParentBubble}>
+                    <Text style={styles.chatParentText}>{m.text}</Text>
+                  </View>
+                  <View style={styles.chatParentAvatar}>
+                    <Text style={styles.chatParentAvatarText}>{(parentName || '家').charAt(0)}</Text>
+                  </View>
+                </View>
+              ) : (
+                <View key={i} style={styles.chatAiRow}>
+                  <View style={styles.chatAiAvatar}>
+                    <RobotIcon size={14} color={ParentColors.pine500} />
+                  </View>
+                  <View style={styles.chatAiBubble}>
+                    <Text style={styles.chatAiText}>{m.text}</Text>
+                  </View>
+                </View>
+              ),
+            )
+          )}
+        </ScrollView>
 
-        <View style={styles.advisorSheetPromptList}>
-          {[
-            '這個獎勵的成長幣值合適嗎？',
-            '今天有哪些任務值得先肯定？',
-            '這週任務節奏可以怎麼安排？',
-          ].map(prompt => (
-            <TouchableOpacity key={prompt} style={styles.advisorSheetPrompt} onPress={notReady} activeOpacity={0.75}>
-              <Text style={styles.advisorSheetPromptText}>{prompt}</Text>
-              <Chevron color={ParentColors.pine500} />
+        {messages.length > 0 && (
+          <View style={styles.chatActionList}>
+            <TouchableOpacity style={styles.chatActionRow} onPress={onOpenWeekly} activeOpacity={0.7}>
+              <ChartNavIcon size={15} color={ParentColors.fgSecondary} />
+              <Text style={styles.chatActionText}>查看相關紀錄</Text>
+              <Chevron color={ParentColors.ink300} />
             </TouchableOpacity>
-          ))}
-        </View>
+            <TouchableOpacity style={styles.chatActionRow} onPress={notReady} activeOpacity={0.7}>
+              <SlidersIcon size={15} color={ParentColors.fgSecondary} />
+              <Text style={styles.chatActionText}>調整任務建議</Text>
+              <Chevron color={ParentColors.ink300} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.chatActionRow} onPress={onClose} activeOpacity={0.7}>
+              <BanIcon size={15} color={ParentColors.fgSecondary} />
+              <Text style={styles.chatActionText}>忽略這則建議</Text>
+              <Chevron color={ParentColors.ink300} />
+            </TouchableOpacity>
+          </View>
+        )}
 
-        <TouchableOpacity style={styles.advisorSheetWeeklyBtn} onPress={onOpenWeekly} activeOpacity={0.75}>
-          <Text style={styles.advisorSheetWeeklyText}>查看週報脈絡</Text>
-        </TouchableOpacity>
+        <View style={styles.chatInputRow}>
+          <TextInput
+            style={styles.chatInput}
+            placeholder={`輸入想問${childName}的問題…`}
+            placeholderTextColor={ParentColors.fgMuted}
+            value={input}
+            onChangeText={setInput}
+            onSubmitEditing={handleSend}
+            returnKeyType="send"
+          />
+          <TouchableOpacity style={styles.chatSendBtn} onPress={handleSend} activeOpacity={0.8}>
+            <SendArrowIcon size={14} color="#fff" />
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.chatDisclaimer}>AI 建議僅供參考，實際教養請依孩子狀況調整。</Text>
       </View>
     </View>
   );
@@ -2714,6 +2682,7 @@ export default function ParentHomeTablet() {
   const [parentName, setParentName] = useState<string | null>(null);
   const [rightMode, setRightMode] = useState<'pending' | 'assign' | 'newTask'>('pending');
   const [advisorOpen, setAdvisorOpen] = useState(false);
+  const [advisorInitialPrompt, setAdvisorInitialPrompt] = useState<string | undefined>(undefined);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [accountMenuAnchor, setAccountMenuAnchor] = useState<{ top: number; right: number } | null>(null);
   const avatarRef = useRef<View>(null);
@@ -2759,10 +2728,7 @@ export default function ParentHomeTablet() {
   }, []);
 
   const {
-    pendingRequests,
     childWishes,
-    approveRequest,
-    rejectRequest,
     approveChildWish,
     fetchAll: refreshRedemption,
   } = useParentRedemption(familyId);
@@ -2869,8 +2835,7 @@ export default function ParentHomeTablet() {
   // 申請審核：過濾到目前選中的孩子（單一孩子視圖 — 全家彙總是之後的功能）
   const unapprovedWishes = childWishes.filter(w => !w.parent_approved);
   const childPendingWishes = unapprovedWishes.filter(w => w.child_id === childId);
-  const childPendingRequests = pendingRequests.filter(r => r.child_id === childId);
-  const childPendingCount = childPendingWishes.length + childPendingRequests.length;
+  const childPendingCount = childPendingWishes.length;
   const parentGreeting = buildParentGreeting({
     parentName,
     pendingCount: childPendingCount,
@@ -2883,9 +2848,7 @@ export default function ParentHomeTablet() {
   // 側欄徽章：每個孩子各自的待處理數量
   const pendingCounts: Record<string, number> = {};
   for (const c of allChildren) {
-    pendingCounts[c.id] =
-      unapprovedWishes.filter(w => w.child_id === c.id).length +
-      pendingRequests.filter(r => r.child_id === c.id).length;
+    pendingCounts[c.id] = unapprovedWishes.filter(w => w.child_id === c.id).length;
   }
 
   if (loading) {
@@ -2927,6 +2890,47 @@ export default function ParentHomeTablet() {
           onAddChild={handleAddChild}
         />
 
+        {/* ── 側欄之後的整個內容區 ── */}
+        <View style={styles.contentArea}>
+
+        {/* ── 頂部問候列：跨中欄＋右欄整個寬度，通知鈴鐺／家長頭像才會貼齊整個頁面的右邊界
+             （理想圖裡鈴鐺＋頭像在最外側，不是卡在中欄跟右欄中間）。 ── */}
+        <View style={[styles.pageHeader, { paddingTop: insets.top + 16 }]}>
+          <View style={styles.mainHeaderLeft}>
+            <View style={styles.mainHeaderDateRow}>
+              <Text style={styles.mainHeaderDate}>
+                {dayjs().format('M 月 D 日 dddd')} · {greetingLabel()}
+              </Text>
+              <SunIcon size={14} />
+            </View>
+            <Text style={styles.mainHeaderTitle}>{parentGreeting}</Text>
+          </View>
+          <View style={styles.headerActions}>
+            <TouchableOpacity style={styles.bellBtn} onPress={handleBellPress} activeOpacity={0.7}>
+              <BellIcon size={20} color={ParentColors.fgSecondary} />
+              {childPendingCount > 0 && (
+                <View style={styles.bellBadge}>
+                  <Text style={styles.bellBadgeText}>{childPendingCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              ref={avatarRef}
+              style={styles.avatarPill}
+              onPress={handleToggleAccountMenu}
+              activeOpacity={0.7}
+            >
+              <View style={styles.avatarCircle}>
+                <Text style={styles.avatarCircleText}>{(parentName ?? '家長').charAt(0)}</Text>
+              </View>
+              <Text style={styles.avatarName}>{parentName ?? '家長'}</Text>
+              <View style={accountMenuOpen ? styles.avatarChevronOpen : undefined}>
+                <ChevronDownIcon size={13} color={ParentColors.fgMuted} />
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* ── 中欄＋右欄的共同容器 ──
              mainAreaWrap 設 maxWidth，螢幕比設計寬很多（大平板/桌機瀏覽器）時不會無限撐開；
              justifyContent:'center' 讓兩欄一起在側欄之後的剩餘空間置中，
@@ -2939,46 +2943,9 @@ export default function ParentHomeTablet() {
         <View style={styles.mainAreaWrap}>
         <ScrollView
           style={[styles.mainArea, webMouseDraggableScroll]}
-          contentContainerStyle={[styles.mainContent, { paddingTop: insets.top + 16, paddingBottom: 40 }]}
+          contentContainerStyle={[styles.mainContent, { paddingTop: 4, paddingBottom: 40 }]}
           showsVerticalScrollIndicator={false}
         >
-          {/* ── 頂部問候列：日期問候＋大標｜通知鈴鐺＋家長頭像 ── */}
-          <View style={styles.mainHeader}>
-            <View style={styles.mainHeaderLeft}>
-              <View style={styles.mainHeaderDateRow}>
-                <Text style={styles.mainHeaderDate}>
-                  {dayjs().format('M 月 D 日 dddd')} · {greetingLabel()}
-                </Text>
-                <SunIcon size={14} />
-              </View>
-              <Text style={styles.mainHeaderTitle}>{parentGreeting}</Text>
-            </View>
-            <View style={styles.headerActions}>
-              <TouchableOpacity style={styles.bellBtn} onPress={handleBellPress} activeOpacity={0.7}>
-                <BellIcon size={20} color={ParentColors.fgSecondary} />
-                {childPendingCount > 0 && (
-                  <View style={styles.bellBadge}>
-                    <Text style={styles.bellBadgeText}>{childPendingCount}</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                ref={avatarRef}
-                style={styles.avatarPill}
-                onPress={handleToggleAccountMenu}
-                activeOpacity={0.7}
-              >
-                <View style={styles.avatarCircle}>
-                  <Text style={styles.avatarCircleText}>{(parentName ?? '家長').charAt(0)}</Text>
-                </View>
-                <Text style={styles.avatarName}>{parentName ?? '家長'}</Text>
-                <View style={accountMenuOpen ? styles.avatarChevronOpen : undefined}>
-                  <ChevronDownIcon size={13} color={ParentColors.fgMuted} />
-                </View>
-              </TouchableOpacity>
-            </View>
-          </View>
-
           {/* ── 待你確認 hero 卡（沒有待審就安靜帶過） ── */}
           {childPendingCount > 0 ? (
             <View style={styles.heroCard}>
@@ -2990,10 +2957,7 @@ export default function ParentHomeTablet() {
                 </View>
               </View>
               <PendingItemsPanel
-                pendingRequests={childPendingRequests}
                 childWishes={childPendingWishes}
-                approveRequest={approveRequest}
-                rejectRequest={rejectRequest}
                 approveChildWish={approveChildWish}
                 childName={nickname}
               />
@@ -3004,7 +2968,7 @@ export default function ParentHomeTablet() {
             </View>
           ) : (
             <View style={styles.reqEmpty}>
-              <Text style={styles.reqEmptyText}>目前沒有申請，孩子的兌換/願望申請會出現在這裡</Text>
+              <Text style={styles.reqEmptyText}>目前沒有申請，孩子的願望申請會出現在這裡</Text>
             </View>
           )}
 
@@ -3014,7 +2978,6 @@ export default function ParentHomeTablet() {
             doneToday={doneToday}
             totalToday={totalToday}
             weekTimeSavedMin={weekTimeSavedMin}
-            attentionCount={attentionCount}
           />
 
           <LongTermTaskCard
@@ -3040,7 +3003,7 @@ export default function ParentHomeTablet() {
         <View style={styles.rightColWrap}>
         <ScrollView
           style={[styles.rightCol, webMouseDraggableScroll]}
-          contentContainerStyle={[styles.rightColContent, { paddingTop: insets.top + 16, paddingBottom: 40 }]}
+          contentContainerStyle={[styles.rightColContent, { paddingTop: 4, paddingBottom: 40 }]}
           showsVerticalScrollIndicator={false}
         >
           {rightMode === 'newTask' ? (
@@ -3062,7 +3025,7 @@ export default function ParentHomeTablet() {
               <AdvisorPanel
                 childName={nickname}
                 onOpenWeekly={handleViewRecords}
-                onOpenAdvisor={() => setAdvisorOpen(true)}
+                onOpenAdvisor={(prompt) => { setAdvisorInitialPrompt(prompt); setAdvisorOpen(true); }}
               />
               <TipCard />
               <WeekDigestCard
@@ -3076,11 +3039,17 @@ export default function ParentHomeTablet() {
         </View>
 
         </View>
+        </View>
       </View>
       {advisorOpen && (
         <AdvisorSideSheet
           childName={nickname}
-          onClose={() => setAdvisorOpen(false)}
+          parentName={parentName ?? '家長'}
+          initialPrompt={advisorInitialPrompt}
+          ltItems={ltItems}
+          doneToday={doneToday}
+          totalToday={totalToday}
+          onClose={() => { setAdvisorOpen(false); setAdvisorInitialPrompt(undefined); }}
           onOpenWeekly={handleViewRecords}
         />
       )}
@@ -3140,6 +3109,11 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     width: '100%',
+  },
+  // 側欄之後的整個內容區：頂部問候列（跨滿寬）＋ 下面中欄/右欄的 contentCluster。
+  contentArea: {
+    flex: 1,
+    minWidth: 0,
   },
   // 中欄＋右欄的共同容器：側欄之後的剩餘空間；寬螢幕時讓兩欄一起置中，不無限拉寬中欄。
   contentCluster: {
@@ -3673,119 +3647,230 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'flex-end',
   },
+  // 理想圖裡展開後主欄／側欄都維持全亮，不像一般 modal 蓋一層暗色——
+  // scrim 只負責「點外面關閉」，不做視覺變暗。
   advisorSheetScrim: {
     position: 'absolute',
     top: 0,
     right: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: 'rgba(28, 27, 23, 0.16)',
+    backgroundColor: 'transparent',
   },
   advisorSideSheet: {
     position: 'absolute',
     right: 0,
     top: 0,
     bottom: 0,
-    width: 380,
-    maxWidth: '42%',
-    minWidth: 360,
-    backgroundColor: ParentColors.bgRail,
+    width: 420,
+    maxWidth: '46%',
+    minWidth: 380,
+    backgroundColor: ParentColors.bgSurface,
     borderLeftWidth: 1,
     borderLeftColor: ParentColors.borderMedium,
-    paddingHorizontal: 24,
-    paddingTop: 30,
-    paddingBottom: 24,
-    gap: 18,
+    flexDirection: 'column',
     ...ParentShadows.card,
   },
-  advisorSheetHeader: {
+  // ── 對話面板頭：機器人頭像＋標題／副標｜關閉鈕 ──
+  chatHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'flex-start',
-    gap: 16,
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: ParentColors.borderSoft,
   },
-  advisorSheetEyebrow: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.eyebrow,
-    fontWeight: ParentFontWeights.bold,
-    color: ParentColors.fgMuted,
-    letterSpacing: 0,
-  },
-  advisorSheetTitle: {
-    fontFamily: ParentFonts.display,
-    fontSize: ParentFontSizes.h3,
-    fontWeight: ParentFontWeights.black,
-    color: ParentColors.fgPrimary,
-    marginTop: 4,
-  },
-  advisorSheetClose: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  chatHeaderAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: ParentColors.tintPine,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: ParentColors.bgSurface,
-    borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
+    flexShrink: 0,
   },
-  advisorSheetCloseText: {
+  chatHeaderText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  chatHeaderTitle: {
     fontFamily: ParentFonts.body,
-    fontSize: 20,
-    lineHeight: 22,
-    color: ParentColors.fgSecondary,
+    fontSize: ParentFontSizes.base,
+    fontWeight: ParentFontWeights.black,
+    color: ParentColors.fgPrimary,
   },
-  advisorSheetCopy: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.sm,
-    lineHeight: 22,
-    color: ParentColors.fgSecondary,
-  },
-  advisorSheetPromptList: {
-    gap: 10,
-  },
-  advisorSheetPrompt: {
-    minHeight: 48,
+  chatHeaderSubRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 12,
+    gap: 5,
+    marginTop: 2,
+  },
+  chatHeaderSub: {
+    flexShrink: 1,
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+  },
+  advisorSheetClose: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: ParentColors.bgCanvas,
     borderWidth: 1,
     borderColor: ParentColors.borderSoft,
-    backgroundColor: ParentColors.bgSurface,
+    flexShrink: 0,
   },
-  advisorSheetPromptText: {
+  // ── 對話串 ──
+  chatScroll: {
+    flex: 1,
+  },
+  chatScrollContent: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    gap: 14,
+  },
+  chatEmptyText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    lineHeight: 20,
+    color: ParentColors.fgMuted,
+  },
+  chatParentRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  chatParentBubble: {
+    maxWidth: '78%',
+    backgroundColor: ParentColors.pine500,
+    borderRadius: 14,
+    borderBottomRightRadius: 4,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+  },
+  chatParentText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    lineHeight: 20,
+    color: '#fff',
+  },
+  chatParentAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: ParentColors.pine100,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  chatParentAvatarText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 11,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.pine500,
+  },
+  chatAiRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  chatAiAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: ParentColors.tintPine,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    marginTop: 2,
+  },
+  chatAiBubble: {
+    flex: 1,
+  },
+  chatAiText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    lineHeight: 21,
+    color: ParentColors.fgPrimary,
+  },
+  // ── 後續動作清單 ──
+  chatActionList: {
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    gap: 8,
+  },
+  chatActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    minHeight: 44,
+    paddingHorizontal: 14,
+    borderRadius: ParentRadii.md,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    backgroundColor: ParentColors.bgCanvas,
+  },
+  chatActionText: {
     flex: 1,
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.sm,
     fontWeight: ParentFontWeights.semi,
     color: ParentColors.fgPrimary,
   },
-  advisorSheetWeeklyBtn: {
-    alignSelf: 'flex-start',
-    marginTop: 'auto',
-    minHeight: 42,
-    paddingHorizontal: 18,
-    borderRadius: ParentRadii.md,
-    borderWidth: 1,
-    borderColor: ParentColors.pine500,
+  // ── 輸入框 ──
+  chatInputRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: ParentColors.bgSurface,
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 8,
+    borderTopWidth: 1,
+    borderTopColor: ParentColors.borderSoft,
   },
-  advisorSheetWeeklyText: {
+  chatInput: {
+    flex: 1,
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.sm,
-    fontWeight: ParentFontWeights.bold,
-    color: ParentColors.pine500,
+    color: ParentColors.fgPrimary,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: ParentRadii.pill,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    backgroundColor: ParentColors.bgCanvas,
+  },
+  chatSendBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: ParentColors.pine500,
+    flexShrink: 0,
+  },
+  chatDisclaimer: {
+    fontFamily: ParentFonts.body,
+    fontSize: 11,
+    color: ParentColors.fgMuted,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+    paddingBottom: 14,
   },
   // ── 主欄標頭：日期問候＋大標｜鈴鐺＋家長頭像 ──
-  mainHeader: {
+  // 跨中欄＋右欄整個寬度的問候列：左邊對齊中欄左緣，右邊（鈴鐺／頭像）對齊右欄右緣。
+  pageHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 16,
-    marginBottom: 4,
+    paddingLeft: ParentSpacing.cardPadLg,
+    paddingRight: 16,
+    paddingBottom: 16,
   },
   mainHeaderLeft: {
     flex: 1,
@@ -3806,9 +3891,9 @@ const styles = StyleSheet.create({
   },
   mainHeaderTitle: {
     fontFamily: ParentFonts.display,
-    fontSize: 24,
-    fontWeight: ParentFontWeights.black,
-    letterSpacing: 0,
+    fontSize: ParentFontSizes.h1,
+    fontWeight: ParentFontWeights.bold,
+    letterSpacing: -0.5,
     color: ParentColors.fgPrimary,
   },
   headerActions: {
@@ -3939,10 +4024,10 @@ const styles = StyleSheet.create({
   // ── 待你確認 hero 卡 ──
   heroCard: {
     backgroundColor: ParentColors.bgHero,
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: ParentColors.borderMedium,
-    padding: 18,
+    padding: 14,
     ...ParentShadows.card,
     shadowOpacity: 0.055,
     shadowRadius: 18,
@@ -3951,11 +4036,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   heroEyebrow: {
     fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.pMeta,
+    fontSize: ParentFontSizes.xs,
     fontWeight: ParentFontWeights.bold,
     color: ParentColors.amber700,
   },
@@ -3966,7 +4051,7 @@ const styles = StyleSheet.create({
   },
   heroBalanceNum: {
     fontFamily: ParentFonts.display,
-    fontSize: 20,
+    fontSize: 17,
     fontWeight: ParentFontWeights.black,
     color: ParentColors.gold700,
     fontVariant: ['tabular-nums'],
@@ -4012,7 +4097,7 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     borderColor: 'transparent',
     padding: 0,
-    marginBottom: 10,
+    marginBottom: 8,
     ...ParentShadows.card,
     shadowOpacity: 0,
     shadowRadius: 0,
@@ -4021,11 +4106,11 @@ const styles = StyleSheet.create({
   reqTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 13,
+    gap: 10,
   },
   reqIllust: {
-    width: 74,
-    height: 74,
+    width: 58,
+    height: 58,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
@@ -4036,7 +4121,7 @@ const styles = StyleSheet.create({
   },
   reqTitle: {
     fontFamily: ParentFonts.body,
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: ParentFontWeights.black,
     color: ParentColors.fgPrimary,
   },
@@ -4145,12 +4230,12 @@ const styles = StyleSheet.create({
   // ── Shared action buttons ──
   proposalActions: {
     flexDirection: 'row',
-    gap: 12,
-    marginTop: 12,
+    gap: 10,
+    marginTop: 10,
   },
   proposalApproveBtn: {
     flex: 7,
-    minHeight: 44,
+    minHeight: 38,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -4167,7 +4252,7 @@ const styles = StyleSheet.create({
   },
   proposalRejectBtn: {
     flex: 3,
-    minHeight: 44,
+    minHeight: 38,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 14,
