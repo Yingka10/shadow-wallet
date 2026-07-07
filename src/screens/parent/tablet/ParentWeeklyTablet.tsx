@@ -16,8 +16,10 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import type { StackNavigationProp } from '@react-navigation/stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import type { RootStackParamList } from '../../../../App';
 import { useSelectedChild } from '../../../context/SelectedChildContext';
 import {
   useParentWeeklyReport,
@@ -39,7 +41,9 @@ import {
   ParentFontSizes,
   ParentFontWeights,
 } from '../../../constants/parentTheme';
+import { webTabletScreen } from '../../../constants/webStyles';
 import type { TaskCategory } from '../../../types/database';
+import { ParentSidebar, type ManageSection } from './ParentSidebar';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -515,10 +519,31 @@ function MonthlyView({ childId }: { childId: string }) {
 export default function ParentWeeklyTablet() {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
   const { childId, allChildren, setSelectedChild, loadingChildren } = useSelectedChild();
   const [view, setView] = useState<ReportView>('weekly');
   const [aiRefreshing, setAiRefreshing] = useState(false);
   const [aiRefreshError, setAiRefreshError] = useState<string | null>(null);
+
+  const handleNavigateHome = useCallback(() => {
+    navigation.navigate('Dashboard' as never);
+  }, [navigation]);
+
+  const handleNavigateManage = useCallback((section?: ManageSection | 'settings') => {
+    if (section === 'settings') {
+      navigation.navigate('ParentSettings');
+      return;
+    }
+    if (section) {
+      (navigation.navigate as (name: string, params?: object) => void)('Manage', { initialSection: section });
+      return;
+    }
+    navigation.navigate('Manage' as never);
+  }, [navigation]);
+
+  const handleAddChild = useCallback(() => {
+    navigation.navigate('AddChild');
+  }, [navigation]);
 
   const {
     childName, weekLabel, weekRange,
@@ -569,7 +594,20 @@ export default function ParentWeeklyTablet() {
   const netCoin      = coinFlow.income - coinFlow.spend;
 
   return (
-    <View style={[s.root, { paddingTop: insets.top }]}>
+    <View style={webTabletScreen}>
+    <View style={s.columns}>
+      <ParentSidebar
+        activeTab="weekly"
+        allChildren={allChildren}
+        childId={childId}
+        setSelectedChild={setSelectedChild}
+        pendingCounts={{}}
+        onNavigateHome={handleNavigateHome}
+        onNavigateWeekly={() => {}}
+        onNavigateManage={handleNavigateManage}
+        onAddChild={handleAddChild}
+      />
+    <View style={[s.root, s.mainAreaWrap, { paddingTop: insets.top }]}>
 
       {/* ── Page header ──────────────────────────────────────────────────── */}
       <View style={s.header}>
@@ -584,22 +622,6 @@ export default function ParentWeeklyTablet() {
         </View>
 
         <View style={s.headerControls}>
-          {allChildren.length > 1 && (
-            <View style={s.segPill}>
-              {allChildren.map(c => (
-                <TouchableOpacity
-                  key={c.id}
-                  onPress={() => setSelectedChild(c)}
-                  style={[s.segItem, c.id === childId && s.segItemActive]}
-                >
-                  <Text style={[s.segLabel, c.id === childId && s.segLabelActive]}>
-                    {c.nickname}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-
           <View style={s.segPill}>
             {VIEWS.map(v => (
               <TouchableOpacity
@@ -885,6 +907,8 @@ export default function ParentWeeklyTablet() {
       {view === 'history' && <PlaceholderView title="紀錄" />}
 
     </View>
+    </View>
+    </View>
   );
 }
 
@@ -893,6 +917,15 @@ export default function ParentWeeklyTablet() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
+  // 側欄 + 內容的橫向容器（共用 ParentSidebar，跟 ParentHomeTablet 同一套版面骨架）
+  columns: {
+    flex: 1,
+    flexDirection: 'row',
+    width: '100%',
+  },
+  mainAreaWrap: {
+    minWidth: 0,
+  },
   root: {
     flex: 1,
     backgroundColor: ParentColors.bgCanvas,

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Platform, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/colors';
@@ -59,9 +59,18 @@ const TABS: { id: TabId; label: string; Glyph: React.ComponentType<{ color: stri
  */
 export default function BottomNav({ activeTab = 'home', onTabPress }: BottomNavProps) {
   const insets = useSafeAreaInsets();
+  const isWeb = Platform.OS === 'web';
 
   return (
-    <View style={[styles.nav, { paddingBottom: 12 + Math.max(insets.bottom, 0) }]}>
+    <View
+      testID="bottom-nav"
+      style={[
+        styles.nav,
+        isWeb && styles.navWeb,
+        { paddingBottom: 12 + Math.max(insets.bottom, 0) },
+      ]}
+      accessibilityRole="tablist"
+    >
       {TABS.map(({ id, label, Glyph }) => {
         const isActive = activeTab === id;
         const color = isActive ? Colors.cta : Colors.ink300;
@@ -90,6 +99,13 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.hairline,
     paddingTop: 10,
+  },
+  navWeb: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 20,
   },
   tab: {
     flex: 1,

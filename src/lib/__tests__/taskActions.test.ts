@@ -199,11 +199,12 @@ describe('skillCoinsAreValid', () => {
 // helper: build a supabase from()-chain whose .single() resolves to `result`
 function makeReadChain(result: { data: unknown; error: unknown }) {
   const chain: Record<string, unknown> = {
-    select: () => chain,
-    eq:     () => chain,
-    gte:    () => chain,
-    lt:     () => chain,
-    single: () => Promise.resolve(result),
+    select:      () => chain,
+    eq:          () => chain,
+    gte:         () => chain,
+    lt:          () => chain,
+    maybeSingle: () => Promise.resolve(result),
+    single:      () => Promise.resolve(result),
   };
   return chain;
 }
@@ -251,14 +252,28 @@ describe('parentMarkTask', () => {
     ).rejects.toThrow('找不到家長帳號');
   });
 
-  it('throws when today completion is not found', async () => {
+  it('creates a parent completion when today completion is not found', async () => {
     mockRpc.mockResolvedValueOnce({ data: 'parent-uuid', error: null });
     mockFrom.mockReturnValueOnce(
-      makeReadChain({ data: null, error: { message: 'no rows' } }),
+      makeReadChain({ data: null, error: null }),
     );
+    mockFrom.mockReturnValueOnce(
+      makeInsertChain({ data: { id: 'completion-created', coin_earned: 0 }, error: null }),
+    );
+    mockFrom.mockReturnValueOnce(
+      makeInsertChain({ data: { id: 'override-1' }, error: null }),
+    );
+    mockFrom.mockReturnValueOnce(makeUpdateChain());
+
     await expect(
-      parentMarkTask('task-1', 'child-1', 'exceeded', 10, null),
-    ).rejects.toThrow('找不到今日完成紀錄');
+      parentMarkTask('task-1', 'child-1', 'exceeded', 0, null),
+    ).resolves.toBeUndefined();
+
+    expect(mockFrom).toHaveBeenCalledTimes(4);
+    expect(mockFrom).toHaveBeenNthCalledWith(1, 'task_completions');
+    expect(mockFrom).toHaveBeenNthCalledWith(2, 'task_completions');
+    expect(mockFrom).toHaveBeenNthCalledWith(3, 'overrides');
+    expect(mockFrom).toHaveBeenNthCalledWith(4, 'task_completions');
   });
 });
 

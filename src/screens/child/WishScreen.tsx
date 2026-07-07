@@ -19,6 +19,7 @@ import WishTreeComponent from '../../components/WishTreeComponent';
 import WishModalComponent from '../../components/WishModalComponent';
 import { CoinIcon } from '../../components/icons/TaskIcons';
 import { Colors } from '../../constants/colors';
+import { webMouseDraggableScroll, webScreen } from '../../constants/webStyles';
 import { supabase } from '../../lib/supabase';
 import { useWallet } from '../../hooks/useWallet';
 
@@ -371,11 +372,12 @@ export default function WishScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <GradientBackground />
+    <View style={webScreen}>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <GradientBackground />
 
-      {/* ── Hero 許願樹區 ───────────────────────────────────── */}
-      <View style={styles.heroSection}>
+        {/* ── Hero 許願樹區 ───────────────────────────────────── */}
+        <View style={styles.heroSection}>
         {/* 標題列 */}
         <View style={styles.heroHeader}>
           <Text style={styles.heroTitle}>✨ 許願樹</Text>
@@ -446,8 +448,8 @@ export default function WishScreen() {
 
         {/* 清單 */}
         <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
+          style={[styles.scroll, webMouseDraggableScroll]}
+          contentContainerStyle={[styles.scrollContent, styles.scrollContentWithNav]}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -492,14 +494,14 @@ export default function WishScreen() {
         </ScrollView>
       </View>
 
-      <BottomNav
-        activeTab="wish"
-        onTabPress={tab => {
-          if (tab === 'home') navigation.navigate('Home', { childId });
-          else if (tab === 'wallet') navigation.navigate('Wallet', { childId });
-          else if (tab === 'profile') navigation.navigate('Profile', { childId });
-        }}
-      />
+        <BottomNav
+          activeTab="wish"
+          onTabPress={tab => {
+            if (tab === 'home') navigation.navigate('Home', { childId });
+            else if (tab === 'wallet') navigation.navigate('Wallet', { childId });
+            else if (tab === 'profile') navigation.navigate('Profile', { childId });
+          }}
+        />
 
       <WishModalComponent
         visible={wishModalVisible}
@@ -507,7 +509,8 @@ export default function WishScreen() {
         onSubmit={handleWishModalSubmit}
         childNickname={child?.nickname ?? '小寶貝'}
       />
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 

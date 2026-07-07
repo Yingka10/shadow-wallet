@@ -18,6 +18,7 @@ import BottomNav from '../../components/BottomNav';
 import GradientBackground from '../../components/child/GradientBackground';
 import { CoinIcon } from '../../components/icons/TaskIcons';
 import { Colors } from '../../constants/colors';
+import { webMouseDraggableScroll, webScreen } from '../../constants/webStyles';
 import { supabase } from '../../lib/supabase';
 import { useWallet } from '../../hooks/useWallet';
 import type { Transaction } from '../../types/database';
@@ -202,12 +203,13 @@ export default function WalletScreen() {
   const isLoading = walletLoading || loadingLedger;
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <GradientBackground />
+    <View style={webScreen}>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <GradientBackground />
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
+        <ScrollView
+          style={[styles.scroll, webMouseDraggableScroll]}
+          contentContainerStyle={[styles.scrollContent, styles.scrollContentWithNav]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -304,15 +306,16 @@ export default function WalletScreen() {
         <View style={styles.bottomPad} />
       </ScrollView>
 
-      <BottomNav
-        activeTab="wallet"
-        onTabPress={tab => {
-          if (tab === 'home') navigation.navigate('Home', { childId });
-          else if (tab === 'wish') navigation.navigate('Wish', { childId });
-          else if (tab === 'profile') navigation.navigate('Profile', { childId });
-        }}
-      />
-    </SafeAreaView>
+        <BottomNav
+          activeTab="wallet"
+          onTabPress={tab => {
+            if (tab === 'home') navigation.navigate('Home', { childId });
+            else if (tab === 'wish') navigation.navigate('Wish', { childId });
+            else if (tab === 'profile') navigation.navigate('Profile', { childId });
+          }}
+        />
+      </SafeAreaView>
+    </View>
   );
 }
 
@@ -327,6 +330,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 20,
+  },
+  scrollContentWithNav: {
+    paddingBottom: 120,
   },
 
   // ── 頁標題 ──────────────────────────────────────────────────

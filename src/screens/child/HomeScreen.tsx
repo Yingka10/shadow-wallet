@@ -45,7 +45,7 @@ import { CoinIcon } from '../../components/icons/TaskIcons';
 import { completeTask, createChildTask } from '../../lib/taskActions';
 import { supabase } from '../../lib/supabase';
 import { Colors } from '../../constants/colors';
-import { webScreen } from '../../constants/webStyles';
+import { webMouseDraggableScroll, webScreen } from '../../constants/webStyles';
 import type { AgeGroup, Task } from '../../types/database';
 
 type HomeRoute = RouteProp<RootStackParamList, 'Home'>;
@@ -272,14 +272,21 @@ export default function HomeScreen() {
     async (completedDate: string) => {
       if (!modal.task) return;
       const task: Task = modal.task;
-      const result = await completeTask(
-        task.id,
-        childId,
-        completedDate,
-        isPrerequisiteMet,
-        task,
-        modal.task.goal?.id,
-      );
+      let result;
+      try {
+        result = await completeTask(
+          task.id,
+          childId,
+          completedDate,
+          isPrerequisiteMet,
+          task,
+          modal.task.goal?.id,
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '完成任務失敗';
+        Alert.alert('無法完成任務', msg);
+        return;
+      }
       closeModal();
       treePulse.value = withSequence(
         withTiming(1.05, { duration: 220 }),
@@ -319,8 +326,8 @@ export default function HomeScreen() {
         />
 
         <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
+          style={[styles.scroll, webMouseDraggableScroll]}
+          contentContainerStyle={[styles.scrollContent, styles.scrollContentWithNav]}
           refreshControl={
             <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={HOME.primaryGreen} />
           }
@@ -878,6 +885,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 16,
     paddingTop: 4,
+  },
+  scrollContentWithNav: {
+    paddingBottom: 120,
   },
   hero: {
     minHeight: 220,

@@ -4,12 +4,12 @@ import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { supabase } from '../lib/supabase';
 import { applyHabitResume } from '../lib/taskActions';
+import { taipeiDayRange } from '../lib/taipeiDate';
+import { isTaskDueToday } from '../lib/taskSchedule';
 import type { Task, LongTermGoal } from '../types/database';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
-
-const TZ = 'Asia/Taipei';
 
 export type TodayTask = Task & {
   isCompleted: boolean;
@@ -26,15 +26,6 @@ export type UseTodayTasksResult = {
   refresh: () => void;
 };
 
-function getTodayStr(): string {
-  return dayjs().tz(TZ).format('YYYY-MM-DD');
-}
-
-function isWeekendToday(): boolean {
-  const day = dayjs().tz(TZ).day(); // 0=Sun, 6=Sat
-  return day === 0 || day === 6;
-}
-
 export function useTodayTasks(childId: string): UseTodayTasksResult {
   const [weekdayTasks, setWeekdayTasks] = useState<TodayTask[]>([]);
   const [weekendTasks, setWeekendTasks] = useState<TodayTask[]>([]);
@@ -48,9 +39,6 @@ export function useTodayTasks(childId: string): UseTodayTasksResult {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const today = getTodayStr();
-      const weekend = isWeekendToday();
-
       // 1. Get task IDs assigned to this child
       const { data: childTaskRows, error: ctErr } = await supabase
         .from('child_tasks')
@@ -79,13 +67,17 @@ export function useTodayTasks(childId: string): UseTodayTasksResult {
       if (tErr) throw tErr;
       const tasks: Task[] = taskRows ?? [];
 
-      // 3. Fetch today's completions
+      // 3. Fetch today's completions.
+      // Compare against UTC-instant bounds of the Taipei calendar day — a bare
+      // 'YYYY-MM-DD' string is cast as UTC midnight, so completions made during
+      // Taipei 00:00–08:00 would be missed and the task never shows as done.
+      const { startIso, endIso } = taipeiDayRange();
       const { data: completionRows, error: cErr } = await supabase
         .from('task_completions')
         .select('task_id')
         .eq('child_id', childId)
-        .gte('completed_at', today)
-        .lt('completed_at', dayjs().tz(TZ).add(1, 'day').format('YYYY-MM-DD'));
+        .gte('completed_at', startIso)
+        .lt('completed_at', endIso);
 
       if (cErr) throw cErr;
       const completedIds = new Set((completionRows ?? []).map(r => r.task_id));
@@ -129,27 +121,11 @@ export function useTodayTasks(childId: string): UseTodayTasksResult {
         .filter(t => t.is_long_term)
         .map(t => ({ ...t, isCompleted: completedIds.has(t.id), goal: goalsByTaskId.get(t.id) }));
 
-      const todayWd = dayjs().tz(TZ).day(); // 0=Sun, 1=Mon, ..., 6=Sat
-
-      const matchesToday = (t: Task): boolean => {
-        switch (t.day_type) {
-          case 'both':    return true;
-          case 'weekday': return !weekend;
-          case 'weekend': return weekend;
-          case 'custom':  return (t.recurrence_days ?? []).includes(todayWd);
-          case 'once':    return true;
-          default:        return false;
-        }
-      };
-
-      // Hide tasks whose due_date has already passed
-      const notExpired = (t: Task): boolean =>
-        !t.due_date || t.due_date >= today;
-
+      // 今天該顯示的短期任務。判斷邏輯抽到 isTaskDueToday，與家長端今日總覽
+      // (useParentDashboard) 共用同一事實來源，避免兩邊清單再次漂移。
       const shortTermTasks = tasks
         .filter(t => !t.is_long_term)
-        .filter(notExpired)
-        .filter(matchesToday);
+        .filter(t => isTaskDueToday(t));
 
       // 'custom' and 'once' tasks appear in whichever section is relevant today.
       // Exclude 'weekend'-only tasks on weekdays and vice versa.

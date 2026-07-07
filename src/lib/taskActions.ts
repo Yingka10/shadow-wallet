@@ -2,6 +2,7 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { supabase } from './supabase';
+import { taipeiDayRange } from './taipeiDate';
 import type { Task, CheckpointRewards, OverrideType, SkillMilestone, CreateFamilyGoalInput } from '../types/database';
 
 dayjs.extend(utc);
@@ -38,9 +39,10 @@ export async function parentMarkTask(
   const { data: parentId, error: rpcError } = await supabase.rpc('my_parent_id');
   if (rpcError != null || parentId == null) throw new Error('找不到家長帳號');
 
-  // 2. Find today's completion for this task + child
-  const today    = dayjs().tz(TZ).format('YYYY-MM-DD');
-  const tomorrow = dayjs().tz(TZ).add(1, 'day').format('YYYY-MM-DD');
+  // 2. Find today's completion for this task + child.
+  // Taipei-day UTC bounds — a bare date string would be read as UTC midnight and
+  // miss a self-report the child made during Taipei 00:00–08:00.
+  const { startIso, endIso } = taipeiDayRange();
   const nowIso   = dayjs().tz(TZ).toISOString();
 
   let existingCompletion: { id: string; coin_earned: number } | null = null;
@@ -49,8 +51,8 @@ export async function parentMarkTask(
     .select('id, coin_earned')
     .eq('task_id', taskId)
     .eq('child_id', childId)
-    .gte('completed_at', today)
-    .lt('completed_at', tomorrow)
+    .gte('completed_at', startIso)
+    .lt('completed_at', endIso)
     .maybeSingle();
 
   if (found != null) {
@@ -358,18 +360,20 @@ export async function applyHabitResume(
   activeDays: number[] | null,
 ): Promise<void> {
   const yesterday = dayjs().tz(TZ).subtract(1, 'day');
-  const yesterdayStr = yesterday.format('YYYY-MM-DD');
   const yesterdayDow = yesterday.day(); // 0=Sun, 1=Mon, ..., 6=Sat
 
   if (!isActiveDayForHabit(yesterdayDow, activeDays)) return;
 
+  // Taipei-day UTC bounds for *yesterday* — bare date strings would read as UTC
+  // midnight and mis-window the "missed yesterday" check around Taipei 00:00–08:00.
+  const { startIso, endIso } = taipeiDayRange(yesterday);
   const { data: completions } = await supabase
     .from('task_completions')
     .select('id')
     .eq('task_id', taskId)
     .eq('child_id', childId)
-    .gte('completed_at', yesterdayStr)
-    .lt('completed_at', dayjs().tz(TZ).format('YYYY-MM-DD'))
+    .gte('completed_at', startIso)
+    .lt('completed_at', endIso)
     .limit(1);
 
   const missedYesterday = !completions || completions.length === 0;

@@ -1,7 +1,7 @@
 // Shadow Wallet · Parent Tablet — 管理頁
 // 三塊內容：任務庫設定 / 獎勵設定 / 兌換歷史 — 全部接真資料
 // Only renders when width >= 768.
-// selectedChildId 為本頁 local state，不依賴 SelectedChildContext。
+// 孩子選擇跟首頁/週報共用 SelectedChildContext（共用側欄 ParentSidebar 才切得動）。
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -16,11 +16,12 @@ import {
   Alert,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../../../../App';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../../lib/supabase';
+import { useSelectedChild } from '../../../context/SelectedChildContext';
 import { useParentTaskList, type TaskListItem } from '../../../hooks/useParentTaskList';
 import {
   useParentLongTermGoals,
@@ -41,6 +42,8 @@ import {
   ParentFontSizes,
   ParentFontWeights,
 } from '../../../constants/parentTheme';
+import { webTabletScreen } from '../../../constants/webStyles';
+import { ParentSidebar, type ManageSection } from './ParentSidebar';
 import dayjs from 'dayjs';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -169,15 +172,12 @@ function FlagIcon({ size = 13, color = ParentColors.fgMuted }: { size?: number; 
 // ManageHeader
 // ─────────────────────────────────────────────────────────────────────────────
 
+// 孩子切換已移到共用側欄（ParentSidebar），這裡只顯示目前孩子的標題資訊。
 function ManageHeader({
   selectedChild,
-  allChildren,
-  onPickChild,
   activeCount,
 }: {
   selectedChild: RedemptionChildInfo | null;
-  allChildren: RedemptionChildInfo[];
-  onPickChild: (id: string) => void;
   activeCount: number;
 }) {
   return (
@@ -193,24 +193,6 @@ function ManageHeader({
           {' 項任務'}
         </Text>
       </View>
-      {allChildren.length > 1 && (
-        <View style={s.childSwitcher}>
-          {allChildren.map((c) => {
-            const active = c.id === selectedChild?.id;
-            return (
-              <TouchableOpacity
-                key={c.id}
-                onPress={() => onPickChild(c.id)}
-                style={[s.childChip, active && s.childChipActive]}
-              >
-                <Text style={[s.childChipText, active && s.childChipTextActive]}>
-                  {c.nickname}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      )}
     </View>
   );
 }
@@ -359,13 +341,20 @@ function TaskLibrarySection({
   inactiveTasks,
   loading,
   onTaskPress,
+  forceExpanded,
 }: {
   tasks: TaskListItem[];
   inactiveTasks: TaskListItem[];
   loading: boolean;
   onTaskPress?: (task: TaskListItem) => void;
+  /** 首頁側欄「管理 > 任務管理」導來時強制展開一次 */
+  forceExpanded?: boolean;
 }) {
   const [expanded, toggle] = useExpandState('lib', false);
+  useEffect(() => {
+    if (forceExpanded && !expanded) toggle();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forceExpanded]);
 
   // Exclude long-term tasks — they're managed via the long-term section
   const regularTasks = tasks.filter((t) => !t.isLongTerm);
@@ -458,11 +447,18 @@ function RewardRow({ proposal, isLast }: { proposal: ParentProposal; isLast: boo
 function RewardListSection({
   proposals,
   loading,
+  forceExpanded,
 }: {
   proposals: ParentProposal[];
   loading: boolean;
+  /** 首頁側欄「管理 > 獎勵管理」導來時強制展開一次 */
+  forceExpanded?: boolean;
 }) {
   const [expanded, toggle] = useExpandState('rewards', false);
+  useEffect(() => {
+    if (forceExpanded && !expanded) toggle();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forceExpanded]);
   const summary = loading ? '' : `${proposals.length} 項`;
 
   return (
@@ -631,14 +627,21 @@ function LongTermManageSection({
   onPause,
   onResume,
   onDelete,
+  forceExpanded,
 }: {
   items: LongTermGoalItem[];
   loading: boolean;
   onPause: (goalId: string) => Promise<void>;
   onResume: (goalId: string) => Promise<void>;
   onDelete: (goalId: string, taskId: string) => Promise<void>;
+  /** 首頁側欄「管理 > 任務管理」導來時強制展開一次 */
+  forceExpanded?: boolean;
 }) {
   const [expanded, toggle] = useExpandState('lt', false);
+  useEffect(() => {
+    if (forceExpanded && !expanded) toggle();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forceExpanded]);
 
   const pausedCount = items.filter((it) => it.status === 'paused').length;
   const activeCount = items.length - pausedCount;
@@ -860,9 +863,40 @@ export default function ParentManageTablet() {
   const insets = useSafeAreaInsets();
 
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
+  const route = useRoute();
+  const initialSection = (route.params as { initialSection?: ManageSection } | undefined)?.initialSection;
+
+  const { childId: selectedChildId, allChildren, setSelectedChild } = useSelectedChild();
   const [familyId, setFamilyId] = useState<string | null>(null);
-  const [selectedChildId, setSelectedChildId] = useState<string | null>(null);
   const [historyVisible, setHistoryVisible] = useState(false);
+
+  const handleNavigateHome = useCallback(() => {
+    navigation.navigate('Dashboard' as never);
+  }, [navigation]);
+
+  const handleNavigateWeekly = useCallback(() => {
+    navigation.navigate('Weekly' as never);
+  }, [navigation]);
+
+  const handleNavigateManage = useCallback((section?: ManageSection | 'settings') => {
+    if (section === 'settings') {
+      navigation.navigate('ParentSettings');
+      return;
+    }
+    if (section) {
+      (navigation.navigate as (name: string, params?: object) => void)('Manage', { initialSection: section });
+      return;
+    }
+  }, [navigation]);
+
+  const handleAddChild = useCallback(() => {
+    navigation.navigate('AddChild');
+  }, [navigation]);
+
+  // 從首頁側欄「管理」子選單導來時，展開對應區塊一次（帳本紀錄＝開歷史彈窗）。
+  useEffect(() => {
+    if (initialSection === 'history') setHistoryVisible(true);
+  }, [initialSection]);
 
   useEffect(() => {
     async function loadFamily() {
@@ -885,17 +919,9 @@ export default function ParentManageTablet() {
   const {
     parentProposals,
     history,
-    children: allChildren,
     loading: redemptionLoading,
     fetchAll: refreshRedemption,
   } = useParentRedemption(familyId);
-
-  // Set first child once children are available
-  useEffect(() => {
-    if (selectedChildId === null && allChildren.length > 0) {
-      setSelectedChildId(allChildren[0].id);
-    }
-  }, [allChildren, selectedChildId]);
 
   const {
     tasks,
@@ -937,10 +963,23 @@ export default function ParentManageTablet() {
   if (width < 768) return null;
 
   const selectedChild = allChildren.find((c) => c.id === selectedChildId) ?? null;
-  const isTaskLoading = taskLoading || selectedChildId === null;
+  const isTaskLoading = taskLoading || selectedChildId === '';
 
   return (
-    <View style={[s.screen, { paddingBottom: insets.bottom }]}>
+    <View style={webTabletScreen}>
+    <View style={s.columns}>
+      <ParentSidebar
+        activeTab="manage"
+        allChildren={allChildren}
+        childId={selectedChildId}
+        setSelectedChild={setSelectedChild}
+        pendingCounts={{}}
+        onNavigateHome={handleNavigateHome}
+        onNavigateWeekly={handleNavigateWeekly}
+        onNavigateManage={handleNavigateManage}
+        onAddChild={handleAddChild}
+      />
+    <View style={[s.screen, s.mainAreaWrap, { paddingBottom: insets.bottom }]}>
       <HistoryModal
         visible={historyVisible}
         history={history}
@@ -950,8 +989,6 @@ export default function ParentManageTablet() {
       />
       <ManageHeader
         selectedChild={selectedChild}
-        allChildren={allChildren}
-        onPickChild={setSelectedChildId}
         activeCount={tasks.length}
       />
       <ScrollView
@@ -967,19 +1004,25 @@ export default function ParentManageTablet() {
               inactiveTasks={inactiveTasks}
               loading={isTaskLoading}
               onTaskPress={handleTaskPress}
+              forceExpanded={initialSection === 'tasks'}
             />
             <View style={s.colGap} />
             <LongTermManageSection
               items={longTermGoals}
-              loading={longTermLoading || selectedChildId === null}
+              loading={longTermLoading || selectedChildId === ''}
               onPause={pauseGoal}
               onResume={resumeGoal}
               onDelete={removeGoal}
+              forceExpanded={initialSection === 'tasks'}
             />
           </View>
           {/* 右欄 — 獎勵清單 + 兌換歷史入口 */}
           <View style={s.colRight}>
-            <RewardListSection proposals={parentProposals} loading={redemptionLoading} />
+            <RewardListSection
+              proposals={parentProposals}
+              loading={redemptionLoading}
+              forceExpanded={initialSection === 'rewards'}
+            />
             <View style={s.colGap} />
             <HistoryEntry
               history={history}
@@ -990,6 +1033,8 @@ export default function ParentManageTablet() {
         </View>
       </ScrollView>
     </View>
+    </View>
+    </View>
   );
 }
 
@@ -998,6 +1043,15 @@ export default function ParentManageTablet() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
+  // 側欄 + 內容的橫向容器（共用 ParentSidebar，跟 ParentHomeTablet 同一套版面骨架）
+  columns: {
+    flex: 1,
+    flexDirection: 'row',
+    width: '100%',
+  },
+  mainAreaWrap: {
+    minWidth: 0,
+  },
   screen: {
     flex: 1,
     backgroundColor: ParentColors.bgCanvas,

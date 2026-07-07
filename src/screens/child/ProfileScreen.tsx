@@ -14,7 +14,7 @@ import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../../../App';
 import { supabase } from '../../lib/supabase';
 import { Colors } from '../../constants/colors';
-import { webFullHeight } from '../../constants/webStyles';
+import { webFullHeight, webMouseDraggableScroll, webScreen } from '../../constants/webStyles';
 import BottomNav from '../../components/BottomNav';
 import { CheckIcon, CoinIcon, HourglassIcon, SparkleIcon, StarIcon, TargetIcon, WaveIcon } from '../../components/icons/TaskIcons';
 
@@ -201,11 +201,13 @@ export default function ProfileScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.safe, webFullHeight]} edges={['top']}>
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color={Colors.coral500} />
-        </View>
-      </SafeAreaView>
+      <View style={webScreen}>
+        <SafeAreaView style={[styles.safe, webFullHeight]} edges={['top']}>
+          <View style={styles.centerContainer}>
+            <ActivityIndicator size="large" color={Colors.coral500} />
+          </View>
+        </SafeAreaView>
+      </View>
     );
   }
 
@@ -235,12 +237,13 @@ export default function ProfileScreen() {
   ];
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
+    <View style={webScreen}>
+      <SafeAreaView style={[styles.safe, webFullHeight]} edges={['top']}>
+        <ScrollView
+          style={[styles.scroll, webMouseDraggableScroll]}
+          contentContainerStyle={[styles.content, styles.contentWithNav]}
+          showsVerticalScrollIndicator={false}
+        >
         <View style={styles.headerCard}>
           <View style={styles.headerMain}>
             <View style={styles.avatarWrap}>
@@ -414,22 +417,23 @@ export default function ProfileScreen() {
         </View>
       </ScrollView>
 
-      {/* Bottom Nav */}
-      <BottomNav
-        activeTab="profile"
-        onTabPress={tab => {
-          if (tab === 'home') {
-            navigation.navigate('Home', { childId });
-          } else if (tab === 'wallet') {
-            navigation.navigate('Wallet', { childId });
-          } else if (tab === 'wish') {
-            navigation.navigate('Wish', { childId });
-          } else if (tab !== 'profile') {
-            Alert.alert('功能開發中', '即將推出！');
-          }
-        }}
-      />
-    </SafeAreaView>
+        {/* Bottom Nav */}
+        <BottomNav
+          activeTab="profile"
+          onTabPress={tab => {
+            if (tab === 'home') {
+              navigation.navigate('Home', { childId });
+            } else if (tab === 'wallet') {
+              navigation.navigate('Wallet', { childId });
+            } else if (tab === 'wish') {
+              navigation.navigate('Wish', { childId });
+            } else if (tab !== 'profile') {
+              Alert.alert('功能開發中', '即將推出！');
+            }
+          }}
+        />
+      </SafeAreaView>
+    </View>
   );
 }
 
@@ -446,6 +450,9 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     paddingBottom: 110,
     gap: 14,
+  },
+  contentWithNav: {
+    paddingBottom: 140,
   },
   centerContainer: {
     flex: 1,

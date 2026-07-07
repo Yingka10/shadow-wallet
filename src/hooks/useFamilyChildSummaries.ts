@@ -1,13 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import dayjs from 'dayjs';
-import utc from 'dayjs/plugin/utc';
-import timezone from 'dayjs/plugin/timezone';
 import { supabase } from '../lib/supabase';
-
-dayjs.extend(utc);
-dayjs.extend(timezone);
-
-const TZ = 'Asia/Taipei';
+import { taipeiDayRange } from '../lib/taipeiDate';
 
 /** Per-child snapshot used by the dashboard sidebar roster. */
 export type ChildSummary = {
@@ -52,8 +45,9 @@ export function useFamilyChildSummaries(childIds: string[]): FamilyChildSummarie
         return;
       }
 
-      const today = dayjs().tz(TZ).format('YYYY-MM-DD');
-      const tomorrow = dayjs().tz(TZ).add(1, 'day').format('YYYY-MM-DD');
+      // Taipei-day UTC bounds so completions made during Taipei 00:00–08:00 are
+      // counted for today rather than being lost to a UTC-midnight cast.
+      const { startIso, endIso } = taipeiDayRange();
 
       // ── Batched queries across all children ────────────────────────────────
       const [ctRes, completionsRes, walletsRes] = await Promise.all([
@@ -61,8 +55,8 @@ export function useFamilyChildSummaries(childIds: string[]): FamilyChildSummarie
         supabase.from('task_completions')
           .select('child_id')
           .in('child_id', ids)
-          .gte('completed_at', today)
-          .lt('completed_at', tomorrow),
+          .gte('completed_at', startIso)
+          .lt('completed_at', endIso),
         supabase.from('wallets')
           .select('child_id, balance')
           .in('child_id', ids)

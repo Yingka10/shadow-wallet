@@ -8,8 +8,7 @@
  *   一律走 token；語義層（accent / bgSidebar / pending …）優先於原始色階。
  *
  * ── 三平面（家庭帳本 console 的骨架）───────────────────────────
- *   側欄 bgSidebar 暖松 #2C4A3D（品牌 + 孩子切換器）→ 中欄 bgMain 純白（決策主場）
- *   → 右欄 bgRail 石色 #F7F6F2（本週 + AI 教養顧問，純參考）。
+ *   側欄 bgSidebar 暖松 #2C4A3D（品牌 + 孩子切換器）→ 中欄/右欄極亮冷白紙色。
  *
  * ── 顏色紀律（別讓家長端變花）───────────────────────────────
  *   pine   主色 / 側欄 / 主要動作（送出鈕）。
@@ -100,23 +99,37 @@ export const ParentPalette = {
 export const ParentColors = {
   ...ParentPalette,
 
-  // 三平面
+  // 三平面（v14：中欄＋右欄同一張極亮冷白畫布，內容為白卡）
   bgSidebar:     '#2C4A3D',   // pine500 — 左側欄
-  bgMain:        '#FFFFFF',   // 中欄決策主場
-  bgRail:        '#F7F6F2',   // stone50 — 右欄
-  bgCanvas:      '#FFFFFF',   // = bgMain（相容舊名）
-  bgSurface:     '#FFFFFF',
-  bgSurfaceWarm: '#F7F6F2',   // 改指 stone50（原 ivory100）
+  bgMain:        '#FBFCFC',   // 極亮冷白紙色畫布
+  bgRail:        '#FBFCFC',   // 與中欄同畫布
+  bgCanvas:      '#FBFCFC',   // 統一畫布色
+  bgSurface:     '#FFFFFF',   // 截圖感白卡
+  bgSurfaceWarm: '#F8F4EB',   // 暖米色次要面
+  bgHero:        '#FFF7E8',   // 待你確認 hero 卡的淡蜂蜜色底
 
   // 側欄上的前景（深底反白）
   onSidebar:       '#FFFFFF',
   onSidebarMuted:  'rgba(255, 255, 255, 0.66)',
-  pickActiveBg:    'rgba(255, 255, 255, 0.14)',   // 側欄選中列的疊色（深底玻璃感，非拿去做別的用途）
+  onSidebarFaint:  'rgba(255, 255, 255, 0.45)',   // kicker / 子選單圓點
+  pickActiveBg:    'rgba(255, 255, 255, 0.14)',   // 孩子切換器選中列的疊色（白疊色，玻璃感）
+  navActiveBg:     'rgba(0, 0, 0, 0.30)',         // 主要功能選中列的疊色（深疊色，照理想圖「首頁」選中樣式）
+  sidebarHoverBg:  'rgba(255, 255, 255, 0.08)',   // 側欄非選中列的按壓/子選單底
+  sidebarCardBg:   'rgba(255, 255, 255, 0.10)',   // 側欄底部品牌卡底
+  sidebarDashed:   'rgba(255, 255, 255, 0.35)',   // 「＋ 新增孩子」虛線框
   pickAllAvatarBg: '#ECF2ED',   // 「全家」大頭貼底色（淺，跟孩子色系區分）
 
   // 申請審核卡（req-card）圖示底色 —— 兌換=gold、任務提案=green，別互換
   reqIconGold:  '#FBF0D9',
   reqIconGreen: '#EAF2E4',
+
+  // 圓底 icon tint（本週摘要四格 / 任務小 icon 的柔色圓圈；淡底＋對應深色前景）
+  tintGold:  '#FBF0D9',   // 成長幣（= reqIconGold，同源）
+  tintLeaf:  '#EAF2E4',   // 任務完成（= reqIconGreen，同源）
+  tintPine:  '#E3EBE6',   // 投入時間 / 一般
+  tintAmber: '#F7E8D4',   // 需要關注
+  tintClay:  '#F4E4DA',   // 任務 icon 輪替色 A
+  tintPlum:  '#EEE4EA',   // 任務 icon 輪替色 B
 
   // 前景（淺底）
   fgPrimary:   '#1C1B17',   // ink900
@@ -133,9 +146,9 @@ export const ParentColors = {
   done:    '#5E9A32',   // leaf500 — 只給已完成
 
   // 邊界
-  borderSoft:   'rgba(28, 27, 23, 0.07)',
-  borderMedium: 'rgba(28, 27, 23, 0.14)',
-  hairline:     'rgba(28, 27, 23, 0.10)',
+  borderSoft:   'rgba(92, 76, 45, 0.12)',
+  borderMedium: 'rgba(92, 76, 45, 0.18)',
+  hairline:     'rgba(92, 76, 45, 0.14)',
 
   // Status（相容舊名）
   success: '#5E9A32',   // = done

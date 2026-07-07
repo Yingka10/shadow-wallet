@@ -1,14 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import dayjs from 'dayjs';
-import utc from 'dayjs/plugin/utc';
-import timezone from 'dayjs/plugin/timezone';
 import { supabase } from '../lib/supabase';
+import { taipeiDayRange } from '../lib/taipeiDate';
 import type { Child, Task, TaskCategory } from '../types/database';
-
-dayjs.extend(utc);
-dayjs.extend(timezone);
-
-const TZ = 'Asia/Taipei';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -84,8 +77,9 @@ export function useParentTaskList(childId: string): ParentTaskListData {
     setLoading(true);
     setError(null);
     try {
-      const today    = dayjs().tz(TZ).format('YYYY-MM-DD');
-      const tomorrow = dayjs().tz(TZ).add(1, 'day').format('YYYY-MM-DD');
+      // Taipei-day UTC bounds — a bare 'YYYY-MM-DD' would be read as UTC midnight
+      // and miss completions made during Taipei 00:00–08:00.
+      const { startIso, endIso } = taipeiDayRange();
 
       // ── Round 1: parallel ─────────────────────────────────────────────────
       const [childRes, ctRes, completionsRes] = await Promise.all([
@@ -95,8 +89,8 @@ export function useParentTaskList(childId: string): ParentTaskListData {
         supabase.from('task_completions')
           .select('task_id')
           .eq('child_id', childId)
-          .gte('completed_at', today)
-          .lt('completed_at', tomorrow),
+          .gte('completed_at', startIso)
+          .lt('completed_at', endIso),
       ]);
 
       if (childRes.error) throw childRes.error;

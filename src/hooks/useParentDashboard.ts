@@ -4,6 +4,8 @@ import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { supabase } from '../lib/supabase';
 import { calcCoin } from '../lib/taskActions';
+import { taipeiDayRange } from '../lib/taipeiDate';
+import { isTaskDueToday } from '../lib/taskSchedule';
 import type { Child, Task, TaskCategory } from '../types/database';
 
 dayjs.extend(utc);
@@ -37,6 +39,8 @@ export type ParentDashboardData = {
   child: Child | null;
   spendingBalance: number;
   weekCoinDelta: number;
+  /** 本週（近 7 天）時間儲蓄累計，供首頁「本週摘要」使用 */
+  weekTimeSavedMin: number;
   timeSavedUnredeemedMin: number;
   timeSavedAllMin: number;
   goal: DashboardGoal | null;
@@ -114,6 +118,7 @@ export function useParentDashboard(childId: string): ParentDashboardData {
   const [child, setChild] = useState<Child | null>(null);
   const [spendingBalance, setSpendingBalance] = useState(0);
   const [weekCoinDelta, setWeekCoinDelta] = useState(0);
+  const [weekTimeSavedMin, setWeekTimeSavedMin] = useState(0);
   const [timeSavedUnredeemedMin, setTimeSavedUnredeemedMin] = useState(0);
   const [timeSavedAllMin, setTimeSavedAllMin] = useState(0);
   const [goal, setGoal] = useState<DashboardGoal | null>(null);
@@ -130,12 +135,13 @@ export function useParentDashboard(childId: string): ParentDashboardData {
         return;
       }
 
-      const today = dayjs().tz(TZ).format('YYYY-MM-DD');
-      const tomorrow = dayjs().tz(TZ).add(1, 'day').format('YYYY-MM-DD');
+      // Taipei-day UTC bounds — a bare 'YYYY-MM-DD' casts to UTC midnight and
+      // drops completions made during Taipei 00:00–08:00 from today's counts.
+      const { startIso: today, endIso: tomorrow } = taipeiDayRange();
       const sevenDaysAgo = dayjs().tz(TZ).subtract(7, 'day').toISOString();
 
       // ── Round 1: queries that don't depend on each other ───────────────────
-      const [childRes, walletRes, ctRes, tsRes, rewardRes, completionsRes] = await Promise.all([
+      const [childRes, walletRes, ctRes, tsRes, rewardRes, completionsRes, weekTimeRes] = await Promise.all([
         supabase.from('children').select('*').eq('id', childId).single(),
         supabase.from('wallets').select('id, balance').eq('child_id', childId).eq('wallet_type', 'spending').single(),
         supabase.from('child_tasks').select('task_id').eq('child_id', childId).eq('is_active', true),
@@ -146,6 +152,10 @@ export function useParentDashboard(childId: string): ParentDashboardData {
           .eq('child_id', childId)
           .gte('completed_at', today)
           .lt('completed_at', tomorrow),
+        supabase.from('task_completions')
+          .select('time_saved_min')
+          .eq('child_id', childId)
+          .gte('completed_at', sevenDaysAgo),
       ]);
 
       if (childRes.error) throw childRes.error;
@@ -167,6 +177,10 @@ export function useParentDashboard(childId: string): ParentDashboardData {
       );
       setTimeSavedAllMin(tsSums.all);
       setTimeSavedUnredeemedMin(tsSums.unredeemed);
+
+      setWeekTimeSavedMin(
+        (weekTimeRes.data ?? []).reduce((sum, row) => sum + (row.time_saved_min ?? 0), 0),
+      );
 
       // ── Round 2: queries that depend on Round 1 results ────────────────────
       const [tasksRes, weekTxRes] = await Promise.all([
@@ -210,7 +224,12 @@ export function useParentDashboard(childId: string): ParentDashboardData {
       const completedIds = new Set(completions.map(c => c.task_id));
       const isPrerequisiteMet = abTasks.every(t => completedIds.has(t.id));
 
-      setTodayTasks(deriveDashboardTasks(tasks, completions, isPrerequisiteMet));
+      // Only show tasks that are actually due today — same predicate the child's
+      // home screen uses, so the parent's 今日總覽 matches what the child sees
+      // (weekend-only tasks on a weekday and expired one-off tasks are hidden).
+      const todayVisibleTasks = tasks.filter(t => !t.is_long_term && isTaskDueToday(t));
+
+      setTodayTasks(deriveDashboardTasks(todayVisibleTasks, completions, isPrerequisiteMet));
     } catch (err) {
       console.error('[useParentDashboard] error:', err);
       setError('資料載入失敗，請稍後再試');
@@ -227,6 +246,7 @@ export function useParentDashboard(childId: string): ParentDashboardData {
     child,
     spendingBalance,
     weekCoinDelta,
+    weekTimeSavedMin,
     timeSavedUnredeemedMin,
     timeSavedAllMin,
     goal,

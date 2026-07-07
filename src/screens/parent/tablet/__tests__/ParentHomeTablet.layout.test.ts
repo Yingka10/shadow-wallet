@@ -1,4 +1,6 @@
 import { StyleSheet } from 'react-native';
+import fs from 'fs';
+import path from 'path';
 
 jest.mock('../../../../lib/supabase', () => ({
   supabase: {
@@ -36,9 +38,16 @@ jest.mock('../ParentWeeklyTablet', () => () => null);
 jest.mock('../ParentManageTablet', () => () => null);
 
 import { webMouseDraggableScroll, webTabletScreen } from '../../../../constants/webStyles';
-import { ParentFontSizes, ParentFontWeights } from '../../../../constants/parentTheme';
-import { parentHomeTabletStyles } from '../ParentHomeTablet';
+import { ParentColors, ParentFontSizes, ParentFontWeights } from '../../../../constants/parentTheme';
+import { buildParentGreeting, parentHomeTabletStyles } from '../ParentHomeTablet';
 import { parentTabletTabStyles } from '../../ParentTabNavigator';
+import { taskIconBubbleStyles } from '../home/homeIcons';
+import { weekSummaryStyles } from '../home/WeekSummary';
+import { parentSidebarStyles } from '../ParentSidebar';
+
+const homeSource = fs.readFileSync(path.join(__dirname, '..', 'ParentHomeTablet.tsx'), 'utf8');
+const summarySource = fs.readFileSync(path.join(__dirname, '..', 'home', 'WeekSummary.tsx'), 'utf8');
+const weeklySource = fs.readFileSync(path.join(__dirname, '..', 'ParentWeeklyTablet.tsx'), 'utf8');
 
 describe('ParentHomeTablet layout tokens', () => {
   it('uses the full tablet viewport instead of a fixed preview width', () => {
@@ -53,10 +62,22 @@ describe('ParentHomeTablet layout tokens', () => {
     const rightColWrap = StyleSheet.flatten(parentHomeTabletStyles.rightColWrap) as Record<string, unknown>;
 
     expect(rightColWrap.width).toBeUndefined();
-    expect(rightColWrap.flexBasis).toBe('24%');
     expect(rightColWrap.minWidth).toBeGreaterThanOrEqual(260);
+    expect(rightColWrap.maxWidth).toBeLessThanOrEqual(340);
     expect(parentHomeTabletStyles).not.toHaveProperty('advisorContextRow');
     expect(parentHomeTabletStyles).not.toHaveProperty('advisorContextChip');
+  });
+
+  it('caps the main column width instead of stretching unbounded on wide screens', () => {
+    const mainAreaWrap = StyleSheet.flatten(parentHomeTabletStyles.mainAreaWrap) as Record<string, unknown>;
+    const contentCluster = StyleSheet.flatten(parentHomeTabletStyles.contentCluster) as Record<string, unknown>;
+
+    // 沒有 maxWidth 的話，在很寬的螢幕上 mainAreaWrap 會無限吃掉剩餘空間，
+    // 讓字級/留白看起來越來越稀疏（使用者回報：平板越大字越像變小）。
+    expect(typeof mainAreaWrap.maxWidth).toBe('number');
+    expect(mainAreaWrap.maxWidth as number).toBeGreaterThan(0);
+    // 中欄跟右欄要在同一個容器裡置中，超寬螢幕才不會變成中欄單獨拉爆。
+    expect(contentCluster.justifyContent).toBe('center');
   });
 
   it('improves reading hierarchy for support text and task rows', () => {
@@ -102,16 +123,126 @@ describe('ParentHomeTablet layout tokens', () => {
     }
   });
 
-  it('renders the tablet tabs as a floating translucent pill', () => {
-    const wrap = StyleSheet.flatten(parentTabletTabStyles.wrap);
-    const bar = StyleSheet.flatten(parentTabletTabStyles.bar);
+  it('hides the home tablet bottom tab so the left rail owns navigation', () => {
+    const tabletHidden = StyleSheet.flatten(parentTabletTabStyles.tabletHidden);
+    const mainContent = StyleSheet.flatten(parentHomeTabletStyles.mainContent);
 
-    expect(wrap.position).toBe('absolute');
-    expect(wrap.left).toBe(0);
-    expect(wrap.right).toBe(0);
-    expect(bar.borderRadius).toBeGreaterThanOrEqual(32);
-    expect(bar.backgroundColor).toMatch(/^rgba\(/);
-    expect(bar.borderWidth).toBe(1);
-    expect(bar.maxWidth).toBeLessThanOrEqual(640);
+    expect(tabletHidden.display).toBe('none');
+    expect(mainContent.paddingBottom).toBeLessThanOrEqual(ParentFontSizes.h1);
+    expect(parentSidebarStyles).toHaveProperty('sidebarNav');
+    expect(parentSidebarStyles).toHaveProperty('sidebarNavActive');
+  });
+
+  it('gives the advisor card a robot avatar head row instead of a standalone open button', () => {
+    const advisorCard = StyleSheet.flatten(parentHomeTabletStyles.advisorCard);
+    const advisorSideSheet = StyleSheet.flatten(parentHomeTabletStyles.advisorSideSheet);
+    const advisorAvatar = StyleSheet.flatten(parentHomeTabletStyles.advisorAvatar);
+
+    expect(advisorCard.borderWidth).toBe(1);
+    expect(advisorSideSheet.position).toBe('absolute');
+    expect(advisorSideSheet.right).toBe(0);
+    expect(advisorSideSheet.width).toBeGreaterThanOrEqual(360);
+    expect(advisorAvatar.borderRadius).toBeGreaterThan(0);
+    expect(parentHomeTabletStyles).not.toHaveProperty('advisorOpenButton');
+  });
+
+  it('uses a cool-white canvas and white card surfaces', () => {
+    expect(ParentColors.bgCanvas).toBe('#FBFCFC');
+    expect(ParentColors.bgMain).toBe('#FBFCFC');
+    expect(ParentColors.bgRail).toBe('#FBFCFC');
+    expect(ParentColors.bgSurface).toBe('#FFFFFF');
+    expect(ParentColors.bgHero).toBe('#FFF7E8');
+  });
+
+  it('labels the week summary section card as a bordered white surface', () => {
+    const sectionCard = StyleSheet.flatten(parentHomeTabletStyles.sectionCard);
+    const sectionTitle = StyleSheet.flatten(parentHomeTabletStyles.sectionTitle);
+    const heroCard = StyleSheet.flatten(parentHomeTabletStyles.heroCard);
+
+    expect(sectionCard.borderWidth).toBe(1);
+    expect(sectionCard.backgroundColor).toBe(ParentColors.bgSurface);
+    expect(heroCard.backgroundColor).toBe(ParentColors.bgHero);
+    expect(sectionTitle.fontWeight).toBe(ParentFontWeights.bold);
+  });
+
+  it('keeps the pending approval content as a single-layer hero card', () => {
+    const reqCard = StyleSheet.flatten(parentHomeTabletStyles.reqCard);
+    const heroCard = StyleSheet.flatten(parentHomeTabletStyles.heroCard);
+
+    expect(heroCard.borderWidth).toBe(1);
+    expect(reqCard.backgroundColor).toBe('transparent');
+    expect(reqCard.borderWidth).toBe(0);
+    expect(reqCard.padding).toBe(0);
+    expect(reqCard.shadowOpacity).toBe(0);
+    expect(reqCard.elevation).toBe(0);
+  });
+
+  it('shows the coin/time/review stats via the shared week summary card styles', () => {
+    const cellNum = StyleSheet.flatten(weekSummaryStyles.cellNum);
+    const cellLabel = StyleSheet.flatten(weekSummaryStyles.cellLabel);
+
+    expect(cellNum.fontWeight).toBe(ParentFontWeights.bold);
+    expect(cellLabel.color).toBeTruthy();
+    expect(summarySource).toContain('任務回顧');
+    expect(summarySource).not.toContain('需要關注');
+    expect(summarySource).not.toContain('需要幫助');
+  });
+
+  it('uses parent-facing, non-pressuring copy on the home screen', () => {
+    expect(homeSource).not.toContain('今天又是成長的一天');
+    expect(homeSource).not.toContain('需要注意');
+    expect(homeSource).not.toContain('需要調整');
+    expect(homeSource).not.toContain('需要幫助');
+    expect(homeSource).toContain('buildParentGreeting');
+  });
+
+  it('builds the parent greeting from current dashboard state', () => {
+    expect(buildParentGreeting({ parentName: '媽媽', pendingCount: 2, doneToday: 0, totalToday: 4, missedToday: 0, longTermActive: 3 }))
+      .toBe('媽媽，今天先看 2 件需要決定的事。');
+    expect(buildParentGreeting({ parentName: '媽媽', pendingCount: 0, doneToday: 4, totalToday: 4, missedToday: 0, longTermActive: 1 }))
+      .toBe('媽媽，今天的紀錄很完整，可以晚點一起回顧。');
+    expect(buildParentGreeting({ parentName: null, pendingCount: 0, doneToday: 0, totalToday: 0, missedToday: 0, longTermActive: 0 }))
+      .toBe('家長，今天先整理一下家裡的成長節奏。');
+  });
+
+  it('makes task icon bubbles read as richer illustrated tokens', () => {
+    const bubble = StyleSheet.flatten(taskIconBubbleStyles.bubble);
+
+    expect(bubble.borderWidth).toBe(1);
+    expect(bubble.borderColor).toBe(ParentColors.borderSoft);
+  });
+
+  it('shares one sidebar component across all three tablet tabs', () => {
+    const sidebarSource = fs.readFileSync(path.join(__dirname, '..', 'ParentSidebar.tsx'), 'utf8');
+    const manageSource = fs.readFileSync(path.join(__dirname, '..', 'ParentManageTablet.tsx'), 'utf8');
+
+    // activeTab 決定「主要功能」哪一項顯示選中，讓三個 tab 都能共用同一份側欄。
+    expect(sidebarSource).toContain("activeTab === 'home'");
+    expect(sidebarSource).toContain("activeTab === 'weekly'");
+    expect(sidebarSource).toContain("activeTab === 'manage'");
+
+    expect(homeSource).toContain('<ParentSidebar');
+    expect(weeklySource).toContain('<ParentSidebar');
+    expect(manageSource).toContain('<ParentSidebar');
+  });
+
+  it('frames weekly reports as parent conversation support instead of a scorecard', () => {
+    expect(weeklySource).toContain('本週整理');
+    expect(weeklySource).toContain('本週紀錄概覽');
+    expect(weeklySource).toContain('本週投入分布');
+    expect(weeklySource).toContain('長期任務進展');
+    expect(weeklySource).toContain('這週值得一起回顧');
+    expect(weeklySource).toContain('和孩子聊聊');
+    expect(weeklySource).toContain('查看完整紀錄');
+    expect(weeklySource).toContain('任務紀錄');
+    expect(weeklySource).toContain('成長幣');
+    expect(weeklySource).toContain('時間儲蓄');
+    expect(weeklySource).toContain('獎勵兌換');
+
+    expect(weeklySource).not.toContain('CompletionRing');
+    expect(weeklySource).not.toContain('完成率');
+    expect(weeklySource).not.toContain('落後');
+    expect(weeklySource).not.toContain('需改善');
+    expect(weeklySource).not.toContain('表現不佳');
   });
 });

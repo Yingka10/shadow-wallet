@@ -68,38 +68,6 @@ function WeeklyEntry() {
 // SVG icons — shared
 // ---------------------------------------------------------------------------
 
-function HomeIcon({ color, size }: { color: string; size: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-      <Path d="M9 21V12h6v9" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-    </Svg>
-  );
-}
-
-function ChartIcon({ color, size }: { color: string; size: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M3 20h18" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-      <Rect x="5"  y="13" width="3" height="7" rx="1" stroke={color} strokeWidth={1.8} />
-      <Rect x="10" y="9"  width="3" height="11" rx="1" stroke={color} strokeWidth={1.8} />
-      <Rect x="16" y="5"  width="3" height="15" rx="1" stroke={color} strokeWidth={1.8} />
-    </Svg>
-  );
-}
-
-function SettingsIcon({ color, size }: { color: string; size: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Circle cx="12" cy="12" r="3" stroke={color} strokeWidth={1.8} />
-      <Path
-        d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"
-        stroke={color} strokeWidth={1.8} strokeLinecap="round"
-      />
-    </Svg>
-  );
-}
-
 function DashboardIcon({ color, size }: { color: string; size: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -141,69 +109,12 @@ function WeeklyIcon({ color, size }: { color: string; size: number }) {
 }
 
 // ---------------------------------------------------------------------------
-// Tablet tab bar — design-ref style (3 tabs)
+// Tablet tab bar — 三個 tab 現在都自己渲染共用左側欄（ParentSidebar）來導航，
+// 平板寬度下這個浮動底欄完全交給側欄取代，永遠不顯示。
 // ---------------------------------------------------------------------------
 
-type TabletTabDef = {
-  routeName: keyof ParentTabParamList;
-  label: string;
-  sub: string;
-  renderIcon: (color: string, size: number) => React.ReactElement;
-};
-
-const TABLET_TABS: TabletTabDef[] = [
-  {
-    routeName: 'Dashboard',
-    label: '首頁',
-    sub: '今日任務 · 待處理',
-    renderIcon: (c, s) => <HomeIcon color={c} size={s} />,
-  },
-  {
-    routeName: 'Weekly',
-    label: '週報',
-    sub: '本週觀察與紀錄',
-    renderIcon: (c, s) => <ChartIcon color={c} size={s} />,
-  },
-  {
-    routeName: 'Manage',
-    label: '管理',
-    sub: '任務 · 獎勵 · 設定',
-    renderIcon: (c, s) => <SettingsIcon color={c} size={s} />,
-  },
-];
-
-function TabletTabBar({ state, navigation }: BottomTabBarProps) {
-  const insets = useSafeAreaInsets();
-
-  return (
-    <View style={[ts.wrap, { bottom: 16 + (insets.bottom || 0) }]}>
-      <View style={ts.bar}>
-        {TABLET_TABS.map((tab) => {
-          const routeIdx = state.routes.findIndex((r) => r.name === tab.routeName);
-          const active = state.index === routeIdx;
-          const iconColor = active ? '#fff' : ParentColors.ink400;
-
-          return (
-            <TouchableOpacity
-              key={tab.routeName}
-              style={[ts.item, active && ts.itemActive]}
-              activeOpacity={0.75}
-              onPress={() => navigation.dispatch(CommonActions.navigate(tab.routeName))}
-            >
-              <View style={[ts.iconBox, active && ts.iconBoxActive]}>
-                {tab.renderIcon(iconColor, 20)}
-              </View>
-
-              <View style={ts.labelCol}>
-                <Text style={[ts.label, active && ts.labelActive]}>{tab.label}</Text>
-                <Text style={ts.sub}>{tab.sub}</Text>
-              </View>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-    </View>
-  );
+function TabletTabBar(_props: BottomTabBarProps) {
+  return <View style={ts.tabletHidden} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -302,73 +213,8 @@ export default function ParentTabNavigator() {
 // ---------------------------------------------------------------------------
 
 const ts = StyleSheet.create({
-  wrap: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 16,
-    alignItems: 'center',
-    pointerEvents: 'box-none',
-  },
-  bar: {
-    width: '56%',
-    minWidth: 520,
-    maxWidth: 600,
-    minHeight: 84,
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(250,248,245,0.86)',
-    borderRadius: 36,
-    borderWidth: 1,
-    borderColor: 'rgba(28,27,23,0.08)',
-    padding: 8,
-    ...ParentShadows.card,
-  },
-  item: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    paddingHorizontal: 14,
-    borderRadius: 28,
-    position: 'relative',
-  },
-  itemActive: {
-    backgroundColor: 'rgba(44,74,61,0.08)',
-  },
-  iconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
-  },
-  iconBoxActive: {
-    backgroundColor: ParentColors.accent,
-    borderWidth: 0,
-  },
-  labelCol: {
-    alignItems: 'flex-start',
-  },
-  label: {
-    fontFamily: ParentFonts.body,
-    fontSize: 14.5,
-    fontWeight: ParentFontWeights.semi,
-    color: ParentColors.ink400,
-  },
-  labelActive: {
-    color: ParentColors.fgPrimary,
-  },
-  sub: {
-    fontFamily: ParentFonts.body,
-    fontSize: 11,
-    color: ParentColors.fgMuted,
-    marginTop: 2,
-    letterSpacing: 0,
+  tabletHidden: {
+    display: 'none',
   },
 });
 
