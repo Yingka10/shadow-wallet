@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Alert,
   View,
   Text,
   ScrollView,
@@ -58,6 +59,7 @@ export default function ProfileScreen() {
     highlight: '這週開始養成習慣囉，繼續保持就會越來越穩定！',
   });
   const [loading, setLoading] = useState(true);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     void loadData();
@@ -166,7 +168,15 @@ export default function ProfileScreen() {
     }
   }
 
-  function handleLogout() {
+  async function handleLogout() {
+    setLoggingOut(true);
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error('[ProfileScreen] signOut error:', err);
+    } finally {
+      setLoggingOut(false);
+    }
     navigation.reset({ index: 0, routes: [{ name: 'ChildLogin' }] });
   }
 
