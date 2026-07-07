@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -16,8 +17,10 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { MotiView } from 'moti';
 import Animated, {
+  Easing,
   useAnimatedStyle,
   useSharedValue,
+  withRepeat,
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
@@ -39,6 +42,8 @@ import type { RootStackParamList } from '../../../App';
 import { useTodayTasks, type TodayTask } from '../../hooks/useTodayTasks';
 import { useWallet } from '../../hooks/useWallet';
 import BottomNav from '../../components/BottomNav';
+import GrassGroundScene from '../../components/child/GrassGroundScene';
+import { Moon, Star, Firefly, NightHills } from '../../components/child/NightAssets';
 import TaskCompleteModal from '../../components/TaskCompleteModal';
 import FeedbackAnimation, { type FeedbackType } from '../../components/FeedbackAnimation';
 import { CoinIcon } from '../../components/icons/TaskIcons';
@@ -72,6 +77,34 @@ const HOME = {
   card: '#FFFDF8',
   grass: '#CFE7A7',
 };
+
+// 晚安模式 —— 只有 hero 換成夜景（深藍天空＋月亮＋星星＋螢火＋月光草坡），
+// 下方內容區維持亮色不動。觸發條件：問候語 = 晚安（見 getGreeting）。
+const NIGHT = {
+  sky: ['#132747', '#243D63', '#4C6079'] as const,   // hero 天空漸層（深藍 → 地平線偏灰藍）
+  dayHero: ['#E7F5EC', '#F9F1C9', '#DDECB8'] as const,
+  greeting: '#FDFBF4',
+  tagline: '#D3DCEA',
+  moonGlow: 'rgba(246,228,160,0.30)',   // 月亮外暈（補原檔被拿掉的 glow filter）
+};
+
+// 夜空星星（裝飾用，hero 座標系內的 px；size = 渲染大小）
+const NIGHT_STARS: Array<{ top: number; left: number; size: number; opacity: number }> = [
+  { top: 14, left: 66, size: 13, opacity: 0.75 },
+  { top: 44, left: 150, size: 16, opacity: 0.9 },
+  { top: 82, left: 214, size: 13, opacity: 0.7 },
+  { top: 30, left: 250, size: 15, opacity: 0.8 },
+  { top: 108, left: 60, size: 12, opacity: 0.65 },
+  { top: 96, left: 128, size: 12, opacity: 0.6 },
+  { top: 60, left: 300, size: 14, opacity: 0.7 },
+];
+
+// 螢火蟲暖光（近樹屋／草坡處，畫在樹前）
+const NIGHT_FIREFLIES: Array<{ top: number; left: number; size: number; opacity: number }> = [
+  { top: 150, left: 244, size: 30, opacity: 0.95 },
+  { top: 188, left: 296, size: 24, opacity: 0.8 },
+  { top: 168, left: 196, size: 22, opacity: 0.8 },
+];
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -155,12 +188,25 @@ export default function HomeScreen() {
 
   const coinPulse = useSharedValue(1);
   const treePulse = useSharedValue(1);
+  const treeSway = useSharedValue(0);
+
+  // 樹的微風搖擺（PNG 無法單獨動葉子，改讓整棵樹極輕微擺動 → 有生命感、不死板）
+  useEffect(() => {
+    treeSway.value = withRepeat(
+      withTiming(1, { duration: 3400, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      true,
+    );
+  }, [treeSway]);
 
   const coinAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: coinPulse.value }],
   }));
   const treeAnimatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: treePulse.value }],
+    transform: [
+      { scale: treePulse.value },
+      { rotate: `${(treeSway.value - 0.5) * 1.6}deg` },
+    ],
   }));
 
   const isWeekend = [0, 6].includes(new Date().getDay());
@@ -177,6 +223,8 @@ export default function HomeScreen() {
     .reduce((sum, task) => sum + calcDisplayCoin(task, isPrerequisiteMet), 0);
   const visibleLongTermTasks = longTermTasks.filter(task => task.goal).slice(0, 6);
   const nickname = childMeta?.nickname ?? '小朋友';
+  const greeting = getGreeting();
+  const isNight = greeting === '晚安';   // 問候語變晚安 → hero 切夜景
   const remainingToday = Math.max(todayTotal - todayDone, 0);
   const treeStage = Math.min(5, Math.max(1, Math.ceil((coinBalance + todayDone * 12) / 80)));
 
@@ -334,20 +382,27 @@ export default function HomeScreen() {
           showsVerticalScrollIndicator={false}
         >
           <LinearGradient
-            colors={['#E7F5EC', '#F9F1C9', '#DDECB8']}
-            locations={[0, 0.62, 1]}
-            style={styles.hero}
+            colors={isNight ? NIGHT.sky : NIGHT.dayHero}
+            locations={isNight ? [0, 0.5, 1] : [0, 0.62, 1]}
+            style={[styles.hero, isNight && styles.heroNight]}
           >
+            {isNight && <NightStars />}
+            {isNight && (
+              <View pointerEvents="none" style={styles.nightHillsLayer}>
+                <NightHills height={120} />
+              </View>
+            )}
+
             <View style={styles.heroCopy}>
-              <Text style={styles.greeting}>{getGreeting()}，{nickname}！</Text>
-              <Text style={styles.tagline}>今天也是成長的一天</Text>
+              <Text style={[styles.greeting, isNight && styles.greetingNight]}>{greeting}，{nickname}！</Text>
+              <Text style={[styles.tagline, isNight && styles.taglineNight]}>今天也是成長的一天</Text>
             </View>
 
             <TouchableOpacity
               activeOpacity={0.86}
               onPress={() => navigation.navigate('Wallet', { childId })}
               accessibilityLabel={`前往撲滿，金幣餘額 ${coinBalance}`}
-              style={styles.coinCardTouch}
+              style={[styles.coinCardTouch, isNight && styles.coinCardTouchNight]}
             >
               <Animated.View style={[styles.coinCard, coinAnimatedStyle]}>
                 <View style={styles.coinGlow}>
@@ -376,18 +431,32 @@ export default function HomeScreen() {
               <Text style={styles.diaryText}>成長日記</Text>
             </TouchableOpacity>
 
+            {isNight && <NightMoon />}
+
             <TouchableOpacity
               activeOpacity={0.9}
               onPress={() => navigation.navigate('Wish', { childId })}
-              style={styles.treeTouch}
+              style={[styles.treeTouch, isNight && styles.treeTouchNight]}
               accessibilityLabel={`前往許願樹，第 ${treeStage} 階段`}
             >
-              <Animated.View style={[styles.treeWrap, treeAnimatedStyle]}>
-                <GrowthTreeIllustration stage={treeStage} fruitCount={Math.min(5, Math.max(1, Math.ceil(coinBalance / 40)))} />
+              <Animated.View style={[styles.treeWrap, isNight && styles.treeWrapNight, treeAnimatedStyle]}>
+                {isNight ? (
+                  <Image
+                    source={require('../../../assets/images/child/treehouse-night.png')}
+                    style={styles.treeHouseImg}
+                    resizeMode="contain"
+                  />
+                ) : (
+                  <GrowthTreeIllustration stage={treeStage} fruitCount={Math.min(5, Math.max(1, Math.ceil(coinBalance / 40)))} />
+                )}
               </Animated.View>
             </TouchableOpacity>
 
-            <View style={styles.ground} />
+            {isNight && <NightFireflies />}
+
+            <View style={styles.ground} pointerEvents="none">
+              <GrassGroundScene height={116} variant={isNight ? 'night' : 'day'} />
+            </View>
           </LinearGradient>
 
           <View style={styles.progressPill}>
@@ -491,8 +560,6 @@ export default function HomeScreen() {
             </View>
             <Text style={styles.addRowText}>新增一件今天的事</Text>
           </TouchableOpacity>
-
-          <View style={styles.bottomPad} />
         </ScrollView>
 
         <BottomNav
@@ -820,6 +887,61 @@ function GrowthTreeIllustration({ stage, fruitCount }: { stage: number; fruitCou
   );
 }
 
+// 星空層 —— 畫在最底（樹在其上），星星屬於遠方天空；每顆各自閃爍（明暗＋微縮放）
+function NightStars() {
+  return (
+    <View pointerEvents="none" style={styles.starsLayer}>
+      {NIGHT_STARS.map((s, i) => (
+        <MotiView
+          key={`star-${i}`}
+          style={[styles.starPos, { top: s.top, left: s.left }]}
+          from={{ opacity: s.opacity * 0.3, scale: 0.6 }}
+          animate={{ opacity: s.opacity, scale: 1 }}
+          transition={{ loop: true, repeatReverse: true, type: 'timing', duration: 900 + (i % 4) * 380, delay: i * 240 }}
+        >
+          <Star size={s.size} />
+        </MotiView>
+      ))}
+    </View>
+  );
+}
+
+// 月亮層 —— zIndex 高於樹，確保月亮不會被樹屋擋到；光暈會呼吸（明暗＋放大縮小）
+function NightMoon() {
+  return (
+    <View pointerEvents="none" style={styles.moonLayer}>
+      <MotiView
+        style={styles.moonGlow}
+        from={{ opacity: 0.45, scale: 0.82 }}
+        animate={{ opacity: 1, scale: 1.18 }}
+        transition={{ loop: true, repeatReverse: true, type: 'timing', duration: 2600 }}
+      />
+      <View style={styles.moonPos}>
+        <Moon size={48} />
+      </View>
+    </View>
+  );
+}
+
+// 螢火蟲層 —— 畫在樹前，一閃一閃並輕輕飄動
+function NightFireflies() {
+  return (
+    <View pointerEvents="none" style={styles.firefliesLayer}>
+      {NIGHT_FIREFLIES.map((f, i) => (
+        <MotiView
+          key={`fly-${i}`}
+          style={[styles.fireflyPos, { top: f.top, left: f.left }]}
+          from={{ opacity: 0.18, translateY: 3, translateX: -3 }}
+          animate={{ opacity: f.opacity, translateY: -7, translateX: 4 }}
+          transition={{ loop: true, repeatReverse: true, type: 'timing', duration: 1500 + i * 360, delay: i * 520 }}
+        >
+          <Firefly size={f.size} />
+        </MotiView>
+      ))}
+    </View>
+  );
+}
+
 function LeafSvg() {
   return (
     <Svg width={26} height={18} viewBox="0 0 26 18">
@@ -895,8 +1017,12 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 30,
     marginHorizontal: -16,
     paddingHorizontal: 26,
-    paddingTop: 14,
+    paddingTop: 28,   // 問候語往下，避免部分機型瀏海／動態島擋到（與成長日記按鈕同一高度）
     overflow: 'hidden',
+  },
+  // 晚安模式 hero 加高（但別太高），讓樹屋往下、樹冠避開「成長日記」按鈕，也留出夜空
+  heroNight: {
+    minHeight: 260,
   },
   heroCopy: {
     maxWidth: 218,
@@ -915,10 +1041,72 @@ const styles = StyleSheet.create({
     marginTop: 8,
     lineHeight: 21,
   },
+  greetingNight: {
+    color: NIGHT.greeting,
+  },
+  taglineNight: {
+    color: NIGHT.tagline,
+  },
+  // 星空層（最底，樹在其上）
+  starsLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 0,
+  },
+  // 遠景山坡層（星空之上、樹與草坡之下，鋪在中下段當背景層次）
+  nightHillsLayer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 43,
+    height: 120,
+    zIndex: 0,
+  },
+  starPos: {
+    position: 'absolute',
+  },
+  // 月亮層（zIndex 5 > 樹的 3，保證不被樹屋擋住）
+  moonLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 5,
+  },
+  moonGlow: {
+    position: 'absolute',
+    top: 11,
+    right: 141,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: NIGHT.moonGlow,
+  },
+  moonPos: {
+    position: 'absolute',
+    top: 16,
+    right: 146,
+  },
+  // 螢火蟲層（zIndex 4 > 樹，暖光在樹前）
+  firefliesLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 4,
+  },
+  fireflyPos: {
+    position: 'absolute',
+  },
+  treeTouchNight: {
+    right: -8,
+    bottom: 0,
+  },
+  treeWrapNight: {
+    width: 176,
+    height: 176,
+  },
+  treeHouseImg: {
+    width: '100%',
+    height: '100%',
+  },
   diaryBadge: {
     position: 'absolute',
     right: 22,
-    top: 24,
+    top: 28,   // 與問候語同一高度（見 hero.paddingTop）
     zIndex: 8,
     flexDirection: 'row',
     alignItems: 'center',
@@ -955,11 +1143,9 @@ const styles = StyleSheet.create({
     left: -28,
     right: -28,
     bottom: -24,
-    height: 92,
-    borderTopLeftRadius: 100,
-    borderTopRightRadius: 100,
-    backgroundColor: HOME.grass,
-    opacity: 0.9,
+    height: 116,
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
   },
   coinCardTouch: {
     position: 'absolute',
@@ -967,6 +1153,11 @@ const styles = StyleSheet.create({
     top: 94,
     width: 172,
     zIndex: 7,
+  },
+  // 晚安模式：卡片往下、左緣對齊下方內容卡（scrollContent paddingHorizontal 16）
+  coinCardTouchNight: {
+    top: 150,
+    left: 16,
   },
   coinCard: {
     minHeight: 78,
@@ -1031,9 +1222,9 @@ const styles = StyleSheet.create({
   },
   coinToday: {
     color: HOME.textSecondary,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '800',
-    lineHeight: 13,
+    lineHeight: 15,
   },
   progressPill: {
     minHeight: 74,
@@ -1041,7 +1232,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 18,
-    backgroundColor: 'rgba(255,253,248,0.92)',
+    backgroundColor: HOME.card,   // 實心不透明（使用者要求不要半透明）
     borderRadius: 28,
     paddingHorizontal: 18,
     paddingVertical: 14,
@@ -1553,8 +1744,5 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '900',
-  },
-  bottomPad: {
-    height: 88,
   },
 });

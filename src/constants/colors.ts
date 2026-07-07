@@ -45,6 +45,22 @@ export const Colors = {
   groundShadow: '#B9D48F',   // 樹腳下較深的地面陰影
   grassTuft:    '#A8C494',   // 草叢
 
+  // 草地場景 —— 許願樹 hero 底下「有分層的草坡」，讓樹站在草地上（不再一片綠）。
+  // 色調忠實對齊 design-previews/child-hero-generated.html 那版草地 mockup，勿自行換色。
+  grass: {
+    sky:            '#EFF7E1',   // 場景面板底（淡薄荷，襯出樹＝天空區）
+    hillBackTop:    '#D6EDAB', hillBackBottom:  '#B8DE80',   // 最遠的草坡（淡）
+    hillMidTop:     '#CCEAA1', hillMidBottom:   '#A7D46C',
+    hillFrontTop:   '#B7DF7D', hillFrontBottom: '#8FC05A',   // 最近的草坡（深）
+    bladeTop:       '#BDE36F', bladeBottom:     '#68A83D',   // 草叢刀片
+
+    // 夜間版（晚安模式）—— 月光下的草坡，冷調暗綠，遠山帶點藍
+    nightHillBackTop:  '#46617B', nightHillBackBottom:  '#3C566B',   // 遠山（帶藍霧）
+    nightHillMidTop:   '#3A5A4E', nightHillMidBottom:   '#2E4F40',
+    nightHillFrontTop: '#2C4E37', nightHillFrontBottom: '#21402B',   // 近景草坡（暗）
+    nightBladeTop:     '#4E7648', nightBladeBottom:     '#2C512C',
+  },
+
   // ── 果實 Fruit — 願望（熟 = 可兌換）───────────────────────
   fruit100: '#FDECCB',
   fruit300: '#F8C979',
@@ -81,12 +97,11 @@ export const Colors = {
   gradientPage: ['#DCEFC8', '#E9F1DA', '#FFF8EE', '#FFF8EE'],
   gradientPageStops: [0, 0.22, 0.46, 1],
 
-  // 許願頁專用漸層 —— 跟目前 HomeScreen.tsx 本地 HOME 色盤的底色對齊（2026-07-07
-  // 使用者截圖比對回饋：許願頁比首頁明顯偏橘）。HomeScreen 現在已經不吃上面那組
-  // gradientPage（另一人重刷首頁時改用自己的本地色盤），兩邊要視覺一致就得對齊
-  // 這組值，不是再調 gradientPage 本身（會連動影響 Wallet 頁）。
-  gradientPageWish: ['#F8F6F1', '#FFFDF8', '#FFF8EE'],
-  gradientPageWishStops: [0, 0.58, 1],
+  // 許願頁專用漸層 —— 樹的上方保留淡淡的綠（使用者 2026-07-07 截圖回饋明講要留），
+  // 但比 gradientPage 更快退到跟 HomeScreen.tsx 本地 HOME 色盤一致的米白，避免整頁
+  // 偏橘。gradientPage 本身不動（會連動影響 Wallet 頁）。
+  gradientPageWish: ['#E3EFD4', '#F3F6E8', '#FFFDF8', '#FFF8EE'],
+  gradientPageWishStops: [0, 0.2, 0.5, 1],
 
   // ── 語義別名（新程式優先用這層）──────────────────────────
   bgCanvas:      '#FFF8EE',   // 漸層退化的平色底（不支援漸層時）
@@ -107,10 +122,23 @@ export const Colors = {
   warning:     '#F2A93B',   // fruit500（提醒用暖琥珀，不用紅）
   error:       '#C6543A',   // 僅破壞性動作；日常別用
 
+  wishPrimary: '#5E8B49',
+  wishPrimaryPressed: '#4D763B',
+  redeemButton: '#E5F0D8',
+  redeemButtonText: '#52753C',
+  redeemButtonBorder: '#B8D39B',
+  redeemButtonPressed: '#CFE3B8',
+  redeemButtonPressedText: '#42632F',
+  progressGreen: '#85B95D',
+  tabGreen: '#DDECCF',
+  coinGold: '#E6B94E',
+  creamWish: '#FFFDF8',
+  textBrown: '#4A4136',
+
   borderSoft:   'rgba(95, 60, 30, 0.10)',
   borderMedium: 'rgba(95, 60, 30, 0.18)',
   hairline:     'rgba(95, 60, 30, 0.12)',   // 列表髮絲線
-  navBg:        'rgba(255, 248, 238, 0.96)',   // 底部 tab 半透明底
+  navBg:        'rgba(255, 248, 238, 0.96)',   // 底部 tab 半透明奶油底
 
   // shadowColor 用（RN shadow props）
   shadowWarm: 'rgba(95, 60, 30, 1)',

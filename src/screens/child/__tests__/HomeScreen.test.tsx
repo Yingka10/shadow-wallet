@@ -149,7 +149,9 @@ describe('HomeScreen', () => {
   it('renders bottom nav tabs', () => {
     render(<HomeScreen />);
     expect(screen.getByText('首頁')).toBeTruthy();
-    expect(screen.getByText('撲滿')).toBeTruthy();
+    expect(screen.getByText('成長幣')).toBeTruthy();
+    expect(screen.getByText('許願樹')).toBeTruthy();
+    expect(screen.getByText('我的')).toBeTruthy();
   });
 
   it('keeps bottom feedback cards in a clear primary-secondary ratio', () => {

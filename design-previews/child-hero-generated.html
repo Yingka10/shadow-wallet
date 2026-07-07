@@ -1,0 +1,996 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Child Home Grass Preview</title>
+  <style>
+    :root {
+      --page: #fffaf0;
+      --paper: #fffefb;
+      --ink: #3c2f24;
+      --muted: #7f715f;
+      --line: #eadfcd;
+      --leaf: #70b44e;
+      --leaf-dark: #4d8734;
+      --leaf-soft: #dff0c3;
+      --gold: #f6bd28;
+      --gold-deep: #d8900d;
+      --cream: #fff7df;
+      --shadow: rgba(108, 76, 35, 0.14);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 28px;
+      color: var(--ink);
+      font-family: ui-rounded, "Nunito", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+      background:
+        radial-gradient(circle at 18% 12%, rgba(246, 189, 40, 0.2), transparent 30%),
+        radial-gradient(circle at 78% 22%, rgba(112, 180, 78, 0.14), transparent 34%),
+        #f5efe4;
+    }
+
+    .phone {
+      position: relative;
+      width: min(390px, calc(100vw - 28px));
+      min-height: 812px;
+      overflow: hidden;
+      border-radius: 34px;
+      background:
+        radial-gradient(circle at 80% 9%, rgba(246, 189, 40, 0.13), transparent 25%),
+        linear-gradient(180deg, #fff9e9 0%, #fffdf7 44%, #fffaf0 100%);
+      border: 1px solid rgba(88, 61, 29, 0.08);
+      box-shadow: 0 28px 80px rgba(80, 55, 20, 0.24);
+    }
+
+    .content {
+      position: relative;
+      z-index: 2;
+      padding: 26px 22px 96px;
+    }
+
+    .hero {
+      position: relative;
+      min-height: 234px;
+      margin: -26px -22px 0;
+      padding: 34px 24px 0;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at 22% 6%, rgba(255,255,255,0.96), transparent 28%),
+        radial-gradient(circle at 72% 14%, rgba(255, 225, 117, 0.24), transparent 26%),
+        linear-gradient(180deg, #fff9e8 0%, #fff9e7 58%, rgba(223, 240, 195, 0.56) 100%);
+      z-index: 0;
+    }
+
+    .sky-dot {
+      position: absolute;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.76);
+      filter: blur(0.2px);
+      z-index: 1;
+    }
+
+    .sky-dot.a { width: 52px; height: 24px; right: 116px; top: 112px; }
+    .sky-dot.b { width: 22px; height: 22px; right: 148px; top: 105px; }
+    .sky-dot.c { width: 42px; height: 16px; right: 91px; top: 122px; opacity: 0.62; }
+
+    .hero-copy {
+      position: relative;
+      z-index: 7;
+      width: 58%;
+    }
+
+    .greeting {
+      margin: 0;
+      font-size: 31px;
+      line-height: 1.12;
+      font-weight: 950;
+      letter-spacing: 0;
+    }
+
+    .tagline {
+      margin: 7px 0 0;
+      color: #6f6254;
+      font-size: 15px;
+      font-weight: 850;
+      line-height: 1.45;
+    }
+
+    .diary {
+      position: absolute;
+      right: 22px;
+      top: 35px;
+      z-index: 8;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 40px;
+      padding: 0 14px;
+      border: 0;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.92);
+      color: #3c2f24;
+      font-size: 14px;
+      font-weight: 950;
+      box-shadow: 0 10px 24px rgba(122, 82, 23, 0.09);
+    }
+
+    .coin {
+      position: relative;
+      display: inline-grid;
+      place-items: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 999px;
+      background:
+        radial-gradient(circle at 33% 28%, #fff3aa 0 17%, transparent 18%),
+        radial-gradient(circle, #ffd863 0 54%, #f5b425 55% 75%, #cd810c 76%);
+      box-shadow: inset 0 -2px 0 rgba(125, 78, 0, 0.18), 0 6px 12px rgba(188, 122, 13, 0.23);
+      flex: 0 0 auto;
+    }
+
+    .coin::before {
+      content: "";
+      width: 22px;
+      height: 22px;
+      border-radius: 999px;
+      border: 2px solid rgba(159, 99, 4, 0.35);
+      background:
+        linear-gradient(#9c6d12, #9c6d12) 50% 52% / 3px 12px no-repeat;
+    }
+
+    .coin::after {
+      content: "";
+      position: absolute;
+      left: 15px;
+      top: 11px;
+      width: 8px;
+      height: 6px;
+      border-radius: 9px 9px 0 9px;
+      background: #9c6d12;
+      transform: rotate(-28deg);
+      box-shadow: 7px 0 0 #9c6d12;
+    }
+
+    .landscape {
+      position: absolute;
+      left: -28px;
+      right: -28px;
+      bottom: -18px;
+      height: 120px;
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    .hill {
+      position: absolute;
+      left: 50%;
+      border-radius: 999px 999px 0 0;
+      transform: translateX(-50%);
+    }
+
+    .hill.back {
+      bottom: 30px;
+      width: 498px;
+      height: 106px;
+      background:
+        radial-gradient(ellipse at 27% 45%, rgba(255,255,255,0.38), transparent 24%),
+        radial-gradient(ellipse at 74% 58%, rgba(255,255,255,0.22), transparent 26%),
+        linear-gradient(180deg, rgba(213, 237, 169, 0.78), rgba(184, 222, 128, 0.64));
+      box-shadow: inset 0 12px 20px rgba(255,255,255,0.28);
+    }
+
+    .hill.mid {
+      bottom: 7px;
+      width: 532px;
+      height: 92px;
+      background:
+        radial-gradient(ellipse at 64% 42%, rgba(255,255,255,0.26), transparent 22%),
+        linear-gradient(180deg, #cceaa1 0%, #a7d46c 100%);
+      box-shadow: 0 -8px 18px rgba(85, 139, 52, 0.08);
+    }
+
+    .hill.front {
+      bottom: -18px;
+      width: 496px;
+      height: 70px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.28), transparent 38%),
+        linear-gradient(180deg, #b7df7d 0%, #8fc05a 100%);
+    }
+
+    .grass {
+      position: absolute;
+      width: 34px;
+      height: 34px;
+      z-index: 4;
+    }
+
+    .grass::before,
+    .grass::after,
+    .blade {
+      content: "";
+      position: absolute;
+      bottom: 0;
+      width: 12px;
+      height: 25px;
+      border-radius: 100% 0 100% 0;
+      background: linear-gradient(135deg, #bde36f, #68a83d);
+      transform-origin: bottom center;
+    }
+
+    .grass::before { left: 11px; transform: rotate(-22deg); }
+    .grass::after { left: 18px; transform: rotate(30deg) scale(0.82); }
+    .blade { left: 5px; transform: rotate(5deg) scale(0.72); }
+
+    .grass.a { left: 238px; bottom: 58px; }
+    .grass.b { left: 314px; bottom: 20px; transform: scale(0.88); opacity: 0.75; }
+    .grass.c { left: 362px; bottom: 34px; transform: scale(0.72); opacity: 0.68; }
+
+    .tree-scene {
+      position: absolute;
+      right: 20px;
+      bottom: 18px;
+      width: 152px;
+      height: 148px;
+      z-index: 5;
+      filter: drop-shadow(0 10px 12px rgba(92, 130, 48, 0.15));
+    }
+
+    .tree-crown {
+      position: absolute;
+      border-radius: 999px;
+      background:
+        radial-gradient(circle at 32% 26%, rgba(255,255,255,0.26), transparent 15%),
+        radial-gradient(circle at 70% 32%, rgba(255,255,255,0.14), transparent 15%),
+        linear-gradient(145deg, #b4de74, #77b94f);
+      box-shadow: inset -8px -10px 0 rgba(78, 140, 45, 0.08);
+    }
+
+    .tree-crown.main { width: 96px; height: 88px; right: 24px; top: 9px; }
+    .tree-crown.left { width: 70px; height: 62px; left: 6px; top: 54px; background: linear-gradient(145deg, #a9d96b, #70ad4b); }
+    .tree-crown.right { width: 70px; height: 62px; right: 0; top: 55px; background: linear-gradient(145deg, #9fd465, #68a743); }
+    .tree-crown.mid { width: 66px; height: 58px; left: 31px; top: 41px; opacity: 0.9; }
+
+    .tree-trunk {
+      position: absolute;
+      left: 74px;
+      bottom: 5px;
+      width: 20px;
+      height: 55px;
+      border-radius: 10px 10px 6px 6px;
+      background: linear-gradient(90deg, #a9672e, #c48745 50%, #8d562a);
+      z-index: 3;
+    }
+
+    .tree-ground {
+      position: absolute;
+      left: 51px;
+      bottom: -1px;
+      width: 72px;
+      height: 18px;
+      border-radius: 999px;
+      background: rgba(104, 168, 61, 0.55);
+      filter: blur(0.2px);
+    }
+
+    .tree-sign {
+      position: absolute;
+      left: 59px;
+      bottom: 34px;
+      width: 44px;
+      height: 36px;
+      border-radius: 5px;
+      background: linear-gradient(135deg, #c58a45, #a36a33);
+      z-index: 6;
+      box-shadow: inset 0 0 0 1px rgba(101, 57, 22, 0.14);
+    }
+
+    .tree-sign::before {
+      content: "";
+      position: absolute;
+      left: 17px;
+      top: 9px;
+      width: 10px;
+      height: 10px;
+      border-radius: 10px 10px 0 10px;
+      background: #74471f;
+      transform: rotate(-45deg);
+      box-shadow: 6px 6px 0 0 #74471f;
+    }
+
+    .tree-fruit {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: #fff1aa;
+      box-shadow: 0 0 0 1px rgba(211, 154, 32, 0.08);
+      z-index: 7;
+      animation: fruitPulse 3.8s ease-in-out infinite;
+    }
+
+    .tree-fruit.a { right: 42px; top: 57px; }
+    .tree-fruit.b { right: 78px; top: 76px; animation-delay: 1.1s; }
+    .tree-fruit.c { right: 14px; top: 84px; animation-delay: 2s; }
+
+    .balance {
+      position: relative;
+      z-index: 8;
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      width: 184px;
+      margin-top: 26px;
+      padding: 18px 17px;
+      border-radius: 20px;
+      background: rgba(255,255,255,0.92);
+      box-shadow: 0 12px 28px rgba(105, 71, 29, 0.12);
+      border: 1px solid rgba(255,255,255,0.82);
+    }
+
+    .balance .coin {
+      width: 58px;
+      height: 58px;
+    }
+
+    .balance strong {
+      display: block;
+      font-size: 38px;
+      line-height: 0.95;
+      font-weight: 950;
+    }
+
+    .balance small {
+      margin-left: 3px;
+      font-size: 13px;
+      font-weight: 950;
+    }
+
+    .today-bonus {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      margin-top: 9px;
+      padding: 5px 10px;
+      border: 1px solid rgba(246, 189, 40, 0.36);
+      border-radius: 999px;
+      color: #a36e10;
+      background: rgba(255, 248, 228, 0.92);
+      font-size: 13px;
+      font-weight: 950;
+    }
+
+    .progress-card {
+      position: relative;
+      z-index: 5;
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      margin-top: -4px;
+      padding: 13px 16px;
+      border-radius: 24px;
+      background: rgba(255,255,255,0.94);
+      box-shadow: 0 9px 24px rgba(103, 72, 36, 0.1);
+      border: 1px solid rgba(255,255,255,0.8);
+    }
+
+    .sprout-badge {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: 52px;
+      height: 52px;
+      flex: 0 0 auto;
+      border-radius: 999px;
+      background: #edf7dd;
+    }
+
+    .sprout {
+      position: relative;
+      width: 18px;
+      height: 26px;
+      border-bottom: 4px solid #78b957;
+    }
+
+    .sprout::before,
+    .sprout::after {
+      content: "";
+      position: absolute;
+      top: 5px;
+      width: 16px;
+      height: 11px;
+      border-radius: 100% 0 100% 0;
+      background: #65ad48;
+    }
+
+    .sprout::before { left: -10px; transform: rotate(18deg); }
+    .sprout::after { right: -10px; transform: rotate(78deg); }
+
+    .progress-title {
+      flex: 0 0 auto;
+      font-size: 23px;
+      font-weight: 950;
+    }
+
+    .dots {
+      display: flex;
+      gap: 12px;
+      margin-left: auto;
+    }
+
+    .dot {
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      background: #e8e0d5;
+    }
+
+    .dot.done {
+      background: linear-gradient(145deg, #8fca63, #62aa45);
+      box-shadow: inset 0 -2px 0 rgba(65, 129, 44, 0.14);
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 24px 2px 12px;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.1;
+      font-weight: 950;
+    }
+
+    .section-link {
+      color: var(--leaf-dark);
+      font-size: 15px;
+      font-weight: 950;
+    }
+
+    .tiny-plant,
+    .sun-icon {
+      flex: 0 0 auto;
+    }
+
+    .tiny-plant {
+      position: relative;
+      width: 30px;
+      height: 28px;
+    }
+
+    .tiny-plant::before {
+      content: "";
+      position: absolute;
+      left: 13px;
+      bottom: 5px;
+      width: 5px;
+      height: 19px;
+      border-radius: 999px;
+      background: #7a5a27;
+      transform: rotate(-4deg);
+    }
+
+    .tiny-plant::after {
+      content: "";
+      position: absolute;
+      left: 6px;
+      bottom: 14px;
+      width: 15px;
+      height: 10px;
+      border-radius: 100% 0 100% 0;
+      background: #71b44b;
+      box-shadow: 12px -4px 0 #8bc85c;
+      transform: rotate(12deg);
+    }
+
+    .sun-icon {
+      position: relative;
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      background: #ffc84a;
+      box-shadow:
+        0 -10px 0 -5px #ffc84a,
+        0 10px 0 -5px #ffc84a,
+        10px 0 0 -5px #ffc84a,
+        -10px 0 0 -5px #ffc84a,
+        7px 7px 0 -5px #ffc84a,
+        -7px -7px 0 -5px #ffc84a,
+        7px -7px 0 -5px #ffc84a,
+        -7px 7px 0 -5px #ffc84a;
+    }
+
+    .goals {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 11px;
+    }
+
+    .goal {
+      min-height: 139px;
+      padding: 11px 11px 13px;
+      border-radius: 21px;
+      background: rgba(255,255,255,0.92);
+      border: 1px solid #eadfcd;
+      box-shadow: 0 7px 18px rgba(103, 72, 36, 0.07);
+    }
+
+    .goal-art {
+      height: 66px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 10px;
+      border-radius: 18px;
+      background:
+        radial-gradient(circle at 35% 26%, rgba(255,255,255,0.72), transparent 23%),
+        linear-gradient(135deg, #eee8fb, #f8f1ff);
+    }
+
+    .goal:nth-child(2) .goal-art {
+      background:
+        radial-gradient(circle at 35% 26%, rgba(255,255,255,0.78), transparent 23%),
+        linear-gradient(135deg, #f1f8dc, #eef8e8);
+    }
+
+    .piano {
+      width: 65px;
+      height: 42px;
+      border-radius: 4px;
+      background: linear-gradient(180deg, #2f2840 0 30%, #f7eeff 31%);
+      border: 2px solid rgba(48, 40, 64, 0.3);
+      box-shadow: 0 8px 12px rgba(62, 50, 83, 0.12);
+    }
+
+    .piano::after {
+      content: "";
+      display: block;
+      height: 28px;
+      margin-top: 11px;
+      background:
+        linear-gradient(90deg, transparent 0 17%, #2f2840 18% 23%, transparent 24% 36%, #2f2840 37% 42%, transparent 43% 57%, #2f2840 58% 63%, transparent 64%),
+        repeating-linear-gradient(90deg, transparent 0 15px, rgba(48,40,64,0.25) 16px 17px);
+    }
+
+    .banana {
+      width: 61px;
+      height: 41px;
+      border-radius: 0 0 48px 48px;
+      border-bottom: 15px solid #ffc848;
+      border-left: 7px solid transparent;
+      transform: rotate(-14deg);
+      box-shadow: 8px 12px 0 -6px rgba(236, 156, 15, 0.26);
+    }
+
+    .banana::after {
+      content: "";
+      display: block;
+      width: 7px;
+      height: 7px;
+      margin: 26px 0 0 50px;
+      border-radius: 999px;
+      background: #d59213;
+      box-shadow: -14px -7px 0 -2px rgba(213, 146, 19, 0.42);
+    }
+
+    .goal-title {
+      font-size: 15px;
+      font-weight: 950;
+      line-height: 1.15;
+    }
+
+    .goal-sub {
+      margin-top: 5px;
+      color: #766956;
+      font-size: 13px;
+      font-weight: 850;
+    }
+
+    .bar {
+      height: 8px;
+      margin-top: 14px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e9e0d2;
+    }
+
+    .bar span {
+      display: block;
+      height: 100%;
+      width: 50%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #72b64d, #8dca68);
+    }
+
+    .bar.empty span { width: 0; }
+
+    .tasks {
+      overflow: hidden;
+      border-radius: 21px;
+      background: rgba(255,255,255,0.92);
+      border: 1px solid #eadfcd;
+      box-shadow: 0 7px 18px rgba(103, 72, 36, 0.07);
+    }
+
+    .task {
+      display: grid;
+      grid-template-columns: 43px 48px 1fr 42px;
+      align-items: center;
+      gap: 9px;
+      min-height: 66px;
+      padding: 9px 13px;
+    }
+
+    .task + .task {
+      border-top: 1px solid #eee4d6;
+    }
+
+    .task-state {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      border: 3px solid #a8a197;
+      color: white;
+      font-size: 22px;
+      font-weight: 950;
+    }
+
+    .task.done .task-state {
+      border-color: #79b954;
+      background: #79b954;
+    }
+
+    .task-icon {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      font-size: 30px;
+    }
+
+    .task-title {
+      font-size: 16px;
+      font-weight: 950;
+      line-height: 1.18;
+    }
+
+    .task-sub {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 4px;
+      color: var(--leaf-dark);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .mini-coin {
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 32% 27%, #fff1a0 0 22%, #ffc946 24% 62%, #d48a10 64%);
+      box-shadow: inset 0 -1px 0 rgba(125, 78, 0, 0.15);
+    }
+
+    .task-check {
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      justify-self: end;
+      border-radius: 999px;
+      background: #edf7dd;
+      color: #72ae4e;
+      font-size: 22px;
+      font-weight: 950;
+    }
+
+    .task-check.empty {
+      background: transparent;
+      color: transparent;
+      border: 2px dashed #ddd0bd;
+    }
+
+    .tabbar {
+      position: absolute;
+      left: 19px;
+      right: 19px;
+      bottom: 17px;
+      z-index: 20;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      align-items: center;
+      height: 67px;
+      padding: 8px 7px;
+      border-radius: 24px;
+      background: rgba(255,255,255,0.94);
+      border: 1px solid rgba(234, 223, 205, 0.9);
+      box-shadow: 0 12px 28px rgba(105, 71, 29, 0.12);
+      backdrop-filter: blur(10px);
+    }
+
+    .tab {
+      display: grid;
+      justify-items: center;
+      gap: 4px;
+      min-width: 0;
+      color: #877966;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .tab.active {
+      color: var(--leaf-dark);
+    }
+
+    .tab-icon {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: 31px;
+      height: 31px;
+    }
+
+    .home-icon::before {
+      content: "";
+      position: absolute;
+      top: 4px;
+      width: 21px;
+      height: 21px;
+      background: linear-gradient(145deg, #8dca57, #69a943);
+      clip-path: polygon(50% 0, 95% 41%, 84% 41%, 84% 100%, 16% 100%, 16% 41%, 5% 41%);
+      filter: drop-shadow(0 4px 5px rgba(78, 135, 52, 0.18));
+    }
+
+    .tab .coin {
+      width: 30px;
+      height: 30px;
+    }
+
+    .tab .coin::before {
+      width: 17px;
+      height: 17px;
+    }
+
+    .tab .coin::after {
+      left: 12px;
+      top: 9px;
+      width: 6px;
+      height: 5px;
+      box-shadow: 5px 5px 0 0 #9c6d12;
+    }
+
+    .nav-tree {
+      width: 30px;
+      height: 31px;
+    }
+
+    .nav-tree::before {
+      content: "";
+      position: absolute;
+      left: 7px;
+      bottom: 2px;
+      width: 7px;
+      height: 13px;
+      border-radius: 5px;
+      background: #93612d;
+    }
+
+    .nav-tree::after {
+      content: "";
+      position: absolute;
+      left: 3px;
+      top: 2px;
+      width: 24px;
+      height: 22px;
+      border-radius: 999px;
+      background:
+        radial-gradient(circle at 35% 29%, rgba(255,255,255,0.22), transparent 16%),
+        linear-gradient(145deg, #9bd263, #5e9d3f);
+      box-shadow: -8px 7px 0 -4px #78b251, 8px 7px 0 -4px #6ba747;
+    }
+
+    .avatar {
+      width: 29px;
+      height: 29px;
+      border-radius: 999px;
+      background: #ffe3c0;
+      box-shadow: inset 0 0 0 2px rgba(126, 83, 38, 0.08);
+    }
+
+    .avatar::before {
+      content: "";
+      position: absolute;
+      left: 6px;
+      top: 3px;
+      width: 18px;
+      height: 10px;
+      border-radius: 999px 999px 6px 6px;
+      background: #815421;
+    }
+
+    .avatar::after {
+      content: "";
+      position: absolute;
+      left: 8px;
+      top: 15px;
+      width: 4px;
+      height: 4px;
+      border-radius: 999px;
+      background: #684526;
+      box-shadow: 12px 0 0 #684526, 6px 7px 0 1px #ee8d75;
+    }
+
+    @keyframes fruitPulse {
+      0%, 100% { transform: scale(1); opacity: 0.82; }
+      48% { transform: scale(1.12); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <main class="phone" aria-label="child home grass preview">
+    <div class="content">
+      <section class="hero">
+        <span class="sky-dot a"></span>
+        <span class="sky-dot b"></span>
+        <span class="sky-dot c"></span>
+
+        <button class="diary" type="button">
+          <span class="coin"></span>
+          成長日記
+        </button>
+
+        <div class="hero-copy">
+          <h1 class="greeting">午安，承恩！</h1>
+          <p class="tagline">今天也是成長的一天</p>
+        </div>
+
+        <div class="balance">
+          <span class="coin"></span>
+          <div>
+            <strong>162 <small>幣</small></strong>
+            <span class="today-bonus">✨ 今天 +8</span>
+          </div>
+        </div>
+
+        <div class="landscape">
+          <span class="hill back"></span>
+          <span class="hill mid"></span>
+          <span class="hill front"></span>
+          <span class="grass a"><span class="blade"></span></span>
+          <span class="grass b"><span class="blade"></span></span>
+          <span class="grass c"><span class="blade"></span></span>
+        </div>
+
+        <div class="tree-scene" aria-hidden="true">
+          <span class="tree-ground"></span>
+          <span class="tree-trunk"></span>
+          <span class="tree-crown main"></span>
+          <span class="tree-crown mid"></span>
+          <span class="tree-crown left"></span>
+          <span class="tree-crown right"></span>
+          <span class="tree-sign"></span>
+          <span class="tree-fruit a"></span>
+          <span class="tree-fruit b"></span>
+          <span class="tree-fruit c"></span>
+        </div>
+      </section>
+
+      <section class="progress-card">
+        <span class="sprout-badge"><span class="sprout"></span></span>
+        <span class="progress-title">今天 4/7</span>
+        <span class="dots" aria-hidden="true">
+          <span class="dot done"></span>
+          <span class="dot done"></span>
+          <span class="dot done"></span>
+          <span class="dot done"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+        </span>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2 class="section-title"><span class="tiny-plant"></span>我的成長目標</h2>
+          <span class="section-link">查看全部</span>
+        </div>
+
+        <div class="goals">
+          <article class="goal">
+            <div class="goal-art"><span class="piano"></span></div>
+            <div class="goal-title">鋼琴家之路</div>
+            <div class="goal-sub">第 2/4 級</div>
+            <div class="bar"><span></span></div>
+          </article>
+
+          <article class="goal">
+            <div class="goal-art"><span class="banana"></span></div>
+            <div class="goal-title">早睡挑戰</div>
+            <div class="goal-sub">第 0/30 天</div>
+            <div class="bar empty"><span></span></div>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2 class="section-title"><span class="sun-icon"></span>今天要做的</h2>
+          <span class="section-link">3 件任務</span>
+        </div>
+
+        <div class="tasks">
+          <div class="task done">
+            <span class="task-state">✓</span>
+            <span class="task-icon">🎒</span>
+            <div>
+              <div class="task-title">自己整理書包</div>
+              <div class="task-sub"><span class="mini-coin"></span>完成打卡</div>
+            </div>
+            <span class="task-check">✓</span>
+          </div>
+
+          <div class="task">
+            <span class="task-state"></span>
+            <span class="task-icon">🪥</span>
+            <div>
+              <div class="task-title">早上自己刷牙</div>
+              <div class="task-sub"><span class="mini-coin"></span>完成打卡</div>
+            </div>
+            <span class="task-check empty">✓</span>
+          </div>
+
+          <div class="task done">
+            <span class="task-state">✓</span>
+            <span class="task-icon">🍽️</span>
+            <div>
+              <div class="task-title">飯後把碗盤送水槽</div>
+              <div class="task-sub"><span class="mini-coin"></span>省 3 分鐘</div>
+            </div>
+            <span class="task-check">✓</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <nav class="tabbar" aria-label="child tabs">
+      <span class="tab active">
+        <span class="tab-icon home-icon"></span>
+        首頁
+      </span>
+      <span class="tab">
+        <span class="coin"></span>
+        成長幣
+      </span>
+      <span class="tab">
+        <span class="tab-icon nav-tree"></span>
+        許願樹
+      </span>
+      <span class="tab">
+        <span class="tab-icon avatar"></span>
+        我的
+      </span>
+    </nav>
+  </main>
+</body>
+</html>

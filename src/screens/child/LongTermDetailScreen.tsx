@@ -1,16 +1,16 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
   ActivityIndicator,
-  StyleSheet,  
   Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Circle, Path } from 'react-native-svg';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRoute, useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import dayjs from 'dayjs';
@@ -19,6 +19,8 @@ import timezone from 'dayjs/plugin/timezone';
 import { supabase } from '../../lib/supabase';
 import { completeTask } from '../../lib/taskActions';
 import { Colors } from '../../constants/colors';
+import { webMouseDraggableScroll } from '../../constants/webStyles';
+import BottomNav from '../../components/BottomNav';
 import { CheckIcon } from '../../components/icons/TaskIcons';
 import type { RootStackParamList } from '../../../App';
 import type { LongTermGoal, Task } from '../../types/database';
@@ -27,640 +29,511 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const TZ = 'Asia/Taipei';
-const DOT_SIZE = 22;
-const TRACK_HEIGHT = 14;
-const LABEL_WIDTH = 44;
 
-// ---------------------------------------------------------------------------
-// Icons
-// ---------------------------------------------------------------------------
+type LongTermDetailRoute = RouteProp<RootStackParamList, 'LongTermDetail'>;
+type Nav = StackNavigationProp<RootStackParamList, 'LongTermDetail'>;
+type CpStatus = 'done' | 'active' | 'pending';
+type MilestoneIcon = 'moon' | 'lantern' | 'tree';
+type ChildTabId = 'home' | 'wallet' | 'wish' | 'profile';
 
-function ChevLeftIcon({ size = 20, color = Colors.ink700 }: { size?: number; color?: string }) {
+type JourneyMilestone = {
+  day: number;
+  title: string;
+  reward: string;
+  icon: MilestoneIcon;
+};
+
+const DEFAULT_MILESTONES: JourneyMilestone[] = [
+  { day: 10, title: '小月亮徽章', reward: '成長幣 +20', icon: 'moon' },
+  { day: 20, title: '星光小燈', reward: '解鎖晚安小燈', icon: 'lantern' },
+  { day: 30, title: '晚安守護樹', reward: '和家人一起選一個慶祝時刻', icon: 'tree' },
+];
+
+const PATH_MARKERS = [
+  { maxDay: 3, left: '17%', top: 94 },
+  { maxDay: 7, left: '29%', top: 82 },
+  { maxDay: 10, left: '39%', top: 58 },
+  { maxDay: 15, left: '55%', top: 74 },
+  { maxDay: 20, left: '69%', top: 52 },
+  { maxDay: 25, left: '82%', top: 66 },
+  { maxDay: 30, left: '91%', top: 40 },
+];
+
+const WEEK_DAYS = ['一', '二', '三', '四', '五', '六', '日'];
+
+function ChevLeftIcon({ size = 22, color = Colors.ink700 }: { size?: number; color?: string }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M15 18l-6-6 6-6"
-        stroke={color}
-        strokeWidth={2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <Path d="M15 18l-6-6 6-6" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Pure helpers
-// ---------------------------------------------------------------------------
-
-type CpStatus = 'done' | 'active' | 'pending';
-
-function getCpStatus(cpDay: number, currentDay: number, sortedCpDays: number[]): CpStatus {
-  if (currentDay >= cpDay) return 'done';
-  const firstUnreached = sortedCpDays.find(d => currentDay < d);
-  return firstUnreached === cpDay ? 'active' : 'pending';
+function MoreIcon({ size = 24, color = Colors.ink700 }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={6} cy={12} r={1.6} fill={color} />
+      <Circle cx={12} cy={12} r={1.6} fill={color} />
+      <Circle cx={18} cy={12} r={1.6} fill={color} />
+    </Svg>
+  );
 }
 
-// ---------------------------------------------------------------------------
-// Progress bar with checkpoint dots
-// ---------------------------------------------------------------------------
+function getCpStatus(day: number, currentDay: number, days: number[]): CpStatus {
+  if (currentDay >= day) return 'done';
+  const firstUnreached = days.find(item => currentDay < item);
+  return firstUnreached === day ? 'active' : 'pending';
+}
 
-const pbStyles = StyleSheet.create({
-  wrapper: {
-    paddingHorizontal: 4,
-  },
-  barArea: {
-    height: DOT_SIZE,
-    position: 'relative',
-  },
-  track: {
-    position: 'absolute',
-    top: (DOT_SIZE - TRACK_HEIGHT) / 2,
-    left: 0,
-    right: 0,
-    height: TRACK_HEIGHT,
-    backgroundColor: Colors.cream200,
-    borderRadius: 999,
-    overflow: 'hidden',
-  },
-  fill: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    bottom: 0,
-    backgroundColor: Colors.gold500,
-    borderRadius: 999,
-  },
-  dot: {
-    position: 'absolute',
-    top: 0,
-    width: DOT_SIZE,
-    height: DOT_SIZE,
-    borderRadius: DOT_SIZE / 2,
-    backgroundColor: Colors.ink100,
-    borderWidth: 2,
-    borderColor: Colors.bgCanvas,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dotDone: {
-    backgroundColor: Colors.gold500,
-    borderColor: Colors.gold300,
-  },
-  dotActive: {
-    backgroundColor: Colors.coral500,
-    borderColor: Colors.coral300,
-  },
-  dotInner: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.bgSurface,
-  },
-  labelsArea: {
-    height: 20,
-    position: 'relative',
-    marginTop: 6,
-  },
-  labelPos: {
-    position: 'absolute',
-    width: LABEL_WIDTH,
-    alignItems: 'center',
-  },
-  labelText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: Colors.ink300,
-    textAlign: 'center',
-  },
-  labelDone: {
-    color: Colors.gold600,
-  },
-  labelActive: {
-    fontWeight: '800',
-    color: Colors.coral600,
-  },
-});
+function getProgressPosition(day: number) {
+  return PATH_MARKERS.find(item => day <= item.maxDay) ?? PATH_MARKERS[PATH_MARKERS.length - 1];
+}
 
-function ProgressBarWithCheckpoints({
-  current,
-  total,
-  checkpointRewards,
-}: {
-  current: number;
-  total: number;
-  checkpointRewards: Record<string, number> | null;
-}) {
-  const fillPct = total > 0 ? Math.min((current / total) * 100, 100) : 0;
-  const sortedCpDays = checkpointRewards
-    ? Object.keys(checkpointRewards).map(Number).sort((a, b) => a - b)
-    : [];
+function getMilestoneEmoji(icon: MilestoneIcon) {
+  if (icon === 'lantern') return '🏮';
+  if (icon === 'tree') return '🌳';
+  return '🌙';
+}
 
+function buildMilestones(goal: LongTermGoal): JourneyMilestone[] {
+  const rewards = goal.checkpoint_rewards;
+  if (rewards == null || Object.keys(rewards).length === 0) return DEFAULT_MILESTONES;
+
+  return Object.keys(rewards)
+    .map(Number)
+    .sort((a, b) => a - b)
+    .map((day, index) => {
+      const fallback = DEFAULT_MILESTONES[index] ?? DEFAULT_MILESTONES[DEFAULT_MILESTONES.length - 1];
+      const coin = rewards[String(day)] ?? 0;
+      return {
+        day,
+        title: fallback.title,
+        reward: coin > 0 ? `成長幣 +${coin}` : fallback.reward,
+        icon: fallback.icon,
+      };
+    });
+}
+
+function SectionTitle({ icon, title }: { icon: string; title: string }) {
   return (
-    <View style={pbStyles.wrapper}>
-      <View style={pbStyles.barArea}>
-        <View style={pbStyles.track}>
-          <View style={[pbStyles.fill, { width: `${fillPct}%` as any }]} />
+    <View style={styles.sectionTitleRow}>
+      <Text style={styles.sectionIcon}>{icon}</Text>
+      <Text style={styles.sectionTitle}>{title}</Text>
+    </View>
+  );
+}
+
+function NightHero({
+  taskName,
+  currentDay,
+  completedCount,
+}: {
+  taskName: string;
+  currentDay: number;
+  completedCount: number;
+}) {
+  return (
+    <View style={styles.hero}>
+      <Svg style={StyleSheet.absoluteFill} viewBox="0 0 360 178" preserveAspectRatio="none">
+        <Path d="M0 0H360V178H0z" fill="#14284A" />
+        <Path d="M0 110C70 78 128 88 188 116C250 146 298 116 360 92V178H0z" fill="#233D63" opacity={0.9} />
+        <Path d="M0 140C80 118 124 126 180 146C244 169 306 138 360 124V178H0z" fill="#203C33" />
+        <Circle cx={48} cy={46} r={23} fill="#F7D978" opacity={0.24} />
+        <Path d="M58 27C45 33 39 47 44 60C50 73 64 80 77 75C66 72 58 62 58 50C58 40 63 32 72 27C67 25 62 25 58 27z" fill="#FFE48A" />
+        {[94, 150, 214, 286, 318].map((cx, index) => (
+          <Circle key={cx} cx={cx} cy={26 + (index % 3) * 26} r={2.4} fill="#FFE48A" opacity={0.9} />
+        ))}
+        {[216, 248, 304].map((cx, index) => (
+          <Circle key={cx} cx={cx} cy={128 + index * 10} r={4} fill="#F7D978" opacity={0.75} />
+        ))}
+      </Svg>
+      <View style={styles.heroCopy}>
+        <View style={styles.typeBadge}>
+          <Text style={styles.typeBadgeText}>🌙 習慣養成</Text>
         </View>
-        {sortedCpDays.map(cpDay => {
-          const cpPct = total > 0 ? (cpDay / total) * 100 : 0;
-          const status = getCpStatus(cpDay, current, sortedCpDays);
-          return (
-            <View
-              key={cpDay}
-              style={[
-                pbStyles.dot,
-                status === 'done' && pbStyles.dotDone,
-                status === 'active' && pbStyles.dotActive,
-                { left: `${cpPct}%` as any, marginLeft: -(DOT_SIZE / 2) },
-              ]}
-            >
-              {status === 'done' && <CheckIcon size={10} color="#fff" />}
-              {status === 'active' && <View style={pbStyles.dotInner} />}
-            </View>
-          );
-        })}
+        <Text style={styles.heroTitle}>{taskName}</Text>
+        <Text style={styles.heroDescription}>讓身體每天都有足夠的休息時間</Text>
+        <Text style={styles.heroMeta}>第 {currentDay} 天 · 已完成 {completedCount} 次</Text>
+        <View style={styles.streakPill}>
+          <Text style={styles.streakPillText}>🔥 連續 3 天</Text>
+        </View>
       </View>
-      <View style={pbStyles.labelsArea}>
-        {sortedCpDays.map(cpDay => {
-          const cpPct = total > 0 ? (cpDay / total) * 100 : 0;
-          const status = getCpStatus(cpDay, current, sortedCpDays);
-          return (
-            <View
-              key={cpDay}
-              style={[
-                pbStyles.labelPos,
-                { left: `${cpPct}%` as any, marginLeft: -(LABEL_WIDTH / 2) },
-              ]}
-            >
-              <Text
-                style={[
-                  pbStyles.labelText,
-                  status === 'done' && pbStyles.labelDone,
-                  status === 'active' && pbStyles.labelActive,
-                ]}
-              >
-                Day {cpDay}
-              </Text>
-            </View>
-          );
-        })}
+      <View style={styles.treeHouse}>
+        <Text style={styles.treeCrown}>✦ ✦</Text>
+        <Text style={styles.treeHouseIcon}>🏡</Text>
       </View>
     </View>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Milestone row
-// ---------------------------------------------------------------------------
-
-function MilestoneRow({ day, coins, status }: { day: number; coins: number; status: CpStatus }) {
-  const label = status === 'done' ? '已領取' : status === 'active' ? '進行中' : '未達成';
+function TodayHabitCard({
+  checked,
+  checking,
+  onCheckIn,
+}: {
+  checked: boolean;
+  checking: boolean;
+  onCheckIn: () => void;
+}) {
   return (
-    <View style={styles.milestoneRow}>
-      <Text style={styles.milestoneDayText}>Day {day}</Text>
-      <Text style={styles.milestoneCoinText}>🌟 {coins} 枚</Text>
-      <View
-        style={[
-          styles.cpBadge,
-          status === 'done' && styles.cpBadgeDone,
-          status === 'active' && styles.cpBadgeActive,
-        ]}
-      >
-        <Text
-          style={[
-            styles.cpBadgeText,
-            status === 'done' && styles.cpBadgeTextDone,
-            status === 'active' && styles.cpBadgeTextActive,
-          ]}
-        >
-          {label}
+    <View style={styles.todayCard}>
+      <View style={styles.todayHeader}>
+        <View style={styles.todayMoon}>
+          <Text style={styles.todayMoonText}>🌙</Text>
+        </View>
+        <View style={styles.todayCopy}>
+          <Text style={styles.todayTitle}>{checked ? '今晚的努力已記下' : '今晚打卡'}</Text>
+          <Text style={styles.todayQuestion}>今晚有在 10 點前準備睡覺嗎？</Text>
+        </View>
+        <Text style={styles.sleepMascot}>☁️</Text>
+      </View>
+
+      {checked ? (
+        <View style={styles.donePanel}>
+          <CheckIcon size={18} color={Colors.success} />
+          <Text style={styles.donePanelText}>你正在讓身體學會好好休息。</Text>
+        </View>
+      ) : (
+        <View style={styles.todayActions}>
+          <TouchableOpacity
+            style={[styles.primaryChoice, checking && styles.disabledChoice]}
+            onPress={onCheckIn}
+            activeOpacity={0.82}
+            disabled={checking}
+          >
+            {checking ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.primaryChoiceText}>🌙 有，我做到了</Text>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.secondaryChoice} activeOpacity={0.75}>
+            <Text style={styles.secondaryChoiceText}>🫧 差一點，明天再試試</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <View style={styles.reflectionWrap}>
+        <Text style={styles.reflectionLabel}>今天的準備情況如何？</Text>
+        <View style={styles.reflectionChips}>
+          {['🌱 今天很容易', '☁️ 有點困難', '👨‍👩‍👧 需要家人幫忙'].map(item => (
+            <View key={item} style={styles.reflectionChip}>
+              <Text style={styles.reflectionText}>{item}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function GrowthPathCard({
+  currentDay,
+  total,
+  milestones,
+}: {
+  currentDay: number;
+  total: number;
+  milestones: JourneyMilestone[];
+}) {
+  const marker = getProgressPosition(currentDay);
+  const next = milestones.find(item => currentDay < item.day);
+  const daysToNext = next ? Math.max(next.day - currentDay, 0) : 0;
+
+  return (
+    <View style={styles.card}>
+      <SectionTitle icon="🌱" title="成長小徑" />
+      <View style={styles.pathArea}>
+        <Svg style={StyleSheet.absoluteFill} viewBox="0 0 340 150" preserveAspectRatio="none">
+          <Path
+            d="M18 112C70 112 82 84 122 92S178 128 214 78S278 98 326 42"
+            stroke="#E9D7B4"
+            strokeWidth={8}
+            fill="none"
+            strokeLinecap="round"
+          />
+          <Path
+            d="M18 112C70 112 82 84 122 92"
+            stroke="#B4D661"
+            strokeWidth={8}
+            fill="none"
+            strokeLinecap="round"
+          />
+          {[42, 72, 102, 132, 188, 246, 296].map((cx, index) => (
+            <Circle
+              key={cx}
+              cx={cx}
+              cy={[109, 101, 94, 91, 112, 78, 70][index]}
+              r={6}
+              fill={index < 4 ? '#FFFFFF' : '#D8D0C2'}
+              stroke={index < 4 ? '#A9CB4A' : '#C8BFAA'}
+              strokeWidth={3}
+            />
+          ))}
+        </Svg>
+        <Text style={styles.startFlag}>🚩</Text>
+        <View style={[styles.currentMarker, { left: marker.left as any, top: marker.top }]}>
+          <View style={styles.currentAvatar}>
+            <Text style={styles.currentAvatarText}>🌱</Text>
+          </View>
+          <Text style={styles.currentDayText}>第 {currentDay} 天</Text>
+        </View>
+        {milestones.slice(0, 3).map((milestone, index) => {
+          const positions: Array<{ left: `${number}%`; top: number }> = [
+            { left: '48%', top: 20 },
+            { left: '69%', top: 48 },
+            { left: '89%', top: 16 },
+          ];
+          const status = currentDay >= milestone.day ? 'done' : milestone.day - currentDay <= 3 ? 'active' : 'pending';
+          return (
+            <View key={milestone.day} style={[styles.pathMilestone, positions[index]]}>
+              <View style={[styles.pathMilestoneIcon, status === 'active' && styles.pathMilestoneNear]}>
+                <Text style={styles.pathMilestoneEmoji}>{getMilestoneEmoji(milestone.icon)}</Text>
+              </View>
+              <Text style={styles.pathMilestoneDay}>第 {milestone.day} 天</Text>
+              <Text style={styles.pathMilestoneLabel}>{milestone.title}</Text>
+            </View>
+          );
+        })}
+      </View>
+      <View style={styles.helperLine}>
+        <Text style={styles.helperText}>
+          {next ? `🌱 再 ${daysToNext} 天，就能解鎖第一個里程碑。` : `🌳 ${total} 天的旅程已完成。`}
         </Text>
       </View>
     </View>
   );
 }
 
-// ---------------------------------------------------------------------------
-// FamilyRoleView — 家庭責任類的孩子端職位體驗
-// ---------------------------------------------------------------------------
-
-function FamilyProgressBar({ pct }: { pct: number }) {
-  const filled = Math.max(0, Math.min(100, pct));
+function WeeklyFootprint() {
   return (
-    <View style={fbStyles.track}>
-      <View style={[fbStyles.fill, { width: `${filled}%` }]} />
+    <View style={styles.card}>
+      <SectionTitle icon="🍃" title="這週的足跡" />
+      <View style={styles.weekRow}>
+        {WEEK_DAYS.map((day, index) => {
+          const done = index < 4;
+          return (
+            <View key={day} style={styles.weekCell}>
+              <Text style={styles.weekDay}>{day}</Text>
+              <View style={[styles.weekBubble, done && styles.weekBubbleDone]}>
+                <Text style={styles.weekIcon}>{done ? '🌿' : '🌙'}</Text>
+              </View>
+            </View>
+          );
+        })}
+      </View>
+      <View style={styles.weekInsight}>
+        <Text style={styles.weekInsightText}>🌿 這週已完成 4 次，比上週多 1 次。週三最容易忘記，試試先把睡衣放在床邊。</Text>
+      </View>
     </View>
   );
 }
 
-const fbStyles = StyleSheet.create({
-  track: {
-    height: 10,
-    backgroundColor: Colors.cream200,
-    borderRadius: 999,
-    overflow: 'hidden',
-    marginTop: 12,
-  },
-  fill: {
-    height: '100%',
-    backgroundColor: Colors.sage400,
-    borderRadius: 999,
-  },
-});
+function MilestoneJourney({
+  milestones,
+  currentDay,
+}: {
+  milestones: JourneyMilestone[];
+  currentDay: number;
+}) {
+  const days = milestones.map(item => item.day);
+  return (
+    <View style={styles.card}>
+      <SectionTitle icon="⭐" title="旅程里程碑" />
+      <View style={styles.milestoneList}>
+        {milestones.map(milestone => {
+          const status = getCpStatus(milestone.day, currentDay, days);
+          const label = status === 'done' ? '已到達' : status === 'active' ? '快到了' : '未解鎖';
+          return (
+            <View key={milestone.day} style={[styles.milestoneItem, status === 'active' && styles.milestoneItemActive]}>
+              <View style={styles.milestoneBadge}>
+                <Text style={styles.milestoneEmoji}>{getMilestoneEmoji(milestone.icon)}</Text>
+              </View>
+              <View style={styles.milestoneCopy}>
+                <Text style={styles.milestoneTitle}>第 {milestone.day} 天</Text>
+                <Text style={styles.milestoneReward}>{milestone.reward}</Text>
+              </View>
+              <View style={[styles.statusBadge, status === 'active' && styles.statusBadgeActive]}>
+                <Text style={[styles.statusBadgeText, status === 'active' && styles.statusBadgeTextActive]}>{label}</Text>
+              </View>
+              <Text style={styles.chevron}>›</Text>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function AdjustGoalEntry() {
+  return (
+    <TouchableOpacity style={styles.adjustEntry} activeOpacity={0.75}>
+      <Text style={styles.adjustCloud}>☁️</Text>
+      <View style={styles.adjustCopy}>
+        <Text style={styles.adjustTitle}>需要調整這個目標？</Text>
+        <Text style={styles.adjustSub}>可以和家長一起討論</Text>
+      </View>
+      <Text style={styles.adjustArrow}>›</Text>
+    </TouchableOpacity>
+  );
+}
+
+function HabitGoalView({
+  goal,
+  task,
+  taskName,
+  isCheckedIn,
+  checking,
+  onCheckIn,
+}: {
+  goal: LongTermGoal;
+  task: Task;
+  taskName: string;
+  isCheckedIn: boolean;
+  checking: boolean;
+  onCheckIn: () => void;
+}) {
+  const total = goal.total_days ?? 30;
+  const currentDay = Math.min(Math.max(goal.current_day ?? 0, 0), total);
+  const completedCount = Math.max(currentDay - 1 + (isCheckedIn ? 1 : 0), 0);
+  const milestones = useMemo(() => buildMilestones(goal), [goal]);
+
+  return (
+    <ScrollView
+      testID="long-term-detail-scroll"
+      style={[styles.scroll, webMouseDraggableScroll]}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+    >
+      <NightHero taskName={taskName} currentDay={currentDay} completedCount={completedCount} />
+      <TodayHabitCard checked={isCheckedIn} checking={checking} onCheckIn={onCheckIn} />
+      <GrowthPathCard currentDay={currentDay} total={total} milestones={milestones} />
+      <WeeklyFootprint />
+      <MilestoneJourney milestones={milestones} currentDay={currentDay} />
+      {(goal.interrupt_count ?? 0) > 0 && (
+        <View style={styles.softNote}>
+          <Text style={styles.softNoteText}>這段旅程曾暫停 {goal.interrupt_count} 次，重新開始也算是成長的一部分。</Text>
+        </View>
+      )}
+      <AdjustGoalEntry />
+      <Text style={styles.hiddenDataHint}>{task.id}</Text>
+    </ScrollView>
+  );
+}
+
+function SkillGoalView({ goal, task, taskName }: { goal: LongTermGoal; task: Task | null; taskName: string }) {
+  const levels = goal.level_definitions ?? [];
+  const totalLevels = Math.max(goal.level_count ?? levels.length, 1);
+  const currentLevel = Math.min(goal.current_level ?? 0, totalLevels);
+  const progressPct = Math.min((currentLevel / totalLevels) * 100, 100);
+  const currentStage = String(levels[currentLevel]?.name ?? levels[Math.max(currentLevel - 1, 0)]?.name ?? '下一個小練習');
+  const practiceMinutes = Math.max(task?.base_time_min ?? 15, 15);
+
+  return (
+    <ScrollView
+      testID="long-term-detail-scroll"
+      style={[styles.scroll, webMouseDraggableScroll]}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={skillStyles.hero}>
+        <View style={skillStyles.heroIcon}>
+          <Text style={skillStyles.heroIconText}>🎹</Text>
+        </View>
+        <View style={skillStyles.heroCopy}>
+          <Text style={skillStyles.heroLabel}>鋼琴練習之路</Text>
+          <Text style={skillStyles.heroTitle}>{taskName}</Text>
+          <Text style={skillStyles.heroMeta}>第 {currentLevel} / {totalLevels} 階段</Text>
+          <Text style={skillStyles.heroSub}>本階段任務：{currentStage}</Text>
+        </View>
+      </View>
+
+      <View style={skillStyles.stageCard}>
+        <View style={skillStyles.stageHeader}>
+          <Text style={skillStyles.stageTitle}>今天練習 {practiceMinutes} 分鐘</Text>
+          <Text style={skillStyles.stageMeta}>慢慢把手感留在今天</Text>
+        </View>
+        <View style={skillStyles.skillActions}>
+          {['完成練習', '錄一段給自己聽', '今天卡在這裡'].map(label => (
+            <TouchableOpacity key={label} style={skillStyles.skillAction} activeOpacity={0.76}>
+              <Text style={skillStyles.skillActionText}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.card}>
+        <SectionTitle icon="🌱" title="成長階段" />
+        <View style={skillStyles.track}>
+          <View style={[skillStyles.trackFill, { width: `${progressPct}%` as any }]} />
+        </View>
+        <View style={skillStyles.levelList}>
+          {levels.length > 0 ? levels.map((level, index) => {
+            const isDone = index < currentLevel;
+            const isCurrent = index === currentLevel;
+            return (
+              <View key={String(level.id ?? index)} style={skillStyles.levelRow}>
+                <View style={[skillStyles.levelDot, isDone && skillStyles.levelDotDone, isCurrent && skillStyles.levelDotCurrent]}>
+                  <Text style={[skillStyles.levelDotText, isDone && skillStyles.levelDotTextDone]}>
+                    {isDone ? '✓' : index + 1}
+                  </Text>
+                </View>
+                <View style={skillStyles.levelCopy}>
+                  <Text style={skillStyles.levelName}>{String(level.name ?? `第 ${index + 1} 階段`)}</Text>
+                  <Text style={skillStyles.levelReward}>完成後留下作品，也獲得成長幣 {Number(level.coin ?? 0)}</Text>
+                </View>
+              </View>
+            );
+          }) : (
+            <Text style={skillStyles.emptyText}>這個技能還沒有設定階段。</Text>
+          )}
+        </View>
+      </View>
+      <AdjustGoalEntry />
+    </ScrollView>
+  );
+}
 
 function FamilyRoleView({
   goal,
   task,
   taskName,
+  isCheckedIn,
+  checking,
+  onCheckIn,
 }: {
-  goal: import('../../types/database').LongTermGoal;
-  task: import('../../types/database').Task;
+  goal: LongTermGoal;
+  task: Task;
   taskName: string;
+  isCheckedIn: boolean;
+  checking: boolean;
+  onCheckIn: () => void;
 }) {
-  const [currentDay, setCurrentDay] = useState(goal.current_day);
-  const [isCheckedIn, setIsCheckedIn] = useState(false);
-  const [checking, setChecking] = useState(false);
-
-  const targetCompletions = goal.target_completions ?? 0;
-  const pct = targetCompletions > 0
-    ? Math.min(Math.round((currentDay / targetCompletions) * 100), 100)
-    : 0;
-
-  const expiryDate = dayjs(goal.started_at).add(goal.total_days ?? 0, 'day');
-  const daysLeft = Math.max(0, expiryDate.diff(dayjs().tz(TZ), 'day'));
-  const isExpired = daysLeft === 0;
-
-  // Check today's completion on mount
-  useEffect(() => {
-    const check = async () => {
-      const today = dayjs().tz(TZ).format('YYYY-MM-DD');
-      const tomorrow = dayjs().tz(TZ).add(1, 'day').format('YYYY-MM-DD');
-      const { data } = await supabase
-        .from('task_completions')
-        .select('id')
-        .eq('task_id', task.id)
-        .eq('child_id', goal.child_id)
-        .gte('completed_at', today)
-        .lt('completed_at', tomorrow)
-        .limit(1)
-        .maybeSingle();
-      setIsCheckedIn(!!data);
-    };
-    void check();
-  }, [task.id, goal.child_id]);
-
-  const handleCheckIn = useCallback(async () => {
-    if (isCheckedIn || checking) return;
-    setChecking(true);
-    try {
-      const completedDate = dayjs().tz(TZ).format('YYYY-MM-DD');
-      // completeTask handles time_savings (Task-B path) + task_completions
-      await completeTask(task.id, goal.child_id, completedDate, true, task, goal.id);
-      // Increment current_day (完成次數) in DB — completeTask only does this for habit
-      await supabase
-        .from('long_term_goals')
-        .update({ current_day: currentDay + 1 })
-        .eq('id', goal.id);
-      setCurrentDay(d => d + 1);
-      setIsCheckedIn(true);
-    } catch (err) {
-      Alert.alert('完成失敗', err instanceof Error ? err.message : '請稍後再試');
-    } finally {
-      setChecking(false);
-    }
-  }, [isCheckedIn, checking, task, goal, currentDay]);
+  const target = goal.target_completions ?? 1;
+  const current = Math.min(goal.current_day ?? 0, target);
+  const pct = Math.round((current / target) * 100);
 
   return (
     <ScrollView
-      style={styles.scroll}
+      testID="long-term-detail-scroll"
+      style={[styles.scroll, webMouseDraggableScroll]}
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
     >
-      {/* Hero card — 職位感框架 */}
-      <View style={frStyles.heroCard}>
-        <Text style={frStyles.heroLabel}>🏠 家庭職位</Text>
-        <Text style={frStyles.heroTitle} numberOfLines={2}>{taskName}</Text>
-        <Text style={frStyles.heroSub}>
-          承諾期：{Math.round((goal.total_days ?? 0) / 7)} 週
-          {'  ·  '}
-          到期：{expiryDate.format('M/D')}
-        </Text>
+      <View style={styles.card}>
+        <SectionTitle icon="🏠" title="家庭任務" />
+        <Text style={styles.familyTitle}>{taskName}</Text>
+        <Text style={styles.familyMeta}>已完成 {current} / {target} 次 · {pct}%</Text>
+        <View style={skillStyles.track}>
+          <View style={[skillStyles.trackFill, { width: `${pct}%` as any }]} />
+        </View>
+        <Text style={styles.familySub}>每一次幫忙，都會讓家裡的節奏更穩一點。</Text>
       </View>
-
-      {/* Progress card or expiry card */}
-      {isExpired ? (
-        <View style={frStyles.expiryCard}>
-          <Text style={frStyles.expiryTitle}>承諾期已結束</Text>
-          <Text style={frStyles.expiryBody}>
-            你在這 {Math.round((goal.total_days ?? 0) / 7)} 週內{'\n'}
-            完成了 {currentDay} / {targetCompletions} 次{'\n'}
-            達成率 {pct}%
-          </Text>
-          <Text style={frStyles.expiryThanks}>謝謝你為家裡做的貢獻！</Text>
-        </View>
-      ) : (
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>PROGRESS</Text>
-          <View style={styles.card}>
-            <View style={frStyles.progressRow}>
-              <View>
-                <Text style={frStyles.progressLabel}>已完成</Text>
-                <Text style={frStyles.progressNum}>{currentDay} 次</Text>
-              </View>
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text style={frStyles.progressLabel}>目標</Text>
-                <Text style={frStyles.progressNum}>{targetCompletions} 次</Text>
-              </View>
-            </View>
-            <FamilyProgressBar pct={pct} />
-            <Text style={frStyles.daysLeft}>距承諾期滿：還剩 {daysLeft} 天</Text>
-          </View>
-        </View>
-      )}
-
-      {/* Check-in button (hidden when expired) */}
-      {!isExpired && (
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>今日完成</Text>
-          {isCheckedIn ? (
-            <View style={styles.checkedCard}>
-              <CheckIcon size={20} color={Colors.success} />
-              <Text style={styles.checkedText}>今天已完成</Text>
-            </View>
-          ) : (
-            <TouchableOpacity
-              style={[styles.checkInBtn, checking && styles.checkInBtnBusy]}
-              onPress={handleCheckIn}
-              activeOpacity={0.8}
-              disabled={checking}
-            >
-              {checking ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <Text style={styles.checkInBtnText}>完成今日職責</Text>
-              )}
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
+      <TodayHabitCard checked={isCheckedIn} checking={checking} onCheckIn={onCheckIn} />
+      <Text style={styles.hiddenDataHint}>{task.id}</Text>
     </ScrollView>
   );
 }
-
-const frStyles = StyleSheet.create({
-  heroCard: {
-    backgroundColor: Colors.sage100,
-    borderRadius: 24,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: Colors.sage200,
-  },
-  heroLabel: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: Colors.sage600,
-    letterSpacing: 0.5,
-    marginBottom: 8,
-  },
-  heroTitle: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: Colors.ink900,
-    lineHeight: 32,
-    marginBottom: 6,
-  },
-  heroSub: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.ink700,
-  },
-  progressRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  progressLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.fgMuted,
-  },
-  progressNum: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: Colors.ink900,
-  },
-  daysLeft: {
-    marginTop: 10,
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.fgMuted,
-    textAlign: 'right',
-  },
-  expiryCard: {
-    backgroundColor: Colors.sage100,
-    borderRadius: 20,
-    padding: 24,
-    borderWidth: 1,
-    borderColor: Colors.sage200,
-    alignItems: 'center',
-    gap: 10,
-  },
-  expiryTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: Colors.ink900,
-  },
-  expiryBody: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: Colors.ink700,
-    textAlign: 'center',
-    lineHeight: 24,
-  },
-  expiryThanks: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.sage600,
-    textAlign: 'center',
-  },
-});
-
-// ---------------------------------------------------------------------------
-// SkillGoalView — 技能學習類的孩子端階段詳情
-// ---------------------------------------------------------------------------
-
-function SkillGoalView({ goal, taskName }: { goal: LongTermGoal; taskName: string }) {
-  const levels = goal.level_definitions ?? [];
-  const totalLevels = Math.max(goal.level_count ?? levels.length, 1);
-  const currentLevel = Math.min(goal.current_level ?? 0, totalLevels);
-  const progressPct = Math.min((currentLevel / totalLevels) * 100, 100);
-  const targetMonths = goal.total_days ? Math.max(1, Math.round(goal.total_days / 30)) : null;
-
-  return (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-    >
-      <View style={skillStyles.heroCard}>
-        <Text style={skillStyles.heroLabel}>🎹 技能挑戰</Text>
-        <Text style={skillStyles.heroTitle} numberOfLines={2}>{taskName}</Text>
-        <Text style={skillStyles.heroSub}>第 {currentLevel} / {totalLevels} 級</Text>
-        {targetMonths ? <Text style={skillStyles.heroMeta}>約 {targetMonths} 個月</Text> : null}
-        <View style={skillStyles.progressTrack}>
-          <View style={[skillStyles.progressFill, { width: `${progressPct}%` as any }]} />
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionLabel}>成長階段</Text>
-        <View style={skillStyles.levelCard}>
-          {levels.length > 0 ? (
-            levels.map((level, index) => {
-              const isDone = index < currentLevel;
-              const isCurrent = index === currentLevel;
-              return (
-                <View key={String(level.id ?? index)} style={skillStyles.levelRow}>
-                  <View
-                    style={[
-                      skillStyles.levelDot,
-                      isDone && skillStyles.levelDotDone,
-                      isCurrent && skillStyles.levelDotCurrent,
-                    ]}
-                  >
-                    <Text style={skillStyles.levelDotText}>{isDone ? '✓' : index + 1}</Text>
-                  </View>
-                  <View style={skillStyles.levelCopy}>
-                    <Text style={skillStyles.levelName} numberOfLines={2}>
-                      {String(level.name ?? `第 ${index + 1} 級`)}
-                    </Text>
-                    <Text style={skillStyles.levelReward}>完成可獲得 {Number(level.coin ?? 0)} 幣</Text>
-                  </View>
-                </View>
-              );
-            })
-          ) : (
-            <Text style={skillStyles.emptyText}>這個技能挑戰還沒有設定階段</Text>
-          )}
-        </View>
-      </View>
-    </ScrollView>
-  );
-}
-
-const skillStyles = StyleSheet.create({
-  heroCard: {
-    backgroundColor: Colors.sage100,
-    borderRadius: 24,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: Colors.sage200,
-  },
-  heroLabel: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: Colors.sage600,
-    letterSpacing: 0.5,
-    marginBottom: 8,
-  },
-  heroTitle: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: Colors.ink900,
-    lineHeight: 32,
-    marginBottom: 6,
-  },
-  heroSub: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: Colors.ink700,
-  },
-  heroMeta: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.fgMuted,
-    marginTop: 3,
-  },
-  progressTrack: {
-    height: 12,
-    borderRadius: 999,
-    backgroundColor: Colors.cream200,
-    overflow: 'hidden',
-    marginTop: 16,
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 999,
-    backgroundColor: Colors.sage400,
-  },
-  levelCard: {
-    backgroundColor: Colors.bgSurface,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: Colors.borderSoft,
-    padding: 14,
-    gap: 12,
-  },
-  levelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  levelDot: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.cream200,
-    borderWidth: 1,
-    borderColor: Colors.borderSoft,
-  },
-  levelDotDone: {
-    backgroundColor: Colors.sage400,
-    borderColor: Colors.sage400,
-  },
-  levelDotCurrent: {
-    backgroundColor: Colors.gold100,
-    borderColor: Colors.gold300,
-  },
-  levelDotText: {
-    fontSize: 13,
-    fontWeight: '900',
-    color: Colors.ink700,
-  },
-  levelCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  levelName: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: Colors.ink900,
-    lineHeight: 22,
-  },
-  levelReward: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.fgMuted,
-    marginTop: 3,
-  },
-  emptyText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.fgMuted,
-    textAlign: 'center',
-    paddingVertical: 16,
-  },
-});
-
-// ---------------------------------------------------------------------------
-// Screen
-// ---------------------------------------------------------------------------
-
-type LongTermDetailRoute = RouteProp<RootStackParamList, 'LongTermDetail'>;
-type Nav = StackNavigationProp<RootStackParamList, 'LongTermDetail'>;
 
 export default function LongTermDetailScreen() {
   const route = useRoute<LongTermDetailRoute>();
@@ -686,12 +559,13 @@ export default function LongTermDetailScreen() {
       ]);
 
       if (goalRes.error || !goalRes.data) {
-        setError('載入目標資料失敗，請稍後再試');
+        setError('讀取長期目標失敗，請稍後再試。');
         setLoading(false);
         return;
       }
+
       if (taskRes.error || !taskRes.data) {
-        setError('載入任務資料失敗，請稍後再試');
+        setError('讀取任務資料失敗，請稍後再試。');
         setLoading(false);
         return;
       }
@@ -714,11 +588,13 @@ export default function LongTermDetailScreen() {
       setIsCheckedIn(!!todayComp);
       setLoading(false);
     };
+
     void load();
   }, [goalId, taskId]);
 
   const handleCheckIn = useCallback(async () => {
     if (!goal || !task || isCheckedIn || checking) return;
+
     setChecking(true);
     try {
       const completedDate = dayjs().tz(TZ).format('YYYY-MM-DD');
@@ -726,157 +602,77 @@ export default function LongTermDetailScreen() {
       setIsCheckedIn(true);
       setGoal(prev => (prev ? { ...prev, current_day: prev.current_day + 1 } : prev));
       if (result.milestone) {
-        Alert.alert(
-          '🎉 里程碑達成！',
-          `你到達了第 ${result.milestone.day} 天！\n獲得 ${result.milestone.coinReward} 枚硬幣！`,
-          [{ text: '太棒了！' }],
-        );
+        Alert.alert('到達新的里程碑', `第 ${result.milestone.day} 天的努力被記下了。`);
       }
     } catch (err) {
-      Alert.alert('打卡失敗', err instanceof Error ? err.message : '請稍後再試');
+      Alert.alert('打卡失敗', err instanceof Error ? err.message : '請稍後再試。');
     } finally {
       setChecking(false);
     }
-  }, [goal, task, isCheckedIn, checking, taskId, goalId]);
+  }, [checking, goal, goalId, isCheckedIn, task, taskId]);
 
-  const total = goal?.total_days ?? 30;
-  const currentDay = goal?.current_day ?? 0;
-  const remaining = Math.max(total - currentDay, 0);
-  const sortedCpDays = goal?.checkpoint_rewards
-    ? Object.keys(goal.checkpoint_rewards).map(Number).sort((a, b) => a - b)
-    : [];
+  const handleTabPress = useCallback((tab: ChildTabId) => {
+    const childId = goal?.child_id;
+    if (!childId) return;
+
+    if (tab === 'home') {
+      navigation.navigate('Home', { childId });
+    } else if (tab === 'wallet') {
+      navigation.navigate('Wallet', { childId });
+    } else if (tab === 'wish') {
+      navigation.navigate('Wish', { childId });
+    } else {
+      navigation.navigate('Profile', { childId });
+    }
+  }, [goal?.child_id, navigation]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
-      {/* Nav bar */}
-      <View style={[styles.navBar, { paddingTop: insets.top + 4 }]}>
+      <View style={[styles.navBar, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity
-          style={styles.backBtn}
+          style={styles.backButton}
           onPress={() => navigation.goBack()}
-          activeOpacity={0.7}
+          activeOpacity={0.72}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <ChevLeftIcon size={22} />
-          <Text style={styles.backLabel}>返回</Text>
+          <ChevLeftIcon />
+          <Text style={styles.backText}>返回</Text>
         </TouchableOpacity>
-        <Text style={styles.navTitle} numberOfLines={1}>
-          長期目標
-        </Text>
-        <View style={styles.navSpacer} />
+        <Text style={styles.navTitle}>長期目標</Text>
+        <TouchableOpacity style={styles.moreButton} activeOpacity={0.72}>
+          <MoreIcon />
+        </TouchableOpacity>
       </View>
 
       {loading ? (
         <ActivityIndicator color={Colors.gold500} style={styles.loader} />
       ) : error ? (
         <Text style={styles.errorText}>{error}</Text>
-      ) : !goal ? null : goal.goal_type === 'skill' ? (
-        <SkillGoalView goal={goal} taskName={taskName} />
-      ) : goal.goal_type === 'family' ? (
-        <FamilyRoleView goal={goal} task={task!} taskName={taskName} />
-      ) : goal.goal_type !== 'habit' ? (
-        <View style={styles.comingSoon}>
-          <Text style={styles.comingSoonTitle}>{taskName}</Text>
-          <Text style={styles.comingSoonBody}>此類型長期目標詳情即將推出</Text>
-        </View>
-      ) : (
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Hero card */}
-          <View style={styles.heroCard}>
-            <View style={styles.heroTopRow}>
-              <Text style={styles.heroLabel}>🔥 連續打卡挑戰</Text>
-              <View style={styles.streakBadge}>
-                <Text style={styles.streakText}>第 {currentDay} 天</Text>
-              </View>
-            </View>
-            <Text style={styles.heroTitle} numberOfLines={2}>
-              {taskName}
-            </Text>
-            <Text style={styles.heroSub}>
-              共 {total} 天
-              {remaining > 0 ? `  ·  還剩 ${remaining} 天` : '  ·  目標完成！'}
-            </Text>
-          </View>
-
-          {/* Progress section */}
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>進度</Text>
-            <View style={styles.card}>
-              <View style={styles.progressDayRow}>
-                <Text style={styles.progressDayNum}>第 {currentDay} 天</Text>
-                <Text style={styles.progressDayOf}>/ 共 {total} 天</Text>
-              </View>
-              <ProgressBarWithCheckpoints
-                current={currentDay}
-                total={total}
-                checkpointRewards={goal.checkpoint_rewards}
-              />
-            </View>
-          </View>
-
-          {/* Check-in section */}
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>今日打卡</Text>
-            {isCheckedIn ? (
-              <View style={styles.checkedCard}>
-                <CheckIcon size={20} color={Colors.success} />
-                <Text style={styles.checkedText}>今天已打卡</Text>
-              </View>
-            ) : (
-              <TouchableOpacity
-                style={[styles.checkInBtn, checking && styles.checkInBtnBusy]}
-                onPress={handleCheckIn}
-                activeOpacity={0.8}
-                disabled={checking}
-              >
-                {checking ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.checkInBtnText}>今天打卡</Text>
-                )}
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Milestones section */}
-          {sortedCpDays.length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>里程碑獎勵</Text>
-              <View style={styles.milestonesCard}>
-                {sortedCpDays.map((cpDay, idx) => (
-                  <React.Fragment key={cpDay}>
-                    {idx > 0 && <View style={styles.rowDivider} />}
-                    <MilestoneRow
-                      day={cpDay}
-                      coins={goal.checkpoint_rewards![String(cpDay)]}
-                      status={getCpStatus(cpDay, currentDay, sortedCpDays)}
-                    />
-                  </React.Fragment>
-                ))}
-              </View>
-            </View>
-          )}
-
-          {/* Interrupt note */}
-          {(goal.interrupt_count ?? 0) > 0 && (
-            <View style={styles.interruptNote}>
-              <Text style={styles.interruptText}>
-                曾中斷 {goal.interrupt_count} 次，繼續加油！
-              </Text>
-            </View>
-          )}
-        </ScrollView>
-      )}
+      ) : goal?.goal_type === 'skill' ? (
+        <SkillGoalView goal={goal} task={task} taskName={taskName} />
+      ) : goal?.goal_type === 'family' && task ? (
+        <FamilyRoleView
+          goal={goal}
+          task={task}
+          taskName={taskName}
+          isCheckedIn={isCheckedIn}
+          checking={checking}
+          onCheckIn={handleCheckIn}
+        />
+      ) : goal && task ? (
+        <HabitGoalView
+          goal={goal}
+          task={task}
+          taskName={taskName}
+          isCheckedIn={isCheckedIn}
+          checking={checking}
+          onCheckIn={handleCheckIn}
+        />
+      ) : null}
+      <BottomNav activeTab="wallet" onTabPress={handleTabPress} />
     </SafeAreaView>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Styles
-// ---------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
   safe: {
@@ -884,253 +680,704 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.bgCanvas,
   },
   navBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
+    minHeight: 74,
+    paddingHorizontal: 24,
     paddingBottom: 10,
-    backgroundColor: Colors.bgCanvas,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.borderSoft,
-  },
-  backBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
-    paddingVertical: 4,
-    minWidth: 64,
+    backgroundColor: Colors.bgCanvas,
   },
-  backLabel: {
-    fontSize: 15,
-    color: Colors.ink700,
+  backButton: {
+    minWidth: 82,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  backText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.ink900,
   },
   navTitle: {
     flex: 1,
     textAlign: 'center',
-    fontSize: 15,
-    fontWeight: '600',
-    color: Colors.fgPrimary,
-  },
-  navSpacer: {
-    minWidth: 64,
-  },
-  loader: {
-    marginTop: 64,
-  },
-  errorText: {
-    textAlign: 'center',
-    marginTop: 64,
-    fontSize: 15,
-    color: Colors.error,
-    paddingHorizontal: 24,
-  },
-  comingSoon: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 32,
-  },
-  comingSoonTitle: {
     fontSize: 22,
     fontWeight: '800',
-    color: Colors.fgPrimary,
-    marginBottom: 12,
-    textAlign: 'center',
+    color: Colors.ink900,
   },
-  comingSoonBody: {
-    fontSize: 15,
-    color: Colors.fgMuted,
+  moreButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(95, 60, 30, 0.06)',
+  },
+  loader: {
+    marginTop: 80,
+  },
+  errorText: {
+    marginTop: 80,
+    paddingHorizontal: 28,
+    color: Colors.error,
+    fontSize: 16,
+    fontWeight: '700',
     textAlign: 'center',
   },
   scroll: {
     flex: 1,
   },
   content: {
-    padding: 20,
-    paddingBottom: 48,
-    gap: 16,
+    paddingHorizontal: 18,
+    paddingBottom: 112,
+    gap: 14,
   },
-  // ── Hero ──────────────────────────────────────────────────────────────────
-  heroCard: {
-    backgroundColor: Colors.gold100,
-    borderRadius: 24,
-    padding: 20,
-    shadowColor: Colors.shadowGold,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.35,
-    shadowRadius: 24,
-    elevation: 4,
+  hero: {
+    minHeight: 190,
+    borderRadius: 26,
+    overflow: 'hidden',
+    padding: 22,
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 232, 160, 0.18)',
   },
-  heroTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  heroLabel: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: Colors.coral600,
-    letterSpacing: 0.5,
-  },
-  streakBadge: {
-    backgroundColor: Colors.bgSurface,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-  },
-  streakText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: Colors.gold700,
-  },
-  heroTitle: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: Colors.ink900,
-    lineHeight: 32,
-    marginBottom: 6,
-  },
-  heroSub: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.ink700,
-  },
-  // ── Sections ──────────────────────────────────────────────────────────────
-  section: {
+  heroCopy: {
+    width: '68%',
     gap: 8,
   },
-  sectionLabel: {
-    fontSize: 12,
+  typeBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.24)',
+  },
+  typeBadgeText: {
+    color: '#FFF4C8',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  heroTitle: {
+    color: '#FFFDF8',
+    fontSize: 34,
+    lineHeight: 40,
+    fontWeight: '900',
+  },
+  heroDescription: {
+    color: '#E4EAF2',
+    fontSize: 16,
+    lineHeight: 22,
     fontWeight: '700',
-    color: Colors.fgMuted,
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
+  },
+  heroMeta: {
+    color: '#F7D978',
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  streakPill: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(23, 48, 43, 0.72)',
+  },
+  streakPillText: {
+    color: '#FFE28A',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  treeHouse: {
+    position: 'absolute',
+    right: 12,
+    bottom: 22,
+    alignItems: 'center',
+  },
+  treeCrown: {
+    color: '#FFE28A',
+    fontSize: 18,
+  },
+  treeHouseIcon: {
+    fontSize: 70,
+  },
+  todayCard: {
+    marginHorizontal: 16,
+    marginTop: -20,
+    backgroundColor: 'rgba(255, 253, 248, 0.98)',
+    borderRadius: 26,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: Colors.borderSoft,
+    shadowColor: Colors.shadowWarm,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    elevation: 4,
+    gap: 14,
+  },
+  todayHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  todayMoon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.gold100,
+  },
+  todayMoonText: {
+    fontSize: 26,
+  },
+  todayCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  todayTitle: {
+    color: Colors.ink900,
+    fontSize: 23,
+    fontWeight: '900',
+  },
+  todayQuestion: {
+    marginTop: 4,
+    color: Colors.ink700,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  sleepMascot: {
+    fontSize: 42,
+  },
+  todayActions: {
+    flexDirection: 'column',
+    gap: 12,
+  },
+  primaryChoice: {
+    flex: 1,
+    minHeight: 56,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#47733C',
+  },
+  disabledChoice: {
+    opacity: 0.72,
+  },
+  primaryChoiceText: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  secondaryChoice: {
+    flex: 1,
+    minHeight: 56,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.cream50,
+    borderWidth: 1,
+    borderColor: Colors.cream300,
+  },
+  secondaryChoiceText: {
+    color: Colors.ink700,
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  reflectionWrap: {
+    borderTopWidth: 1,
+    borderTopColor: Colors.borderSoft,
+    paddingTop: 12,
+    gap: 10,
+  },
+  reflectionLabel: {
+    color: Colors.ink700,
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  reflectionChips: {
+    flexDirection: 'column',
+    gap: 8,
+  },
+  reflectionChip: {
+    flex: 1,
+    minHeight: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+    backgroundColor: Colors.cream50,
+    borderWidth: 1,
+    borderColor: Colors.borderSoft,
+    paddingHorizontal: 8,
+  },
+  reflectionText: {
+    color: Colors.ink700,
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  donePanel: {
+    minHeight: 56,
+    borderRadius: 18,
+    backgroundColor: Colors.sage100,
+    borderWidth: 1,
+    borderColor: Colors.sage200,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  donePanelText: {
+    color: Colors.success,
+    fontSize: 16,
+    fontWeight: '800',
   },
   card: {
     backgroundColor: Colors.bgSurface,
-    borderRadius: 16,
+    borderRadius: 22,
+    padding: 18,
     borderWidth: 1,
     borderColor: Colors.borderSoft,
-    padding: 16,
   },
-  progressDayRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 4,
-    marginBottom: 14,
-  },
-  progressDayNum: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: Colors.ink900,
-  },
-  progressDayOf: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.fgMuted,
-  },
-  // ── Check-in ──────────────────────────────────────────────────────────────
-  checkedCard: {
+  sectionTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: Colors.sage100,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: Colors.sage200,
   },
-  checkedText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.success,
+  sectionIcon: {
+    fontSize: 21,
   },
-  checkInBtn: {
-    backgroundColor: Colors.coral500,
-    borderRadius: 16,
-    paddingVertical: 18,
+  sectionTitle: {
+    color: Colors.ink900,
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  pathArea: {
+    height: 184,
+    marginTop: 12,
+    position: 'relative',
+  },
+  startFlag: {
+    position: 'absolute',
+    left: 12,
+    top: 98,
+    fontSize: 28,
+  },
+  currentMarker: {
+    position: 'absolute',
+    width: 72,
+    marginLeft: -36,
     alignItems: 'center',
-    shadowColor: Colors.coral700,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.6,
-    shadowRadius: 0,
-    elevation: 4,
   },
-  checkInBtnBusy: {
-    opacity: 0.7,
+  currentAvatar: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFF8DD',
+    borderWidth: 3,
+    borderColor: '#5D8C4A',
   },
-  checkInBtnText: {
-    fontSize: 18,
+  currentAvatarText: {
+    fontSize: 28,
+  },
+  currentDayText: {
+    marginTop: 5,
+    color: Colors.ink700,
+    fontSize: 13,
     fontWeight: '800',
-    color: '#fff',
-    letterSpacing: 0.5,
   },
-  // ── Milestones ────────────────────────────────────────────────────────────
-  milestonesCard: {
-    backgroundColor: Colors.bgSurface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.borderSoft,
-    overflow: 'hidden',
-  },
-  rowDivider: {
-    height: 1,
-    backgroundColor: Colors.borderSoft,
-  },
-  milestoneRow: {
-    flexDirection: 'row',
+  pathMilestone: {
+    position: 'absolute',
+    width: 82,
+    marginLeft: -41,
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  },
+  pathMilestoneIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.cream50,
+    borderWidth: 2,
+    borderColor: Colors.cream300,
+  },
+  pathMilestoneNear: {
+    backgroundColor: '#FFF7C8',
+    borderColor: Colors.gold300,
+  },
+  pathMilestoneEmoji: {
+    fontSize: 29,
+  },
+  pathMilestoneDay: {
+    marginTop: 5,
+    color: Colors.ink700,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  pathMilestoneLabel: {
+    color: Colors.ink500,
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  helperLine: {
+    borderTopWidth: 1,
+    borderTopColor: Colors.borderSoft,
+    paddingTop: 13,
+  },
+  helperText: {
+    color: Colors.ink700,
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  weekRow: {
+    marginTop: 18,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  weekCell: {
+    alignItems: 'center',
     gap: 8,
   },
-  milestoneDayText: {
-    width: 56,
+  weekDay: {
+    color: Colors.ink900,
     fontSize: 15,
-    fontWeight: '700',
-    color: Colors.fgPrimary,
+    fontWeight: '900',
   },
-  milestoneCoinText: {
-    flex: 1,
+  weekBubble: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.cream50,
+    borderWidth: 1.5,
+    borderColor: Colors.cream300,
+  },
+  weekBubbleDone: {
+    backgroundColor: Colors.leaf50,
+    borderColor: Colors.leaf300,
+  },
+  weekIcon: {
+    fontSize: 22,
+  },
+  weekInsight: {
+    marginTop: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: '#F6F7EA',
+    borderWidth: 1,
+    borderColor: Colors.borderSoft,
+  },
+  weekInsightText: {
+    color: Colors.ink700,
     fontSize: 14,
-    fontWeight: '600',
-    color: Colors.gold700,
+    lineHeight: 20,
+    fontWeight: '700',
+    textAlign: 'center',
   },
-  cpBadge: {
+  milestoneList: {
+    marginTop: 14,
+    gap: 8,
+  },
+  milestoneItem: {
+    minHeight: 76,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: Colors.borderSoft,
+    backgroundColor: Colors.cream50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    gap: 12,
+  },
+  milestoneItemActive: {
+    backgroundColor: '#FFF8DA',
+    borderColor: Colors.gold300,
+  },
+  milestoneBadge: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  milestoneEmoji: {
+    fontSize: 30,
+  },
+  milestoneCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  milestoneTitle: {
+    color: Colors.ink900,
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  milestoneReward: {
+    marginTop: 3,
+    color: Colors.ink700,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  statusBadge: {
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 6,
     borderRadius: 999,
     backgroundColor: Colors.cream200,
   },
-  cpBadgeDone: {
-    backgroundColor: Colors.sage100,
+  statusBadgeActive: {
+    backgroundColor: Colors.gold500,
   },
-  cpBadgeActive: {
-    backgroundColor: Colors.coral100,
-  },
-  cpBadgeText: {
+  statusBadgeText: {
+    color: Colors.ink500,
     fontSize: 12,
-    fontWeight: '600',
-    color: Colors.fgMuted,
+    fontWeight: '800',
   },
-  cpBadgeTextDone: {
-    color: Colors.success,
+  statusBadgeTextActive: {
+    color: '#FFFFFF',
   },
-  cpBadgeTextActive: {
-    color: Colors.coral600,
+  chevron: {
+    color: Colors.ink300,
+    fontSize: 34,
+    lineHeight: 34,
   },
-  // ── Interrupt note ────────────────────────────────────────────────────────
-  interruptNote: {
-    backgroundColor: Colors.gold100,
-    borderRadius: 12,
+  adjustEntry: {
+    minHeight: 78,
+    borderRadius: 22,
+    backgroundColor: '#EAF4FF',
+    borderWidth: 1,
+    borderColor: '#C9DDF3',
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  adjustCloud: {
+    fontSize: 44,
+  },
+  adjustCopy: {
+    flex: 1,
+  },
+  adjustTitle: {
+    color: '#315C8D',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  adjustSub: {
+    color: '#315C8D',
+    fontSize: 15,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  adjustArrow: {
+    color: '#6B8CB2',
+    fontSize: 38,
+    lineHeight: 38,
+  },
+  softNote: {
+    borderRadius: 16,
     padding: 14,
+    backgroundColor: Colors.gold100,
     borderWidth: 1,
     borderColor: Colors.gold300,
   },
-  interruptText: {
-    fontSize: 14,
-    fontWeight: '600',
+  softNoteText: {
     color: Colors.gold700,
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  hiddenDataHint: {
+    height: 0,
+    opacity: 0,
+  },
+  familyTitle: {
+    marginTop: 14,
+    color: Colors.ink900,
+    fontSize: 24,
+    fontWeight: '900',
+  },
+  familyMeta: {
+    marginTop: 8,
+    color: Colors.ink700,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  familySub: {
+    marginTop: 12,
+    color: Colors.ink500,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '700',
+  },
+});
+
+const skillStyles = StyleSheet.create({
+  hero: {
+    borderRadius: 26,
+    padding: 20,
+    backgroundColor: '#F5F0FF',
+    borderWidth: 1,
+    borderColor: '#DCD0F3',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  heroIcon: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  heroIconText: {
+    fontSize: 38,
+  },
+  heroCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  heroLabel: {
+    color: '#6D5799',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  heroTitle: {
+    marginTop: 5,
+    color: Colors.ink900,
+    fontSize: 27,
+    lineHeight: 33,
+    fontWeight: '900',
+  },
+  heroMeta: {
+    marginTop: 6,
+    color: '#6D5799',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  heroSub: {
+    marginTop: 4,
+    color: Colors.ink700,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  stageCard: {
+    borderRadius: 22,
+    padding: 18,
+    backgroundColor: Colors.bgSurface,
+    borderWidth: 1,
+    borderColor: Colors.borderSoft,
+  },
+  stageHeader: {
+    gap: 4,
+  },
+  stageTitle: {
+    color: Colors.ink900,
+    fontSize: 21,
+    fontWeight: '900',
+  },
+  stageMeta: {
+    color: Colors.ink500,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  skillActions: {
+    marginTop: 14,
+    gap: 8,
+  },
+  skillAction: {
+    minHeight: 46,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F7F4FE',
+    borderWidth: 1,
+    borderColor: '#E2D7F4',
+  },
+  skillActionText: {
+    color: '#5D4A87',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  track: {
+    marginTop: 16,
+    height: 12,
+    borderRadius: 999,
+    overflow: 'hidden',
+    backgroundColor: Colors.cream200,
+  },
+  trackFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: Colors.sage400,
+  },
+  levelList: {
+    marginTop: 16,
+    gap: 12,
+  },
+  levelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  levelDot: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.cream100,
+    borderWidth: 1,
+    borderColor: Colors.borderSoft,
+  },
+  levelDotDone: {
+    backgroundColor: Colors.sage400,
+    borderColor: Colors.sage400,
+  },
+  levelDotCurrent: {
+    backgroundColor: '#F5F0FF',
+    borderColor: '#9B82C7',
+  },
+  levelDotText: {
+    color: Colors.ink700,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  levelDotTextDone: {
+    color: '#FFFFFF',
+  },
+  levelCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  levelName: {
+    color: Colors.ink900,
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  levelReward: {
+    marginTop: 3,
+    color: Colors.ink500,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  emptyText: {
+    paddingVertical: 18,
+    color: Colors.ink500,
+    fontSize: 15,
+    fontWeight: '700',
     textAlign: 'center',
   },
 });

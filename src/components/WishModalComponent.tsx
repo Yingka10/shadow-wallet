@@ -63,7 +63,7 @@ export default function WishModalComponent({
   // 嘗試載入圖片
   useEffect(() => {
     try {
-      require('../../assets/images/child/wish-tree.png');
+      require('../../assets/images/child/pretty_wish_tree_trimmed.png');
       setUseImage(true);
     } catch {
       setUseImage(false);
@@ -219,7 +219,7 @@ export default function WishModalComponent({
           >
             {useImage ? (
               <Image
-                source={require('../../assets/images/child/wish-tree.png')}
+                source={require('../../assets/images/child/pretty_wish_tree_trimmed.png')}
                 style={{ width: 180, height: 180 }}
                 resizeMode="contain"
               />

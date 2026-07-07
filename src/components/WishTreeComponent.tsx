@@ -21,8 +21,13 @@ interface WishTreeComponentProps {
 
 /**
  * 成長大樹 —— 全 app 唯一那棵樹（首頁 hero + 許願頁共用）。
- * 優先用插畫 assets/images/child/wish-tree.png，沒有則 SVG 後備（token 綠 + 樹幹 + 果實 + 落地泥土）。
+ * 優先用插畫 assets/images/child/pretty_wish_tree_trimmed.png（=pretty_wish_tree.png 裁掉四周透明
+ * 留白的版本，原圖下緣留白多達 16%、resizeMode=contain 會讓樹看起來偏小、樹跟下方內容間留一大截
+ * 空白——2026-07-07 使用者回報過，別改回吃原圖），沒有則 SVG 後備（token 綠 + 樹幹 + 果實 + 落地泥土）。
  * 顏色一律走 Colors.leaf/bark/fruit，不再硬編碼。
+ * 光暈用多層同心圓（各自 flat fill + 遞減 opacity）疊出來，不要用 svg RadialGradient——
+ * 試過 RadialGradient 在 react-native-web 上完全不吃，畫面上什麼都看不到（2026-07-07 使用者
+ * 回報過）；也不要改回單層純色 View + borderRadius，邊緣是硬邊會像一個「框」（同一天回報過）。
  */
 export default function WishTreeComponent({
   onPress,
@@ -47,7 +52,7 @@ export default function WishTreeComponent({
 
   useEffect(() => {
     try {
-      require('../../assets/images/child/wish-tree.png');
+      require('../../assets/images/child/pretty_wish_tree_trimmed.png');
       setUseImage(true);
     } catch {
       setUseImage(false);
@@ -103,19 +108,23 @@ export default function WishTreeComponent({
     return () => loops.forEach(loop => loop.stop());
   }, [sparkleAnims, calm]);
 
+  // 光暈要明顯比樹大一圈才看得出來（貼齊樹邊只會被樹蓋掉，2026-07-07 使用者回報「沒有光環」）
+  const glowSize = Math.round(size * 1.35);
+  const inset = (glowSize - size) / 2;
+
   const glowScale = glowAnim.interpolate({ inputRange: [0.4, 1], outputRange: [0.94, 1.06] });
   const leafOffsets = leafAnims.map(a => a.interpolate({ inputRange: [0, 1], outputRange: [0, -size * 1.2] }));
   const leafRotates = leafAnims.map(a => a.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '120deg'] }));
   const sparklePositions = [
-    { left: size * -0.08, top: size * 0.06 },
-    { left: size * 0.98, top: size * 0.22 },
-    { left: size * 0.62, top: size * -0.06 },
+    { left: inset + size * -0.08, top: inset + size * 0.06 },
+    { left: inset + size * 0.98, top: inset + size * 0.22 },
+    { left: inset + size * 0.62, top: inset + size * -0.06 },
   ];
   const sparkleScales = sparkleAnims.map(a => a.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.1] }));
 
   const tree = useImage ? (
     <Image
-      source={require('../../assets/images/child/wish-tree.png')}
+      source={require('../../assets/images/child/pretty_wish_tree_trimmed.png')}
       style={{ width: size, height: size }}
       resizeMode="contain"
     />
@@ -143,14 +152,21 @@ export default function WishTreeComponent({
   );
 
   const inner = (
-    <View style={[styles.container, { width: size + 24, height: size + 24 }]}>
+    <View style={[styles.container, { width: glowSize, height: glowSize }]}>
       {!calm && (
         <Animated.View
           style={[
             styles.glow,
-            { width: size + 24, height: size + 24, opacity: glowAnim, transform: [{ scale: glowScale }] },
+            { width: glowSize, height: glowSize, opacity: glowAnim, transform: [{ scale: glowScale }] },
           ]}
-        />
+        >
+          <Svg width={glowSize} height={glowSize} viewBox={`0 0 ${glowSize} ${glowSize}`}>
+            <Circle cx={glowSize / 2} cy={glowSize / 2} r={glowSize / 2} fill={Colors.leaf200} opacity={0.16} />
+            <Circle cx={glowSize / 2} cy={glowSize / 2} r={glowSize * 0.38} fill={Colors.leaf200} opacity={0.22} />
+            <Circle cx={glowSize / 2} cy={glowSize / 2} r={glowSize * 0.26} fill={Colors.cream50} opacity={0.4} />
+            <Circle cx={glowSize / 2} cy={glowSize / 2} r={glowSize * 0.16} fill={Colors.cream50} opacity={0.55} />
+          </Svg>
+        </Animated.View>
       )}
       <View style={styles.treeWrap}>{tree}</View>
 
@@ -160,8 +176,8 @@ export default function WishTreeComponent({
           style={[
             styles.leafParticle,
             {
-              left: size * (0.06 + i * 0.22),
-              top: size * 0.7,
+              left: inset + size * (0.06 + i * 0.22),
+              top: inset + size * 0.7,
               backgroundColor: [Colors.leaf400, Colors.leaf300, Colors.leaf500, Colors.leaf450, Colors.leaf200][i],
               transform: [{ translateY: leafOffsets[i] }, { rotate: leafRotates[i] }],
               opacity: leafAnims[i].interpolate({ inputRange: [0, 0.1, 0.9, 1], outputRange: [0, 0.5, 0.25, 0] }),
@@ -210,8 +226,6 @@ const styles = StyleSheet.create({
   },
   glow: {
     position: 'absolute',
-    borderRadius: 1000,
-    backgroundColor: 'rgba(122,184,74,0.16)',
   },
   treeWrap: {
     zIndex: 2,

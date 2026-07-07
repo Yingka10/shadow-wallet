@@ -949,3 +949,438 @@ Web Bundled 130ms index.ts (1 module)
 Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
 Web Bundled 139ms index.ts (1 module)
  LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 142ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 145ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Unable to resolve "../../components/BottomNav" from "src\screens\child\HomeScreen.tsx"
+[0m [90m 39 |[39m [36mimport[39m { useTodayTasks[33m,[39m type [33mTodayTask[39m } [36mfrom[39m [32m'../../hooks/useTodayTasks'[39m[33m;[39m
+ [90m 40 |[39m [36mimport[39m { useWallet } [36mfrom[39m [32m'../../hooks/useWallet'[39m[33m;[39m
+[31m[1m>[22m[39m[90m 41 |[39m [36mimport[39m [33mBottomNav[39m [36mfrom[39m [32m'../../components/BottomNav'[39m[33m;[39m
+ [90m    |[39m                        [31m[1m^[22m[39m
+ [90m 42 |[39m [36mimport[39m [33mTaskCompleteModal[39m [36mfrom[39m [32m'../../components/TaskCompleteModal'[39m[33m;[39m
+ [90m 43 |[39m [36mimport[39m [33mFeedbackAnimation[39m[33m,[39m { type [33mFeedbackType[39m } [36mfrom[39m [32m'../../components/FeedbackAnimation'[39m[33m;[39m
+ [90m 44 |[39m [36mimport[39m { [33mCoinIcon[39m } [36mfrom[39m [32m'../../components/icons/TaskIcons'[39m[33m;[39m[0m
+
+Import stack:
+
+ src\screens\child\HomeScreen.tsx
+ | import "../../components/BottomNav"
+
+ 
+ | import "./src/screens/child/HomeScreen"
+
+Unable to resolve "./src/screens/child/WalletScreen" from "App.tsx"
+[0m [90m 24 |[39m [36mimport[39m [33mLongTermDetailScreen[39m [36mfrom[39m [32m'./src/screens/child/LongTermDetailScreen'[39m[33m;[39m
+ [90m 25 |[39m [36mimport[39m [33mProfileScreen[39m [36mfrom[39m [32m'./src/screens/child/ProfileScreen'[39m[33m;[39m
+[31m[1m>[22m[39m[90m 26 |[39m [36mimport[39m [33mWalletScreen[39m [36mfrom[39m [32m'./src/screens/child/WalletScreen'[39m[33m;[39m
+ [90m    |[39m                           [31m[1m^[22m[39m
+ [90m 27 |[39m [36mimport[39m [33mWishScreen[39m [36mfrom[39m [32m'./src/screens/child/WishScreen'[39m[33m;[39m
+ [90m 28 |[39m [36mimport[39m [33mObservationHistoryScreen[39m [36mfrom[39m [32m'./src/screens/parent/ObservationHistoryScreen'[39m[33m;[39m
+ [90m 29 |[39m [36mimport[39m [33mParentLongTermCreateScreen[39m [36mfrom[39m [32m'./src/screens/parent/ParentLongTermCreateScreen'[39m[33m;[39m[0m
+
+Import stack:
+
+ App.tsx
+ | import "./src/screens/child/WalletScreen"
+
+ index.ts
+ | import "./App"
+
+ 
+ | import "./index.ts"
+
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 135ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+ ERROR  SyntaxError: C:\Users\jenny\app\shadow-wallet\src\screens\child\WalletScreen.tsx: Expected corresponding JSX closing tag for <ScrollView>. (421:16)
+
+  419 |             </View>
+  420 |           </View>
+> 421 |                 </View>
+      |                 ^
+  422 |                 <View style={[styles.jarWrap, isCompactPhone && styles.jarWrapCompact]}>
+  423 |                   <CoinJarIllustration size={heroJarSize} />
+  424 |                 </View>
+    at constructor (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:365:19)
+    at TypeScriptParserMixin.raise (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:6616:19)
+    at TypeScriptParserMixin.jsxParseElementAt (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4739:16)
+    at TypeScriptParserMixin.jsxParseElementAt (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4710:32)
+    at TypeScriptParserMixin.jsxParseElementAt (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4710:32)
+    at TypeScriptParserMixin.jsxParseElement (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4761:17)
+    at TypeScriptParserMixin.parseExprAtom (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4771:19)
+    at TypeScriptParserMixin.parseExprSubscripts (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11098:23)
+    at TypeScriptParserMixin.parseUpdate (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11083:21)
+    at TypeScriptParserMixin.parseMaybeUnary (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11063:23)
+    at TypeScriptParserMixin.parseMaybeUnary (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9854:18)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10916:61)
+    at TypeScriptParserMixin.parseExprOps (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10921:23)
+    at TypeScriptParserMixin.parseMaybeConditional (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10898:23)
+    at TypeScriptParserMixin.parseMaybeAssign (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10848:21)
+    at C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9792:39
+    at TypeScriptParserMixin.tryParse (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:6924:20)
+    at TypeScriptParserMixin.parseMaybeAssign (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9792:18)
+    at C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10817:39
+    at TypeScriptParserMixin.allowInAnd (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12443:12)
+    at TypeScriptParserMixin.parseMaybeAssignAllowIn (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10817:17)
+    at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12510:17)
+    at TypeScriptParserMixin.parseParenAndDistinguishExpression (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11692:28)
+    at TypeScriptParserMixin.parseExprAtom (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11348:23)
+    at TypeScriptParserMixin.parseExprAtom (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4776:20)
+    at TypeScriptParserMixin.parseExprSubscripts (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11098:23)
+    at TypeScriptParserMixin.parseUpdate (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11083:21)
+    at TypeScriptParserMixin.parseMaybeUnary (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11063:23)
+    at TypeScriptParserMixin.parseMaybeUnary (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9854:18)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10916:61)
+    at TypeScriptParserMixin.parseExprOps (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10921:23)
+    at TypeScriptParserMixin.parseMaybeConditional (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10898:23)
+    at TypeScriptParserMixin.parseMaybeAssign (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10848:21)
+    at TypeScriptParserMixin.parseMaybeAssign (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9803:20)
+    at TypeScriptParserMixin.parseExpressionBase (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10801:23)
+    at C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10797:39
+    at TypeScriptParserMixin.allowInAnd (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12438:16)
+    at TypeScriptParserMixin.parseExpression (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10797:17)
+    at TypeScriptParserMixin.parseReturnStatement (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13159:28)
+    at TypeScriptParserMixin.parseStatementContent (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12815:21)
+    at TypeScriptParserMixin.parseStatementContent (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9525:18)
+    at TypeScriptParserMixin.parseStatementLike (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12784:17)
+    at TypeScriptParserMixin.parseStatementListItem (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12764:17)
+    at TypeScriptParserMixin.parseBlockOrModuleBlockBody (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13333:61)
+    at TypeScriptParserMixin.parseBlockBody (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13326:10)
+    at TypeScriptParserMixin.parseBlock (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13314:10)
+    at TypeScriptParserMixin.parseFunctionBody (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12117:24)
+    at TypeScriptParserMixin.parseFunctionBodyAndFinish (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12103:10)
+    at TypeScriptParserMixin.parseFunctionBodyAndFinish (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9189:18)
+    at C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13462:12
+ ERROR  SyntaxError: C:\Users\jenny\app\shadow-wallet\src\screens\child\WalletScreen.tsx: Expected corresponding JSX closing tag for <ScrollView>. (421:16)
+
+  419 |             </View>
+  420 |           </View>
+> 421 |                 </View>
+      |                 ^
+  422 |                 <View style={[styles.jarWrap, isCompactPhone && styles.jarWrapCompact]}>
+  423 |                   <CoinJarIllustration size={heroJarSize} />
+  424 |                 </View>
+    at constructor (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:365:19)
+    at TypeScriptParserMixin.raise (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:6616:19)
+    at TypeScriptParserMixin.jsxParseElementAt (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4739:16)
+    at TypeScriptParserMixin.jsxParseElementAt (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4710:32)
+    at TypeScriptParserMixin.jsxParseElementAt (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4710:32)
+    at TypeScriptParserMixin.jsxParseElement (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4761:17)
+    at TypeScriptParserMixin.parseExprAtom (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4771:19)
+    at TypeScriptParserMixin.parseExprSubscripts (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11098:23)
+    at TypeScriptParserMixin.parseUpdate (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11083:21)
+    at TypeScriptParserMixin.parseMaybeUnary (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11063:23)
+    at TypeScriptParserMixin.parseMaybeUnary (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9854:18)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10916:61)
+    at TypeScriptParserMixin.parseExprOps (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10921:23)
+    at TypeScriptParserMixin.parseMaybeConditional (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10898:23)
+    at TypeScriptParserMixin.parseMaybeAssign (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10848:21)
+    at C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9792:39
+    at TypeScriptParserMixin.tryParse (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:6924:20)
+    at TypeScriptParserMixin.parseMaybeAssign (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9792:18)
+    at C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10817:39
+    at TypeScriptParserMixin.allowInAnd (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12443:12)
+    at TypeScriptParserMixin.parseMaybeAssignAllowIn (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10817:17)
+    at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12510:17)
+    at TypeScriptParserMixin.parseParenAndDistinguishExpression (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11692:28)
+    at TypeScriptParserMixin.parseExprAtom (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11348:23)
+    at TypeScriptParserMixin.parseExprAtom (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4776:20)
+    at TypeScriptParserMixin.parseExprSubscripts (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11098:23)
+    at TypeScriptParserMixin.parseUpdate (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11083:21)
+    at TypeScriptParserMixin.parseMaybeUnary (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11063:23)
+    at TypeScriptParserMixin.parseMaybeUnary (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9854:18)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10916:61)
+    at TypeScriptParserMixin.parseExprOps (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10921:23)
+    at TypeScriptParserMixin.parseMaybeConditional (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10898:23)
+    at TypeScriptParserMixin.parseMaybeAssign (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10848:21)
+    at TypeScriptParserMixin.parseMaybeAssign (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9803:20)
+    at TypeScriptParserMixin.parseExpressionBase (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10801:23)
+    at C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10797:39
+    at TypeScriptParserMixin.allowInAnd (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12438:16)
+    at TypeScriptParserMixin.parseExpression (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10797:17)
+    at TypeScriptParserMixin.parseReturnStatement (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13159:28)
+    at TypeScriptParserMixin.parseStatementContent (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12815:21)
+    at TypeScriptParserMixin.parseStatementContent (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9525:18)
+    at TypeScriptParserMixin.parseStatementLike (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12784:17)
+    at TypeScriptParserMixin.parseStatementListItem (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12764:17)
+    at TypeScriptParserMixin.parseBlockOrModuleBlockBody (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13333:61)
+    at TypeScriptParserMixin.parseBlockBody (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13326:10)
+    at TypeScriptParserMixin.parseBlock (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13314:10)
+    at TypeScriptParserMixin.parseFunctionBody (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12117:24)
+    at TypeScriptParserMixin.parseFunctionBodyAndFinish (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12103:10)
+    at TypeScriptParserMixin.parseFunctionBodyAndFinish (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9189:18)
+    at C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13462:12
+ ERROR  SyntaxError: C:\Users\jenny\app\shadow-wallet\src\screens\child\WalletScreen.tsx: Expected corresponding JSX closing tag for <ScrollView>. (421:16)
+
+  419 |             </View>
+  420 |           </View>
+> 421 |                 </View>
+      |                 ^
+  422 |                 <View style={[styles.jarWrap, isCompactPhone && styles.jarWrapCompact]}>
+  423 |                   <CoinJarIllustration size={heroJarSize} />
+  424 |                 </View>
+    at constructor (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:365:19)
+    at TypeScriptParserMixin.raise (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:6616:19)
+    at TypeScriptParserMixin.jsxParseElementAt (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4739:16)
+    at TypeScriptParserMixin.jsxParseElementAt (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4710:32)
+    at TypeScriptParserMixin.jsxParseElementAt (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4710:32)
+    at TypeScriptParserMixin.jsxParseElement (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4761:17)
+    at TypeScriptParserMixin.parseExprAtom (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4771:19)
+    at TypeScriptParserMixin.parseExprSubscripts (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11098:23)
+    at TypeScriptParserMixin.parseUpdate (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11083:21)
+    at TypeScriptParserMixin.parseMaybeUnary (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11063:23)
+    at TypeScriptParserMixin.parseMaybeUnary (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9854:18)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10916:61)
+    at TypeScriptParserMixin.parseExprOps (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10921:23)
+    at TypeScriptParserMixin.parseMaybeConditional (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10898:23)
+    at TypeScriptParserMixin.parseMaybeAssign (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10848:21)
+    at C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9792:39
+    at TypeScriptParserMixin.tryParse (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:6924:20)
+    at TypeScriptParserMixin.parseMaybeAssign (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9792:18)
+    at C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10817:39
+    at TypeScriptParserMixin.allowInAnd (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12443:12)
+    at TypeScriptParserMixin.parseMaybeAssignAllowIn (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10817:17)
+    at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12510:17)
+    at TypeScriptParserMixin.parseParenAndDistinguishExpression (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11692:28)
+    at TypeScriptParserMixin.parseExprAtom (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11348:23)
+    at TypeScriptParserMixin.parseExprAtom (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4776:20)
+    at TypeScriptParserMixin.parseExprSubscripts (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11098:23)
+    at TypeScriptParserMixin.parseUpdate (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11083:21)
+    at TypeScriptParserMixin.parseMaybeUnary (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11063:23)
+    at TypeScriptParserMixin.parseMaybeUnary (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9854:18)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10916:61)
+    at TypeScriptParserMixin.parseExprOps (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10921:23)
+    at TypeScriptParserMixin.parseMaybeConditional (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10898:23)
+    at TypeScriptParserMixin.parseMaybeAssign (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10848:21)
+    at TypeScriptParserMixin.parseMaybeAssign (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9803:20)
+    at TypeScriptParserMixin.parseExpressionBase (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10801:23)
+    at C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10797:39
+    at TypeScriptParserMixin.allowInAnd (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12438:16)
+    at TypeScriptParserMixin.parseExpression (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10797:17)
+    at TypeScriptParserMixin.parseReturnStatement (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13159:28)
+    at TypeScriptParserMixin.parseStatementContent (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12815:21)
+    at TypeScriptParserMixin.parseStatementContent (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9525:18)
+    at TypeScriptParserMixin.parseStatementLike (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12784:17)
+    at TypeScriptParserMixin.parseStatementListItem (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12764:17)
+    at TypeScriptParserMixin.parseBlockOrModuleBlockBody (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13333:61)
+    at TypeScriptParserMixin.parseBlockBody (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13326:10)
+    at TypeScriptParserMixin.parseBlock (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13314:10)
+    at TypeScriptParserMixin.parseFunctionBody (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12117:24)
+    at TypeScriptParserMixin.parseFunctionBodyAndFinish (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12103:10)
+    at TypeScriptParserMixin.parseFunctionBodyAndFinish (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9189:18)
+    at C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13462:12
+ ERROR  SyntaxError: C:\Users\jenny\app\shadow-wallet\src\screens\child\WalletScreen.tsx: Expected corresponding JSX closing tag for <ScrollView>. (421:16)
+
+  419 |             </View>
+  420 |           </View>
+> 421 |                 </View>
+      |                 ^
+  422 |                 <View style={[styles.jarWrap, isCompactPhone && styles.jarWrapCompact]}>
+  423 |                   <CoinJarIllustration size={heroJarSize} />
+  424 |                 </View>
+    at constructor (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:365:19)
+    at TypeScriptParserMixin.raise (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:6616:19)
+    at TypeScriptParserMixin.jsxParseElementAt (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4739:16)
+    at TypeScriptParserMixin.jsxParseElementAt (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4710:32)
+    at TypeScriptParserMixin.jsxParseElementAt (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4710:32)
+    at TypeScriptParserMixin.jsxParseElement (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4761:17)
+    at TypeScriptParserMixin.parseExprAtom (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4771:19)
+    at TypeScriptParserMixin.parseExprSubscripts (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11098:23)
+    at TypeScriptParserMixin.parseUpdate (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11083:21)
+    at TypeScriptParserMixin.parseMaybeUnary (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11063:23)
+    at TypeScriptParserMixin.parseMaybeUnary (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9854:18)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10916:61)
+    at TypeScriptParserMixin.parseExprOps (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10921:23)
+    at TypeScriptParserMixin.parseMaybeConditional (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10898:23)
+    at TypeScriptParserMixin.parseMaybeAssign (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10848:21)
+    at C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9792:39
+    at TypeScriptParserMixin.tryParse (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:6924:20)
+    at TypeScriptParserMixin.parseMaybeAssign (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9792:18)
+    at C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10817:39
+    at TypeScriptParserMixin.allowInAnd (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12443:12)
+    at TypeScriptParserMixin.parseMaybeAssignAllowIn (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10817:17)
+    at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12510:17)
+    at TypeScriptParserMixin.parseParenAndDistinguishExpression (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11692:28)
+    at TypeScriptParserMixin.parseExprAtom (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11348:23)
+    at TypeScriptParserMixin.parseExprAtom (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:4776:20)
+    at TypeScriptParserMixin.parseExprSubscripts (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11098:23)
+    at TypeScriptParserMixin.parseUpdate (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11083:21)
+    at TypeScriptParserMixin.parseMaybeUnary (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:11063:23)
+    at TypeScriptParserMixin.parseMaybeUnary (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9854:18)
+    at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10916:61)
+    at TypeScriptParserMixin.parseExprOps (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10921:23)
+    at TypeScriptParserMixin.parseMaybeConditional (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10898:23)
+    at TypeScriptParserMixin.parseMaybeAssign (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10848:21)
+    at TypeScriptParserMixin.parseMaybeAssign (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9803:20)
+    at TypeScriptParserMixin.parseExpressionBase (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10801:23)
+    at C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10797:39
+    at TypeScriptParserMixin.allowInAnd (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12438:16)
+    at TypeScriptParserMixin.parseExpression (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:10797:17)
+    at TypeScriptParserMixin.parseReturnStatement (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13159:28)
+    at TypeScriptParserMixin.parseStatementContent (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12815:21)
+    at TypeScriptParserMixin.parseStatementContent (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9525:18)
+    at TypeScriptParserMixin.parseStatementLike (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12784:17)
+    at TypeScriptParserMixin.parseStatementListItem (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12764:17)
+    at TypeScriptParserMixin.parseBlockOrModuleBlockBody (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13333:61)
+    at TypeScriptParserMixin.parseBlockBody (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13326:10)
+    at TypeScriptParserMixin.parseBlock (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13314:10)
+    at TypeScriptParserMixin.parseFunctionBody (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12117:24)
+    at TypeScriptParserMixin.parseFunctionBodyAndFinish (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:12103:10)
+    at TypeScriptParserMixin.parseFunctionBodyAndFinish (C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:9189:18)
+    at C:\Users\jenny\app\shadow-wallet\node_modules\@babel\parser\lib\index.js:13462:12
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 113ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 117ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 121ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 129ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Unable to resolve "../../../assets/images/child/treehouse-night.png" from "src\screens\child\HomeScreen.tsx"
+[0m [90m 423 |[39m                 {isNight [33m?[39m (
+ [90m 424 |[39m                   [33m<[39m[33mImage[39m
+[31m[1m>[22m[39m[90m 425 |[39m                     source[33m=[39m{require([32m'../../../assets/images/child/treehouse-night.png'[39m)}
+ [90m     |[39m                                      [31m[1m^[22m[39m
+ [90m 426 |[39m                     style[33m=[39m{styles[33m.[39mtreeHouseImg}
+ [90m 427 |[39m                     resizeMode[33m=[39m[32m"contain"[39m
+ [90m 428 |[39m                   [33m/[39m[33m>[39m[0m
+
+Import stack:
+
+ src\screens\child\HomeScreen.tsx
+ | import "../../../assets/images/child/treehouse-night.png"
+
+ 
+ | import "./src/screens/child/HomeScreen"
+
+Unable to resolve "../../../assets/images/child/treehouse-night.png" from "src\screens\child\HomeScreen.tsx"
+[0m [90m 423 |[39m                 {isNight [33m?[39m (
+ [90m 424 |[39m                   [33m<[39m[33mImage[39m
+[31m[1m>[22m[39m[90m 425 |[39m                     source[33m=[39m{require([32m'../../../assets/images/child/treehouse-night.png'[39m)}
+ [90m     |[39m                                      [31m[1m^[22m[39m
+ [90m 426 |[39m                     style[33m=[39m{styles[33m.[39mtreeHouseImg}
+ [90m 427 |[39m                     resizeMode[33m=[39m[32m"contain"[39m
+ [90m 428 |[39m                   [33m/[39m[33m>[39m[0m
+
+Import stack:
+
+ src\screens\child\HomeScreen.tsx
+ | import "../../../assets/images/child/treehouse-night.png"
+
+ 
+ | import "./src/screens/child/HomeScreen"
+
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundling failed 34ms index.ts (1 module)
+Unable to resolve "../../../assets/images/child/treehouse-night.png" from "src\screens\child\HomeScreen.tsx"
+[0m [90m 423 |[39m                 {isNight [33m?[39m (
+ [90m 424 |[39m                   [33m<[39m[33mImage[39m
+[31m[1m>[22m[39m[90m 425 |[39m                     source[33m=[39m{require([32m'../../../assets/images/child/treehouse-night.png'[39m)}
+ [90m     |[39m                                      [31m[1m^[22m[39m
+ [90m 426 |[39m                     style[33m=[39m{styles[33m.[39mtreeHouseImg}
+ [90m 427 |[39m                     resizeMode[33m=[39m[32m"contain"[39m
+ [90m 428 |[39m                   [33m/[39m[33m>[39m[0m
+
+Import stack:
+
+ src\screens\child\HomeScreen.tsx
+ | import "../../../assets/images/child/treehouse-night.png"
+
+ 
+ | import "./src/screens/child/HomeScreen"
+
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 135ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 124ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 115ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Unable to resolve "../../../assets/images/child/treehouse-night.png" from "src\screens\child\HomeScreen.tsx"
+[0m [90m 423 |[39m                 {isNight [33m?[39m (
+ [90m 424 |[39m                   [33m<[39m[33mImage[39m
+[31m[1m>[22m[39m[90m 425 |[39m                     source[33m=[39m{require([32m'../../../assets/images/child/treehouse-night.png'[39m)}
+ [90m     |[39m                                      [31m[1m^[22m[39m
+ [90m 426 |[39m                     style[33m=[39m{styles[33m.[39mtreeHouseImg}
+ [90m 427 |[39m                     resizeMode[33m=[39m[32m"contain"[39m
+ [90m 428 |[39m                   [33m/[39m[33m>[39m[0m
+
+Import stack:
+
+ src\screens\child\HomeScreen.tsx
+ | import "../../../assets/images/child/treehouse-night.png"
+
+ 
+ | import "./src/screens/child/HomeScreen"
+
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 134ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 133ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 132ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 132ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 131ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 122ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 118ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 119ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 114ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 157ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 142ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 143ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Unable to resolve "./src/screens/child/LongTermDetailScreen" from "App.tsx"
+[0m [90m 22 |[39m [36mimport[39m [33mTaskSelectionScreen[39m [36mfrom[39m [32m'./src/screens/onboarding/TaskSelectionScreen'[39m[33m;[39m
+ [90m 23 |[39m [36mimport[39m [33mOverviewScreen[39m [36mfrom[39m [32m'./src/screens/onboarding/OverviewScreen'[39m[33m;[39m
+[31m[1m>[22m[39m[90m 24 |[39m [36mimport[39m [33mLongTermDetailScreen[39m [36mfrom[39m [32m'./src/screens/child/LongTermDetailScreen'[39m[33m;[39m
+ [90m    |[39m                                   [31m[1m^[22m[39m
+ [90m 25 |[39m [36mimport[39m [33mProfileScreen[39m [36mfrom[39m [32m'./src/screens/child/ProfileScreen'[39m[33m;[39m
+ [90m 26 |[39m [36mimport[39m [33mWalletScreen[39m [36mfrom[39m [32m'./src/screens/child/WalletScreen'[39m[33m;[39m
+ [90m 27 |[39m [36mimport[39m [33mWishScreen[39m [36mfrom[39m [32m'./src/screens/child/WishScreen'[39m[33m;[39m[0m
+
+Import stack:
+
+ App.tsx
+ | import "./src/screens/child/LongTermDetailScreen"
+
+ index.ts
+ | import "./App"
+
+ 
+ | import "./index.ts"
+
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 118ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 131ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
