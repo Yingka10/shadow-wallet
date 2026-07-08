@@ -30,22 +30,23 @@ function tuft(x: number, baseY: number, h: number, sway: number): string {
   ].join(' ');
 }
 
-// 草叢（三葉）與零星小草（單葉）位置 —— 沿草地線散佈，高低錯落
+// 草叢（三葉）與零星小草（單葉）位置 —— 高低錯落，近按鈕處往下放
 const TUFTS: Array<[number, number, number, number]> = [
-  // x, baseY, height, sway
-  [26, 56, 18, 3],
-  [72, 51, 15, -3],
-  [120, 54, 20, 2],
-  [168, 50, 14, -2],
-  [214, 55, 17, 3],
-  [246, 58, 13, -2],
+  // x,   baseY, h,   sway
+  [18,    48, 17,  3],   // 左側坡頂
+  [55,    70, 15, -2],   // 左側低處，按鈕旁
+  [90,    43, 16,  2],   // 左中坡頂
+  [148,   44, 13, -3],   // 右中坡頂
+  [195,   68, 16,  3],   // 右側低處，按鈕旁
+  [228,   46, 14, -2],   // 右側坡頂
+  [245,   54, 12,  2],   // 最右
 ];
 const SMALL_BLADES: Array<[number, number, number, number]> = [
-  [50, 58, 9, 2],
-  [96, 55, 8, -2],
-  [144, 57, 10, 2],
-  [192, 54, 8, -2],
-  [232, 60, 9, 3],
+  [36,    55,  9,  2],
+  [72,    73,  8, -2],   // 低處，按鈕左
+  [120,   48,  8,  2],
+  [175,   72,  7,  3],   // 低處，按鈕右
+  [215,   52,  8, -2],
 ];
 
 /**
@@ -94,9 +95,9 @@ export default function GrassGroundScene({ height = 96, variant = 'day' }: Props
       </Defs>
 
       {/* 三層草坡（大橢圓，圓弧坡頂，遠淡近深） */}
-      <Ellipse cx={130} cy={104} rx={214} ry={74} fill="url(#ggBack)" opacity={0.75} />
-      <Ellipse cx={130} cy={110} rx={192} ry={66} fill="url(#ggMid)" />
-      <Ellipse cx={130} cy={116} rx={176} ry={62} fill="url(#ggFront)" />
+      <Ellipse cx={130} cy={107} rx={220} ry={94} fill="url(#ggBack)" opacity={0.75} />
+      <Ellipse cx={130} cy={112} rx={200} ry={84} fill="url(#ggMid)" />
+      <Ellipse cx={130} cy={117} rx={180} ry={74} fill="url(#ggFront)" />
 
       {/* 零星小草（單葉，較淡，襯在草叢之間） */}
       <G fill="url(#ggBlade)" opacity={0.7}>
