@@ -1384,3 +1384,126 @@ Web Bundled 118ms index.ts (1 module)
 Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
 Web Bundled 131ms index.ts (1 module)
  LOG  [web] Logs will appear in the browser console
+› Detected a change in babel.config.js. Restart the server to see the new results. You may need to clear the bundler cache with the --clear flag for your changes to take effect.
+Unable to resolve "react-native-worklets" from "node_modules\react-native-reanimated\lib\module\initializers.js"
+[0m [90m 1 |[39m [32m'use strict'[39m[33m;[39m
+ [90m 2 |[39m
+[31m[1m>[22m[39m[90m 3 |[39m [36mimport[39m { executeOnUIRuntimeSync } [36mfrom[39m [32m'react-native-worklets'[39m[33m;[39m
+ [90m   |[39m                                         [31m[1m^[22m[39m
+ [90m 4 |[39m [36mimport[39m { [33mIS_WEB[39m[33m,[39m [33mReanimatedError[39m[33m,[39m [33mSHOULD_BE_USE_WEB[39m } [36mfrom[39m [32m'./common'[39m[33m;[39m
+ [90m 5 |[39m [36mimport[39m { initSvgCssSupport } [36mfrom[39m [32m'./css/svg'[39m[33m;[39m
+ [90m 6 |[39m [36mimport[39m { getStaticFeatureFlag } [36mfrom[39m [32m'./featureFlags'[39m[33m;[39m[0m
+
+Import stack:
+
+ node_modules\react-native-reanimated\lib\module\initializers.js
+ | import "react-native-worklets"
+
+ node_modules\react-native-reanimated\lib\module\index.js
+ | import "./initializers"
+
+ src\screens\child\HomeScreen.tsx
+ | import "react-native-reanimated"
+
+ 
+ | import "./src/screens/child/HomeScreen"
+
+Unable to resolve "react-native-worklets" from "node_modules\react-native-reanimated\lib\module\initializers.js"
+[0m [90m 1 |[39m [32m'use strict'[39m[33m;[39m
+ [90m 2 |[39m
+[31m[1m>[22m[39m[90m 3 |[39m [36mimport[39m { executeOnUIRuntimeSync } [36mfrom[39m [32m'react-native-worklets'[39m[33m;[39m
+ [90m   |[39m                                         [31m[1m^[22m[39m
+ [90m 4 |[39m [36mimport[39m { [33mIS_WEB[39m[33m,[39m [33mReanimatedError[39m[33m,[39m [33mSHOULD_BE_USE_WEB[39m } [36mfrom[39m [32m'./common'[39m[33m;[39m
+ [90m 5 |[39m [36mimport[39m { initSvgCssSupport } [36mfrom[39m [32m'./css/svg'[39m[33m;[39m
+ [90m 6 |[39m [36mimport[39m { getStaticFeatureFlag } [36mfrom[39m [32m'./featureFlags'[39m[33m;[39m[0m
+
+Import stack:
+
+ node_modules\react-native-reanimated\lib\module\initializers.js
+ | import "react-native-worklets"
+
+ node_modules\react-native-reanimated\lib\module\index.js
+ | import "./initializers"
+
+ src\screens\child\HomeScreen.tsx
+ | import "react-native-reanimated"
+
+ 
+ | import "./src/screens/child/HomeScreen"
+
+Unable to resolve "react-native-worklets" from "node_modules\react-native-reanimated\lib\module\initializers.js"
+[0m [90m 1 |[39m [32m'use strict'[39m[33m;[39m
+ [90m 2 |[39m
+[31m[1m>[22m[39m[90m 3 |[39m [36mimport[39m { executeOnUIRuntimeSync } [36mfrom[39m [32m'react-native-worklets'[39m[33m;[39m
+ [90m   |[39m                                         [31m[1m^[22m[39m
+ [90m 4 |[39m [36mimport[39m { [33mIS_WEB[39m[33m,[39m [33mReanimatedError[39m[33m,[39m [33mSHOULD_BE_USE_WEB[39m } [36mfrom[39m [32m'./common'[39m[33m;[39m
+ [90m 5 |[39m [36mimport[39m { initSvgCssSupport } [36mfrom[39m [32m'./css/svg'[39m[33m;[39m
+ [90m 6 |[39m [36mimport[39m { getStaticFeatureFlag } [36mfrom[39m [32m'./featureFlags'[39m[33m;[39m[0m
+
+Import stack:
+
+ node_modules\react-native-reanimated\lib\module\initializers.js
+ | import "react-native-worklets"
+
+ node_modules\react-native-reanimated\lib\module\index.js
+ | import "./initializers"
+
+ src\screens\child\HomeScreen.tsx
+ | import "react-native-reanimated"
+
+ 
+ | import "./src/screens/child/HomeScreen"
+
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundling failed 94728ms index.ts (1 module)
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Unable to resolve "react-native-worklets" from "node_modules\react-native-reanimated\lib\module\initializers.js"
+[0m [90m 1 |[39m [32m'use strict'[39m[33m;[39m
+ [90m 2 |[39m
+[31m[1m>[22m[39m[90m 3 |[39m [36mimport[39m { executeOnUIRuntimeSync } [36mfrom[39m [32m'react-native-worklets'[39m[33m;[39m
+ [90m   |[39m                                         [31m[1m^[22m[39m
+ [90m 4 |[39m [36mimport[39m { [33mIS_WEB[39m[33m,[39m [33mReanimatedError[39m[33m,[39m [33mSHOULD_BE_USE_WEB[39m } [36mfrom[39m [32m'./common'[39m[33m;[39m
+ [90m 5 |[39m [36mimport[39m { initSvgCssSupport } [36mfrom[39m [32m'./css/svg'[39m[33m;[39m
+ [90m 6 |[39m [36mimport[39m { getStaticFeatureFlag } [36mfrom[39m [32m'./featureFlags'[39m[33m;[39m[0m
+
+Import stack:
+
+ node_modules\react-native-reanimated\lib\module\initializers.js
+ | import "react-native-worklets"
+
+ node_modules\react-native-reanimated\lib\module\index.js
+ | import "./initializers"
+
+ src\screens\child\HomeScreen.tsx
+ | import "react-native-reanimated"
+
+ 
+ | import "./src/screens/child/HomeScreen"
+
+Web Bundling failed 81844ms index.ts (1 module)
+Unable to resolve "react-native-worklets" from "node_modules\react-native-reanimated\lib\module\initializers.js"
+[0m [90m 1 |[39m [32m'use strict'[39m[33m;[39m
+ [90m 2 |[39m
+[31m[1m>[22m[39m[90m 3 |[39m [36mimport[39m { executeOnUIRuntimeSync } [36mfrom[39m [32m'react-native-worklets'[39m[33m;[39m
+ [90m   |[39m                                         [31m[1m^[22m[39m
+ [90m 4 |[39m [36mimport[39m { [33mIS_WEB[39m[33m,[39m [33mReanimatedError[39m[33m,[39m [33mSHOULD_BE_USE_WEB[39m } [36mfrom[39m [32m'./common'[39m[33m;[39m
+ [90m 5 |[39m [36mimport[39m { initSvgCssSupport } [36mfrom[39m [32m'./css/svg'[39m[33m;[39m
+ [90m 6 |[39m [36mimport[39m { getStaticFeatureFlag } [36mfrom[39m [32m'./featureFlags'[39m[33m;[39m[0m
+
+Import stack:
+
+ node_modules\react-native-reanimated\lib\module\initializers.js
+ | import "react-native-worklets"
+
+ node_modules\react-native-reanimated\lib\module\index.js
+ | import "./initializers"
+
+ src\screens\child\HomeScreen.tsx
+ | import "react-native-reanimated"
+
+ 
+ | import "./src/screens/child/HomeScreen"
+

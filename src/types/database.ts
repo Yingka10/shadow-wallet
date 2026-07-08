@@ -166,6 +166,8 @@ export type RewardItem = {
   added_by: RewardAddedBy;
   parent_approved: boolean;
   is_active: boolean;
+  is_redeemed: boolean;
+  redeemed_at: string | null;
   created_at: string;
 };
 
@@ -551,6 +553,8 @@ export interface Database {
           added_by: RewardAddedBy;
           parent_approved?: boolean;
           is_active?: boolean;
+          is_redeemed?: boolean;
+          redeemed_at?: string | null;
           created_at?: string;
         };
         Update: Partial<RewardItem>;
