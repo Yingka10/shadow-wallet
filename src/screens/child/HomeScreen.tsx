@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -830,32 +830,40 @@ function TodayTaskRow({
 }
 
 function GrowthTreeIllustration({ stage, fruitCount }: { stage: number; fruitCount: number }) {
+  // gradient id 用 useId() 產生（不要改回寫死字串）——stack navigator 在 web 上沒把上一頁
+  // 樹的 <Svg> 卸載乾淨時，兩個同 id="trunk" 的 <LinearGradient> 會在 DOM 上打架，
+  // url(#trunk) 解析到錯的一個，樹幹整片消失（2026-07-08 使用者回報：切頁再回來樹幹不見）。
+  // GradientBackground.tsx 也是同一個根因，已經用這個模式修過。
+  const gid = useId();
+  const trunkId = `${gid}-trunk`;
+  const leafId = `${gid}-leaf`;
+  const fruitId = `${gid}-fruit`;
   const canopyScale = 0.84 + stage * 0.035;
   return (
     <Svg width={226} height={232} viewBox="0 0 230 236" fill="none">
       <Defs>
-        <SvgLinearGradient id="trunk" x1="112" y1="92" x2="116" y2="217" gradientUnits="userSpaceOnUse">
+        <SvgLinearGradient id={trunkId} x1="112" y1="92" x2="116" y2="217" gradientUnits="userSpaceOnUse">
           <Stop stopColor="#9B6334" />
           <Stop offset="1" stopColor="#6F4328" />
         </SvgLinearGradient>
-        <SvgLinearGradient id="leaf" x1="76" y1="33" x2="164" y2="153" gradientUnits="userSpaceOnUse">
+        <SvgLinearGradient id={leafId} x1="76" y1="33" x2="164" y2="153" gradientUnits="userSpaceOnUse">
           <Stop stopColor="#B7D95E" />
           <Stop offset="1" stopColor="#5EA33C" />
         </SvgLinearGradient>
-        <SvgLinearGradient id="fruit" x1="0" y1="0" x2="1" y2="1">
+        <SvgLinearGradient id={fruitId} x1="0" y1="0" x2="1" y2="1">
           <Stop stopColor="#FFD66D" />
           <Stop offset="1" stopColor="#F2997A" />
         </SvgLinearGradient>
       </Defs>
       <Ellipse cx="116" cy="217" rx="64" ry="13" fill="#A6C979" opacity="0.42" />
-      <Path d="M96 215c14-42 14-74 10-107h27c-2 34 2 69 18 107H96z" fill="url(#trunk)" />
+      <Path d="M96 215c14-42 14-74 10-107h27c-2 34 2 69 18 107H96z" fill={`url(#${trunkId})`} />
       <Path d="M111 132c-20-15-35-30-53-55" stroke="#7B4C2D" strokeWidth="12" strokeLinecap="round" />
       <Path d="M128 130c20-12 39-29 55-53" stroke="#7B4C2D" strokeWidth="12" strokeLinecap="round" />
       <Path d="M119 122c-1 28-2 56-10 85" stroke="#5A3322" strokeWidth="3" strokeLinecap="round" opacity="0.35" />
       <G transform={`translate(${116 - 116 * canopyScale} ${94 - 94 * canopyScale}) scale(${canopyScale})`}>
-        <Circle cx="69" cy="93" r="45" fill="url(#leaf)" />
-        <Circle cx="101" cy="56" r="51" fill="url(#leaf)" />
-        <Circle cx="143" cy="75" r="48" fill="url(#leaf)" />
+        <Circle cx="69" cy="93" r="45" fill={`url(#${leafId})`} />
+        <Circle cx="101" cy="56" r="51" fill={`url(#${leafId})`} />
+        <Circle cx="143" cy="75" r="48" fill={`url(#${leafId})`} />
         <Circle cx="168" cy="111" r="41" fill="#64AE3D" />
         <Circle cx="109" cy="111" r="52" fill="#79BD47" />
         <Circle cx="67" cy="122" r="34" fill="#73B946" />
@@ -873,7 +881,7 @@ function GrowthTreeIllustration({ stage, fruitCount }: { stage: number; fruitCou
           ][index];
           return (
             <G key={index}>
-              <Circle cx={points[0]} cy={points[1]} r="12" fill="url(#fruit)" />
+              <Circle cx={points[0]} cy={points[1]} r="12" fill={`url(#${fruitId})`} />
               <Circle cx={points[0] - 4} cy={points[1] - 4} r="3" fill="#FFF4B9" opacity="0.75" />
               <Path d={`M${points[0] - 1} ${points[1] - 13}c2-6 7-7 10-5`} stroke="#5EA33C" strokeWidth="3" strokeLinecap="round" />
             </G>
