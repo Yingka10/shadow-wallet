@@ -407,49 +407,38 @@ export default function WishScreen() {
 
         {/* ── Hero 許願樹區 ───────────────────────────────────── */}
         <View style={styles.heroSection}>
-        {/* 標題列 */}
-        <View style={styles.heroHeader}>
-          <Text style={styles.heroTitle}>✨ 許願樹</Text>
-          <TouchableOpacity
-            style={styles.coinChip}
-            onPress={() => navigation.navigate('Wallet', { childId })}
-            activeOpacity={0.85}
-          >
-            <CoinIcon size={16} />
-            <Text style={styles.coinChipText}>{formatNumber(balance)}</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* 大樹 —— 站在分層草坡上的柔和場景面板（不再浮在一片綠漸層裡） */}
-        <View style={styles.treeScene}>
-          <View style={styles.treeSceneGround} pointerEvents="none">
-            <GrassGroundScene height={88} />
+          {/* 標題列 */}
+          <View style={styles.heroHeader}>
+            <Text style={styles.heroTitle}>✨ 許願樹</Text>
+            <TouchableOpacity
+              style={styles.coinChip}
+              onPress={() => navigation.navigate('Wallet', { childId })}
+              activeOpacity={0.85}
+            >
+              <CoinIcon size={16} />
+              <Text style={styles.coinChipText}>{formatNumber(balance)}</Text>
+            </TouchableOpacity>
           </View>
-          <WishTreeComponent
-            onPress={() => setWishModalVisible(true)}
-            size={165}
-            hasRipeFruit={ripeFruitItem !== null}
-          />
-        </View>
 
-        {/* 熟果提示泡泡 */}
-        {ripeFruitItem && (
-          <View style={styles.ripeBubble}>
-            <Text style={styles.ripeBubbleText}>
-              存夠了「{ripeFruitItem.name}」，可以兌換囉！
-            </Text>
+          {/* 大樹＋草地＋許願按鈕 —— 草地視覺延伸到按鈕 */}
+          <View style={styles.treeScene}>
+            <View style={styles.treeSceneGround} pointerEvents="none">
+              <GrassGroundScene height={150} />
+            </View>
+            <WishTreeComponent
+              onPress={() => setWishModalVisible(true)}
+              size={165}
+              hasRipeFruit={ripeFruitItem !== null}
+            />
+            <Pressable
+              style={({ pressed }) => [styles.wishBtn, pressed && styles.wishBtnPressed]}
+              onPress={() => setWishModalVisible(true)}
+              disabled={saving}
+            >
+              <Text style={styles.wishBtnText}>✨ 許一個願望</Text>
+            </Pressable>
           </View>
-        )}
-
-        {/* 許願按鈕 */}
-        <Pressable
-          style={({ pressed }) => [styles.wishBtn, pressed && styles.wishBtnPressed]}
-          onPress={() => setWishModalVisible(true)}
-          disabled={saving}
-        >
-          <Text style={styles.wishBtnText}>✨ 許一個願望</Text>
-        </Pressable>
-      </View>
+        </View>
 
       {/* ── 列表區 ─────────────────────────────────────────── */}
       <View style={styles.listSection}>
@@ -596,8 +585,7 @@ const styles = StyleSheet.create({
   // ── Hero ───────────────────────────────────────────────────
   heroSection: {
     paddingTop: 8,
-    paddingBottom: 8,
-    paddingHorizontal: 20,
+    paddingBottom: 4,
     alignItems: 'center',
   },
   heroHeader: {
@@ -606,6 +594,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     width: '100%',
     marginBottom: 4,
+    paddingHorizontal: 20,
   },
   heroTitle: {
     fontSize: 16,
@@ -618,20 +607,21 @@ const styles = StyleSheet.create({
   // （2026-07-07 使用者回報過兩次：不要淺綠色框框）。
   treeScene: {
     width: '100%',
-    maxWidth: 280,
-    height: 236,
+    height: 290,
     marginTop: 6,
     marginBottom: 0,
     alignItems: 'center',
     justifyContent: 'flex-end',
-    paddingBottom: 4,
+    paddingBottom: 16,
+    gap: 10,
   },
   treeSceneGround: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    height: 112,
+    height: 210,
+    justifyContent: 'flex-end',
   },
   coinChip: {
     flexDirection: 'row',
@@ -674,7 +664,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   wishBtn: {
-    marginTop: 4,
     paddingVertical: 12,
     paddingHorizontal: 40,
     borderRadius: 28,
@@ -698,7 +687,7 @@ const styles = StyleSheet.create({
   // ── 列表區 ─────────────────────────────────────────────────
   listSection: {
     flex: 1,
-    paddingTop: 6,
+    paddingTop: 14,
   },
 
   // ── Segmented control（獨立 pill 並排，非灰底滑動軌）────────
