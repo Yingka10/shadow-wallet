@@ -1,4 +1,9 @@
 import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+dayjs.extend(utc);
+dayjs.extend(timezone);
 import {
   ActivityIndicator,
   Alert,
@@ -66,6 +71,35 @@ type ChildMeta = {
 type GoalTone = 'piano' | 'book' | 'sleep' | 'growth';
 
 const TASK_DIFF_OPTIONS = [1, 1.5, 2, 2.5, 3];
+
+type AddTaskType = 'temp' | 'recurring';
+type DueOption = 'today' | 'tomorrow' | 'dayAfter' | 'thisWeek';
+const DUE_LABELS: Record<DueOption, string> = {
+  today: '今天', tomorrow: '明天', dayAfter: '後天', thisWeek: '本週日',
+};
+const DAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
+const TZ = 'Asia/Taipei';
+
+function getDueDateStr(option: DueOption): string {
+  const today = dayjs().tz(TZ);
+  if (option === 'tomorrow') return today.add(1, 'day').format('YYYY-MM-DD');
+  if (option === 'dayAfter') return today.add(2, 'day').format('YYYY-MM-DD');
+  if (option === 'thisWeek') {
+    const dow = today.day();
+    return today.add(dow === 0 ? 7 : 7 - dow, 'day').format('YYYY-MM-DD');
+  }
+  return today.format('YYYY-MM-DD');
+}
+
+function formatCountdown(dueDate: string | null): string {
+  if (!dueDate) return '';
+  const now = dayjs().tz(TZ);
+  const due = dayjs.tz(dueDate, TZ).endOf('day');
+  const diffH = due.diff(now, 'hour');
+  if (diffH <= 0) return '今天截止';
+  if (diffH < 24) return `剩 ${diffH} 小時`;
+  return `剩 ${Math.ceil(diffH / 24)} 天`;
+}
 const HOME = {
   primaryGreen: '#A8C686',
   successGreen: '#8DC76A',
@@ -170,7 +204,7 @@ export default function HomeScreen() {
   const navigation = useNavigation<Nav>();
   const { childId } = route.params;
 
-  const { weekdayTasks, weekendTasks, longTermTasks, isPrerequisiteMet, loading, refresh } =
+  const { weekdayTasks, weekendTasks, longTermTasks, tempTasks, isPrerequisiteMet, loading, refresh } =
     useTodayTasks(childId);
   const { spending } = useWallet(childId);
   const coinBalance = spending?.balance ?? 0;
@@ -185,6 +219,9 @@ export default function HomeScreen() {
   const [newTaskTime, setNewTaskTime] = useState('');
   const [newTaskDifficulty, setNewTaskDifficulty] = useState(1);
   const [creatingTask, setCreatingTask] = useState(false);
+  const [addTaskType, setAddTaskType] = useState<AddTaskType>('temp');
+  const [dueOption, setDueOption] = useState<DueOption>('today');
+  const [recurrenceDays, setRecurrenceDays] = useState<number[]>([1, 2, 3, 4, 5]);
 
   const coinPulse = useSharedValue(1);
   const treePulse = useSharedValue(1);
@@ -265,7 +302,16 @@ export default function HomeScreen() {
     setNewTaskCategory('B');
     setNewTaskTime('');
     setNewTaskDifficulty(1);
+    setAddTaskType('temp');
+    setDueOption('today');
+    setRecurrenceDays([1, 2, 3, 4, 5]);
     setAddTaskVisible(true);
+  }, []);
+
+  const toggleDay = useCallback((dow: number) => {
+    setRecurrenceDays(prev =>
+      prev.includes(dow) ? prev.filter(d => d !== dow) : [...prev, dow],
+    );
   }, []);
 
   const submitAddTask = useCallback(async () => {
@@ -273,31 +319,47 @@ export default function HomeScreen() {
       Alert.alert('資料還在載入', '請稍後再試');
       return;
     }
-
     const trimmedName = newTaskName.trim();
     const timeMin = Number.parseInt(newTaskTime, 10);
-
     if (!trimmedName) {
       Alert.alert('請輸入任務名稱', '至少要有一個清楚的名字');
       return;
     }
-
     if (!Number.isFinite(timeMin) || timeMin < 1) {
       Alert.alert('時間不正確', '請輸入大於 0 的分鐘數');
       return;
     }
-
+    if (addTaskType === 'recurring' && recurrenceDays.length === 0) {
+      Alert.alert('請選擇出現日', '至少要選一天');
+      return;
+    }
     setCreatingTask(true);
     try {
-      await createChildTask({
-        familyId: childMeta.familyId,
-        childId,
-        ageGroup: childMeta.ageGroup,
-        name: trimmedName,
-        category: newTaskCategory,
-        baseTimeMin: timeMin,
-        difficulty: newTaskCategory === 'C' ? newTaskDifficulty : 1,
-      });
+      if (addTaskType === 'temp') {
+        await createChildTask({
+          familyId: childMeta.familyId,
+          childId,
+          ageGroup: childMeta.ageGroup,
+          name: trimmedName,
+          category: newTaskCategory,
+          baseTimeMin: timeMin,
+          difficulty: newTaskCategory === 'C' ? newTaskDifficulty : 1,
+          dayType: 'once',
+          dueDate: getDueDateStr(dueOption),
+        });
+      } else {
+        await createChildTask({
+          familyId: childMeta.familyId,
+          childId,
+          ageGroup: childMeta.ageGroup,
+          name: trimmedName,
+          category: newTaskCategory,
+          baseTimeMin: timeMin,
+          difficulty: newTaskCategory === 'C' ? newTaskDifficulty : 1,
+          dayType: 'custom',
+          recurrenceDays,
+        });
+      }
       setAddTaskVisible(false);
       await refresh();
     } catch (err) {
@@ -306,7 +368,7 @@ export default function HomeScreen() {
     } finally {
       setCreatingTask(false);
     }
-  }, [childMeta, childId, newTaskCategory, newTaskDifficulty, newTaskName, newTaskTime, refresh]);
+  }, [childMeta, childId, addTaskType, newTaskCategory, newTaskDifficulty, newTaskName, newTaskTime, dueOption, recurrenceDays, refresh]);
 
   const openModal = useCallback((task: TodayTask) => {
     setModal({ task, visible: true });
@@ -518,6 +580,22 @@ export default function HomeScreen() {
             )}
           </View>
 
+          {tempTasks.length > 0 && (
+            <View style={styles.section}>
+              <SectionTitle icon="⏳" title="臨時任務" action={`${tempTasks.length} 件`} />
+              <View style={styles.taskList}>
+                {tempTasks.map(task => (
+                  <TempTaskRow
+                    key={task.id}
+                    task={task}
+                    isPrerequisiteMet={isPrerequisiteMet}
+                    onPress={() => openModal(task)}
+                  />
+                ))}
+              </View>
+            </View>
+          )}
+
           {isEmpty ? null : (
             <View style={styles.encourageLine}>
               <Text style={styles.encourageText}>🍃 完成任務讓小樹長得更茂盛吧！ 🍃</Text>
@@ -558,7 +636,7 @@ export default function HomeScreen() {
             <View style={styles.addPlus}>
               <Text style={styles.addPlusText}>＋</Text>
             </View>
-            <Text style={styles.addRowText}>新增一件今天的事</Text>
+            <Text style={styles.addRowText}>新增任務</Text>
           </TouchableOpacity>
         </ScrollView>
 
@@ -636,10 +714,24 @@ export default function HomeScreen() {
               <TouchableOpacity style={styles.sheet} activeOpacity={1} onPress={() => {}}>
                 <View style={styles.sheetHandle} />
                 <Text style={styles.sheetTitle}>新增任務</Text>
-                <Text style={styles.sheetSubtitle}>
-                  {childMeta ? `${childMeta.nickname} 的臨時任務` : '先幫今天加一件小事'}
-                </Text>
 
+                {/* 任務種類切換 */}
+                <View style={styles.taskTypeRow}>
+                  {(['temp', 'recurring'] as AddTaskType[]).map(t => (
+                    <TouchableOpacity
+                      key={t}
+                      style={[styles.taskTypeBtn, addTaskType === t && styles.taskTypeBtnActive]}
+                      onPress={() => setAddTaskType(t)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={[styles.taskTypeText, addTaskType === t && styles.taskTypeTextActive]}>
+                        {t === 'temp' ? '⏰ 臨時任務' : '🔁 週期任務'}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* 任務名稱 */}
                 <Text style={styles.fieldLabel}>任務名稱</Text>
                 <TextInput
                   style={styles.input}
@@ -649,28 +741,66 @@ export default function HomeScreen() {
                   placeholderTextColor={HOME.textSecondary}
                 />
 
-                <Text style={styles.fieldLabel}>任務類型</Text>
+                {/* 任務分類 B / C */}
+                <Text style={styles.fieldLabel}>任務分類</Text>
                 <View style={styles.segmentRow}>
-                  <TouchableOpacity
-                    style={[styles.segmentBtn, newTaskCategory === 'B' && styles.segmentBtnActive]}
-                    onPress={() => setNewTaskCategory('B')}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={[styles.segmentText, newTaskCategory === 'B' && styles.segmentTextActive]}>
-                      本分
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.segmentBtn, newTaskCategory === 'C' && styles.segmentBtnActive]}
-                    onPress={() => setNewTaskCategory('C')}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={[styles.segmentText, newTaskCategory === 'C' && styles.segmentTextActive]}>
-                      貢獻
-                    </Text>
-                  </TouchableOpacity>
+                  {(['B', 'C'] as const).map(cat => (
+                    <TouchableOpacity
+                      key={cat}
+                      style={[styles.segmentBtn, newTaskCategory === cat && styles.segmentBtnActive]}
+                      onPress={() => setNewTaskCategory(cat)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={[styles.segmentText, newTaskCategory === cat && styles.segmentTextActive]}>
+                        {cat === 'B' ? '本分（不發幣）' : '貢獻（發幣）'}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
 
+                {/* 臨時任務：截止日期 */}
+                {addTaskType === 'temp' && (
+                  <>
+                    <Text style={styles.fieldLabel}>截止日期</Text>
+                    <View style={styles.dueRow}>
+                      {(Object.keys(DUE_LABELS) as DueOption[]).map(opt => (
+                        <TouchableOpacity
+                          key={opt}
+                          style={[styles.dueBtn, dueOption === opt && styles.dueBtnActive]}
+                          onPress={() => setDueOption(opt)}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={[styles.dueBtnText, dueOption === opt && styles.dueBtnTextActive]}>
+                            {DUE_LABELS[opt]}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </>
+                )}
+
+                {/* 週期任務：出現日 */}
+                {addTaskType === 'recurring' && (
+                  <>
+                    <Text style={styles.fieldLabel}>出現在哪幾天</Text>
+                    <View style={styles.dayRow}>
+                      {DAY_LABELS.map((label, dow) => (
+                        <TouchableOpacity
+                          key={dow}
+                          style={[styles.dayBtn, recurrenceDays.includes(dow) && styles.dayBtnActive]}
+                          onPress={() => toggleDay(dow)}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={[styles.dayBtnText, recurrenceDays.includes(dow) && styles.dayBtnTextActive]}>
+                            {label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </>
+                )}
+
+                {/* 預估時間 */}
                 <Text style={styles.fieldLabel}>預估時間（分鐘）</Text>
                 <TextInput
                   style={styles.input}
@@ -681,14 +811,7 @@ export default function HomeScreen() {
                   keyboardType="number-pad"
                 />
 
-                <View style={styles.hintPill}>
-                  <Text style={styles.hintText}>
-                    {newTaskCategory === 'B'
-                      ? '本分任務不發幣，會以省下的時間計算。'
-                      : '貢獻任務會依時間與難度換算成金幣。'}
-                  </Text>
-                </View>
-
+                {/* 難度（僅 C 類） */}
                 {newTaskCategory === 'C' && (
                   <>
                     <Text style={styles.fieldLabel}>難度</Text>
@@ -696,19 +819,11 @@ export default function HomeScreen() {
                       {TASK_DIFF_OPTIONS.map(option => (
                         <TouchableOpacity
                           key={option}
-                          style={[
-                            styles.diffBtn,
-                            newTaskDifficulty === option && styles.diffBtnActive,
-                          ]}
+                          style={[styles.diffBtn, newTaskDifficulty === option && styles.diffBtnActive]}
                           onPress={() => setNewTaskDifficulty(option)}
                           activeOpacity={0.85}
                         >
-                          <Text
-                            style={[
-                              styles.diffText,
-                              newTaskDifficulty === option && styles.diffTextActive,
-                            ]}
-                          >
+                          <Text style={[styles.diffText, newTaskDifficulty === option && styles.diffTextActive]}>
                             {option}x
                           </Text>
                         </TouchableOpacity>
@@ -825,6 +940,41 @@ function TodayTaskRow({
           </Text>
         </View>
       ) : null}
+    </TouchableOpacity>
+  );
+}
+
+function TempTaskRow({
+  task,
+  isPrerequisiteMet,
+  onPress,
+}: {
+  task: TodayTask;
+  isPrerequisiteMet: boolean;
+  onPress: () => void;
+}) {
+  const disabled = task.isCompleted && !task.allow_repeat;
+  const countdown = formatCountdown(task.due_date);
+  return (
+    <TouchableOpacity
+      activeOpacity={0.78}
+      disabled={disabled}
+      onPress={onPress}
+      style={[styles.taskRow, task.isCompleted && styles.taskRowDone]}
+    >
+      <View style={[styles.checkbox, task.isCompleted && styles.checkboxDone]}>
+        {task.isCompleted ? <Text style={styles.checkboxCheck}>✓</Text> : null}
+      </View>
+      <Text style={styles.taskEmoji}>{taskIcon(task)}</Text>
+      <View style={styles.taskCopy}>
+        <Text style={[styles.taskName, task.isCompleted && styles.taskNameDone]} numberOfLines={2}>
+          {task.name}
+        </Text>
+        <Text style={styles.taskReward}>🪙 {taskRewardText(task, isPrerequisiteMet)}</Text>
+      </View>
+      <View style={styles.countdownBadge}>
+        <Text style={styles.countdownText}>{countdown}</Text>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -1752,5 +1902,97 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '900',
+  },
+  taskTypeRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 16,
+  },
+  taskTypeBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 14,
+    alignItems: 'center',
+    backgroundColor: '#FFF8EE',
+    borderWidth: 1.5,
+    borderColor: HOME.border,
+  },
+  taskTypeBtnActive: {
+    backgroundColor: '#EDF6E2',
+    borderColor: HOME.primaryGreen,
+  },
+  taskTypeText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: HOME.textSecondary,
+  },
+  taskTypeTextActive: {
+    color: Colors.leaf700,
+  },
+  dueRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 14,
+    flexWrap: 'wrap',
+  },
+  dueBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: '#FFF8EE',
+    borderWidth: 1,
+    borderColor: HOME.border,
+  },
+  dueBtnActive: {
+    backgroundColor: '#FFF0CB',
+    borderColor: HOME.honeyGold,
+  },
+  dueBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: HOME.textSecondary,
+  },
+  dueBtnTextActive: {
+    color: '#8B572A',
+  },
+  dayRow: {
+    flexDirection: 'row',
+    gap: 5,
+    marginBottom: 14,
+  },
+  dayBtn: {
+    flex: 1,
+    paddingVertical: 9,
+    alignItems: 'center',
+    borderRadius: 10,
+    backgroundColor: '#FFF8EE',
+    borderWidth: 1,
+    borderColor: HOME.border,
+  },
+  dayBtnActive: {
+    backgroundColor: '#EDF6E2',
+    borderColor: HOME.primaryGreen,
+  },
+  dayBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: HOME.textSecondary,
+  },
+  dayBtnTextActive: {
+    color: Colors.leaf700,
+  },
+  countdownBadge: {
+    backgroundColor: '#FFF0CB',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#F4C471',
+    flexShrink: 0,
+  },
+  countdownText: {
+    color: '#8B572A',
+    fontSize: 11,
+    fontWeight: '800',
   },
 });

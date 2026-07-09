@@ -20,6 +20,7 @@ export type UseTodayTasksResult = {
   weekdayTasks: TodayTask[];
   weekendTasks: TodayTask[];
   longTermTasks: TodayTask[];
+  tempTasks: TodayTask[];
   isPrerequisiteMet: boolean;
   completedTodayIds: Set<string>;
   loading: boolean;
@@ -30,6 +31,7 @@ export function useTodayTasks(childId: string): UseTodayTasksResult {
   const [weekdayTasks, setWeekdayTasks] = useState<TodayTask[]>([]);
   const [weekendTasks, setWeekendTasks] = useState<TodayTask[]>([]);
   const [longTermTasks, setLongTermTasks] = useState<TodayTask[]>([]);
+  const [tempTasks, setTempTasks] = useState<TodayTask[]>([]);
   const [completedTodayIds, setCompletedTodayIds] = useState<Set<string>>(new Set());
   const [isPrerequisiteMet, setIsPrerequisiteMet] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -52,6 +54,7 @@ export function useTodayTasks(childId: string): UseTodayTasksResult {
         setWeekdayTasks([]);
         setWeekendTasks([]);
         setLongTermTasks([]);
+        setTempTasks([]);
         setCompletedTodayIds(new Set());
         setIsPrerequisiteMet(true);
         return;
@@ -126,6 +129,13 @@ export function useTodayTasks(childId: string): UseTodayTasksResult {
       const shortTermTasks = tasks
         .filter(t => !t.is_long_term)
         .filter(t => isTaskDueToday(t));
+
+      // 臨時任務：day_type='once' 且 due_date > 今天 → 獨立 bucket，不進今日清單
+      const todayStr = dayjs().tz('Asia/Taipei').format('YYYY-MM-DD');
+      const tempTasksList = tasks
+        .filter(t => !t.is_long_term && t.day_type === 'once' && t.due_date && t.due_date > todayStr)
+        .map(t => ({ ...t, isCompleted: completedIds.has(t.id) }));
+      setTempTasks(tempTasksList);
 
       // 'custom' and 'once' tasks appear in whichever section is relevant today.
       // Exclude 'weekend'-only tasks on weekdays and vice versa.
@@ -215,6 +225,7 @@ export function useTodayTasks(childId: string): UseTodayTasksResult {
     weekdayTasks,
     weekendTasks,
     longTermTasks,
+    tempTasks,
     isPrerequisiteMet,
     completedTodayIds,
     loading,
