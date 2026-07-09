@@ -44,7 +44,10 @@ export function isTaskDueToday(task: SchedulableTask, now?: dayjs.ConfigType): b
     case 'weekday': return !weekend;
     case 'weekend': return weekend;
     case 'custom':  return (task.recurrence_days ?? []).includes(dow);
-    case 'once':    return true;
+    case 'once':
+      // due_date > today → goes to the temporary-tasks bucket, not today's required list
+      if (task.due_date && task.due_date > today) return false;
+      return true;
     default:        return false;
   }
 }

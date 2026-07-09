@@ -216,6 +216,9 @@ type CreateChildTaskInput = {
   category: 'B' | 'C';
   baseTimeMin: number;
   difficulty: number;
+  dayType: 'once' | 'custom' | 'both';
+  dueDate?: string | null;
+  recurrenceDays?: number[] | null;
 };
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
@@ -773,7 +776,9 @@ export async function createChildTask(input: CreateChildTaskInput): Promise<void
         family_id: input.familyId,
         name: input.name,
         category: input.category,
-        day_type: 'both',
+        day_type: input.dayType,
+        due_date: input.dueDate ?? null,
+        recurrence_days: input.recurrenceDays ?? null,
         long_term_type: null,
         is_long_term: false,
         base_time_min: safeBaseTime,
