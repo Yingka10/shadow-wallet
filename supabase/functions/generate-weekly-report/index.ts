@@ -24,7 +24,10 @@ const corsHeaders = {
 };
 
 const GEMINI_KEY = Deno.env.get('GEMINI_API_KEY')!;
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`;
+// gemini-2.0-flash has free-tier quota 0 on this key (429 RESOURCE_EXHAUSTED);
+// gemini-flash-latest is the model confirmed to return 200 on this key's free tier.
+const GEMINI_MODEL = 'gemini-flash-latest';
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_KEY}`;
 
 type TaskCategory = 'A' | 'B' | 'C' | 'D';
 
@@ -67,9 +70,13 @@ async function callGemini(prompt: string): Promise<string> {
   });
   if (!res.ok) throw new Error(`Gemini error ${res.status}`);
   const data = await res.json() as {
-    candidates: Array<{ content: { parts: Array<{ text: string }> } }>;
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
   };
-  return data.candidates[0]?.content.parts[0]?.text ?? '{}';
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  // Empty text = response blocked by safety filter or no candidate returned.
+  // Throw (not return '{}') so processChild's catch triggers computeFallbackInsight.
+  if (!text || !text.trim()) throw new Error('Gemini returned no text (blocked or empty)');
+  return text;
 }
 
 type GeminiInsightResult = {
@@ -130,7 +137,27 @@ action 只能是 "adjust_reminder", "increase_difficulty", "add_contribution" �
 
   const raw = await callGemini(prompt);
   const cleaned = raw.trim().replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
-  return JSON.parse(cleaned) as GeminiInsightResult;
+  const parsed = JSON.parse(cleaned) as Partial<GeminiInsightResult>;
+
+  // Validate the shape before trusting it. A syntactically-valid but empty/partial
+  // object (e.g. Gemini returned `{}`) must NOT pass silently — throw so the caller
+  // falls back to computeFallbackInsight instead of writing a blank report.
+  if (
+    typeof parsed.motivation_observation !== 'string' ||
+    parsed.motivation_observation.trim() === '' ||
+    !Array.isArray(parsed.suggestions) ||
+    parsed.suggestions.length === 0
+  ) {
+    throw new Error('Gemini response missing required fields');
+  }
+
+  return {
+    motivation_observation: parsed.motivation_observation,
+    dialogue: typeof parsed.dialogue === 'string' ? parsed.dialogue : '',
+    suggestions: parsed.suggestions,
+    affirmations: Array.isArray(parsed.affirmations) ? parsed.affirmations : [],
+    task_recommendations: Array.isArray(parsed.task_recommendations) ? parsed.task_recommendations : [],
+  };
 }
 
 /**
@@ -299,8 +326,11 @@ async function processChild(
   const existingAdjustments =
     (existingReportRes.data?.task_adjustments as Record<string, unknown> | null) ?? {};
 
-  // Upsert weekly_reports
-  await supabase.from('weekly_reports').upsert(
+  // Upsert weekly_reports.
+  // The error MUST be checked: a swallowed write failure (missing unique index
+  // for onConflict, RLS, bad column) would let processChild "succeed" while
+  // nothing lands, and the parent UI would show 生成中 forever with no error.
+  const { error: upsertErr } = await supabase.from('weekly_reports').upsert(
     {
       family_id: familyId,
       child_id: childId,
@@ -319,8 +349,11 @@ async function processChild(
     },
     { onConflict: 'family_id,child_id,week_start' },
   );
+  if (upsertErr) {
+    throw new Error(`weekly_reports upsert failed for child ${childId}: ${upsertErr.message}`);
+  }
 
-  console.log(`[generate-weekly-report] processed child ${childId} week ${weekStart}`);
+  console.log(`[generate-weekly-report] processed child ${childId} week ${weekStart} (fallback=${usedFallback})`);
 }
 
 Deno.serve(async (req) => {
