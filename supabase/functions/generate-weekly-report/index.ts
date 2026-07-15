@@ -24,7 +24,10 @@ const corsHeaders = {
 };
 
 const GEMINI_KEY = Deno.env.get('GEMINI_API_KEY')!;
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`;
+// gemini-2.0-flash has free-tier quota 0 on this key (429 RESOURCE_EXHAUSTED);
+// gemini-flash-latest is the model confirmed to return 200 on this key's free tier.
+const GEMINI_MODEL = 'gemini-flash-latest';
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_KEY}`;
 
 type TaskCategory = 'A' | 'B' | 'C' | 'D';
 
@@ -42,18 +45,13 @@ type WeeklyContext = {
   coinSpendCount: number;
 };
 
+// 家長教養傾向的中文說明。只當作「給 AI 參考的背景」，用來拿捏建議口吻；
+// prompt 會明確要求 AI 不要把這個分類名詞寫進給家長看的內容裡。
 const BAUMRIND_LABELS: Record<string, string> = {
-  elite_high_control: '高要求高回應型',
-  pragmatic_labor: '高要求低回應型',
-  guilt_compensate: '低要求高回應型',
-  free_fatigue: '低要求低回應型',
-};
-
-const MOTIVATION_LABELS: Record<string, string> = {
-  amotivation: '無動機',
-  external: '外在動機',
-  introjected: '內攝動機',
-  internal: '內在動機',
+  elite_high_control: '比較重視規矩，同時也給孩子很多關心與回應',
+  pragmatic_labor: '對孩子要求較高，日常互動比較務實、少著墨情感',
+  guilt_compensate: '要求較寬鬆，但很願意回應孩子的需求',
+  free_fatigue: '給孩子很大空間，日常較少主動介入',
 };
 
 async function callGemini(prompt: string): Promise<string> {
@@ -67,9 +65,13 @@ async function callGemini(prompt: string): Promise<string> {
   });
   if (!res.ok) throw new Error(`Gemini error ${res.status}`);
   const data = await res.json() as {
-    candidates: Array<{ content: { parts: Array<{ text: string }> } }>;
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
   };
-  return data.candidates[0]?.content.parts[0]?.text ?? '{}';
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  // Empty text = response blocked by safety filter or no candidate returned.
+  // Throw (not return '{}') so processChild's catch triggers computeFallbackInsight.
+  if (!text || !text.trim()) throw new Error('Gemini returned no text (blocked or empty)');
+  return text;
 }
 
 type GeminiInsightResult = {
@@ -88,49 +90,84 @@ type GeminiInsightResult = {
 };
 
 async function generateInsight(ctx: WeeklyContext): Promise<GeminiInsightResult> {
+  // 用白話的分類名稱餵給 AI，避免它在輸出裡照抄「Task-A」這種代號。
+  const CAT_NAMES: Record<TaskCategory, string> = {
+    A: '自己的事自己做（例如刷牙、收書包、整理玩具）',
+    B: '幫忙做家事',
+    C: '額外的付出與貢獻',
+    D: '學習與成長的目標',
+  };
   const catLines = (['A', 'B', 'C', 'D'] as TaskCategory[])
-    .map(cat => `- Task-${cat}：${ctx.taskCounts[cat].done}/${ctx.taskCounts[cat].total} 完成`)
+    .map(cat => `- ${CAT_NAMES[cat]}：這週完成 ${ctx.taskCounts[cat].done} 項，本來安排了 ${ctx.taskCounts[cat].total} 項`)
     .join('\n');
 
-  const prompt = `你是一個家庭教養週報分析助手。
-根據以下孩子這週的任務數據，生成一份週報洞察。
+  const styleLabel = BAUMRIND_LABELS[ctx.baumrindType ?? ''] ?? '沒有特別設定';
+  const prompt = `你是一位溫柔、細心的親職陪伴顧問，正在幫一位家長看懂孩子這一週的狀況。
+你的讀者是「家長本人」，不是專業人士，所以說話要像跟一位朋友聊他的孩子一樣自然、有溫度。
 
-孩子資訊：
-- 年齡段：${ctx.ageGroup}
-- 動機類型：${MOTIVATION_LABELS[ctx.motivationLevel] ?? ctx.motivationLevel}
-- 家長教養風格：${BAUMRIND_LABELS[ctx.baumrindType ?? ''] ?? '未知'}
-
-這週任務完成概況：
+【這週孩子的情況】（以下是給你參考的背景，請不要原封不動抄進回覆裡）
+- 孩子年齡大約：${ctx.ageGroup} 歲
+- 這位家長平常的教養傾向：${styleLabel}
+  （請用這個來拿捏你給建議的方式與語氣，但回覆裡「絕對不要」提到這段描述，也不要出現任何教養分類或理論名詞）
+- 這週各方面的完成情況：
 ${catLines}
+- 成長幣：這週賺到 ${ctx.coinIncome} 枚（來自 ${ctx.coinIncomeCount} 次），花掉 ${ctx.coinSpend} 枚（${ctx.coinSpendCount} 次兌換）
 
-幣值流動：
-- 賺取：${ctx.coinIncome} 幣（共 ${ctx.coinIncomeCount} 次）
-- 兌換：${ctx.coinSpend} 幣（共 ${ctx.coinSpendCount} 次）
+【非常重要：說話方式】
+1. 全程用溫暖、鼓勵、體貼的語氣，多看見孩子的努力，少批評。
+2. 用生活化的白話，想像你在跟一位不熟教育理論的家長講話。
+3. 絕對不要出現任何專有名詞或系統代號，包括但不限於：
+   「Task-A / A 類 / B 類」「完成率」「動機類型」「教養風格」「里程碑」「幣值流動」這類詞。
+   例如：不要說「里程碑」，改說「一個小目標」；不要說「完成率偏低」，改說「這週做起來比較吃力」。
+4. 內容要具體、要有畫面感，避免空泛的場面話；可以自然帶到上面看到的實際情況。
 
-請回傳 JSON（不含其他文字）：
+請只回傳 JSON（前後不要有任何其他文字或說明）：
 {
-  "motivation_observation": "2-3句對孩子這週表現的觀察，語氣溫暖，提到具體行為",
-  "dialogue": "一段可以直接對孩子說出口的開場白（2-3句、60字內），用第一人稱『我』的口吻，先肯定這週看到的具體表現，再用一個開放式問題邀請孩子聊聊還沒開始或卡關的地方，語氣溫暖不說教",
+  "motivation_observation": "給家長看的一段觀察，3~5句、溫暖具體，說說這週孩子的狀態、看到的亮點、以及可以多留意的地方。像在跟家長分享，不要說教。",
+  "dialogue": "一段家長可以直接對孩子說出口的開場白（3~4句、90字內），用『我』的口吻，先真心肯定這週看到的一件具體小事，再用一個溫柔的開放式問題，邀請孩子聊聊還沒開始或覺得困難的部分。語氣像關心，不像檢討。",
   "suggestions": [
-    {"body": "具體建議（40字內）", "actionLabel": "按鈕文字（5字內）", "action": "adjust_reminder"},
-    {"body": "具體建議（40字內）", "actionLabel": "按鈕文字（5字內）", "action": "increase_difficulty"},
-    {"body": "具體建議（40字內）", "actionLabel": "按鈕文字（5字內）", "action": "add_contribution"}
+    {"body": "給家長的貼心建議，40~60字，白話、可以馬上做，說明為什麼這樣做對孩子好", "actionLabel": "按鈕文字（5字內）", "action": "adjust_reminder"},
+    {"body": "給家長的貼心建議，40~60字，白話、具體", "actionLabel": "按鈕文字（5字內）", "action": "increase_difficulty"},
+    {"body": "給家長的貼心建議，40~60字，白話、具體", "actionLabel": "按鈕文字（5字內）", "action": "add_contribution"}
   ],
   "affirmations": [
-    "適合家長傳給孩子的短句讚美1（20字內）",
-    "適合家長傳給孩子的短句讚美2（20字內）",
-    "適合家長傳給孩子的短句讚美3（20字內）"
+    "一句家長可以直接傳給孩子的溫暖讚美，25字內，講到具體的事",
+    "另一句溫暖讚美，25字內",
+    "再一句溫暖讚美，25字內"
   ],
   "task_recommendations": [
-    {"category": "B", "suggestion": "針對家庭本分任務的調整建議（40字內）"}
+    {"category": "B", "suggestion": "針對某一方面給家長的調整建議，40~60字，白話、溫柔、可執行"}
   ]
 }
-action 只能是 "adjust_reminder", "increase_difficulty", "add_contribution" 之一。
-所有文字請用繁體中文。`;
+
+補充規則：
+- "action" 這個欄位的值只能是 "adjust_reminder"、"increase_difficulty"、"add_contribution" 其中之一（這是系統用的，家長不會看到，照填即可）。
+- "category" 這個欄位請填 A、B、C、D 其中一個字母（A=自己的事自己做、B=幫忙家事、C=額外付出、D=學習成長），這也是系統用的，家長不會看到。
+- 除了上面兩個系統欄位，其他所有給人看的文字，一律用溫暖白話的繁體中文，不要出現代號或專有名詞。`;
 
   const raw = await callGemini(prompt);
   const cleaned = raw.trim().replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
-  return JSON.parse(cleaned) as GeminiInsightResult;
+  const parsed = JSON.parse(cleaned) as Partial<GeminiInsightResult>;
+
+  // Validate the shape before trusting it. A syntactically-valid but empty/partial
+  // object (e.g. Gemini returned `{}`) must NOT pass silently — throw so the caller
+  // falls back to computeFallbackInsight instead of writing a blank report.
+  if (
+    typeof parsed.motivation_observation !== 'string' ||
+    parsed.motivation_observation.trim() === '' ||
+    !Array.isArray(parsed.suggestions) ||
+    parsed.suggestions.length === 0
+  ) {
+    throw new Error('Gemini response missing required fields');
+  }
+
+  return {
+    motivation_observation: parsed.motivation_observation,
+    dialogue: typeof parsed.dialogue === 'string' ? parsed.dialogue : '',
+    suggestions: parsed.suggestions,
+    affirmations: Array.isArray(parsed.affirmations) ? parsed.affirmations : [],
+    task_recommendations: Array.isArray(parsed.task_recommendations) ? parsed.task_recommendations : [],
+  };
 }
 
 /**
@@ -299,8 +336,11 @@ async function processChild(
   const existingAdjustments =
     (existingReportRes.data?.task_adjustments as Record<string, unknown> | null) ?? {};
 
-  // Upsert weekly_reports
-  await supabase.from('weekly_reports').upsert(
+  // Upsert weekly_reports.
+  // The error MUST be checked: a swallowed write failure (missing unique index
+  // for onConflict, RLS, bad column) would let processChild "succeed" while
+  // nothing lands, and the parent UI would show 生成中 forever with no error.
+  const { error: upsertErr } = await supabase.from('weekly_reports').upsert(
     {
       family_id: familyId,
       child_id: childId,
@@ -319,8 +359,11 @@ async function processChild(
     },
     { onConflict: 'family_id,child_id,week_start' },
   );
+  if (upsertErr) {
+    throw new Error(`weekly_reports upsert failed for child ${childId}: ${upsertErr.message}`);
+  }
 
-  console.log(`[generate-weekly-report] processed child ${childId} week ${weekStart}`);
+  console.log(`[generate-weekly-report] processed child ${childId} week ${weekStart} (fallback=${usedFallback})`);
 }
 
 Deno.serve(async (req) => {
