@@ -109,6 +109,65 @@ export async function suggestTaskCoin(taskName: string): Promise<SuggestTaskCoin
   }
 }
 
+export type AnalyzeTaskInput = {
+  taskName: string;
+  childAgeGroup: '2-4' | '4-6' | '6-9' | '9-12';
+  taskSource?: 'parent' | 'child' | 'negotiated' | 'system';
+  durationType?: 'single' | 'recurring' | 'long_term';
+  frequency?: string | null;
+  duplicateOfExisting?: boolean;
+  exceedsFrequency?: boolean;
+};
+
+/** 規則引擎的算幣結果（見 supabase/functions/ai-proxy/coinPolicy.ts）。 */
+export type TaskPricing =
+  | { status: 'priced'; coins: number; band: string; policyVersion: string }
+  | { status: 'coin_disabled'; reason?: string }
+  | { status: 'gated' }
+  | { status: 'unpriced'; reason: string; band: string; policyVersion: string };
+
+export type AnalyzeTaskResult = {
+  category: TaskCategory;
+  reason: string;
+  coinEnabled: boolean;
+  rewardMode: 'life_progress' | 'family_contribution' | 'coin_or_time';
+  estimatedMinutes?: number;
+  difficulty?: 'easy' | 'standard' | 'hard';
+  payout?: { payoutBasis: string; claimPeriod: string; maxClaimsPerPeriod: number };
+  pricing: TaskPricing;
+  blockingIssues: string[];
+  requiresConfirmation: string[];
+  warnings: string[];
+  clarificationQuestion: string | null;
+  policyVersion: string;
+};
+
+/**
+ * 新版任務分析：AI 只做結構化理解，資格閘門與幣值由規則引擎決定。
+ * 取代 suggestTaskCoin 的架構（後者保留供舊畫面相容）。
+ * 任何錯誤時 fallback 成「需家長確認、不自動發幣」的安全狀態。
+ */
+export async function analyzeTask(input: AnalyzeTaskInput): Promise<AnalyzeTaskResult> {
+  const fallback: AnalyzeTaskResult = {
+    category: 'C',
+    reason: 'AI 分析失敗，請家長手動確認任務類別與幣值。',
+    coinEnabled: false,
+    rewardMode: 'coin_or_time',
+    pricing: { status: 'gated' },
+    blockingIssues: [],
+    requiresConfirmation: ['AI 分析暫時無法使用，請家長手動設定'],
+    warnings: [],
+    clarificationQuestion: null,
+    policyVersion: 'fallback',
+  };
+  try {
+    return await invokeAiProxy<AnalyzeTaskResult>('analyzeTask', { ...input });
+  } catch (err) {
+    console.warn('[aiAgent.analyzeTask] fallback due to error:', err);
+    return fallback;
+  }
+}
+
 export type SuggestRewardCoinResult = {
   coins: number;
   reason: string;
