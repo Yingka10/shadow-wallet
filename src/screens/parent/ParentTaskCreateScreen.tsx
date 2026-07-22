@@ -15,7 +15,8 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useNavigation } from '@react-navigation/native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { supabase } from '../../lib/supabase';
-import { suggestTaskCoin } from '../../lib/aiAgent';
+import { analyzeTask } from '../../lib/aiAgent';
+import { calcAgeGroup } from '../../lib/onboarding';
 import { useSelectedChild } from '../../context/SelectedChildContext';
 import {
   ParentColors,
@@ -181,6 +182,7 @@ export default function ParentTaskCreateScreen() {
   const [saving, setSaving] = useState(false);
   const [aiCoinLoading, setAiCoinLoading] = useState(false);
   const [aiCoinReason, setAiCoinReason] = useState<string | null>(null);
+  const [aiNotice, setAiNotice] = useState<string | null>(null);
 
   const isDuty = cat === 'B';
   const isMilestone = cat === 'D';
@@ -192,10 +194,62 @@ export default function ParentTaskCreateScreen() {
     if (!name.trim()) return;
     setAiCoinLoading(true);
     setAiCoinReason(null);
+    setAiNotice(null);
     try {
-      const result = await suggestTaskCoin(name.trim());
-      setRewardN(result.coins);
+      // 取得第一位適用孩子的年齡段，餵給規則引擎（AI 不猜年齡）。
+      let ageGroup: '2-4' | '4-6' | '6-9' | '9-12' = '6-9';
+      const firstChildId = appliesTo[0];
+      if (firstChildId) {
+        const { data: child } = await supabase
+          .from('children')
+          .select('birth_date')
+          .eq('id', firstChildId)
+          .single();
+        if (child?.birth_date) ageGroup = calcAgeGroup(child.birth_date);
+      }
+
+      const result = await analyzeTask({
+        taskName: name.trim(),
+        childAgeGroup: ageGroup,
+        taskSource: 'parent',
+        durationType: taskMode === 'recurring' ? 'recurring' : 'single',
+      });
+
       setAiCoinReason(result.reason);
+
+      // AI 判斷自動套用到「類別」選擇器。
+      setCat(result.category);
+
+      // 依規則引擎結果自動設定「獎勵類型」與幣值。
+      if (result.pricing.status === 'priced') {
+        // C/D 可發幣 → 切成金幣並回填建議幣值。
+        setRewardOverride('coins');
+        setRewardN(result.pricing.coins);
+        if (result.estimatedMinutes) setRewardM(result.estimatedMinutes);
+      } else if (result.pricing.status === 'coin_disabled') {
+        if (result.rewardMode === 'family_contribution') {
+          // B 類 → 切成時間儲蓄，不發幣。
+          setRewardOverride('time');
+          setAiNotice('此任務屬家庭參與，預設不發幣，改記家庭貢獻／時間儲蓄。');
+        } else {
+          // A 類 → 生活常規，以完成進度與肯定為回饋。
+          setRewardOverride('auto');
+          setAiNotice('此任務屬生活常規，預設不發幣，以完成進度與肯定為回饋。');
+        }
+      } else if (result.pricing.status === 'unpriced') {
+        setAiNotice('幣值規則尚未定案，請家長手動設定幣值。');
+      }
+
+      // 三級 flags：擋下 / 需確認 / 提示，合併成一段給家長看。
+      const notices = [
+        ...result.blockingIssues.map((s) => `⛔ ${s}`),
+        ...result.requiresConfirmation.map((s) => `❓ ${s}`),
+        ...result.warnings.map((s) => `⚠️ ${s}`),
+      ];
+      if (result.clarificationQuestion) notices.unshift(`❓ ${result.clarificationQuestion}`);
+      if (notices.length > 0) {
+        setAiNotice((prev) => [prev, ...notices].filter(Boolean).join('\n'));
+      }
     } catch {
       Alert.alert('AI 建議失敗', '請手動設定幣值');
     } finally {
@@ -418,6 +472,7 @@ export default function ParentTaskCreateScreen() {
                         : <Text style={styles.aiCoinBtnText}>✨ AI 建議幣值</Text>}
                     </TouchableOpacity>
                     {aiCoinReason ? <Text style={styles.aiCoinReason}>{aiCoinReason}</Text> : null}
+                    {aiNotice ? <Text style={styles.aiNotice}>{aiNotice}</Text> : null}
                   </View>
                 )}
               </>
@@ -921,6 +976,12 @@ const styles = StyleSheet.create({
   aiCoinReason: {
     fontSize: 12,
     color: ParentColors.ink500,
+    lineHeight: 18,
+  },
+  aiNotice: {
+    marginTop: 6,
+    fontSize: 12,
+    color: ParentColors.ink700,
     lineHeight: 18,
   },
 });

@@ -1,0 +1,90 @@
+{
+  "_meta": {
+    "policyVersion": "coin-policy-draft-2026-07-22",
+    "status": "DRAFT — 所有數字為暫用 placeholder，尚未定案，勿當定案基準",
+    "source": "docs/coin-policy-draft.md",
+    "effectiveDate": null,
+    "notes": [
+      "第一版只吃 C / D；A / B 由 reward-eligibility 閘門在進入本檔前擋掉。",
+      "難度為列舉三值（easy/standard/hard），不用連續小數。",
+      "算法為『時間分級 band → baseCoins → 難度加減 → 套 range clamp』，非線性乘法。",
+      "4–6 與 6–9 的 bandBaseCoins 為『暫用測試值』，由 docs 錨點外推，供打通流程測試用，未定案。",
+      "9–12 歲維持 null（待論證，docs 第 3.2 / 修改.txt 第 12 點），該年齡會回 unpriced。",
+      "定案方式見 docs 第 3.3 節整體經濟模擬；改數字後請 bump policyVersion。"
+    ]
+  },
+
+  "timeBands": [
+    { "id": "5-10",  "minMinutes": 5,  "maxMinutes": 10 },
+    { "id": "11-20", "minMinutes": 11, "maxMinutes": 20 },
+    { "id": "21-30", "minMinutes": 21, "maxMinutes": 30 },
+    { "id": "31-45", "minMinutes": 31, "maxMinutes": 45 },
+    { "id": "46+",   "minMinutes": 46, "maxMinutes": null }
+  ],
+
+  "difficultyDelta": {
+    "easy": -1,
+    "standard": 0,
+    "hard": 2
+  },
+
+  "payoutBasis": {
+    "allowed": ["per_completion", "per_session", "per_milestone", "final_completion"],
+    "default": "per_completion"
+  },
+
+  "agePolicies": {
+    "2-4": {
+      "C": { "coinEnabled": false, "reason": "原則上不獨立呈現、不發幣" },
+      "D": { "coinEnabled": false, "reason": "原則上不獨立呈現、不發幣" }
+    },
+    "4-6": {
+      "C": {
+        "coinEnabled": true,
+        "bandBaseCoins": { "5-10": 2, "11-20": 4, "21-30": 6, "31-45": 8, "46+": 10 },
+        "range": { "min": 1, "max": 10 },
+        "_todo": "暫用測試值；小額成長幣起步，待定案"
+      },
+      "D": {
+        "coinEnabled": true,
+        "bandBaseCoins": { "5-10": 2, "11-20": 3, "21-30": 5, "31-45": 7, "46+": 9 },
+        "range": { "min": 1, "max": 10 },
+        "_todo": "暫用測試值；階段性、數字小，待定案"
+      }
+    },
+    "6-9": {
+      "C": {
+        "coinEnabled": true,
+        "bandBaseCoins": { "5-10": 5, "11-20": 10, "21-30": 18, "31-45": 25, "46+": 30 },
+        "range": { "min": 3, "max": 30 },
+        "_todo": "暫用測試值；錨點：中等貢獻→費力貢獻，range 3–30，待定案"
+      },
+      "D": {
+        "coinEnabled": true,
+        "bandBaseCoins": { "5-10": 6, "11-20": 10, "21-30": 15, "31-45": 20, "46+": 25 },
+        "range": { "min": 5, "max": 25 },
+        "_todo": "暫用測試值；錨點：練琴 30 分 ≈ 15 幣，range 5–25，待定案"
+      }
+    },
+    "9-12": {
+      "C": {
+        "coinEnabled": true,
+        "bandBaseCoins": { "5-10": null, "11-20": null, "21-30": null, "31-45": null, "46+": null },
+        "range": { "min": null, "max": null },
+        "_todo": "待論證：年齡差異應體現在難度/規模，非單價；勿沿用外推值"
+      },
+      "D": {
+        "coinEnabled": true,
+        "bandBaseCoins": { "5-10": null, "11-20": null, "21-30": null, "31-45": null, "46+": null },
+        "range": { "min": null, "max": null },
+        "_todo": "待論證：長期作品／專題"
+      }
+    }
+  },
+
+  "frequency": {
+    "_note": "單任務頻率上限為 P0（修改.txt 第 7 點）；全局每日上限屬 family-policy，Phase 2。",
+    "defaultClaimPeriod": "day",
+    "defaultMaxClaimsPerPeriod": 1
+  }
+}

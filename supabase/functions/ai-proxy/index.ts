@@ -3,9 +3,18 @@
  * Moves all AI calls server-side so GEMINI_API_KEY is never exposed in the client.
  *
  * Supported `type` values:
- *   classifyTask | suggestTaskCoin | suggestRewardCoin |
+ *   classifyTask | suggestTaskCoin | analyzeTask | suggestRewardCoin |
  *   screenRedemptionRequest | suggestCoinWithAI
  */
+
+import {
+  runEligibilityGate,
+  type AgeGroup as GateAgeGroup,
+  type Category,
+  type DurationType,
+  type TaskSource,
+} from './rewardEligibility.ts';
+import { calcCoins, defaultPayout, POLICY_VERSION, type AgeGroup, type Difficulty } from './coinPolicy.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -16,7 +25,13 @@ const GEMINI_KEY = Deno.env.get('GEMINI_API_KEY')!;
 const GEMINI_URL = (model: string) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`;
 
-async function callGemini(prompt: string, model = 'gemini-2.0-flash', jsonMode = false): Promise<string> {
+// 依序嘗試的 model 鏈：某個配額用盡（429）或不存在（404）時自動換下一個。
+// 用 *-latest 別名當首選：它永遠指向 Google 當前可用的 flash，
+// 不會被「舊 model 對新用戶下架」咬到（gemini-2.5-flash 已對新 key 下架）。
+// 目前 gemini-flash-latest 實際指向 gemini-3.6-flash。
+const MODEL_CHAIN = ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-2.0-flash'];
+
+async function callGeminiOnce(prompt: string, model: string, jsonMode: boolean): Promise<string> {
   const body: Record<string, unknown> = {
     contents: [{ parts: [{ text: prompt }] }],
   };
@@ -36,6 +51,25 @@ async function callGemini(prompt: string, model = 'gemini-2.0-flash', jsonMode =
     candidates: Array<{ content: { parts: Array<{ text: string }> } }>;
   };
   return data.candidates[0]?.content.parts[0]?.text ?? '';
+}
+
+/**
+ * 呼叫 Gemini，依 MODEL_CHAIN 逐一嘗試。
+ * 遇到 429（配額）或 404（model 不存在）時換下一個 model；其他錯誤直接拋出。
+ */
+async function callGemini(prompt: string, jsonMode = false): Promise<string> {
+  let lastErr: unknown;
+  for (const model of MODEL_CHAIN) {
+    try {
+      return await callGeminiOnce(prompt, model, jsonMode);
+    } catch (err) {
+      lastErr = err;
+      const msg = String(err);
+      if (!msg.includes('429') && !msg.includes('404')) throw err;
+      console.warn(`[ai-proxy] model ${model} 失敗，改試下一個：${msg.slice(0, 100)}`);
+    }
+  }
+  throw lastErr;
 }
 
 function parseJson<T>(raw: string): T {
@@ -81,10 +115,112 @@ async function handleSuggestTaskCoin(payload: { taskName: string }) {
 reason 請在 40 字以內說明。
 只回傳 JSON：{"coins":10,"reason":"說明"}`;
 
-  const raw = await callGemini(prompt, 'gemini-2.0-flash', true);
+  const raw = await callGemini(prompt, true);
   const parsed = parseJson<{ coins: number; reason: string }>(raw);
   const coins = Math.min(50, Math.max(1, Math.round(parsed.coins)));
   return { coins, reason: parsed.reason ?? '' };
+}
+
+/**
+ * analyzeTask — 新版任務分析（取代 suggestTaskCoin 的架構）。
+ * AI 只做結構化理解，不決定幣值；資格閘門與幣值計算由規則引擎負責。
+ * 流程：AI 理解 → runEligibilityGate → calcCoins（見 docs/coin-policy-draft.md）。
+ */
+async function handleAnalyzeTask(payload: {
+  taskName: string;
+  childAgeGroup: AgeGroup;
+  taskSource?: TaskSource;
+  durationType?: DurationType;
+  frequency?: string | null;
+  duplicateOfExisting?: boolean;
+  exceedsFrequency?: boolean;
+}) {
+  const ageGroup = payload.childAgeGroup;
+  const taskSource: TaskSource = payload.taskSource ?? 'parent';
+  const durationType: DurationType = payload.durationType ?? 'single';
+
+  // 1. AI 結構化理解（不吐幣值）。難度為列舉、估時為分鐘。
+  const prompt = `你是兒童教養 App 的任務理解助手。只「理解」任務，**不要**決定幣值。
+任務名稱：${payload.taskName}
+孩子年齡段：${ageGroup}
+任務來源：${taskSource}（parent=家長提出 / child=孩子提出 / negotiated=親子協商 / system=系統建議）
+執行形式：${durationType}
+
+類別定義：
+A = 生活常規（刷牙、整理書包）
+B = 家庭參與 / 家庭本分（倒垃圾、洗碗等固定家務）
+C = 自主挑戰（孩子主動提出、明顯超出本分的額外貢獻）
+D = 學習與技能（連續練習、學習新技能、有進步軌跡）
+
+判斷原則：
+- 固定家務即使「幫忙」也是 B，不是 C。C 必須是孩子主動提出或親子協商。
+- 若獎勵的是單次成績（考一百分），outcomeBased=true。
+- 若類別/來源存在歧義，needsClarification=true 並給 clarificationQuestion。
+
+只回傳 JSON：
+{"category":"D","alternativeCategory":null,"estimatedMinutes":20,"difficulty":"standard","outcomeBased":false,"needsClarification":false,"clarificationQuestion":null,"reason":"40字內說明"}
+difficulty 只能是 easy / standard / hard。`;
+
+  const raw = await callGemini(prompt, true);
+  const ai = parseJson<{
+    category: Category;
+    alternativeCategory: Category | null;
+    estimatedMinutes: number;
+    difficulty: Difficulty;
+    outcomeBased: boolean;
+    needsClarification: boolean;
+    clarificationQuestion: string | null;
+    reason: string;
+  }>(raw);
+
+  // 2. 資格閘門（八步）。
+  const gate = runEligibilityGate({
+    category: ai.category,
+    alternativeCategory: ai.alternativeCategory,
+    ageGroup: ageGroup as GateAgeGroup,
+    taskSource,
+    durationType,
+    outcomeBased: ai.outcomeBased,
+    needsClarification: ai.needsClarification,
+    clarificationQuestion: ai.clarificationQuestion,
+    duplicateOfExisting: payload.duplicateOfExisting,
+    exceedsFrequency: payload.exceedsFrequency,
+  });
+
+  // 3. A/B 或被閘門擋下 → 不算幣，回傳資格結果。
+  if (!gate.coinEnabled || gate.gateBlocked) {
+    return {
+      category: ai.category,
+      reason: ai.reason,
+      coinEnabled: gate.coinEnabled,
+      rewardMode: gate.rewardMode,
+      pricing: { status: gate.coinEnabled ? 'gated' : 'coin_disabled' as const },
+      blockingIssues: gate.blockingIssues,
+      requiresConfirmation: gate.requiresConfirmation,
+      warnings: gate.warnings,
+      clarificationQuestion: gate.clarificationQuestion,
+      policyVersion: POLICY_VERSION,
+    };
+  }
+
+  // 4. C/D 通過 → 規則引擎算幣（placeholder 未填時回 unpriced，不亂猜）。
+  const calc = calcCoins(ageGroup, ai.category as 'C' | 'D', ai.estimatedMinutes, ai.difficulty);
+
+  return {
+    category: ai.category,
+    reason: ai.reason,
+    coinEnabled: true,
+    rewardMode: gate.rewardMode,
+    estimatedMinutes: ai.estimatedMinutes,
+    difficulty: ai.difficulty,
+    payout: defaultPayout(),
+    pricing: calc,
+    blockingIssues: gate.blockingIssues,
+    requiresConfirmation: gate.requiresConfirmation,
+    warnings: gate.warnings,
+    clarificationQuestion: null,
+    policyVersion: POLICY_VERSION,
+  };
 }
 
 async function handleSuggestRewardCoin(payload: { rewardName: string }) {
@@ -102,7 +238,7 @@ async function handleSuggestRewardCoin(payload: { rewardName: string }) {
 reason 請在 40 字以內說明。
 只回傳 JSON：{"coins":40,"reason":"說明"}`;
 
-  const raw = await callGemini(prompt, 'gemini-2.0-flash', true);
+  const raw = await callGemini(prompt, true);
   const parsed = parseJson<{ coins: number; reason: string }>(raw);
   const coins = Math.min(200, Math.max(15, Math.round(parsed.coins / 5) * 5));
   return { coins, reason: parsed.reason ?? '' };
@@ -130,7 +266,7 @@ reason 請在 60 字以內，直接說明。
 只回傳 JSON：{"verdict":"ok","reason":"說明文字","suggestedCoins":null}`;
 
   try {
-    const raw = await callGemini(prompt, 'gemini-2.0-flash', true);
+    const raw = await callGemini(prompt, true);
     const parsed = parseJson<{ verdict: string; reason: string; suggestedCoins: number | null }>(raw);
     if (!['ok', 'high'].includes(parsed.verdict)) throw new Error('invalid verdict');
     return parsed;
@@ -151,7 +287,7 @@ async function handleSuggestCoinWithAI(payload: { rewardName: string }) {
 請根據這個獎品的相對吸引力，建議一個合適的幣值（60-200 幣之間）。
 回應 JSON（不含其他文字）：{ "coins": number, "weeks": number, "reason": string }`;
 
-  const raw = await callGemini(prompt, 'gemini-1.5-flash', true);
+  const raw = await callGemini(prompt, true);
   return parseJson<{ coins: number; weeks: number; reason: string }>(raw);
 }
 
@@ -173,6 +309,17 @@ Deno.serve(async (req) => {
         break;
       case 'suggestTaskCoin':
         result = await handleSuggestTaskCoin(payload as { taskName: string });
+        break;
+      case 'analyzeTask':
+        result = await handleAnalyzeTask(payload as {
+          taskName: string;
+          childAgeGroup: AgeGroup;
+          taskSource?: TaskSource;
+          durationType?: DurationType;
+          frequency?: string | null;
+          duplicateOfExisting?: boolean;
+          exceedsFrequency?: boolean;
+        });
         break;
       case 'suggestRewardCoin':
         result = await handleSuggestRewardCoin(payload as { rewardName: string });
