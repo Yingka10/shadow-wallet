@@ -223,7 +223,13 @@ export default function ChildLoginScreen() {
           style={styles.flex}
         >
           <ScrollView contentContainerStyle={styles.scrollContent}>
-            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+            <TouchableOpacity
+              style={styles.backBtn}
+              onPress={async () => {
+                await supabase.auth.signOut();
+                navigation.navigate('Entry');
+              }}
+            >
               <Text style={styles.backText}>← 返回</Text>
             </TouchableOpacity>
 
@@ -345,7 +351,13 @@ export default function ChildLoginScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.padded}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={async () => {
+            await supabase.auth.signOut();
+            navigation.navigate('Entry');
+          }}
+        >
           <Text style={styles.backText}>← 返回</Text>
         </TouchableOpacity>
         <Text style={styles.title}>你是誰？</Text>
