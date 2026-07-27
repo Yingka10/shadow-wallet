@@ -1,18 +1,23 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { webMouseDraggableScroll } from '../../../constants/webStyles';
 
 const mockGoBack = jest.fn();
+const mockCompleteTask = jest.fn();
+const mockRecordCompletionContext = jest.fn();
 
 let mockRouteParams = {
-  goalId: 'goal-habit',
-  taskId: 'task-habit',
-  taskName: '每天十點前睡',
+  goalId: 'goal-reading',
+  taskId: 'task-reading',
+  taskName: '自主閱讀計畫',
 };
 
 jest.mock('@react-navigation/native', () => ({
   useRoute: () => ({ params: mockRouteParams }),
-  useNavigation: () => ({ goBack: mockGoBack }),
+  useNavigation: () => ({
+    goBack: mockGoBack,
+    navigate: jest.fn(),
+  }),
 }));
 
 jest.mock('react-native-safe-area-context', () => ({
@@ -21,18 +26,19 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 
 jest.mock('../../../lib/taskActions', () => ({
-  completeTask: jest.fn(async () => ({ milestone: null })),
+  completeTask: (...args: unknown[]) => mockCompleteTask(...args),
+  recordCompletionContext: (...args: unknown[]) => mockRecordCompletionContext(...args),
 }));
 
 const mockBaseGoal = {
-  id: 'goal-habit',
+  id: 'goal-reading',
   child_id: 'child-1',
-  task_id: 'task-habit',
+  task_id: 'task-reading',
   goal_type: 'habit',
-  total_days: 30,
-  current_day: 8,
+  total_days: 20,
+  current_day: 3,
   status: 'active',
-  checkpoint_rewards: { '10': 20, '20': 0, '30': 0 },
+  checkpoint_rewards: { '5': 10 },
   motivation_note: null,
   started_at: '2026-07-01',
   next_review_at: null,
@@ -41,7 +47,7 @@ const mockBaseGoal = {
   min_age: 6,
   interrupt_count: 0,
   last_active_date: null,
-  active_days: null,
+  active_days: [1, 2, 3, 4, 5],
   level_definitions: null,
   current_level: null,
   level_count: null,
@@ -55,6 +61,7 @@ const mockBaseGoal = {
   target_value: null,
   current_value: null,
   value_unit: null,
+  preferred_time_window: 'after_dinner',
 };
 
 const mockSkillGoal = {
@@ -62,9 +69,11 @@ const mockSkillGoal = {
   id: 'goal-skill',
   task_id: 'task-skill',
   goal_type: 'skill',
-  total_days: 120,
+  total_days: 4,
   current_day: 0,
   checkpoint_rewards: null,
+  active_days: null,
+  preferred_time_window: null,
   level_definitions: [
     { id: 'level-1', name: '基礎指法', coin: 10 },
     { id: 'level-2', name: '簡單曲目', coin: 20 },
@@ -76,23 +85,23 @@ const mockSkillGoal = {
 };
 
 const mockTasks = {
-  'task-habit': {
-    id: 'task-habit',
+  'task-reading': {
+    id: 'task-reading',
     family_id: 'family-1',
-    name: '每天十點前睡',
+    name: '自主閱讀計畫',
     category: 'D',
-    day_type: 'both',
+    day_type: 'custom',
     is_long_term: true,
     long_term_type: 'habit',
-    base_time_min: 0,
+    base_time_min: 15,
     difficulty: 1,
     coin_override: null,
     is_system_default: false,
     allow_repeat: true,
     min_age: 6,
-    max_age: 12,
+    max_age: 9,
     time_saving_min: 0,
-    recurrence_days: null,
+    recurrence_days: [1, 2, 3, 4, 5],
     due_date: null,
     created_at: '2026-07-01',
     is_active: true,
@@ -100,7 +109,7 @@ const mockTasks = {
   'task-skill': {
     id: 'task-skill',
     family_id: 'family-1',
-    name: '學鋼琴四個等級',
+    name: '鋼琴家之路',
     category: 'D',
     day_type: 'both',
     is_long_term: true,
@@ -120,6 +129,27 @@ const mockTasks = {
   },
 };
 
+const readingCompletions = [
+  {
+    id: 'completion-mon',
+    completed_at: '2026-07-27T11:30:00.000Z',
+    planned_time_window: 'after_dinner',
+    start_mode: 'reminded',
+  },
+  {
+    id: 'completion-tue',
+    completed_at: '2026-07-28T11:20:00.000Z',
+    planned_time_window: 'after_dinner',
+    start_mode: 'self_started',
+  },
+  {
+    id: 'completion-wed',
+    completed_at: '2026-07-29T11:10:00.000Z',
+    planned_time_window: 'after_dinner',
+    start_mode: 'self_started',
+  },
+];
+
 jest.mock('../../../lib/supabase', () => ({
   supabase: {
     from: jest.fn((table: string) => {
@@ -128,8 +158,6 @@ jest.mock('../../../lib/supabase', () => ({
         eq: jest.fn(() => builder),
         gte: jest.fn(() => builder),
         lt: jest.fn(() => builder),
-        limit: jest.fn(() => builder),
-        update: jest.fn(() => builder),
         single: jest.fn(async () => {
           if (table === 'long_term_goals') {
             return {
@@ -138,11 +166,17 @@ jest.mock('../../../lib/supabase', () => ({
             };
           }
           if (table === 'tasks') {
-            return { data: mockTasks[mockRouteParams.taskId as keyof typeof mockTasks], error: null };
+            return {
+              data: mockTasks[mockRouteParams.taskId as keyof typeof mockTasks],
+              error: null,
+            };
           }
           return { data: null, error: null };
         }),
-        maybeSingle: jest.fn(async () => ({ data: null, error: null })),
+        order: jest.fn(async () => ({
+          data: mockRouteParams.goalId === 'goal-reading' ? readingCompletions : [],
+          error: null,
+        })),
       };
       return builder;
     }),
@@ -152,51 +186,80 @@ jest.mock('../../../lib/supabase', () => ({
 import LongTermDetailScreen from '../LongTermDetailScreen';
 
 describe('LongTermDetailScreen', () => {
-  beforeEach(() => {
-    mockRouteParams = {
-      goalId: 'goal-habit',
-      taskId: 'task-habit',
-      taskName: '每天十點前睡',
-    };
+  beforeAll(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-07-30T12:00:00.000Z'));
   });
 
-  it('renders the habit detail as a gentle growth journey instead of a form-like progress page', async () => {
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockRouteParams = {
+      goalId: 'goal-reading',
+      taskId: 'task-reading',
+      taskName: '自主閱讀計畫',
+    };
+    mockCompleteTask.mockResolvedValue({
+      completionId: 'completion-thu',
+      milestone: null,
+    });
+    mockRecordCompletionContext.mockResolvedValue(undefined);
+  });
+
+  it('renders the reading plan with total progress and meaningful weekly behavior', async () => {
     render(<LongTermDetailScreen />);
 
-    expect(await screen.findByText('長期目標')).toBeTruthy();
-    expect(screen.getByText('每天十點前睡')).toBeTruthy();
-    expect(screen.getByText('讓身體每天都有足夠的休息時間')).toBeTruthy();
-    expect(screen.getByText('第 8 天 · 已完成 7 次')).toBeTruthy();
-    expect(screen.getByText('今晚有在 10 點前準備睡覺嗎？')).toBeTruthy();
-    expect(screen.getByText('成長小徑')).toBeTruthy();
-    expect(screen.getByText('這週的足跡')).toBeTruthy();
-    expect(screen.getByText('旅程里程碑')).toBeTruthy();
-    expect(screen.getByText('需要調整這個目標？')).toBeTruthy();
+    expect(await screen.findByText('自主閱讀計畫')).toBeTruthy();
+    expect(screen.getByText('3 / 20 次')).toBeTruthy();
+    expect(screen.getByText('今天預計：晚餐後')).toBeTruthy();
+    expect(screen.getByText(/這週已閱讀 3 次，其中 2 次是自己開始的。/)).toBeTruthy();
+    expect(screen.getByTestId('goal-hero')).toBeTruthy();
+    expect(screen.getByTestId('goal-rewards')).toBeTruthy();
   });
 
-  it('keeps the bottom tab visible and applies mouse-friendly web scrolling to the detail body', async () => {
+  it('records the chosen schedule and start mode after completing reading', async () => {
+    render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByText('完成今天閱讀'));
+    expect(await screen.findByText('我自己開始的')).toBeTruthy();
+    fireEvent.press(screen.getByText('我自己開始的'));
+
+    await waitFor(() => {
+      expect(mockRecordCompletionContext).toHaveBeenCalledWith(
+        'completion-thu',
+        'after_dinner',
+        'self_started',
+      );
+    });
+  });
+
+  it('keeps the bottom tab visible and applies mouse-friendly web scrolling', async () => {
     render(<LongTermDetailScreen />);
 
     expect(await screen.findByTestId('bottom-nav')).toBeTruthy();
     const scroll = screen.getByTestId('long-term-detail-scroll');
-
     expect(scroll.props.style).toEqual(expect.arrayContaining([webMouseDraggableScroll]));
   });
 
-  it('renders skill goals with stage language and practice actions', async () => {
+  it('renders skill goals with the same visual skeleton and no unsupported recording action', async () => {
     mockRouteParams = {
       goalId: 'goal-skill',
       taskId: 'task-skill',
-      taskName: '學鋼琴四個等級',
+      taskName: '鋼琴家之路',
     };
 
     render(<LongTermDetailScreen />);
 
-    expect(await screen.findByText('鋼琴練習之路')).toBeTruthy();
+    expect(await screen.findByText('鋼琴家之路')).toBeTruthy();
     expect(screen.getByText('第 2 / 4 階段')).toBeTruthy();
-    expect(screen.getByText('本階段任務：雙手合奏')).toBeTruthy();
-    expect(screen.getByText('今天練習 15 分鐘')).toBeTruthy();
-    expect(screen.getByText('基礎指法')).toBeTruthy();
-    expect(screen.queryByText('今晚有在 10 點前準備睡覺嗎？')).toBeNull();
+    expect(screen.getByTestId('goal-hero')).toBeTruthy();
+    expect(screen.getByTestId('goal-today')).toBeTruthy();
+    expect(screen.getByTestId('goal-week')).toBeTruthy();
+    expect(screen.getByTestId('goal-rewards')).toBeTruthy();
+    expect(screen.getByTestId('goal-review')).toBeTruthy();
+    expect(screen.queryByText('錄一段給自己聽')).toBeNull();
   });
 });

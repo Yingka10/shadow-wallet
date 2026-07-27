@@ -24,9 +24,9 @@ type Props = {
   presentation: GoalPresentation;
   isCompletedToday: boolean;
   checking: boolean;
-  onComplete: () => void | Promise<void>;
+  onComplete: () => void | boolean | Promise<void | boolean>;
   onSelectTimeWindow: (window: PreferredTimeWindow) => void;
-  onRecordStartMode: (mode: CompletionStartMode) => void;
+  onRecordStartMode: (mode: CompletionStartMode) => void | Promise<void>;
 };
 
 function formatTimeWindow(window: PreferredTimeWindow): string {
@@ -103,6 +103,7 @@ function TodayStepCard({
 }: TodayStepCardProps) {
   const [showTimeOptions, setShowTimeOptions] = useState(false);
   const [completedLocally, setCompletedLocally] = useState(isCompletedToday);
+  const [recordedStartMode, setRecordedStartMode] = useState(false);
   const completed = isCompletedToday || completedLocally;
 
   useEffect(() => {
@@ -110,13 +111,18 @@ function TodayStepCard({
   }, [isCompletedToday]);
 
   const handleComplete = async () => {
-    await onComplete();
-    setCompletedLocally(true);
+    const completedSuccessfully = await onComplete();
+    if (completedSuccessfully !== false) setCompletedLocally(true);
   };
 
   const handleTimeSelect = (window: PreferredTimeWindow) => {
     onSelectTimeWindow(window);
     setShowTimeOptions(false);
+  };
+
+  const handleStartMode = async (mode: CompletionStartMode) => {
+    await onRecordStartMode(mode);
+    setRecordedStartMode(true);
   };
 
   return (
@@ -202,19 +208,19 @@ function TodayStepCard({
           </View>
         )}
 
-        {completed && presentation.isReadingPlan ? (
+        {completed && presentation.isReadingPlan && !recordedStartMode ? (
           <View style={styles.followup}>
             <Text style={styles.followupTitle}>開始閱讀前，有人提醒嗎？</Text>
             <View style={styles.followupActions}>
               <TouchableOpacity
                 style={styles.followupButton}
-                onPress={() => onRecordStartMode('self_started')}
+                onPress={() => void handleStartMode('self_started')}
               >
                 <Text style={styles.followupButtonText}>我自己開始的</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.followupButton}
-                onPress={() => onRecordStartMode('reminded')}
+                onPress={() => void handleStartMode('reminded')}
               >
                 <Text style={styles.followupButtonText}>提醒後開始</Text>
               </TouchableOpacity>
