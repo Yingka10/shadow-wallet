@@ -1133,6 +1133,8 @@ function NewTaskPanel({
           time_saving_min: rewardMode === 'time' ? baseTime : 0,
           is_system_default: false,
           allow_repeat: true,
+          claim_period: 'day',
+          max_claims_per_period: 5,
           min_age: 0,
           max_age: 18,
           is_active: true,

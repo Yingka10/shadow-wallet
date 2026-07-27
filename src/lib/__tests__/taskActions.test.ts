@@ -33,6 +33,8 @@ function makeTask(overrides: Partial<Task>): Task {
     coin_override: null,
     is_system_default: false,
     allow_repeat: false,
+    claim_period: 'day',
+    max_claims_per_period: 1,
     min_age: 6,
     max_age: 9,
     is_active: true,
