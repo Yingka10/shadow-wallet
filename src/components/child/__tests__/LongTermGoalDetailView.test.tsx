@@ -1,9 +1,6 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import type {
-  CompletionStartMode,
-  PreferredTimeWindow,
-} from '../../../types/database';
+import type { PreferredTimeWindow } from '../../../types/database';
 import type { GoalPresentation } from '../../../screens/child/longTermGoalPresentation';
 import LongTermGoalDetailView from '../LongTermGoalDetailView';
 
@@ -51,7 +48,6 @@ describe('LongTermGoalDetailView', () => {
         checking={false}
         onComplete={jest.fn()}
         onSelectTimeWindow={onSelectTimeWindow}
-        onRecordStartMode={jest.fn<void, [CompletionStartMode]>()}
       />,
     );
 
@@ -67,7 +63,7 @@ describe('LongTermGoalDetailView', () => {
     expect(onSelectTimeWindow).toHaveBeenCalledWith('before_bed');
   });
 
-  it('asks how reading started only after completion succeeds', async () => {
+  it('shows only the completed state after reading without asking about reminders', async () => {
     const onComplete = jest.fn(async () => undefined);
 
     render(
@@ -77,17 +73,18 @@ describe('LongTermGoalDetailView', () => {
         checking={false}
         onComplete={onComplete}
         onSelectTimeWindow={jest.fn()}
-        onRecordStartMode={jest.fn()}
       />,
     );
 
-    expect(screen.queryByText('我自己開始的')).toBeNull();
     fireEvent.press(screen.getByText('完成今天閱讀'));
 
     await waitFor(() => {
       expect(onComplete).toHaveBeenCalledTimes(1);
-      expect(screen.getByText('我自己開始的')).toBeTruthy();
+      expect(screen.getByText('今天的閱讀已記下')).toBeTruthy();
     });
+    expect(screen.queryByText('開始閱讀前，有人提醒嗎？')).toBeNull();
+    expect(screen.queryByText('我自己開始的')).toBeNull();
+    expect(screen.queryByText('提醒後開始')).toBeNull();
   });
 
   it('renders the same section skeleton for skill goals without unsupported actions', () => {
@@ -107,7 +104,6 @@ describe('LongTermGoalDetailView', () => {
         checking={false}
         onComplete={jest.fn()}
         onSelectTimeWindow={jest.fn()}
-        onRecordStartMode={jest.fn()}
       />,
     );
 

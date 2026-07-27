@@ -11,10 +11,7 @@ import {
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Colors } from '../../constants/colors';
 import { webMouseDraggableScroll } from '../../constants/webStyles';
-import type {
-  CompletionStartMode,
-  PreferredTimeWindow,
-} from '../../types/database';
+import type { PreferredTimeWindow } from '../../types/database';
 import type {
   GoalDayStatus,
   GoalPresentation,
@@ -26,7 +23,6 @@ type Props = {
   checking: boolean;
   onComplete: () => void | boolean | Promise<void | boolean>;
   onSelectTimeWindow: (window: PreferredTimeWindow) => void;
-  onRecordStartMode: (mode: CompletionStartMode) => void | Promise<void>;
 };
 
 function formatTimeWindow(window: PreferredTimeWindow): string {
@@ -90,7 +86,6 @@ type TodayStepCardProps = Pick<
   | 'checking'
   | 'onComplete'
   | 'onSelectTimeWindow'
-  | 'onRecordStartMode'
 >;
 
 function TodayStepCard({
@@ -99,11 +94,9 @@ function TodayStepCard({
   checking,
   onComplete,
   onSelectTimeWindow,
-  onRecordStartMode,
 }: TodayStepCardProps) {
   const [showTimeOptions, setShowTimeOptions] = useState(false);
   const [completedLocally, setCompletedLocally] = useState(isCompletedToday);
-  const [recordedStartMode, setRecordedStartMode] = useState(false);
   const completed = isCompletedToday || completedLocally;
 
   useEffect(() => {
@@ -118,11 +111,6 @@ function TodayStepCard({
   const handleTimeSelect = (window: PreferredTimeWindow) => {
     onSelectTimeWindow(window);
     setShowTimeOptions(false);
-  };
-
-  const handleStartMode = async (mode: CompletionStartMode) => {
-    await onRecordStartMode(mode);
-    setRecordedStartMode(true);
   };
 
   return (
@@ -208,25 +196,6 @@ function TodayStepCard({
           </View>
         )}
 
-        {completed && presentation.isReadingPlan && !recordedStartMode ? (
-          <View style={styles.followup}>
-            <Text style={styles.followupTitle}>開始閱讀前，有人提醒嗎？</Text>
-            <View style={styles.followupActions}>
-              <TouchableOpacity
-                style={styles.followupButton}
-                onPress={() => void handleStartMode('self_started')}
-              >
-                <Text style={styles.followupButtonText}>我自己開始的</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.followupButton}
-                onPress={() => void handleStartMode('reminded')}
-              >
-                <Text style={styles.followupButtonText}>提醒後開始</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        ) : null}
       </View>
     </>
   );
@@ -363,7 +332,6 @@ export default function LongTermGoalDetailView({
   checking,
   onComplete,
   onSelectTimeWindow,
-  onRecordStartMode,
 }: Props) {
   return (
     <ScrollView
@@ -379,7 +347,6 @@ export default function LongTermGoalDetailView({
         checking={checking}
         onComplete={onComplete}
         onSelectTimeWindow={onSelectTimeWindow}
-        onRecordStartMode={onRecordStartMode}
       />
       <WeekProgressCard days={presentation.weekDays} summary={presentation.weekSummary} />
       <JourneyRewardsCard presentation={presentation} />
@@ -614,39 +581,6 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     fontWeight: '700',
     textAlign: 'center',
-  },
-  followup: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: Colors.borderSoft,
-  },
-  followupTitle: {
-    color: Colors.leaf700,
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '900',
-    textAlign: 'center',
-  },
-  followupActions: {
-    marginTop: 8,
-    flexDirection: 'row',
-    gap: 7,
-  },
-  followupButton: {
-    flex: 1,
-    minHeight: 36,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: Colors.borderSoft,
-    backgroundColor: Colors.cream50,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  followupButtonText: {
-    color: Colors.ink700,
-    fontSize: 11,
-    fontWeight: '900',
   },
   weekCard: {
     paddingBottom: 13,

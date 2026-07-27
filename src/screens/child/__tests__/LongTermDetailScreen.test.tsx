@@ -257,20 +257,21 @@ describe('LongTermDetailScreen', () => {
     expect(screen.queryByText('讀取任務進度失敗，請稍後再試。')).toBeNull();
   });
 
-  it('records the chosen schedule and start mode after completing reading', async () => {
+  it('records the chosen schedule without asking how reading started', async () => {
     render(<LongTermDetailScreen />);
 
     fireEvent.press(await screen.findByText('完成今天閱讀'));
-    expect(await screen.findByText('我自己開始的')).toBeTruthy();
-    fireEvent.press(screen.getByText('我自己開始的'));
 
     await waitFor(() => {
       expect(mockRecordCompletionContext).toHaveBeenCalledWith(
         'completion-thu',
         'after_dinner',
-        'self_started',
+        null,
       );
     });
+    expect(screen.queryByText('開始閱讀前，有人提醒嗎？')).toBeNull();
+    expect(screen.queryByText('我自己開始的')).toBeNull();
+    expect(screen.queryByText('提醒後開始')).toBeNull();
   });
 
   it('keeps the bottom tab visible and applies mouse-friendly web scrolling', async () => {

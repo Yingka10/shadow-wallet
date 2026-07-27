@@ -351,7 +351,7 @@ export async function completeTask(
 export async function recordCompletionContext(
   completionId: string,
   plannedTimeWindow: PreferredTimeWindow,
-  startMode: CompletionStartMode,
+  startMode: CompletionStartMode | null,
 ): Promise<void> {
   const { error } = await supabase.rpc('record_completion_context', {
     p_completion_id: completionId,

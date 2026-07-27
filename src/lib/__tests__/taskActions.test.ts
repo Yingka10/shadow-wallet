@@ -373,15 +373,15 @@ describe('applyHabitResume — active_days gating', () => {
 });
 
 describe('recordCompletionContext', () => {
-  it('records the selected window and start mode through the authorized rpc', async () => {
+  it('records the selected window without requiring a start mode', async () => {
     mockRpc.mockResolvedValueOnce({ data: { ok: true }, error: null });
 
-    await recordCompletionContext('completion-1', 'after_dinner', 'self_started');
+    await recordCompletionContext('completion-1', 'after_dinner', null);
 
     expect(mockRpc).toHaveBeenCalledWith('record_completion_context', {
       p_completion_id: 'completion-1',
       p_planned_time_window: 'after_dinner',
-      p_start_mode: 'self_started',
+      p_start_mode: null,
     });
   });
 

@@ -23,7 +23,6 @@ import { webScreen } from '../../constants/webStyles';
 import { supabase } from '../../lib/supabase';
 import { completeTask, recordCompletionContext } from '../../lib/taskActions';
 import type {
-  CompletionStartMode,
   LongTermGoal,
   PreferredTimeWindow,
   Task,
@@ -78,7 +77,6 @@ export default function LongTermDetailScreen() {
   const [completions, setCompletions] = useState<GoalCompletionRecord[]>([]);
   const [selectedTimeWindow, setSelectedTimeWindow] =
     useState<PreferredTimeWindow | null>(null);
-  const [pendingCompletionId, setPendingCompletionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -167,9 +165,6 @@ export default function LongTermDetailScreen() {
           ?? loadedGoal.preferred_time_window
           ?? null,
       );
-      setPendingCompletionId(
-        todayCompletion && !todayCompletion.start_mode ? todayCompletion.id : null,
-      );
       setLoading(false);
     };
 
@@ -216,7 +211,21 @@ export default function LongTermDetailScreen() {
       };
 
       setCompletions((current) => [...current, completion]);
-      setPendingCompletionId(result.completionId);
+
+      if (selectedTimeWindow) {
+        try {
+          await recordCompletionContext(
+            result.completionId,
+            selectedTimeWindow,
+            null,
+          );
+        } catch (contextError) {
+          Alert.alert(
+            '閱讀時段尚未記下',
+            contextError instanceof Error ? contextError.message : '可以稍後再試。',
+          );
+        }
+      }
 
       if (result.milestone) {
         Alert.alert(
@@ -242,43 +251,6 @@ export default function LongTermDetailScreen() {
     selectedTimeWindow,
     task,
     taskId,
-  ]);
-
-  const handleRecordStartMode = useCallback(async (mode: CompletionStartMode) => {
-    const todayCompletion = completions.find((completion) =>
-      dayjs(completion.completed_at).tz(TZ).isSame(dayjs().tz(TZ), 'day'),
-    );
-    const completionId = pendingCompletionId ?? todayCompletion?.id;
-    const timeWindow =
-      selectedTimeWindow
-      ?? goal?.preferred_time_window
-      ?? 'after_dinner';
-
-    if (!completionId) return;
-
-    try {
-      await recordCompletionContext(completionId, timeWindow, mode);
-      setCompletions((current) => current.map((completion) =>
-        completion.id === completionId
-          ? {
-              ...completion,
-              planned_time_window: timeWindow,
-              start_mode: mode,
-            }
-          : completion,
-      ));
-      setPendingCompletionId(null);
-    } catch (caught) {
-      Alert.alert(
-        '狀況尚未記下',
-        caught instanceof Error ? caught.message : '可以稍後再試。',
-      );
-    }
-  }, [
-    completions,
-    goal?.preferred_time_window,
-    pendingCompletionId,
-    selectedTimeWindow,
   ]);
 
   const handleTabPress = useCallback((tab: ChildTabId) => {
@@ -329,7 +301,6 @@ export default function LongTermDetailScreen() {
             checking={checking}
             onComplete={handleComplete}
             onSelectTimeWindow={setSelectedTimeWindow}
-            onRecordStartMode={handleRecordStartMode}
           />
         ) : null}
 

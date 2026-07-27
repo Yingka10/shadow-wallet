@@ -844,7 +844,7 @@ export interface Database {
         Args: {
           p_completion_id: string;
           p_planned_time_window: PreferredTimeWindow;
-          p_start_mode: CompletionStartMode;
+          p_start_mode: CompletionStartMode | null;
         };
         Returns: { ok: boolean };
       };
