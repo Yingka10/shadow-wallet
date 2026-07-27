@@ -42,6 +42,17 @@ type LongTermDetailRoute = RouteProp<RootStackParamList, 'LongTermDetail'>;
 type Nav = StackNavigationProp<RootStackParamList, 'LongTermDetail'>;
 type ChildTabId = 'home' | 'wallet' | 'wish' | 'profile';
 
+function isMissingCompletionContextColumn(error: {
+  code?: string;
+  message?: string;
+} | null): boolean {
+  return error?.code === '42703'
+    || Boolean(
+      error?.message?.includes('planned_time_window')
+      || error?.message?.includes('start_mode'),
+    );
+}
+
 function BackIcon() {
   return (
     <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
@@ -99,7 +110,7 @@ export default function LongTermDetailScreen() {
       const loadedGoal = goalRes.data as LongTermGoal;
       const loadedTask = taskRes.data as Task;
       const tomorrow = dayjs().tz(TZ).add(1, 'day').startOf('day').toISOString();
-      const completionRes = await supabase
+      const contextCompletionRes = await supabase
         .from('task_completions')
         .select('id, completed_at, planned_time_window, start_mode')
         .eq('task_id', taskId)
@@ -109,14 +120,41 @@ export default function LongTermDetailScreen() {
         .order('completed_at', { ascending: true });
 
       if (cancelled) return;
-      if (completionRes.error) {
-        setError('讀取任務進度失敗，請稍後再試。');
-        setLoading(false);
-        return;
-      }
+      let loadedCompletions: GoalCompletionRecord[];
 
-      const loadedCompletions =
-        (completionRes.data as GoalCompletionRecord[] | null) ?? [];
+      if (contextCompletionRes.error) {
+        if (!isMissingCompletionContextColumn(contextCompletionRes.error)) {
+          setError('讀取任務進度失敗，請稍後再試。');
+          setLoading(false);
+          return;
+        }
+
+        const basicCompletionRes = await supabase
+          .from('task_completions')
+          .select('id, completed_at')
+          .eq('task_id', taskId)
+          .eq('child_id', loadedGoal.child_id)
+          .gte('completed_at', loadedGoal.started_at)
+          .lt('completed_at', tomorrow)
+          .order('completed_at', { ascending: true });
+
+        if (cancelled) return;
+        if (basicCompletionRes.error) {
+          setError('讀取任務進度失敗，請稍後再試。');
+          setLoading(false);
+          return;
+        }
+
+        loadedCompletions = (basicCompletionRes.data ?? []).map((completion) => ({
+          id: completion.id,
+          completed_at: completion.completed_at,
+          planned_time_window: null,
+          start_mode: null,
+        }));
+      } else {
+        loadedCompletions =
+          (contextCompletionRes.data as GoalCompletionRecord[] | null) ?? [];
+      }
       const todayCompletion = loadedCompletions.find((completion) =>
         dayjs(completion.completed_at).tz(TZ).isSame(dayjs().tz(TZ), 'day'),
       );

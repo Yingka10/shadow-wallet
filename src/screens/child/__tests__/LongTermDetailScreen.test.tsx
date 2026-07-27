@@ -5,6 +5,7 @@ import { webMouseDraggableScroll } from '../../../constants/webStyles';
 const mockGoBack = jest.fn();
 const mockCompleteTask = jest.fn();
 const mockRecordCompletionContext = jest.fn();
+let mockMissingContextColumns = false;
 
 let mockRouteParams = {
   goalId: 'goal-reading',
@@ -153,8 +154,12 @@ const readingCompletions = [
 jest.mock('../../../lib/supabase', () => ({
   supabase: {
     from: jest.fn((table: string) => {
+      let selectedColumns = '*';
       const builder: any = {
-        select: jest.fn(() => builder),
+        select: jest.fn((columns = '*') => {
+          selectedColumns = columns;
+          return builder;
+        }),
         eq: jest.fn(() => builder),
         gte: jest.fn(() => builder),
         lt: jest.fn(() => builder),
@@ -173,10 +178,31 @@ jest.mock('../../../lib/supabase', () => ({
           }
           return { data: null, error: null };
         }),
-        order: jest.fn(async () => ({
-          data: mockRouteParams.goalId === 'goal-reading' ? readingCompletions : [],
-          error: null,
-        })),
+        order: jest.fn(async () => {
+          if (
+            table === 'task_completions'
+            && mockMissingContextColumns
+            && selectedColumns.includes('planned_time_window')
+          ) {
+            return {
+              data: null,
+              error: {
+                code: '42703',
+                message: 'column task_completions.planned_time_window does not exist',
+              },
+            };
+          }
+
+          const rows = mockRouteParams.goalId === 'goal-reading'
+            ? readingCompletions
+            : [];
+          return {
+            data: selectedColumns.includes('planned_time_window')
+              ? rows
+              : rows.map(({ id, completed_at }) => ({ id, completed_at })),
+            error: null,
+          };
+        }),
       };
       return builder;
     }),
@@ -202,6 +228,7 @@ describe('LongTermDetailScreen', () => {
       taskId: 'task-reading',
       taskName: '自主閱讀計畫',
     };
+    mockMissingContextColumns = false;
     mockCompleteTask.mockResolvedValue({
       completionId: 'completion-thu',
       milestone: null,
@@ -218,6 +245,16 @@ describe('LongTermDetailScreen', () => {
     expect(screen.getByText(/這週已閱讀 3 次，其中 2 次是自己開始的。/)).toBeTruthy();
     expect(screen.getByTestId('goal-hero')).toBeTruthy();
     expect(screen.getByTestId('goal-rewards')).toBeTruthy();
+  });
+
+  it('keeps existing long-term tasks readable before context columns are migrated', async () => {
+    mockMissingContextColumns = true;
+
+    render(<LongTermDetailScreen />);
+
+    expect(await screen.findByText('自主閱讀計畫')).toBeTruthy();
+    expect(screen.getByText('3 / 20 次')).toBeTruthy();
+    expect(screen.queryByText('讀取任務進度失敗，請稍後再試。')).toBeNull();
   });
 
   it('records the chosen schedule and start mode after completing reading', async () => {
