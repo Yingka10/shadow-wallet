@@ -16,7 +16,13 @@
 -- to service_role only — the Edge Function already calls this via a
 -- service_role client.
 
-CREATE OR REPLACE FUNCTION public.settle_weekly_interest()
+-- The live project predates this migration and may have the same zero-argument
+-- function with a different return type. PostgreSQL cannot change a function's
+-- return type through CREATE OR REPLACE, so replace that legacy signature
+-- explicitly inside this migration transaction.
+DROP FUNCTION IF EXISTS public.settle_weekly_interest();
+
+CREATE FUNCTION public.settle_weekly_interest()
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
