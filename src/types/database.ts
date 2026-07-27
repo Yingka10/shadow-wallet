@@ -840,6 +840,14 @@ export interface Database {
         };
         Returns: { ok?: boolean; error?: string; status?: string; finalCoins?: number };
       };
+      record_completion_context: {
+        Args: {
+          p_completion_id: string;
+          p_planned_time_window: PreferredTimeWindow;
+          p_start_mode: CompletionStartMode;
+        };
+        Returns: { ok: boolean };
+      };
       submit_onboarding: {
         Args: {
           p_family_name: string;
