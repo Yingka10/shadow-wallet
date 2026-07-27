@@ -280,6 +280,52 @@ reason 請在 60 字以內，直接說明。
   }
 }
 
+/**
+ * handleAdvisorChat — 家長端「AI 教養顧問」自由問答。
+ * 只餵入家長端畫面本來就會顯示的彙總資料（今日完成數、長期任務進度），
+ * 不額外查 DB、不碰孩子的原始逐筆紀錄——顧問看得到的東西跟家長一樣多。
+ */
+async function handleAdvisorChat(payload: {
+  childName: string;
+  question: string;
+  doneToday: number;
+  totalToday: number;
+  longTermSummary: { name: string; progressPct: number }[];
+  history?: { role: 'parent' | 'ai'; text: string }[];
+}) {
+  const ltLines = payload.longTermSummary.length > 0
+    ? payload.longTermSummary.map(i => `- ${i.name}：進度 ${Math.round(i.progressPct)}%`).join('\n')
+    : '（目前沒有進行中的長期任務）';
+
+  const historyLines = (payload.history ?? [])
+    .slice(-6)
+    .map(h => `${h.role === 'parent' ? '家長' : '顧問'}：${h.text}`)
+    .join('\n');
+
+  const prompt = `你是一位溫柔、細心的親職陪伴顧問，正在跟一位家長聊聊孩子「${payload.childName}」的狀況。
+
+這個 App 的定位是記帳型的任務分配工具，不是監控系統：孩子自行回報完成，系統不驗證真偽。
+你只看得到家長在畫面上也看得到的彙總資訊，看不到逐筆紀錄或任何隱私細節，遇到你不知道的細節就誠實說不知道，不要編造數字或具體事件。
+
+目前可參考的資料：
+- 今日任務完成：${payload.doneToday}/${payload.totalToday}
+- 長期任務進度：
+${ltLines}
+
+${historyLines ? `之前的對話：\n${historyLines}\n` : ''}
+家長現在問：「${payload.question}」
+
+回覆規則：
+1. 全程用溫暖、體貼、鼓勵的白話繁體中文，不要出現「Task-A」「B類」這種代號或專有名詞。
+2. 100 字以內，簡短直接回答問題，不需要重述資料。
+3. 只根據上面給的資料回答；沒有足夠資料判斷時，誠實說明資料不夠，不要憑空編造。
+4. 不要用條列式或標題，用一般說話的口吻。
+5. 只回傳回覆內容本身，不要加引號或其他格式。`;
+
+  const reply = await callGemini(prompt);
+  return { reply: reply.trim() };
+}
+
 async function handleSuggestCoinWithAI(payload: { rewardName: string }) {
   const prompt = `你是一個家庭教養 App 的幣值顧問。
 這個 App 使用「幣」作為虛擬貨幣。孩子（6-9歲）每週透過完成家務賺取約 120-150 幣。
@@ -331,6 +377,16 @@ Deno.serve(async (req) => {
         break;
       case 'suggestCoinWithAI':
         result = await handleSuggestCoinWithAI(payload as { rewardName: string });
+        break;
+      case 'advisorChat':
+        result = await handleAdvisorChat(payload as {
+          childName: string;
+          question: string;
+          doneToday: number;
+          totalToday: number;
+          longTermSummary: { name: string; progressPct: number }[];
+          history?: { role: 'parent' | 'ai'; text: string }[];
+        });
         break;
       default:
         return new Response(

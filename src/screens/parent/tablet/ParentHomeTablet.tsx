@@ -58,7 +58,9 @@ import {
   ParentFontWeights,
 } from '../../../constants/parentTheme';
 import { webMouseDraggableScroll, webTabletScreen } from '../../../constants/webStyles';
-import type { TaskCategory, LongTermType } from '../../../types/database';
+import type { TaskCategory, LongTermType, AgeGroup } from '../../../types/database';
+import { calcAgeGroup } from '../../../lib/onboarding';
+import { analyzeTask, type AnalyzeTaskResult, chatWithAdvisor } from '../../../lib/aiAgent';
 import {
   SunIcon,
   BellIcon,
@@ -907,7 +909,7 @@ function NewTaskPanel({
   const [rewardMode, setRewardMode] = useState<'coin' | 'time'>('coin');
   const [coins, setCoins] = useState(5);
   const [aiBaseTime, setAiBaseTime] = useState<number | null>(null);
-  const [aiCoinRange, setAiCoinRange] = useState<[number, number] | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState<AnalyzeTaskResult | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [selectedDays, setSelectedDays] = useState<number[]>([1, 2, 3, 4, 5]);
   const [submitting, setSubmitting] = useState(false);
@@ -1012,25 +1014,37 @@ function NewTaskPanel({
     if (!trimmed) return;
     setStep(2);
     setAiLoading(true);
-    void supabase.functions
-      .invoke('ai-proxy', {
-        body: { type: 'classifyTask', payload: { taskName: trimmed } },
-      })
-      .then(({ data }) => {
-        if (!isMounted.current) return;
-        const ai = data as { base_time_min?: number; difficulty?: number } | null;
-        if (ai?.base_time_min != null && ai?.difficulty != null) {
-          const suggested = Math.max(
-            1,
-            Math.min(15, Math.round((ai.base_time_min as number) * (ai.difficulty as number))),
-          );
-          setAiBaseTime(ai.base_time_min as number);
-          setAiCoinRange([Math.max(1, suggested - 2), suggested + 3]);
-          setCoins(suggested);
-        }
-        setAiLoading(false);
-      })
-      .catch(() => { if (isMounted.current) setAiLoading(false); });
+    void (async () => {
+      let ageGroup: AgeGroup = '6-9';
+      try {
+        const { data: child } = await supabase
+          .from('children')
+          .select('birth_date')
+          .eq('id', currentChildId)
+          .single();
+        if (child?.birth_date) ageGroup = calcAgeGroup(child.birth_date);
+      } catch {
+        // 查不到出生日期就用預設年齡段，不擋 AI 分析。
+      }
+
+      const result = await analyzeTask({
+        taskName: trimmed,
+        childAgeGroup: ageGroup,
+        taskSource: 'parent',
+        durationType: 'recurring',
+      });
+      if (!isMounted.current) return;
+
+      setAiAnalysis(result);
+      if (result.pricing.status === 'priced') {
+        setAiBaseTime(result.estimatedMinutes ?? null);
+        setCoins(result.pricing.coins);
+        setRewardMode('coin');
+      } else if (!result.coinEnabled && result.rewardMode === 'family_contribution') {
+        setRewardMode('time');
+      }
+      setAiLoading(false);
+    })();
   }
 
   function toggleDay(d: number) {
@@ -1420,11 +1434,20 @@ function NewTaskPanel({
             <Text style={styles.newTaskRewardTitle}>給影子幣</Text>
             {aiLoading ? (
               <Text style={styles.newTaskAiHintLoading}>AI 計算中…</Text>
-            ) : aiCoinRange != null ? (
+            ) : aiAnalysis?.pricing.status === 'priced' ? (
               <Text style={styles.newTaskAiHint}>
-                AI 建議：約 {aiBaseTime} 分鐘，可給 {aiCoinRange[0]}–{aiCoinRange[1]} 幣
+                AI 建議：{aiBaseTime != null ? `約 ${aiBaseTime} 分鐘，` : ''}給 {aiAnalysis.pricing.coins} 幣（{aiAnalysis.reason}）
+              </Text>
+            ) : aiAnalysis && !aiAnalysis.coinEnabled ? (
+              <Text style={styles.newTaskAiHint}>
+                AI 判斷這比較像{aiAnalysis.rewardMode === 'family_contribution' ? '家庭本分（不建議發幣）' : '生活常規'}：{aiAnalysis.reason}
               </Text>
             ) : null}
+            {aiAnalysis && (aiAnalysis.blockingIssues.length > 0 || aiAnalysis.requiresConfirmation.length > 0) && (
+              <Text style={styles.newTaskAiWarn}>
+                {[...aiAnalysis.blockingIssues.map(s => `⛔ ${s}`), ...aiAnalysis.requiresConfirmation.map(s => `❓ ${s}`)].join('\n')}
+              </Text>
+            )}
             {rewardMode === 'coin' && (
               <View style={styles.newTaskCoinRow}>
                 <TouchableOpacity
@@ -2349,41 +2372,6 @@ function BanIcon({ size = 15, color = ParentColors.fgSecondary }: { size?: numbe
   );
 }
 
-/** 依目前已載入的長期挑戰／今日任務狀況組出一段誠實、以真實資料為本的重點整理（非開放式 LLM 對話）。 */
-export function buildAdvisorReply({
-  childName,
-  ltItems,
-  doneToday,
-  totalToday,
-}: {
-  childName: string;
-  ltItems: LongTermTaskItem[];
-  doneToday: number;
-  totalToday: number;
-}): string {
-  const active = ltItems.filter(i => i.progressPct < 100);
-  const started = [...active].filter(i => i.progressPct > 0).sort((a, b) => b.progressPct - a.progressPct);
-  const notStarted = active.filter(i => i.progressPct === 0);
-
-  const lines: string[] = [];
-  lines.push(
-    totalToday > 0
-      ? `整體來看，${childName}今天完成了 ${doneToday}/${totalToday} 項任務。`
-      : `整體來看，${childName}最近的紀錄還在累積中。`,
-  );
-
-  if (started[0]) {
-    lines.push(`「${started[0].name}」持續進行中，維持得不錯 ✨`);
-  }
-
-  if (notStarted[0]) {
-    lines.push(`需要留意的是「${notStarted[0].name}」還沒開始，可以找個時間陪${childName}一起啟動看看。`);
-  }
-
-  lines.push(`我會持續關注${childName}的紀錄，有新的進展再告訴你！`);
-  return lines.join('\n\n');
-}
-
 /**
  * AI 教養顧問 —— 右欄的主要內容（鎖定樣式＝ .t-ask），取代原本的「本週統計」。
  * 點快捷提問／輸入框會帶著問題文字打開 AdvisorSideSheet 展開對話。
@@ -2441,8 +2429,8 @@ type AdvisorChatMessage = { role: 'parent' | 'ai'; text: string; at: string };
 
 /**
  * 展開後的 AI 諮詢對話面板：頭像式訊息串＋快捷後續動作＋輸入框。
- * 三個預設提問（ADVISOR_PROMPTS）用 buildAdvisorReply 依真實資料組回覆，
- * 誠實但不是開放式 LLM——自由輸入的問題會得到同一份誠實整理，不假裝能回答任何問題。
+ * 快捷提問與自由輸入都真的呼叫 Gemini（見 chatWithAdvisor），只餵入畫面上
+ * 本來就會顯示的彙總資料（今日完成數、長期任務進度），不額外查詢逐筆紀錄。
  */
 function AdvisorSideSheet({
   childName,
@@ -2463,30 +2451,46 @@ function AdvisorSideSheet({
   onClose: () => void;
   onOpenWeekly: () => void;
 }) {
-  const buildReply = useCallback(
-    () => buildAdvisorReply({ childName, ltItems, doneToday, totalToday }),
-    [childName, ltItems, doneToday, totalToday],
+  const [messages, setMessages] = useState<AdvisorChatMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const askedInitial = useRef(false);
+
+  const ask = useCallback(
+    async (question: string, historyBefore: AdvisorChatMessage[]) => {
+      setSending(true);
+      const reply = await chatWithAdvisor({
+        childName,
+        question,
+        doneToday,
+        totalToday,
+        longTermSummary: ltItems.map(i => ({ name: i.name, progressPct: i.progressPct })),
+        history: historyBefore.map(m => ({ role: m.role, text: m.text })),
+      });
+      setMessages(prev => [...prev, { role: 'ai', text: reply, at: dayjs().format('HH:mm') }]);
+      setSending(false);
+    },
+    [childName, doneToday, totalToday, ltItems],
   );
 
-  const [messages, setMessages] = useState<AdvisorChatMessage[]>(() =>
-    initialPrompt
-      ? [
-          { role: 'parent', text: initialPrompt, at: dayjs().format('HH:mm') },
-          { role: 'ai', text: buildReply(), at: dayjs().format('HH:mm') },
-        ]
-      : [],
-  );
-  const [input, setInput] = useState('');
+  useEffect(() => {
+    if (initialPrompt && !askedInitial.current) {
+      askedInitial.current = true;
+      setMessages([{ role: 'parent', text: initialPrompt, at: dayjs().format('HH:mm') }]);
+      void ask(initialPrompt, []);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSend = () => {
     const text = input.trim();
-    if (!text) return;
+    if (!text || sending) return;
     setInput('');
-    setMessages(prev => [
-      ...prev,
-      { role: 'parent', text, at: dayjs().format('HH:mm') },
-      { role: 'ai', text: buildReply(), at: dayjs().format('HH:mm') },
-    ]);
+    setMessages(prev => {
+      const historyBefore = prev;
+      void ask(text, historyBefore);
+      return [...prev, { role: 'parent', text, at: dayjs().format('HH:mm') }];
+    });
   };
 
   const notReady = () => Alert.alert('即將推出', '這個功能還在準備中。');
@@ -2537,6 +2541,16 @@ function AdvisorSideSheet({
               ),
             )
           )}
+          {sending && (
+            <View style={styles.chatAiRow}>
+              <View style={styles.chatAiAvatar}>
+                <RobotIcon size={14} color={ParentColors.pine500} />
+              </View>
+              <View style={styles.chatAiBubble}>
+                <ActivityIndicator size="small" color={ParentColors.pine500} />
+              </View>
+            </View>
+          )}
         </ScrollView>
 
         {messages.length > 0 && (
@@ -2569,7 +2583,12 @@ function AdvisorSideSheet({
             onSubmitEditing={handleSend}
             returnKeyType="send"
           />
-          <TouchableOpacity style={styles.chatSendBtn} onPress={handleSend} activeOpacity={0.8}>
+          <TouchableOpacity
+            style={[styles.chatSendBtn, sending && styles.chatSendBtnDisabled]}
+            onPress={handleSend}
+            disabled={sending}
+            activeOpacity={0.8}
+          >
             <SendArrowIcon size={14} color="#fff" />
           </TouchableOpacity>
         </View>
@@ -3856,6 +3875,9 @@ const styles = StyleSheet.create({
     backgroundColor: ParentColors.pine500,
     flexShrink: 0,
   },
+  chatSendBtnDisabled: {
+    opacity: 0.5,
+  },
   chatDisclaimer: {
     fontFamily: ParentFonts.body,
     fontSize: 11,
@@ -4649,6 +4671,12 @@ const styles = StyleSheet.create({
     fontSize: ParentFontSizes.xs,
     color: ParentColors.fgMuted,
     fontStyle: 'italic',
+  },
+  newTaskAiWarn: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.clay500,
+    marginTop: 4,
   },
   newTaskCoinRow: {
     flexDirection: 'row',
