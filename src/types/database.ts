@@ -26,6 +26,8 @@ export type CompletionStatus = 'completed' | 'flagged';
 export type GoalStatus = 'active' | 'completed' | 'paused';
 export type PoolType = 'family_time' | 'game_time';
 export type ReportedBy = 'child' | 'parent';
+export type PreferredTimeWindow = 'after_dinner' | 'before_bed';
+export type CompletionStartMode = 'self_started' | 'reminded';
 
 /** Maps day-number (as string key) to coin reward. E.g. {"7": 20, "14": 40, "21": 80} */
 export type CheckpointRewards = Record<string, number>;
@@ -121,6 +123,8 @@ export type TaskCompletion = {
   time_saved_min: number;
   mentor_child_id: string | null;
   override_id: string | null;
+  planned_time_window: PreferredTimeWindow | null;
+  start_mode: CompletionStartMode | null;
   created_at: string;
 };
 
@@ -190,6 +194,7 @@ export type LongTermGoal = {
   interrupt_count: number;
   last_active_date: string | null;
   active_days: number[] | null;     // 0=日,1=一,...,6=六; null=every day
+  preferred_time_window: PreferredTimeWindow | null;
   // 技能學習專用
   level_definitions: Record<string, any>[] | null;
   current_level: number | null;
