@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>自主閱讀計畫詳情頁 v2</title>
+  <style>
+    :root {
+      --canvas: #fbf7ef;
+      --surface: #fffdf9;
+      --ink: #352c24;
+      --muted: #71655a;
+      --line: #e9ddcc;
+      --night: #13284a;
+      --night-mid: #263f63;
+      --ground: #294838;
+      --leaf: #52753f;
+      --leaf-soft: #edf5df;
+      --gold: #e2a92d;
+      --gold-soft: #fff3cc;
+      --blue-soft: #edf5fb;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 28px;
+      background: #eee9e1;
+      color: var(--ink);
+      font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+      letter-spacing: 0;
+    }
+
+    .stage {
+      display: grid;
+      grid-template-columns: minmax(360px, 410px) minmax(310px, 430px);
+      align-items: start;
+      justify-content: center;
+      gap: 28px;
+      max-width: 940px;
+      margin: 0 auto;
+    }
+
+    .phone {
+      position: relative;
+      overflow: hidden;
+      width: 100%;
+      height: min(920px, calc(100vh - 56px));
+      min-height: 720px;
+      border: 1px solid #d9cfc0;
+      border-radius: 34px;
+      background: var(--canvas);
+      box-shadow: 0 20px 50px rgba(57, 43, 30, .16);
+    }
+
+    .scroll {
+      height: 100%;
+      overflow-y: auto;
+      padding-bottom: 92px;
+      scrollbar-width: thin;
+      scrollbar-color: #c9baa5 transparent;
+    }
+
+    .header {
+      position: sticky;
+      z-index: 20;
+      top: 0;
+      display: grid;
+      grid-template-columns: 88px 1fr 40px;
+      align-items: center;
+      min-height: 72px;
+      padding: 0 18px;
+      background: rgba(251, 247, 239, .97);
+      border-bottom: 1px solid rgba(232, 221, 205, .62);
+    }
+
+    .back {
+      font-size: 17px;
+      font-weight: 900;
+    }
+
+    .header-title {
+      text-align: center;
+      font-size: 19px;
+      font-weight: 900;
+    }
+
+    .more {
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: #f0e9de;
+      font-size: 17px;
+      font-weight: 900;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      min-height: 232px;
+      margin: 12px 16px 0;
+      padding: 23px 20px;
+      border-radius: 26px;
+      color: #fff;
+      background: var(--night);
+      border: 1px solid rgba(255, 235, 171, .18);
+    }
+
+    .hill-back,
+    .hill-front {
+      position: absolute;
+      left: -10%;
+      width: 120%;
+      height: 90px;
+      border-radius: 50% 50% 0 0;
+    }
+
+    .hill-back {
+      right: -10%;
+      bottom: 28px;
+      background: var(--night-mid);
+      transform: rotate(-7deg);
+    }
+
+    .hill-front {
+      bottom: -44px;
+      height: 120px;
+      background: var(--ground);
+      transform: rotate(5deg);
+    }
+
+    .star {
+      position: absolute;
+      color: #ffe28b;
+      font-size: 12px;
+    }
+
+    .s1 { top: 22px; left: 150px; }
+    .s2 { top: 48px; right: 34px; }
+    .s3 { top: 94px; left: 182px; }
+
+    .moon {
+      position: absolute;
+      top: 17px;
+      right: 107px;
+      color: #ffe48d;
+      font-size: 38px;
+      opacity: .96;
+    }
+
+    .hero-copy {
+      position: relative;
+      z-index: 5;
+      width: 62%;
+      min-width: 0;
+    }
+
+    .badge {
+      display: inline-flex;
+      min-height: 28px;
+      align-items: center;
+      padding: 4px 10px;
+      border: 1px solid rgba(255, 255, 255, .3);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, .12);
+      color: #fff0b9;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .hero h1 {
+      margin: 13px 0 7px;
+      font-size: 28px;
+      line-height: 1.22;
+    }
+
+    .hero-description {
+      margin: 0;
+      color: #e5ecf2;
+      font-size: 14px;
+      line-height: 1.55;
+      font-weight: 700;
+    }
+
+    .hero-meta {
+      margin-top: 12px;
+      color: #ffe28a;
+      font-size: 14px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .treehouse {
+      position: absolute;
+      z-index: 4;
+      right: -26px;
+      bottom: -17px;
+      width: 205px;
+      height: 205px;
+      object-fit: contain;
+      object-position: center;
+    }
+
+    .cards {
+      display: grid;
+      gap: 14px;
+      padding: 16px;
+    }
+
+    .card {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--surface);
+      box-shadow: 0 7px 20px rgba(66, 49, 34, .05);
+    }
+
+    .today {
+      padding: 20px 18px;
+    }
+
+    .card-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0;
+      font-size: 21px;
+      line-height: 1.35;
+      font-weight: 900;
+    }
+
+    .card-subtitle {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.55;
+      font-weight: 700;
+    }
+
+    .choice-label {
+      margin: 17px 0 9px;
+      color: #5e5349;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .time-choice {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 9px;
+    }
+
+    .time-btn {
+      min-height: 44px;
+      border: 1px solid #dfd2bf;
+      border-radius: 12px;
+      background: #fbf7ef;
+      color: #665a4f;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+
+    .time-btn.selected {
+      border-color: #9abb64;
+      background: var(--leaf-soft);
+      color: #436232;
+      box-shadow: inset 0 0 0 1px #9abb64;
+    }
+
+    .complete-btn {
+      width: 100%;
+      min-height: 52px;
+      margin-top: 14px;
+      border: 0;
+      border-radius: 14px;
+      background: var(--leaf);
+      color: #fff;
+      font: inherit;
+      font-size: 16px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+
+    .complete-btn:disabled {
+      opacity: .52;
+      cursor: default;
+    }
+
+    .completion-state {
+      display: none;
+      margin-top: 15px;
+      padding-top: 15px;
+      border-top: 1px solid var(--line);
+    }
+
+    .completion-state.visible { display: block; }
+
+    .completion-title {
+      color: #456536;
+      font-size: 14px;
+      font-weight: 900;
+      text-align: center;
+    }
+
+    .start-modes {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .start-modes button {
+      min-height: 42px;
+      padding: 6px;
+      border: 1px solid #dcd1c1;
+      border-radius: 12px;
+      background: #fffaf2;
+      color: #61564c;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+
+    .start-modes button.selected {
+      border-color: #9abb64;
+      background: var(--leaf-soft);
+      color: #436232;
+    }
+
+    .path-area {
+      position: relative;
+      height: 154px;
+      margin-top: 9px;
+    }
+
+    .path-line {
+      position: absolute;
+      top: 59px;
+      left: 9%;
+      width: 82%;
+      height: 9px;
+      border-radius: 5px;
+      background: #e7d7b9;
+      transform: rotate(-2deg);
+    }
+
+    .path-progress {
+      width: 9%;
+      height: 100%;
+      border-radius: inherit;
+      background: #abc957;
+    }
+
+    .node {
+      position: absolute;
+      top: 33px;
+      display: grid;
+      place-items: center;
+      width: 58px;
+      height: 58px;
+      border: 3px solid #dfd3c2;
+      border-radius: 50%;
+      background: #fff;
+      font-size: 28px;
+    }
+
+    .node.current {
+      border-color: #9cbd55;
+      background: #fbffe9;
+    }
+
+    .node span {
+      position: absolute;
+      top: 64px;
+      width: 92px;
+      color: #574d44;
+      font-size: 11px;
+      line-height: 1.4;
+      font-weight: 900;
+      text-align: center;
+    }
+
+    .node-1 { left: 2%; }
+    .node-2 { left: calc(50% - 29px); top: 23px; }
+    .node-3 { right: 2%; top: 31px; }
+
+    .path-note {
+      margin-top: 6px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: #f3f6e9;
+      color: #5e554a;
+      font-size: 13px;
+      line-height: 1.5;
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .week-row {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .week-day {
+      display: grid;
+      place-items: center;
+      gap: 7px;
+      color: #5b5147;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .week-circle {
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border: 1px solid #ddcfba;
+      border-radius: 50%;
+      background: #fffaf0;
+      color: #b9aa93;
+      font-size: 18px;
+    }
+
+    .review {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 14px;
+      padding: 11px 12px;
+      border-radius: 12px;
+      background: var(--gold-soft);
+      color: #685725;
+      font-size: 13px;
+      line-height: 1.5;
+      font-weight: 800;
+    }
+
+    .adjust {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      background: var(--blue-soft);
+      border-color: #d2e2ee;
+      color: #345d81;
+    }
+
+    .adjust-icon { font-size: 35px; }
+    .adjust strong { display: block; font-size: 15px; }
+    .adjust span { display: block; margin-top: 3px; font-size: 12px; line-height: 1.45; }
+
+    .tabbar {
+      position: absolute;
+      z-index: 30;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      min-height: 74px;
+      border-top: 1px solid #e5d8c7;
+      background: rgba(255, 251, 244, .98);
+    }
+
+    .tab {
+      display: grid;
+      place-items: center;
+      align-content: center;
+      gap: 3px;
+      color: #897b6d;
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .tab b { font-size: 20px; }
+    .tab.active { color: #466834; background: #fff8e8; }
+
+    .notes {
+      padding: 24px;
+      border: 1px solid #dcd1c3;
+      border-radius: 12px;
+      background: #fffdf9;
+      box-shadow: 0 12px 34px rgba(57, 43, 30, .08);
+    }
+
+    .notes h2 {
+      margin: 0 0 8px;
+      font-size: 23px;
+    }
+
+    .notes > p {
+      margin: 0 0 20px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .meaning {
+      display: grid;
+      gap: 10px;
+    }
+
+    .meaning article {
+      padding: 14px;
+      border-left: 4px solid #a7c66a;
+      border-radius: 7px;
+      background: #f7f8ef;
+    }
+
+    .meaning h3 {
+      margin: 0 0 4px;
+      font-size: 15px;
+    }
+
+    .meaning p {
+      margin: 0;
+      color: #665b51;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .removed {
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+      color: #75695e;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    @media (max-width: 820px) {
+      body { padding: 14px; }
+      .stage { grid-template-columns: 1fr; }
+      .phone { width: min(410px, 100%); margin: 0 auto; }
+      .notes { width: min(410px, 100%); margin: 0 auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="stage">
+    <section class="phone" aria-label="自主閱讀計畫手機畫面">
+      <div class="scroll">
+        <header class="header">
+          <span class="back">‹ 返回</span>
+          <span class="header-title">長期任務</span>
+          <span class="more">•••</span>
+        </header>
+
+        <section class="hero">
+          <span class="star s1">✦</span>
+          <span class="star s2">•</span>
+          <span class="star s3">✦</span>
+          <span class="moon">☾</span>
+          <div class="hill-back"></div>
+          <div class="hill-front"></div>
+          <div class="hero-copy">
+            <span class="badge">📚 學習與技能</span>
+            <h1>我的閱讀計畫</h1>
+            <p class="hero-description">自己選一本書，閱讀 15 分鐘</p>
+            <div class="hero-meta">第一週 · 本週 0 / 5 天</div>
+          </div>
+          <img class="treehouse" src="../assets/images/child/treehouse-night.png" alt="夜晚樹屋" />
+        </section>
+
+        <div class="cards">
+          <section class="card today">
+            <h2 class="card-title">📖 今天的閱讀</h2>
+            <p class="card-subtitle">承恩可以自己選一本想看的書，再選今天比較適合的時間。</p>
+            <div class="choice-label">今天想什麼時候讀？</div>
+            <div class="time-choice">
+              <button class="time-btn selected" type="button">晚餐後</button>
+              <button class="time-btn" type="button">睡前</button>
+            </div>
+            <button class="complete-btn" type="button">我讀完 15 分鐘了</button>
+            <div class="completion-state">
+              <div class="completion-title">今天的閱讀已記下。你是怎麼開始的？</div>
+              <div class="start-modes">
+                <button type="button">我自己想到的</button>
+                <button type="button">有人提醒後開始</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="card">
+            <h2 class="card-title">🌱 閱讀小徑</h2>
+            <div class="path-area">
+              <div class="path-line"><div class="path-progress"></div></div>
+              <div class="node node-1 current">📚<span>自己選一本書</span></div>
+              <div class="node node-2">🕰️<span>找到適合時間</span></div>
+              <div class="node node-3">💬<span>週末一起回顧</span></div>
+            </div>
+            <div class="path-note">這一週先找出適合自己的閱讀節奏，不需要一次做到完美。</div>
+          </section>
+
+          <section class="card">
+            <h2 class="card-title">🍃 這週的閱讀</h2>
+            <p class="card-subtitle">週一到週五，每完成一次就會留下足跡。</p>
+            <div class="week-row">
+              <div class="week-day">一<div class="week-circle">○</div></div>
+              <div class="week-day">二<div class="week-circle">○</div></div>
+              <div class="week-day">三<div class="week-circle">○</div></div>
+              <div class="week-day">四<div class="week-circle">○</div></div>
+              <div class="week-day">五<div class="week-circle">○</div></div>
+            </div>
+            <div class="review"><span>☀️</span><span>週末和媽媽一起看看：哪個時間最適合？下週要不要調整？</span></div>
+          </section>
+
+          <section class="card adjust">
+            <span class="adjust-icon">☁️</span>
+            <div>
+              <strong>想換一本書或調整時間？</strong>
+              <span>可以先記下來，週末回顧時一起討論。</span>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <nav class="tabbar">
+        <div class="tab"><b>⌂</b><span>首頁</span></div>
+        <div class="tab active"><b>◎</b><span>成長路</span></div>
+        <div class="tab"><b>♣</b><span>許願樹</span></div>
+        <div class="tab"><b>●</b><span>我的</span></div>
+      </nav>
+    </section>
+
+    <aside class="notes">
+      <h2>每個功能為什麼存在</h2>
+      <p>這一頁不是要求孩子證明讀了多少，而是讓一個模糊期待變成孩子能參與、能回顧的小計畫。</p>
+      <div class="meaning">
+        <article>
+          <h3>選書與時間</h3>
+          <p>保留孩子能真的做決定的部分，對應 P9 的「孩子保有選擇」。</p>
+        </article>
+        <article>
+          <h3>完成 15 分鐘</h3>
+          <p>只記投入，不考頁數與分數；15 分鐘讓第一步可完成。</p>
+        </article>
+        <article>
+          <h3>自行開始／提醒後開始</h3>
+          <p>完成後才詢問，不把它做成壓力。這筆資料能直接支撐 P10 的主動開始與提醒需求。</p>
+        </article>
+        <article>
+          <h3>一週足跡與週末回顧</h3>
+          <p>看生活節奏是否逐漸穩定，同時保留恢復提醒與調整計畫的退路。</p>
+        </article>
+      </div>
+      <div class="removed"><strong>刻意移除：</strong>需要家人幫忙、錄一段給自己聽、困難度貼標、無作用的次要打卡按鈕，以及 Day 10／20／30 的通用獎勵模板。</div>
+    </aside>
+  </main>
+
+  <script>
+    document.querySelectorAll(".time-btn").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".time-btn").forEach((item) => item.classList.remove("selected"));
+        button.classList.add("selected");
+      });
+    });
+
+    document.querySelector(".complete-btn").addEventListener("click", (event) => {
+      event.currentTarget.textContent = "今天的閱讀已記下";
+      event.currentTarget.disabled = true;
+      document.querySelector(".completion-state").classList.add("visible");
+    });
+
+    document.querySelectorAll(".start-modes button").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".start-modes button").forEach((item) => item.classList.remove("selected"));
+        button.classList.add("selected");
+      });
+    });
+  </script>
+</body>
+</html>

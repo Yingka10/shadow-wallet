@@ -16,7 +16,20 @@ beforeEach(() => {
   mockFrom = jest.fn();
 });
 
-import { calcCoin, checkMilestone, getPrevCheckpoint, OVERRIDE_TYPE_MAP, parentMarkTask, isActiveDayForHabit, applyHabitResume, calcSkillDefaultCoins, clampSkillCoin, skillCoinsAreValid, MAX_SKILL_MILESTONE_COIN } from '../taskActions';
+import {
+  MAX_SKILL_MILESTONE_COIN,
+  OVERRIDE_TYPE_MAP,
+  applyHabitResume,
+  calcCoin,
+  calcSkillDefaultCoins,
+  checkMilestone,
+  clampSkillCoin,
+  getPrevCheckpoint,
+  isActiveDayForHabit,
+  parentMarkTask,
+  recordCompletionContext,
+  skillCoinsAreValid,
+} from '../taskActions';
 import type { Task, CheckpointRewards } from '../../types/database';
 
 function makeTask(overrides: Partial<Task>): Task {
@@ -358,5 +371,27 @@ describe('applyHabitResume — active_days gating', () => {
     await applyHabitResume('goal-1', 'child-1', 'task-1', 5, null, null);
 
     expect(mockFrom).toHaveBeenCalledTimes(1); // completions checked, no update
+  });
+});
+
+describe('recordCompletionContext', () => {
+  it('records the selected window without requiring a start mode', async () => {
+    mockRpc.mockResolvedValueOnce({ data: { ok: true }, error: null });
+
+    await recordCompletionContext('completion-1', 'after_dinner', null);
+
+    expect(mockRpc).toHaveBeenCalledWith('record_completion_context', {
+      p_completion_id: 'completion-1',
+      p_planned_time_window: 'after_dinner',
+      p_start_mode: null,
+    });
+  });
+
+  it('surfaces an rpc error without changing the completed task', async () => {
+    mockRpc.mockResolvedValueOnce({ data: null, error: { message: 'context failed' } });
+
+    await expect(
+      recordCompletionContext('completion-1', 'before_bed', 'reminded'),
+    ).rejects.toThrow('context failed');
   });
 });

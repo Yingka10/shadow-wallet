@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>長期任務詳情頁統一方式</title>
+  <style>
+    :root {
+      --ink: #352d26;
+      --muted: #786d63;
+      --paper: #fffdf8;
+      --line: #eadfce;
+      --night: #132950;
+      --night-2: #244570;
+      --leaf: #5f853f;
+      --leaf-soft: #edf4df;
+      --gold: #e9ab28;
+      --gold-soft: #fff3cf;
+      --lavender: #7964a7;
+      --lavender-soft: #f2edf9;
+      --blue-soft: #eaf4ff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 32px;
+      background: #f2eee7;
+      color: var(--ink);
+      font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+      letter-spacing: 0;
+    }
+
+    main {
+      width: min(1280px, 100%);
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 30px;
+      line-height: 1.3;
+    }
+
+    .intro {
+      margin: 8px 0 24px;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.7;
+    }
+
+    .approaches {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 26px;
+    }
+
+    .approach {
+      position: relative;
+      min-height: 164px;
+      padding: 18px;
+      border: 2px solid transparent;
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: 0 8px 24px rgba(64, 48, 34, 0.08);
+      cursor: pointer;
+      transition: border-color 160ms ease, transform 160ms ease;
+    }
+
+    .approach:hover { transform: translateY(-2px); }
+    .approach.selected { border-color: var(--leaf); }
+    .approach.recommended { border-color: #b7ce91; }
+
+    .approach .label {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 3px 9px;
+      border-radius: 13px;
+      background: #eee9e1;
+      color: #655a50;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .approach.recommended .label {
+      background: var(--leaf-soft);
+      color: #48692f;
+    }
+
+    .approach h2 {
+      margin: 12px 0 7px;
+      font-size: 19px;
+    }
+
+    .approach p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .choice-mark {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      width: 24px;
+      height: 24px;
+      border: 2px solid #cfc5b8;
+      border-radius: 50%;
+      background: #fff;
+    }
+
+    .selected .choice-mark {
+      border-color: var(--leaf);
+      box-shadow: inset 0 0 0 5px #fff;
+      background: var(--leaf);
+    }
+
+    .preview-title {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .preview-title h2 {
+      margin: 0;
+      font-size: 22px;
+    }
+
+    .preview-title span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .phones {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(360px, 1fr));
+      gap: 22px;
+    }
+
+    .phone {
+      overflow: hidden;
+      border: 1px solid #d8cec1;
+      border-radius: 30px;
+      background: #fbf8f2;
+      box-shadow: 0 16px 38px rgba(58, 44, 32, 0.13);
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: 90px 1fr 42px;
+      align-items: center;
+      height: 68px;
+      padding: 0 18px;
+      background: #fffaf2;
+    }
+
+    .back { font-weight: 800; }
+    .topbar-title { text-align: center; font-size: 18px; font-weight: 900; }
+    .more {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: #f1eadf;
+      font-weight: 900;
+    }
+
+    .hero {
+      min-height: 166px;
+      padding: 20px 22px;
+      color: #fff;
+      background: var(--night);
+      border-top: 1px solid #274367;
+      border-bottom: 1px solid #2d4d73;
+    }
+
+    .hero.skill {
+      background: #203d5f;
+    }
+
+    .hero-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      padding: 5px 10px;
+      border: 1px solid rgba(255,255,255,.28);
+      border-radius: 15px;
+      background: rgba(255,255,255,.11);
+      color: #fff1b8;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .hero h3 {
+      margin: 10px 0 5px;
+      font-size: 28px;
+      line-height: 1.25;
+    }
+
+    .hero p {
+      margin: 0;
+      color: #dce7f0;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .hero-meta {
+      margin-top: 12px;
+      color: #ffe083;
+      font-size: 15px;
+      font-weight: 900;
+    }
+
+    .hero-art {
+      display: grid;
+      place-items: center;
+      width: 98px;
+      height: 98px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.1);
+      font-size: 54px;
+      flex: 0 0 auto;
+    }
+
+    .page-body {
+      display: grid;
+      gap: 13px;
+      padding: 0 18px 86px;
+    }
+
+    .panel {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+    }
+
+    .today {
+      position: relative;
+      z-index: 2;
+      margin-top: -18px;
+      box-shadow: 0 10px 24px rgba(68, 51, 36, .1);
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 11px;
+      font-size: 17px;
+      font-weight: 900;
+    }
+
+    .today-question {
+      margin: 0 0 12px;
+      color: #5d5248;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .primary-action {
+      display: grid;
+      place-items: center;
+      min-height: 44px;
+      border-radius: 8px;
+      background: #4f753c;
+      color: white;
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    .skill .primary-action { background: #68528f; }
+
+    .secondary-actions {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .secondary-actions span {
+      display: grid;
+      place-items: center;
+      min-height: 36px;
+      padding: 5px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #faf6ef;
+      color: #655a50;
+      font-size: 12px;
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .path {
+      position: relative;
+      height: 118px;
+      margin-top: 4px;
+    }
+
+    .path-line {
+      position: absolute;
+      top: 48px;
+      left: 4%;
+      width: 92%;
+      height: 12px;
+      border-radius: 6px;
+      background: #e8dcc6;
+      transform: rotate(-3deg);
+    }
+
+    .path-line::before {
+      content: "";
+      display: block;
+      width: 42%;
+      height: 100%;
+      border-radius: inherit;
+      background: #b5d45b;
+    }
+
+    .skill .path-line::before { width: 50%; background: #a792c8; }
+
+    .node {
+      position: absolute;
+      top: 23px;
+      display: grid;
+      place-items: center;
+      width: 52px;
+      height: 52px;
+      border: 3px solid #e2d7c5;
+      border-radius: 50%;
+      background: #fff;
+      font-size: 25px;
+    }
+
+    .node small {
+      position: absolute;
+      top: 55px;
+      width: 80px;
+      color: #5e534a;
+      font-size: 11px;
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .node.current { border-color: #95bc47; }
+    .skill .node.current { border-color: #8c74b7; }
+    .n1 { left: 4%; }
+    .n2 { left: 31%; top: 34px; }
+    .n3 { left: 59%; top: 17px; }
+    .n4 { right: 2%; top: 27px; }
+
+    .insight {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 7px;
+      background: #f3f6e9;
+      color: #645a50;
+      font-size: 12px;
+      line-height: 1.5;
+      text-align: center;
+    }
+
+    .skill .insight { background: var(--lavender-soft); }
+
+    .week {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 6px;
+      text-align: center;
+    }
+
+    .day {
+      color: #645a50;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .day b {
+      display: grid;
+      place-items: center;
+      width: 31px;
+      height: 31px;
+      margin: 5px auto 0;
+      border: 1px solid #dccfbc;
+      border-radius: 50%;
+      background: #fffaf1;
+      font-size: 15px;
+    }
+
+    .day.done b {
+      border-color: #a9c967;
+      background: var(--leaf-soft);
+    }
+
+    .skill .day.done b {
+      border-color: #a995ca;
+      background: var(--lavender-soft);
+    }
+
+    .adjust {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--blue-soft);
+      color: #365f8e;
+    }
+
+    .adjust strong { display: block; font-size: 14px; }
+    .adjust span { font-size: 12px; }
+
+    .tabbar {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      min-height: 70px;
+      border-top: 1px solid #e4d8c8;
+      background: rgba(255, 251, 244, .97);
+    }
+
+    .phone-shell { position: relative; }
+
+    .tab {
+      display: grid;
+      place-items: center;
+      align-content: center;
+      gap: 3px;
+      color: #897b6d;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .tab.active { color: #4f753c; background: #fff8e8; }
+
+    .decision {
+      margin-top: 22px;
+      padding: 18px;
+      border-left: 4px solid var(--leaf);
+      border-radius: 6px;
+      background: var(--paper);
+      color: #554b43;
+      line-height: 1.65;
+    }
+
+    @media (max-width: 900px) {
+      body { padding: 18px; }
+      .approaches, .phones { grid-template-columns: 1fr; }
+      .phones { gap: 18px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>「統一一個頁面」要統一到什麼程度？</h1>
+    <p class="intro">以下都沿用參考圖的 header、寬鬆卡片比例、夜間場景與底部 tab。請先選資訊架構，細節再往下雕。</p>
+
+    <section class="approaches" aria-label="統一方式選項">
+      <article class="approach" data-choice="A" tabindex="0">
+        <span class="label">A · 完全同版</span>
+        <span class="choice-mark"></span>
+        <h2>所有任務顯示相同區塊</h2>
+        <p>睡眠與鋼琴都用「今天打卡、天數路徑、每週足跡」。最一致，但會把技能學習誤解成連續簽到。</p>
+      </article>
+
+      <article class="approach recommended selected" data-choice="B" tabindex="0">
+        <span class="label">B · 建議方向</span>
+        <span class="choice-mark"></span>
+        <h2>共用骨架，內容依意義變化</h2>
+        <p>閱讀順序與視覺完全一致；習慣看節奏，技能看階段。孩子不會覺得跳到另一套產品，也不會失去任務本身的意義。</p>
+      </article>
+
+      <article class="approach" data-choice="C" tabindex="0">
+        <span class="label">C · 只統一外框</span>
+        <span class="choice-mark"></span>
+        <h2>Header、Hero、Tab 相同</h2>
+        <p>中段仍保留兩套獨立頁面。改動最小，但鋼琴頁進去後仍會有「另一個畫面」的感覺。</p>
+      </article>
+    </section>
+
+    <div class="preview-title">
+      <h2>B 方案預覽：同一頁面骨架</h2>
+      <span>左：習慣型 · 右：技能型</span>
+    </div>
+
+    <section class="phones">
+      <article class="phone phone-shell">
+        <header class="topbar">
+          <span class="back">‹ 返回</span>
+          <span class="topbar-title">長期任務</span>
+          <span class="more">•••</span>
+        </header>
+        <section class="hero">
+          <div class="hero-row">
+            <div>
+              <span class="hero-badge">🌙 習慣養成</span>
+              <h3>每天十點前睡</h3>
+              <p>讓身體慢慢記住休息的節奏</p>
+              <div class="hero-meta">第 8 天 · 這週完成 4 次</div>
+            </div>
+            <div class="hero-art">🏡</div>
+          </div>
+        </section>
+        <div class="page-body">
+          <section class="panel today">
+            <div class="panel-head">🌙 今天的一小步</div>
+            <p class="today-question">今晚有在 10 點前準備睡覺嗎？</p>
+            <div class="primary-action">有，我做到了</div>
+            <div class="secondary-actions">
+              <span>差一點，明天再試</span>
+              <span>需要家人幫忙</span>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">🌱 成長小徑</div>
+            <div class="path">
+              <div class="path-line"></div>
+              <div class="node n1">🚩<small>開始</small></div>
+              <div class="node current n2">🌱<small>現在 · 第 8 天</small></div>
+              <div class="node n3">🌙<small>10 天 · 小月亮</small></div>
+              <div class="node n4">🌳<small>30 天 · 守護樹</small></div>
+            </div>
+            <div class="insight">再累積 2 次，就會抵達第一個里程碑。</div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">🍃 這週的節奏</div>
+            <div class="week">
+              <div class="day done">一<b>🌱</b></div><div class="day done">二<b>🌱</b></div>
+              <div class="day done">三<b>🌱</b></div><div class="day done">四<b>🌱</b></div>
+              <div class="day">五<b>☾</b></div><div class="day">六<b>☾</b></div><div class="day">日<b>☾</b></div>
+            </div>
+            <div class="insight">這週已完成 4 次。週三比較容易忘記，可以先把睡衣放在床邊。</div>
+          </section>
+
+          <section class="panel adjust">
+            <span style="font-size:30px">☁️</span>
+            <div><strong>這個目標需要調整嗎？</strong><span>把感受告訴家人，一起找更適合的方法</span></div>
+          </section>
+        </div>
+        <nav class="tabbar">
+          <div class="tab">⌂<span>首頁</span></div><div class="tab active">◎<span>成長路</span></div>
+          <div class="tab">♣<span>許願樹</span></div><div class="tab">●<span>我的</span></div>
+        </nav>
+      </article>
+
+      <article class="phone phone-shell skill">
+        <header class="topbar">
+          <span class="back">‹ 返回</span>
+          <span class="topbar-title">長期任務</span>
+          <span class="more">•••</span>
+        </header>
+        <section class="hero skill">
+          <div class="hero-row">
+            <div>
+              <span class="hero-badge">🎹 技能成長</span>
+              <h3>鋼琴家之路</h3>
+              <p>把一次次練習，累積成能演奏的能力</p>
+              <div class="hero-meta">第 2 / 4 階段 · 雙手合奏</div>
+            </div>
+            <div class="hero-art">🎹</div>
+          </div>
+        </section>
+        <div class="page-body">
+          <section class="panel today">
+            <div class="panel-head">🎵 今天的一小步</div>
+            <p class="today-question">今天練習 15 分鐘，專心熟悉雙手合奏。</p>
+            <div class="primary-action">完成今天的練習</div>
+            <div class="secondary-actions">
+              <span>錄一段給自己聽</span>
+              <span>記下卡住的地方</span>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">🌱 成長小徑</div>
+            <div class="path">
+              <div class="path-line"></div>
+              <div class="node n1">✓<small>基礎指法</small></div>
+              <div class="node current n2">🎼<small>現在 · 簡單曲目</small></div>
+              <div class="node n3">🎹<small>下一站 · 雙手合奏</small></div>
+              <div class="node n4">🌟<small>完整演奏</small></div>
+            </div>
+            <div class="insight">目前正在第 2 階段；重點是掌握能力，不需要每天都完美。</div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">🎼 這週的練習</div>
+            <div class="week">
+              <div class="day done">一<b>♪</b></div><div class="day">二<b>·</b></div>
+              <div class="day done">三<b>♪</b></div><div class="day">四<b>·</b></div>
+              <div class="day done">五<b>♪</b></div><div class="day">六<b>·</b></div><div class="day">日<b>·</b></div>
+            </div>
+            <div class="insight">這週練習 3 次。雙手合奏容易卡住，下一次可以先慢速練 5 分鐘。</div>
+          </section>
+
+          <section class="panel adjust">
+            <span style="font-size:30px">☁️</span>
+            <div><strong>這個階段需要調整嗎？</strong><span>可以和家人討論時間、難度或需要的協助</span></div>
+          </section>
+        </div>
+        <nav class="tabbar">
+          <div class="tab">⌂<span>首頁</span></div><div class="tab active">◎<span>成長路</span></div>
+          <div class="tab">♣<span>許願樹</span></div><div class="tab">●<span>我的</span></div>
+        </nav>
+      </article>
+    </section>
+
+    <p class="decision"><strong>我推薦 B：</strong>孩子每次都用相同順序理解任務：這是什麼 → 今天能做什麼 → 我走到哪裡 → 最近有什麼模式 → 需要什麼協助。差別只放在真正有意義的地方：習慣看規律與節奏，技能看能力與階段。</p>
+  </main>
+
+  <script>
+    document.querySelectorAll('.approach').forEach((item) => {
+      item.addEventListener('click', () => {
+        document.querySelectorAll('.approach').forEach((option) => option.classList.remove('selected'));
+        item.classList.add('selected');
+      });
+      item.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') item.click();
+      });
+    });
+  </script>
+</body>
+</html>

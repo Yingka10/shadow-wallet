@@ -58,6 +58,10 @@ const rewardManagementPath = path.join(__dirname, '..', 'ParentRewardManagementT
 const rewardManagementSource = fs.existsSync(rewardManagementPath)
   ? fs.readFileSync(rewardManagementPath, 'utf8')
   : '';
+const ledgerPath = path.join(__dirname, '..', 'ParentLedgerTablet.tsx');
+const ledgerSource = fs.existsSync(ledgerPath)
+  ? fs.readFileSync(ledgerPath, 'utf8')
+  : '';
 
 describe('ParentHomeTablet layout tokens', () => {
   it('uses the full tablet viewport instead of a fixed preview width', () => {
@@ -224,7 +228,7 @@ describe('ParentHomeTablet layout tokens', () => {
     expect(bubble.borderColor).toBe(ParentColors.borderSoft);
   });
 
-  it('shares one sidebar component across all three tablet tabs', () => {
+  it('shares one sidebar component across all three tablet tab surfaces', () => {
     const sidebarSource = fs.readFileSync(path.join(__dirname, '..', 'ParentSidebar.tsx'), 'utf8');
 
     // activeTab 決定「主要功能」哪一項顯示選中，讓三個 tab 都能共用同一份側欄。
@@ -234,7 +238,15 @@ describe('ParentHomeTablet layout tokens', () => {
 
     expect(homeSource).toContain('<ParentSidebar');
     expect(weeklySource).toContain('<ParentSidebar');
-    expect(manageSource).toContain('<ParentSidebar');
+    expect(manageSource).toContain('ParentTaskManagementTablet');
+    expect(manageSource).toContain('ParentRewardManagementTablet');
+    expect(manageSource).toContain('ParentLedgerTablet');
+    expect(taskManagementSource).toContain('<ParentSidebar');
+    expect(taskManagementSource).toContain('activeTab="manage"');
+    expect(rewardManagementSource).toContain('<ParentSidebar');
+    expect(rewardManagementSource).toContain('activeTab="manage"');
+    expect(ledgerSource).toContain('<ParentSidebar');
+    expect(ledgerSource).toContain('activeTab="manage"');
   });
 
   it('frames weekly reports as parent conversation support instead of a scorecard', () => {

@@ -3,7 +3,15 @@ import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { supabase } from './supabase';
 import { taipeiDayRange } from './taipeiDate';
-import type { Task, CheckpointRewards, OverrideType, SkillMilestone, CreateFamilyGoalInput } from '../types/database';
+import type {
+  CheckpointRewards,
+  CompletionStartMode,
+  CreateFamilyGoalInput,
+  OverrideType,
+  PreferredTimeWindow,
+  SkillMilestone,
+  Task,
+} from '../types/database';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -338,6 +346,20 @@ export async function completeTask(
     timeSavedMin: result.timeSavedMin!,
     milestone:    result.milestone ?? null,
   };
+}
+
+export async function recordCompletionContext(
+  completionId: string,
+  plannedTimeWindow: PreferredTimeWindow,
+  startMode: CompletionStartMode | null,
+): Promise<void> {
+  const { error } = await supabase.rpc('record_completion_context', {
+    p_completion_id: completionId,
+    p_planned_time_window: plannedTimeWindow,
+    p_start_mode: startMode,
+  });
+
+  if (error) throw new Error(error.message);
 }
 
 /** Returns true when the given day-of-week is a valid check-in day for this habit. */

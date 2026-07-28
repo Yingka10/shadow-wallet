@@ -1,15 +1,78 @@
 import React from 'react';
 import { StyleSheet } from 'react-native';
 import { render, screen } from '@testing-library/react-native';
+import type { TodayTask, UseTodayTasksResult } from '../../../hooks/useTodayTasks';
 
-let mockTodayTasksResult = {
-  weekdayTasks: [],
-  weekendTasks: [],
-  longTermTasks: [],
-  isPrerequisiteMet: true,
-  completedTodayIds: new Set(),
-  loading: false,
-  refresh: jest.fn(),
+function buildTodayTasksResult(overrides: Partial<UseTodayTasksResult> = {}): UseTodayTasksResult {
+  return {
+    weekdayTasks: [],
+    weekendTasks: [],
+    longTermTasks: [],
+    tempTasks: [],
+    isPrerequisiteMet: true,
+    completedTodayIds: new Set<string>(),
+    loading: false,
+    refresh: jest.fn(),
+    ...overrides,
+  };
+}
+
+let mockTodayTasksResult: UseTodayTasksResult = buildTodayTasksResult();
+
+const skillLongTermTask: TodayTask = {
+  id: 'task-skill',
+  family_id: 'family-1',
+  name: '練鋼琴四個等級',
+  category: 'D',
+  day_type: 'both',
+  long_term_type: 'skill',
+  is_long_term: true,
+  base_time_min: 0,
+  difficulty: 1,
+  coin_override: null,
+  is_system_default: false,
+  allow_repeat: false,
+  min_age: 6,
+  max_age: 12,
+  is_active: true,
+  time_saving_min: 0,
+  recurrence_days: null,
+  due_date: null,
+  created_at: '2026-07-01T00:00:00.000Z',
+  isCompleted: false,
+  goal: {
+    id: 'goal-skill',
+    child_id: 'child-1',
+    task_id: 'task-skill',
+    goal_type: 'skill',
+    current_day: 0,
+    total_days: 180,
+    current_level: 2,
+    level_count: 4,
+    status: 'active',
+    checkpoint_rewards: null,
+    motivation_note: null,
+    started_at: '2026-07-01',
+    next_review_at: null,
+    completed_at: null,
+    created_at: '2026-07-01T00:00:00.000Z',
+    min_age: 6,
+    interrupt_count: 0,
+    last_active_date: null,
+    active_days: null,
+    preferred_time_window: null,
+    level_definitions: null,
+    role_title: null,
+    salary_mode: null,
+    base_salary: null,
+    weekly_target_rate: null,
+    privilege_reward: null,
+    family_time_per_completion: null,
+    target_completions: null,
+    target_value: null,
+    current_value: null,
+    value_unit: null,
+  },
 };
 
 let mockWalletBalance = 42;
@@ -72,10 +135,15 @@ jest.mock('react-native-reanimated', () => {
   return {
     __esModule: true,
     default: { View },
-    useSharedValue: (value: unknown) => ({ value }),
+    Easing: {
+      ease: 'ease',
+      inOut: <T,>(value: T) => value,
+    },
+    useSharedValue: <T,>(value: T) => ({ value }),
     useAnimatedStyle: (factory: () => object) => factory(),
-    withTiming: (value: unknown) => value,
-    withSequence: (...values: unknown[]) => values[values.length - 1],
+    withRepeat: <T,>(value: T) => value,
+    withTiming: <T,>(value: T) => value,
+    withSequence: <T,>(...values: T[]) => values[values.length - 1],
   };
 });
 
@@ -84,15 +152,7 @@ import HomeScreen from '../HomeScreen';
 describe('HomeScreen', () => {
   beforeEach(() => {
     mockWalletBalance = 42;
-    mockTodayTasksResult = {
-      weekdayTasks: [],
-      weekendTasks: [],
-      longTermTasks: [],
-      isPrerequisiteMet: true,
-      completedTodayIds: new Set(),
-      loading: false,
-      refresh: jest.fn(),
-    };
+    mockTodayTasksResult = buildTodayTasksResult();
   });
 
   it('renders greeting', () => {
@@ -112,35 +172,9 @@ describe('HomeScreen', () => {
 
   it('uses level progress for skill long-term goals', () => {
     mockTodayTasksResult = {
-      ...mockTodayTasksResult,
-      longTermTasks: [
-        {
-          id: 'task-skill',
-          name: '練鋼琴四個等級',
-          category: 'D',
-          base_time_min: 0,
-          difficulty: 1,
-          coin_override: null,
-          day_type: 'both',
-          is_active: true,
-          is_long_term: true,
-          allow_repeat: false,
-          time_saving_min: 0,
-          isCompleted: false,
-          goal: {
-            id: 'goal-skill',
-            child_id: 'child-1',
-            task_id: 'task-skill',
-            goal_type: 'skill',
-            current_day: 0,
-            total_days: 180,
-            current_level: 2,
-            level_count: 4,
-            status: 'active',
-          },
-        },
-      ],
-    } as any;
+      ...buildTodayTasksResult(),
+      longTermTasks: [skillLongTermTask],
+    };
 
     render(<HomeScreen />);
     expect(screen.getByText('第 2/4 級')).toBeTruthy();
