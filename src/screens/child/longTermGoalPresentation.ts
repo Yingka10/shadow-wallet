@@ -568,7 +568,7 @@ export function buildGoalPresentation(
         : task.name,
     preferredTimeWindow: goal.preferred_time_window,
     canCompleteToday: !isSkill && todayIsActive,
-    isReadingPlan,
+    isReadingPlan: isReadingHabit,
     weekDays: buildWeekDays(activeDays, weeklyCompletions, now),
     weekSummary: isReadingHabit
       ? `這週已閱讀 ${weeklyCompletions.length} 次。少一天沒有關係，找到適合自己的節奏更重要。`

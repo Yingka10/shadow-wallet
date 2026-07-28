@@ -128,6 +128,7 @@ describe('buildGoalPresentation', () => {
     expect(result.weekSummary).not.toContain('自己開始');
     expect(result.nextReward).toEqual({ threshold: 5, coin: 10 });
     expect(result.canCompleteToday).toBe(true);
+    expect(result.isReadingPlan).toBe(true);
   });
 
   it('marks only the real recurrence days as scheduled', () => {
@@ -302,6 +303,7 @@ describe('buildGoalPresentation', () => {
       },
     ]);
     expect(result.canCompleteToday).toBe(false);
+    expect(result.isReadingPlan).toBe(false);
   });
 
   it('uses challenge values consistently for progress and completion meaning', () => {
@@ -332,6 +334,7 @@ describe('buildGoalPresentation', () => {
     expect(result.weekSummary).toBe('這週已完成 1 次。');
     expect(result.milestones[0].title).toBe('已累積 25 頁');
     expect(result.milestones[result.milestones.length - 1].title).toBe('達到 100 頁');
+    expect(result.isReadingPlan).toBe(false);
   });
 
   it('falls back to completion counts when challenge values are incomplete', () => {
