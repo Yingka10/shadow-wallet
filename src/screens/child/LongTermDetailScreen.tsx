@@ -71,10 +71,17 @@ function taipeiDayStart(value: string | null | undefined) {
   if (!value) return null;
 
   try {
-    const parsed = /^\d{4}-\d{2}-\d{2}$/.test(value)
-      ? dayjs.tz(value, TZ)
-      : dayjs(value).tz(TZ);
-    return parsed.isValid() ? parsed.startOf('day') : null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const parsedDate = dayjs.tz(value, TZ);
+      return parsedDate.isValid() && parsedDate.format('YYYY-MM-DD') === value
+        ? parsedDate.startOf('day')
+        : null;
+    }
+
+    const parsedTimestamp = dayjs(value);
+    return parsedTimestamp.isValid()
+      ? parsedTimestamp.tz(TZ).startOf('day')
+      : null;
   } catch {
     return null;
   }
@@ -86,7 +93,7 @@ function normalizeGoalStartIso(
   return (
     taipeiDayStart(goal.started_at)
     ?? taipeiDayStart(goal.created_at)
-    ?? dayjs.tz('1970-01-01', TZ).startOf('day')
+    ?? dayjs().tz(TZ).startOf('day')
   ).toISOString();
 }
 
@@ -124,9 +131,7 @@ export default function LongTermDetailScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const { goalId, taskId, taskName } = route.params;
-  const routeKey = `${goalId}:${taskId}`;
-  const routeKeyRef = useRef(routeKey);
-  routeKeyRef.current = routeKey;
+  const generationRef = useRef(0);
 
   const [goal, setGoal] = useState<LongTermGoal | null>(null);
   const [task, setTask] = useState<Task | null>(null);
@@ -146,8 +151,10 @@ export default function LongTermDetailScreen() {
   const [correctingTimeWindow, setCorrectingTimeWindow] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-    const loadRouteKey = routeKey;
+    const loadGeneration = generationRef.current + 1;
+    generationRef.current = loadGeneration;
+    const isCurrentGeneration = () =>
+      generationRef.current === loadGeneration;
 
     setActiveSheet(null);
     setSelectedCompletionId(null);
@@ -168,7 +175,7 @@ export default function LongTermDetailScreen() {
         supabase.from('tasks').select('*').eq('id', taskId).single(),
       ]);
 
-      if (cancelled || routeKeyRef.current !== loadRouteKey) return;
+      if (!isCurrentGeneration()) return;
       if (goalRes.error || !goalRes.data) {
         setError('讀取長期目標失敗，請稍後再試。');
         setLoading(false);
@@ -194,7 +201,7 @@ export default function LongTermDetailScreen() {
         .lt('completed_at', tomorrow)
         .order('completed_at', { ascending: true });
 
-      if (cancelled || routeKeyRef.current !== loadRouteKey) return;
+      if (!isCurrentGeneration()) return;
       let loadedCompletions: GoalCompletionRecord[];
 
       if (contextCompletionRes.error) {
@@ -214,7 +221,7 @@ export default function LongTermDetailScreen() {
           .lt('completed_at', tomorrow)
           .order('completed_at', { ascending: true });
 
-        if (cancelled || routeKeyRef.current !== loadRouteKey) return;
+        if (!isCurrentGeneration()) return;
         if (basicCompletionRes.error) {
           setError('讀取任務進度失敗，請稍後再試。');
           setLoading(false);
@@ -248,9 +255,11 @@ export default function LongTermDetailScreen() {
 
     void load();
     return () => {
-      cancelled = true;
+      if (generationRef.current === loadGeneration) {
+        generationRef.current += 1;
+      }
     };
-  }, [goalId, routeKey, taskId]);
+  }, [goalId, taskId]);
 
   const isCompletedToday = useMemo(
     () => completions.some((completion) =>
@@ -283,7 +292,9 @@ export default function LongTermDetailScreen() {
   const handleComplete = useCallback(async (): Promise<boolean> => {
     if (!goal || !task || isCompletedToday || checking) return false;
 
-    const requestRouteKey = routeKey;
+    const requestGeneration = generationRef.current;
+    const isCurrentGeneration = () =>
+      generationRef.current === requestGeneration;
     setChecking(true);
     try {
       const now = dayjs().tz(TZ);
@@ -295,7 +306,7 @@ export default function LongTermDetailScreen() {
         task,
         goalId,
       );
-      if (routeKeyRef.current !== requestRouteKey) return false;
+      if (!isCurrentGeneration()) return false;
 
       const completion: GoalCompletionRecord = {
         id: result.completionId,
@@ -305,12 +316,13 @@ export default function LongTermDetailScreen() {
       };
 
       setCompletions((current) => [...current, completion]);
-      if (goal.goal_type === 'habit' || goal.goal_type === 'family') {
+      const milestoneDay = result.milestone?.day ?? null;
+      if (goal.goal_type === 'habit' && milestoneDay !== null) {
         setGoal((current) => {
           if (
             !current
             || current.id !== goalId
-            || (current.goal_type !== 'habit' && current.goal_type !== 'family')
+            || current.goal_type !== 'habit'
           ) {
             return current;
           }
@@ -318,8 +330,8 @@ export default function LongTermDetailScreen() {
           return {
             ...current,
             current_day: Math.max(
-              (current.current_day ?? 0) + 1,
-              result.milestone?.day ?? 0,
+              current.current_day ?? 0,
+              milestoneDay,
             ),
           };
         });
@@ -332,13 +344,13 @@ export default function LongTermDetailScreen() {
             selectedTimeWindow,
             null,
           );
-          if (routeKeyRef.current !== requestRouteKey) return false;
+          if (!isCurrentGeneration()) return false;
           setCompletions((current) => current.map((item) =>
             item.id === result.completionId
               ? { ...item, planned_time_window: selectedTimeWindow }
               : item));
         } catch (contextError) {
-          if (routeKeyRef.current !== requestRouteKey) return false;
+          if (!isCurrentGeneration()) return false;
           Alert.alert(
             '閱讀時段尚未記下',
             contextError instanceof Error ? contextError.message : '可以稍後再試。',
@@ -354,14 +366,14 @@ export default function LongTermDetailScreen() {
       }
       return true;
     } catch (caught) {
-      if (routeKeyRef.current !== requestRouteKey) return false;
+      if (!isCurrentGeneration()) return false;
       Alert.alert(
         '記錄失敗',
         caught instanceof Error ? caught.message : '請稍後再試。',
       );
       return false;
     } finally {
-      if (routeKeyRef.current === requestRouteKey) {
+      if (isCurrentGeneration()) {
         setChecking(false);
       }
     }
@@ -370,7 +382,6 @@ export default function LongTermDetailScreen() {
     goal,
     goalId,
     isCompletedToday,
-    routeKey,
     selectedTimeWindow,
     task,
     taskId,
@@ -389,11 +400,13 @@ export default function LongTermDetailScreen() {
   ) => {
     if (!selectedCompletion || correctingTimeWindow) return;
 
-    const requestRouteKey = routeKey;
+    const requestGeneration = generationRef.current;
+    const isCurrentGeneration = () =>
+      generationRef.current === requestGeneration;
     setCorrectingTimeWindow(true);
     try {
       await recordCompletionContext(selectedCompletion.id, nextWindow, null);
-      if (routeKeyRef.current !== requestRouteKey) return;
+      if (!isCurrentGeneration()) return;
 
       setCompletions((current) => current.map((completion) =>
         completion.id === selectedCompletion.id
@@ -407,18 +420,18 @@ export default function LongTermDetailScreen() {
         setSelectedTimeWindow(nextWindow);
       }
     } catch (caught) {
-      if (routeKeyRef.current !== requestRouteKey) return;
+      if (!isCurrentGeneration()) return;
       Alert.alert(
         '更正失敗',
         caught instanceof Error ? caught.message : '請稍後再試。',
       );
       throw caught;
     } finally {
-      if (routeKeyRef.current === requestRouteKey) {
+      if (isCurrentGeneration()) {
         setCorrectingTimeWindow(false);
       }
     }
-  }, [correctingTimeWindow, routeKey, selectedCompletion]);
+  }, [correctingTimeWindow, selectedCompletion]);
 
   return (
     <View style={webScreen}>

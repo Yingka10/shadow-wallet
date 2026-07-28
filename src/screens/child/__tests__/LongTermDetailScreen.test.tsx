@@ -420,6 +420,43 @@ describe('LongTermDetailScreen', () => {
     ).toBe(false);
   });
 
+  it.each([
+    '2026-02-30',
+    '2026-13-01',
+  ])('rejects the impossible date-only goal start %s', async (startedAt) => {
+    mockReadingGoal = {
+      ...mockBaseGoal,
+      started_at: startedAt,
+      created_at: '2026-07-01',
+    };
+
+    render(<LongTermDetailScreen />);
+
+    await screen.findByText('自主閱讀計畫');
+    expect(mockSupabaseGteCalls).toContainEqual({
+      table: 'task_completions',
+      column: 'completed_at',
+      value: '2026-06-30T16:00:00.000Z',
+    });
+  });
+
+  it('uses today in Taipei when both goal dates are invalid', async () => {
+    mockReadingGoal = {
+      ...mockBaseGoal,
+      started_at: 'not-a-start',
+      created_at: 'not-a-created-date',
+    };
+
+    render(<LongTermDetailScreen />);
+
+    await screen.findByText('自主閱讀計畫');
+    expect(mockSupabaseGteCalls).toContainEqual({
+      table: 'task_completions',
+      column: 'completed_at',
+      value: '2026-07-29T16:00:00.000Z',
+    });
+  });
+
   it('filters flagged completions from the normal context query', async () => {
     mockReadingCompletions = [
       ...baseReadingCompletions,
@@ -589,6 +626,45 @@ describe('LongTermDetailScreen', () => {
     expect(await screen.findByText('成長幣 +10 已記下')).toBeTruthy();
   });
 
+  it('does not guess checkpoint progress for a habit completion without a milestone', async () => {
+    mockReadingGoal = {
+      ...mockBaseGoal,
+      current_day: 4,
+    };
+    mockCompleteTask.mockResolvedValueOnce({
+      completionId: 'completion-thu',
+      milestone: null,
+    });
+    render(<LongTermDetailScreen />);
+
+    expect(await screen.findByText('達成後成長幣 +10')).toBeTruthy();
+    fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
+
+    await screen.findByText('今天已完成 15 分鐘');
+    expect(screen.getByText('達成後成長幣 +10')).toBeTruthy();
+    expect(screen.queryByText('成長幣 +10 已記下')).toBeNull();
+  });
+
+  it('does not apply a returned milestone to family current_day', async () => {
+    mockReadingGoal = {
+      ...mockBaseGoal,
+      goal_type: 'family',
+      current_day: 4,
+    };
+    mockCompleteTask.mockResolvedValueOnce({
+      completionId: 'completion-thu',
+      milestone: { day: 5, reward: 10 },
+    });
+    render(<LongTermDetailScreen />);
+
+    expect(await screen.findByText('達成後成長幣 +10')).toBeTruthy();
+    fireEvent.press(screen.getByLabelText('記下今天的完成'));
+
+    await screen.findByText('今天已完成');
+    expect(screen.getByText('達成後成長幣 +10')).toBeTruthy();
+    expect(screen.queryByText('成長幣 +10 已記下')).toBeNull();
+  });
+
   it('corrects the selected real completion and updates the record sheet', async () => {
     render(<LongTermDetailScreen />);
 
@@ -652,6 +728,122 @@ describe('LongTermDetailScreen', () => {
     expect(
       screen.getByLabelText('想先暫停一下').props.accessibilityState.selected,
     ).toBe(false);
+  });
+
+  it('does not let an A to B to A completion request update the new A generation', async () => {
+    const completionRequest = deferred<{
+      completionId: string;
+      milestone: { day: number; reward: number };
+    }>();
+    mockCompleteTask.mockReturnValueOnce(completionRequest.promise);
+    const { rerender } = render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('記錄今天的閱讀'));
+    mockRouteParams = {
+      goalId: 'goal-skill',
+      taskId: 'task-skill',
+      taskName: '鋼琴家之路',
+    };
+    rerender(<LongTermDetailScreen />);
+    await screen.findByText('目前階段：雙手合奏');
+
+    mockRouteParams = {
+      goalId: 'goal-reading',
+      taskId: 'task-reading',
+      taskName: '自主閱讀計畫',
+    };
+    rerender(<LongTermDetailScreen />);
+    await screen.findByText('本週完成 3／5 次');
+
+    await act(async () => {
+      completionRequest.resolve({
+        completionId: 'stale-reading-completion',
+        milestone: { day: 5, reward: 10 },
+      });
+      await completionRequest.promise;
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('今天已完成 15 分鐘')).toBeNull();
+    expect(mockRecordCompletionContext).not.toHaveBeenCalled();
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it('does not let an A to B to A correction update the new A generation', async () => {
+    const correctionRequest = deferred<void>();
+    mockRecordCompletionContext.mockReturnValueOnce(correctionRequest.promise);
+    const { rerender } = render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('查看2026/07/29的紀錄'));
+    fireEvent.press(screen.getByText('改成睡前'));
+    mockRouteParams = {
+      goalId: 'goal-skill',
+      taskId: 'task-skill',
+      taskName: '鋼琴家之路',
+    };
+    rerender(<LongTermDetailScreen />);
+    await screen.findByText('目前階段：雙手合奏');
+
+    mockRouteParams = {
+      goalId: 'goal-reading',
+      taskId: 'task-reading',
+      taskName: '自主閱讀計畫',
+    };
+    rerender(<LongTermDetailScreen />);
+    await screen.findByText('本週完成 3／5 次');
+
+    await act(async () => {
+      correctionRequest.resolve();
+      await correctionRequest.promise;
+      await Promise.resolve();
+    });
+
+    fireEvent.press(screen.getByLabelText('查看2026/07/29的紀錄'));
+    expect(screen.getAllByText('晚餐後').length).toBeGreaterThan(0);
+    expect(screen.queryByText('睡前')).toBeNull();
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it('does not continue completion context or alert after unmount', async () => {
+    const completionRequest = deferred<{
+      completionId: string;
+      milestone: { day: number; reward: number };
+    }>();
+    mockCompleteTask.mockReturnValueOnce(completionRequest.promise);
+    const { unmount } = render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('記錄今天的閱讀'));
+    unmount();
+
+    await act(async () => {
+      completionRequest.resolve({
+        completionId: 'unmounted-completion',
+        milestone: { day: 5, reward: 10 },
+      });
+      await completionRequest.promise;
+      await Promise.resolve();
+    });
+
+    expect(mockRecordCompletionContext).not.toHaveBeenCalled();
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it('does not alert when a correction rejects after unmount', async () => {
+    const correctionRequest = deferred<void>();
+    mockRecordCompletionContext.mockReturnValueOnce(correctionRequest.promise);
+    const { unmount } = render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('查看2026/07/29的紀錄'));
+    fireEvent.press(screen.getByText('改成睡前'));
+    unmount();
+
+    await act(async () => {
+      correctionRequest.reject(new Error('late correction failure'));
+      await correctionRequest.promise.catch(() => undefined);
+      await Promise.resolve();
+    });
+
+    expect(Alert.alert).not.toHaveBeenCalled();
   });
 
   it('does not let an old completion request update the next route', async () => {
