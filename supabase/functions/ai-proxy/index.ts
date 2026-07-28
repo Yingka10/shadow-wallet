@@ -318,6 +318,23 @@ async function handleAdvisorChat(payload: {
     ? payload.longTermSummary.map(i => `- ${i.name}：進度 ${Math.round(i.progressPct)}%`).join('\n')
     : '（目前沒有進行中的長期任務）';
 
+  // 從真實資料推斷最近的行為模式（活躍天數、單日份量、長期任務投入狀況），
+  // 不用問卷性格分類——那組欄位在這個 App 裡從沒被寫入過，是空的。
+  const weekHistory = payload.weekHistory ?? [];
+  const activeDaysInWeek = weekHistory.length;
+  const totalWeekTasks = weekHistory.reduce((sum, d) => sum + d.tasks.length, 0);
+  const avgPerActiveDay = activeDaysInWeek > 0 ? (totalWeekTasks / activeDaysInWeek).toFixed(1) : null;
+  const ltTotal = payload.longTermSummary.length;
+  const ltStarted = payload.longTermSummary.filter(i => i.progressPct > 0 && i.progressPct < 100).length;
+  const ltStalled = payload.longTermSummary.filter(i => i.progressPct === 0).length;
+
+  const behaviorLines = [
+    `- 過去 7 天有完成紀錄的天數：${activeDaysInWeek}/7${avgPerActiveDay ? `，平均每個有紀錄的天完成 ${avgPerActiveDay} 項任務` : ''}`,
+    ltTotal > 0
+      ? `- 長期任務共 ${ltTotal} 個：${ltStarted} 個持續推進中，${ltStalled} 個還沒開始`
+      : null,
+  ].filter(Boolean).join('\n');
+
   const historyLines = (payload.history ?? [])
     .slice(-6)
     .map(h => `${h.role === 'parent' ? '家長' : '顧問'}：${h.text}`)
@@ -335,6 +352,8 @@ ${taskLines}
 ${weekLines}
 - 長期任務進度：
 ${ltLines}
+- 最近的行為模式（依實際紀錄推算，不是問卷分類）：
+${behaviorLines}
 
 ${historyLines ? `之前的對話：\n${historyLines}\n` : ''}
 家長現在問：「${payload.question}」
@@ -343,8 +362,9 @@ ${historyLines ? `之前的對話：\n${historyLines}\n` : ''}
 1. 全程用溫暖、體貼、鼓勵的白話繁體中文，不要出現「Task-A」「B類」這種代號或專有名詞。
 2. 100 字以內，簡短直接回答問題，不需要重述資料。
 3. 只根據上面給的資料回答，不要編造數字或具體事件；資料不夠判斷時自然帶過（見上），不要提「系統」「資料庫」「目前只記錄到」這類字眼，也不要交代資料從哪裡來。
-4. 不要用條列式或標題，用一般說話的口吻，像朋友聊天，不要像在報告或客服回覆。
-5. 只回傳回覆內容本身，不要加引號或其他格式。`;
+4. 若問題跟任務節奏、步調安排、要不要加/減任務有關，請依「最近的行為模式」給出貼合這個孩子實際步調的建議（例如活躍天數少就別建議加量、長期任務卡住就建議拆小），不要給空泛通用的建議，也不要提到「活躍天數」「行為模式」這種分析用詞，用生活化的說法講出來就好。
+5. 不要用條列式或標題，用一般說話的口吻，像朋友聊天，不要像在報告或客服回覆。
+6. 只回傳回覆內容本身，不要加引號或其他格式。`;
 
   const reply = await callGemini(prompt);
   return { reply: reply.trim() };
