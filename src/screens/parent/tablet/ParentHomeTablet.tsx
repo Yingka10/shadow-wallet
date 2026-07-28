@@ -2437,6 +2437,7 @@ function AdvisorSideSheet({
   parentName,
   initialPrompt,
   ltItems,
+  todayTasks,
   doneToday,
   totalToday,
   onClose,
@@ -2446,6 +2447,7 @@ function AdvisorSideSheet({
   parentName: string;
   initialPrompt?: string;
   ltItems: LongTermTaskItem[];
+  todayTasks: DashboardTask[];
   doneToday: number;
   totalToday: number;
   onClose: () => void;
@@ -2464,13 +2466,18 @@ function AdvisorSideSheet({
         question,
         doneToday,
         totalToday,
+        todayTasks: todayTasks.map(t => ({
+          name: t.name,
+          status: t.status,
+          rewardKind: t.reward?.kind ?? null,
+        })),
         longTermSummary: ltItems.map(i => ({ name: i.name, progressPct: i.progressPct })),
         history: historyBefore.map(m => ({ role: m.role, text: m.text })),
       });
       setMessages(prev => [...prev, { role: 'ai', text: reply, at: dayjs().format('HH:mm') }]);
       setSending(false);
     },
-    [childName, doneToday, totalToday, ltItems],
+    [childName, doneToday, totalToday, todayTasks, ltItems],
   );
 
   useEffect(() => {
@@ -3068,6 +3075,7 @@ export default function ParentHomeTablet() {
           parentName={parentName ?? '家長'}
           initialPrompt={advisorInitialPrompt}
           ltItems={ltItems}
+          todayTasks={todayTasks}
           doneToday={doneToday}
           totalToday={totalToday}
           onClose={() => { setAdvisorOpen(false); setAdvisorInitialPrompt(undefined); }}

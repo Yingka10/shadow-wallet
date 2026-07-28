@@ -192,6 +192,7 @@ export type AdvisorChatInput = {
   question: string;
   doneToday: number;
   totalToday: number;
+  todayTasks?: { name: string; status: string; rewardKind: 'coins' | 'time' | null }[];
   longTermSummary: { name: string; progressPct: number }[];
   history?: { role: 'parent' | 'ai'; text: string }[];
 };

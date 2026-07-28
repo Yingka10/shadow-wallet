@@ -282,17 +282,31 @@ reason 請在 60 字以內，直接說明。
 
 /**
  * handleAdvisorChat — 家長端「AI 教養顧問」自由問答。
- * 只餵入家長端畫面本來就會顯示的彙總資料（今日完成數、長期任務進度），
- * 不額外查 DB、不碰孩子的原始逐筆紀錄——顧問看得到的東西跟家長一樣多。
+ * 只餵入家長端畫面本來就會顯示的資料（今日任務清單、長期任務進度），
+ * 不額外查 DB、不碰孩子的原始逐筆紀錄——顧問看得到的東西跟家長一樣多，
+ * 但不只是彙總數字，也包含家長本來就看得到的任務名稱與狀態。
  */
 async function handleAdvisorChat(payload: {
   childName: string;
   question: string;
   doneToday: number;
   totalToday: number;
+  todayTasks?: { name: string; status: string; rewardKind: 'coins' | 'time' | null }[];
   longTermSummary: { name: string; progressPct: number }[];
   history?: { role: 'parent' | 'ai'; text: string }[];
 }) {
+  const STATUS_LABEL: Record<string, string> = {
+    done: '已完成',
+    pending: '待完成',
+    missed: '沒做到',
+    review: '待家長確認',
+  };
+  const taskLines = (payload.todayTasks ?? []).length > 0
+    ? (payload.todayTasks ?? [])
+        .map(t => `- ${t.name}（${STATUS_LABEL[t.status] ?? t.status}）`)
+        .join('\n')
+    : '（今天沒有排定任務）';
+
   const ltLines = payload.longTermSummary.length > 0
     ? payload.longTermSummary.map(i => `- ${i.name}：進度 ${Math.round(i.progressPct)}%`).join('\n')
     : '（目前沒有進行中的長期任務）';
@@ -305,10 +319,12 @@ async function handleAdvisorChat(payload: {
   const prompt = `你是一位溫柔、細心的親職陪伴顧問，正在跟一位家長聊聊孩子「${payload.childName}」的狀況。
 
 這個 App 的定位是記帳型的任務分配工具，不是監控系統：孩子自行回報完成，系統不驗證真偽。
-你只看得到家長在畫面上也看得到的彙總資訊，看不到逐筆紀錄或任何隱私細節，遇到你不知道的細節就誠實說不知道，不要編造數字或具體事件。
+你只看得到家長在畫面上也看得到的資料，看不到逐筆完成時間、孩子的原話或任何隱私細節，遇到你不知道的細節就誠實說不知道，不要編造數字或具體事件。
 
 目前可參考的資料：
 - 今日任務完成：${payload.doneToday}/${payload.totalToday}
+- 今日任務清單：
+${taskLines}
 - 長期任務進度：
 ${ltLines}
 
@@ -384,6 +400,7 @@ Deno.serve(async (req) => {
           question: string;
           doneToday: number;
           totalToday: number;
+          todayTasks?: { name: string; status: string; rewardKind: 'coins' | 'time' | null }[];
           longTermSummary: { name: string; progressPct: number }[];
           history?: { role: 'parent' | 'ai'; text: string }[];
         });
