@@ -23,7 +23,7 @@ describe('新任務依 reward_policy 分組', () => {
     ['coin_eligible', 'coin_reward'],
     ['family_contribution', 'family_contribution'],
     ['progress_only', 'progress'],
-    ['record_only', 'life_record'],
+    ['record_only', 'record_only'],
     ['time_saving_eligible', 'legacy_time_saving'],
   ];
 
@@ -42,7 +42,7 @@ describe('新任務依 reward_policy 分組', () => {
   it('category 換成什麼都不影響有 reward_policy 的任務', () => {
     for (const category of ['A', 'B', 'C', 'D'] as TaskCategory[]) {
       expect({ category, group: mapTaskToDisplayGroup({ category, rewardPolicy: 'record_only' }) })
-        .toEqual({ category, group: 'life_record' });
+        .toEqual({ category, group: 'record_only' });
     }
   });
 });
@@ -55,7 +55,8 @@ describe('哪一區可以顯示幣值', () => {
   it('只有成長幣區', () => {
     expect(displayGroupShowsCoins('coin_reward')).toBe(true);
     for (const group of
-      ['life_record', 'family_contribution', 'progress', 'legacy_time_saving'] as const) {
+      ['record_only', 'family_contribution', 'progress',
+       'legacy_time_saving', 'legacy_life_record'] as const) {
       expect({ group, shows: displayGroupShowsCoins(group) })
         .toEqual({ group, shows: false });
     }
@@ -77,7 +78,7 @@ describe('哪一區可以顯示幣值', () => {
 
 describe('legacy 任務（reward_policy 為 NULL）', () => {
   const LEGACY: Array<[TaskCategory, ParentTaskDisplayGroup]> = [
-    ['A', 'life_record'],
+    ['A', 'legacy_life_record'],
     ['B', 'legacy_time_saving'],
     ['C', 'coin_reward'],
     ['D', 'coin_reward'],

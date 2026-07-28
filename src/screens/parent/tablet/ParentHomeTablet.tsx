@@ -1370,7 +1370,7 @@ function NewTaskPanel({
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.habitTypeCard}
-              onPress={() => { setLongTermType('family'); setStep(1); }}
+              onPress={() => { setLongTermType('responsibility'); setStep(1); }}
               activeOpacity={0.8}
             >
               <Text style={styles.habitTypeIcon}>🏠</Text>
@@ -1932,7 +1932,7 @@ function NewTaskPanel({
       )}
 
       {/* Family Step 1 — responsibility name */}
-      {step === 1 && longTermType === 'family' && (
+      {step === 1 && longTermType === 'responsibility' && (
         <>
           <Text style={styles.newTaskFieldLabel}>這個孩子要負責什麼？</Text>
           <TextInput
@@ -1957,7 +1957,7 @@ function NewTaskPanel({
       )}
 
       {/* Family Step 2 — active completion days */}
-      {step === 2 && longTermType === 'family' && (
+      {step === 2 && longTermType === 'responsibility' && (
         <>
           <Text style={styles.newTaskFieldLabel}>哪幾天需要完成？</Text>
           <View style={styles.newTaskDayRow}>
@@ -1995,7 +1995,7 @@ function NewTaskPanel({
       )}
 
       {/* Family Step 3 — time saving per completion */}
-      {step === 3 && longTermType === 'family' && (
+      {step === 3 && longTermType === 'responsibility' && (
         <>
           <Text style={styles.newTaskFieldLabel}>每次時間存摺</Text>
           <Text style={styles.habitCoinError /* reuse small text style */}>
@@ -2048,7 +2048,7 @@ function NewTaskPanel({
       )}
 
       {/* Family Step 4 — commit weeks + summary + confirm */}
-      {step === 4 && longTermType === 'family' && effectiveFamilyTime != null && (
+      {step === 4 && longTermType === 'responsibility' && effectiveFamilyTime != null && (
         <>
           <Text style={styles.newTaskFieldLabel}>承諾期間</Text>
           <View style={styles.habitDayGrid}>

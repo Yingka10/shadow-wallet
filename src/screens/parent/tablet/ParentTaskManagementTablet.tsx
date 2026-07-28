@@ -32,6 +32,12 @@ import {
 } from '../../../constants/parentTheme';
 import { webTabletScreen } from '../../../constants/webStyles';
 import type { TaskCategory } from '../../../types/database';
+import {
+  DISPLAY_GROUP_LABEL,
+  DISPLAY_GROUP_SUBTITLE,
+  displayGroupShowsCoins,
+  type ParentTaskDisplayGroup,
+} from '../../../lib/parentTaskDisplayGroup';
 import { ParentSidebar, type ManageSection } from './ParentSidebar';
 import { ManageTabBar } from './ManageTabBar';
 import {
@@ -52,7 +58,16 @@ import {
 } from './home/homeIcons';
 
 type TaskManageTab = 'daily' | 'longTerm' | 'paused' | 'archive';
-type DailyGroupKey = 'life' | 'time' | 'coins';
+
+/**
+ * 日常分區直接就是 ParentTaskDisplayGroup。
+ *
+ * 第七階段 C 把六個分區壓成三個（life / time / coins），代價是
+ * 家庭參與與進度回饋都被叫成「生活紀錄」—— 那是三件不同的事。
+ * 現在一對一，空的區塊本來就不渲染，所以頁面不會因此變碎：
+ * 一個家庭實際上只會同時有兩三種。
+ */
+type DailyGroupKey = ParentTaskDisplayGroup;
 
 const TABS: Array<{ id: TaskManageTab; label: string }> = [
   { id: 'daily', label: '日常任務' },
@@ -61,31 +76,21 @@ const TABS: Array<{ id: TaskManageTab; label: string }> = [
   { id: 'archive', label: '封存紀錄' },
 ];
 
-const DAILY_GROUPS: Record<DailyGroupKey, {
-  title: string;
-  subtitle: string;
-  tint: string;
-  color: string;
-}> = {
-  life: {
-    title: '生活紀錄',
-    subtitle: '日常自理與家庭分工，不兌換成長幣',
-    tint: ParentColors.tintLeaf,
-    color: ParentColors.leaf700,
-  },
-  time: {
-    title: '時間儲蓄任務',
-    subtitle: '完成後累積親子共處時間',
-    tint: ParentColors.tintPine,
-    color: ParentColors.pine400,
-  },
-  coins: {
-    title: '成長幣任務',
-    subtitle: '記錄額外投入與可累積的付出',
-    tint: ParentColors.tintAmber,
-    color: ParentColors.amber700,
-  },
+/** 標題與副標只有一份來源（parentTaskDisplayGroup），這裡只補顏色。 */
+const DAILY_GROUP_TINT: Record<DailyGroupKey, { tint: string; color: string }> = {
+  family_contribution: { tint: ParentColors.tintPine, color: ParentColors.pine400 },
+  progress:            { tint: ParentColors.tintLeaf, color: ParentColors.leaf700 },
+  coin_reward:         { tint: ParentColors.tintAmber, color: ParentColors.amber700 },
+  record_only:         { tint: ParentColors.tintLeaf, color: ParentColors.leaf700 },
+  legacy_time_saving:  { tint: ParentColors.tintPine, color: ParentColors.pine400 },
+  legacy_life_record:  { tint: ParentColors.tintLeaf, color: ParentColors.leaf700 },
 };
+
+/** 區塊的顯示順序。可發幣的放最後 —— 它不是任務清單的主角。 */
+const DAILY_GROUP_ORDER: DailyGroupKey[] = [
+  'legacy_life_record', 'record_only', 'family_contribution',
+  'progress', 'legacy_time_saving', 'coin_reward',
+];
 
 const CAT_DOT: Record<TaskCategory, string> = {
   A: ParentColors.leaf500,
@@ -94,28 +99,8 @@ const CAT_DOT: Record<TaskCategory, string> = {
   D: ParentColors.amber500,
 };
 
-/**
- * 顯示分區 → 這一頁現有的三個日常分組。
- *
- * 對應是刻意壓縮的：這一輪不新增分區（那會動到整頁的版面與計數），
- * 只保證不把不發幣的任務放進成長幣區。
- *   life_record / family_contribution → 生活紀錄（都不發幣、不累積時間）
- *   progress                          → 生活紀錄（同上；進度回饋沒有可顯示的數量）
- *   legacy_time_saving                → 時間儲蓄（舊的 B 類，真的會寫 time_savings）
- *   coin_reward                       → 成長幣任務
- *
- * 視覺債務：家庭參與與進度回饋目前混在「生活紀錄」裡，兩者的意義並不相同。
- * 分開需要新的區塊與文案，留給任務管理頁改版。
- */
 function dailyGroupForTask(task: TaskListItem): DailyGroupKey {
-  switch (task.displayGroup) {
-    case 'coin_reward':
-      return 'coins';
-    case 'legacy_time_saving':
-      return 'time';
-    default:
-      return 'life';
-  }
+  return task.displayGroup;
 }
 
 function formatDate(value?: string | null) {
@@ -123,13 +108,18 @@ function formatDate(value?: string | null) {
   return dayjs(value).format('M/DD');
 }
 
+/**
+ * 每一列右邊那句話。
+ *
+ * 只有可發幣的任務講得出數字；其餘一律用該分區的說法。
+ * 「不兌換成長幣」對家庭參與是錯的重點 —— 那項任務的意義不是「沒有幣」。
+ */
 function formatReward(task: TaskListItem) {
-  // 分區已經說明了這一區是什麼，這裡只補上「有數量的那兩種」的數量。
-  if (task.displayGroup === 'family_contribution') return '記錄家庭參與，不發成長幣';
-  if (task.displayGroup === 'progress') return '回饋進度與肯定，不發成長幣';
-  if (!task.reward) return '不兌換成長幣';
-  if (task.reward.kind === 'time') return `完成後累積 ${task.reward.amount} 分鐘`;
-  return `完成後記錄 ${task.reward.amount} 枚成長幣`;
+  if (task.reward?.kind === 'coins' && displayGroupShowsCoins(task.displayGroup)) {
+    return `完成後記錄 ${task.reward.amount} 枚成長幣`;
+  }
+  if (task.reward?.kind === 'time') return `完成後累積 ${task.reward.amount} 分鐘`;
+  return DISPLAY_GROUP_SUBTITLE[task.displayGroup];
 }
 
 function formatWeeklyChange(goal: LongTermGoalItem) {
@@ -143,8 +133,15 @@ function formatWeeklyChange(goal: LongTermGoalItem) {
   return `本週完成 ${goal.weeklyCompleted} 天｜${compare}`;
 }
 
-function nextMilestone(goal: LongTermGoalItem) {
-  if (goal.progressPct <= 0) return '第 10 天';
+/**
+ * 「下一個里程碑」。
+ *
+ * 只有算得出百分比的任務才講得出下一步 —— 期間型的家庭角色與生活小計畫
+ * 沒有里程碑，它們的下一件事是「一起回顧」，而那句話已經在 progressLabel 裡。
+ * 回 null 時整塊不渲染，不要編一個「第 10 天」出來。
+ */
+function nextMilestone(goal: LongTermGoalItem): string | null {
+  if (goal.progressPct === null) return null;
   if (goal.progressPct < 50) return '第 10 天';
   if (goal.progressPct < 80) return '下一個階段';
   return '接近完成';
@@ -218,18 +215,18 @@ function DailyGroup({
   onEdit: (task: TaskListItem) => void;
 }) {
   if (tasks.length === 0) return null;
-  const meta = DAILY_GROUPS[groupKey];
+  const tint = DAILY_GROUP_TINT[groupKey];
   return (
     <SectionCard
-      title={meta.title}
-      subtitle={meta.subtitle}
+      title={DISPLAY_GROUP_LABEL[groupKey]}
+      subtitle={DISPLAY_GROUP_SUBTITLE[groupKey]}
       icon={
-        <View style={[s.groupIcon, { backgroundColor: meta.tint }]}>
-          {groupKey === 'life'
-            ? <CheckSquareIcon size={21} color={meta.color} />
-            : groupKey === 'time'
-              ? <ClockIcon size={21} color={meta.color} />
-              : <CoinIcon size={21} color={meta.color} />}
+        <View style={[s.groupIcon, { backgroundColor: tint.tint }]}>
+          {groupKey === 'coin_reward'
+            ? <CoinIcon size={21} color={tint.color} />
+            : groupKey === 'legacy_time_saving'
+              ? <ClockIcon size={21} color={tint.color} />
+              : <CheckSquareIcon size={21} color={tint.color} />}
         </View>
       }
     >
@@ -263,17 +260,25 @@ function LongTermCard({
           <TaskStatusChip label="進行中" />
         </View>
         <Text style={s.longTermProgressLabel}>{goal.progressLabel}</Text>
-        <View style={s.bigProgressTrack}>
-          <View style={[s.bigProgressFill, { width: `${Math.min(100, goal.progressPct)}%` }]} />
-        </View>
+        {/*
+          算不出比例就不畫進度條。空的進度條看起來是「一點都沒做」，
+          而家庭角色與生活小計畫本來就沒有可以填滿的分母。
+        */}
+        {goal.progressPct !== null ? (
+          <View style={s.bigProgressTrack}>
+            <View style={[s.bigProgressFill, { width: `${Math.min(100, goal.progressPct)}%` }]} />
+          </View>
+        ) : null}
         <Text style={[s.weeklyChangeText, quiet && s.adjustText]}>
           {weeklyText}{quiet ? '　查看調整建議 ›' : ''}
         </Text>
       </View>
-      <View style={s.longTermSide}>
-        <Text style={s.milestoneLabel}>下一個里程碑：</Text>
-        <Text style={s.milestoneValue}>{nextMilestone(goal)}</Text>
-      </View>
+      {nextMilestone(goal) ? (
+        <View style={s.longTermSide}>
+          <Text style={s.milestoneLabel}>下一個里程碑：</Text>
+          <Text style={s.milestoneValue}>{nextMilestone(goal)}</Text>
+        </View>
+      ) : null}
       <View style={s.longTermActions}>
         <TouchableOpacity style={s.secondaryButton} onPress={() => onEdit(goal)} activeOpacity={0.7}>
           <Text style={s.secondaryButtonText}>編輯挑戰</Text>
@@ -301,7 +306,7 @@ function PausedTaskCard({
       <View style={s.pausedMain}>
         <View style={s.pausedTypeRow}>
           <Text style={s.typeBadge}>{task.isLongTerm ? '長期挑戰' : '日常任務'}</Text>
-          <Text style={s.pausedTypeText}>{DAILY_GROUPS[dailyGroupForTask(task)].title}</Text>
+          <Text style={s.pausedTypeText}>{DISPLAY_GROUP_LABEL[dailyGroupForTask(task)]}</Text>
         </View>
         <Text style={s.pausedTitle}>{task.name}</Text>
         <Text style={s.pausedMeta}>原本：{task.freqLabel}｜{formatReward(task)}</Text>
@@ -455,11 +460,13 @@ export default function ParentTaskManagementTablet() {
     () => tasks.filter(task => !task.isLongTerm),
     [tasks],
   );
-  const dailyGroups = useMemo(() => ({
-    life: regularTasks.filter(task => dailyGroupForTask(task) === 'life'),
-    time: regularTasks.filter(task => dailyGroupForTask(task) === 'time'),
-    coins: regularTasks.filter(task => dailyGroupForTask(task) === 'coins'),
-  }), [regularTasks]);
+  /** 每個分區各自的任務。空的區塊在 DailyGroup 裡直接不渲染。 */
+  const dailyGroups = useMemo(() => {
+    const grouped = {} as Record<DailyGroupKey, TaskListItem[]>;
+    for (const key of DAILY_GROUP_ORDER) grouped[key] = [];
+    for (const task of regularTasks) grouped[dailyGroupForTask(task)].push(task);
+    return grouped;
+  }, [regularTasks]);
   const activeLongTerm = useMemo(
     () => longTermGoals.filter(goal => goal.status === 'active'),
     [longTermGoals],
@@ -667,9 +674,14 @@ export default function ParentTaskManagementTablet() {
                 <View style={s.mainCol}>
                   {activeTab === 'daily' && (
                     <View style={s.stack}>
-                      <DailyGroup groupKey="life" tasks={dailyGroups.life} onEdit={handleEditTask} />
-                      <DailyGroup groupKey="time" tasks={dailyGroups.time} onEdit={handleEditTask} />
-                      <DailyGroup groupKey="coins" tasks={dailyGroups.coins} onEdit={handleEditTask} />
+                      {DAILY_GROUP_ORDER.map(key => (
+                        <DailyGroup
+                          key={key}
+                          groupKey={key}
+                          tasks={dailyGroups[key]}
+                          onEdit={handleEditTask}
+                        />
+                      ))}
                       {regularTasks.length === 0 ? <EmptyState text="目前還沒有啟用中的日常任務" /> : null}
                     </View>
                   )}

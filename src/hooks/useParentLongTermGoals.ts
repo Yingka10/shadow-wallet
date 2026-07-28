@@ -9,7 +9,12 @@ import {
   resumeLongTermGoal,
   deleteLongTermGoal,
 } from '../lib/taskActions';
-import type { LongTermType, GoalStatus } from '../types/database';
+import {
+  createLongTermTaskProgressPresentation,
+  progressPercentOf,
+  type LongTermTaskProgressPresentation,
+} from '../lib/longTermTaskProgress';
+import type { LongTermType, GoalStatus, RewardPolicyValue } from '../types/database';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -27,8 +32,14 @@ export type LongTermGoalItem = {
   name: string;
   goalType: LongTermType;
   status: GoalStatus;
-  progressPct: number;
+  /**
+   * 進度百分比。null = 這種任務算不出有意義的比例（例如期間型的家庭角色）——
+   * **不是 0**。0 會被畫成一條空的進度條，那等於宣稱孩子一點都沒做。
+   */
+  progressPct: number | null;
   progressLabel: string;
+  /** 完整的呈現描述。畫面要分辨形式時看它，不要自己判斷 planMode。 */
+  progress: LongTermTaskProgressPresentation;
   weeklyCompleted: number;
   previousWeeklyCompleted: number;
 };
@@ -60,46 +71,24 @@ type GoalRow = {
   current_value: number | null;
   target_value: number | null;
   value_unit: string | null;
+  first_review_after_days: number | null;
+  started_at: string | null;
 };
 
-const VALID_GOAL_TYPES: LongTermType[] = ['habit', 'skill', 'family', 'challenge'];
+/** 從 tasks 取的、決定「這是新任務還是 legacy」的兩個欄位。 */
+type TaskShapeRow = {
+  id: string;
+  name: string;
+  reward_policy: RewardPolicyValue | null;
+  plan_mode: 'growth_plan' | 'short_support' | 'family_role' | null;
+};
 
-function deriveProgress(g: GoalRow): { pct: number; label: string } {
-  switch (g.goal_type) {
-    case 'habit': {
-      const total = g.total_days ?? 1;
-      return {
-        pct: Math.min(100, Math.round((g.current_day / total) * 100)),
-        label: `第 ${g.current_day} 天 / 共 ${total} 天`,
-      };
-    }
-    case 'skill': {
-      const cur = g.current_level ?? 0;
-      const total = g.level_count ?? 1;
-      return {
-        pct: Math.min(100, Math.round((cur / total) * 100)),
-        label: `第 ${cur} 關 / 共 ${total} 關`,
-      };
-    }
-    case 'family': {
-      const total = g.target_completions ?? 1;
-      return {
-        pct: Math.min(100, Math.round((g.current_day / total) * 100)),
-        label: `完成 ${g.current_day} 次 / 目標 ${total} 次`,
-      };
-    }
-    case 'challenge': {
-      const cur = g.current_value ?? 0;
-      const total = g.target_value ?? 1;
-      const unit = g.value_unit ? ` ${g.value_unit}` : '';
-      return {
-        pct: Math.min(100, Math.round((cur / total) * 100)),
-        label: `${cur} / ${total}${unit}`,
-      };
-    }
-    default:
-      return { pct: 0, label: '進行中' };
-  }
+const VALID_GOAL_TYPES: LongTermType[] = ['habit', 'skill', 'responsibility', 'challenge'];
+
+/** started_at + firstReviewAfterDays 的日期。算不出來就不給。 */
+function firstReviewDateOf(g: GoalRow): string | null {
+  if (!g.started_at || !g.first_review_after_days || g.first_review_after_days <= 0) return null;
+  return dayjs(g.started_at).tz(TZ).add(g.first_review_after_days, 'day').format('YYYY-MM-DD');
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +111,7 @@ export function useParentLongTermGoals(childId: string): ParentLongTermGoalsData
     try {
       const { data: goals, error: goalsErr } = await supabase
         .from('long_term_goals')
-        .select('id, task_id, goal_type, status, current_day, total_days, current_level, level_count, target_completions, current_value, target_value, value_unit')
+        .select('id, task_id, goal_type, status, current_day, total_days, current_level, level_count, target_completions, current_value, target_value, value_unit, first_review_after_days, started_at')
         .eq('child_id', childId)
         .in('status', ['active', 'paused'])
         .order('started_at', { ascending: false });
@@ -144,10 +133,14 @@ export function useParentLongTermGoals(childId: string): ParentLongTermGoalsData
       const prevStart = weekStart.subtract(1, 'week');
       const prevEnd = weekEnd.subtract(1, 'week');
 
-      const [tasksRes, weeklyCompletionsRes, previousCompletionsRes] = await Promise.all([
+      const [
+        tasksRes, weeklyCompletionsRes, previousCompletionsRes,
+        milestonesRes, allCompletionsRes,
+      ] = await Promise.all([
         supabase
           .from('tasks')
-          .select('id, name')
+          // reward_policy 與 plan_mode 決定進度該怎麼說 —— 見 longTermTaskProgress。
+          .select('id, name, reward_policy, plan_mode')
           .in('id', taskIds),
         supabase
           .from('task_completions')
@@ -163,13 +156,36 @@ export function useParentLongTermGoals(childId: string): ParentLongTermGoalsData
           .in('task_id', taskIds)
           .gte('completed_at', prevStart.toISOString())
           .lte('completed_at', prevEnd.toISOString()),
+        // 成長計畫的階段數。沒有里程碑的計畫不會編一個分母出來。
+        supabase
+          .from('task_plan_milestones')
+          .select('task_id')
+          .in('task_id', taskIds),
+        supabase
+          .from('task_completions')
+          .select('task_id')
+          .eq('child_id', childId)
+          .in('task_id', taskIds),
       ]);
 
       if (tasksRes.error) throw tasksRes.error;
       if (weeklyCompletionsRes.error) throw weeklyCompletionsRes.error;
       if (previousCompletionsRes.error) throw previousCompletionsRes.error;
+      // 里程碑子表是抽屜這一版才有的。舊專案沒有這張表時不該讓整頁掛掉 ——
+      // 沒有里程碑就是「進行中的成長計畫」，那本來就是合法的呈現。
+      if (allCompletionsRes.error) throw allCompletionsRes.error;
 
-      const nameMap = new Map((tasksRes.data ?? []).map(t => [t.id, t.name as string]));
+      const taskMap = new Map(
+        ((tasksRes.data ?? []) as TaskShapeRow[]).map(row => [row.id, row]),
+      );
+      const milestoneCountByTask = new Map<string, number>();
+      for (const row of milestonesRes.data ?? []) {
+        milestoneCountByTask.set(row.task_id, (milestoneCountByTask.get(row.task_id) ?? 0) + 1);
+      }
+      const completionCountByTask = new Map<string, number>();
+      for (const row of allCompletionsRes.data ?? []) {
+        completionCountByTask.set(row.task_id, (completionCountByTask.get(row.task_id) ?? 0) + 1);
+      }
       const weeklyDoneByTask = new Map<string, number>();
       const previousDoneByTask = new Map<string, number>();
       for (const completion of weeklyCompletionsRes.data ?? []) {
@@ -180,15 +196,37 @@ export function useParentLongTermGoals(childId: string): ParentLongTermGoalsData
       }
 
       setItems(validGoals.map(g => {
-        const { pct, label } = deriveProgress(g);
+        const task = taskMap.get(g.task_id);
+        const progress = createLongTermTaskProgressPresentation({
+          task: {
+            rewardPolicy: task?.reward_policy ?? null,
+            planMode: task?.plan_mode ?? null,
+          },
+          longTermGoal: {
+            goalType: g.goal_type,
+            currentDay: g.current_day,
+            totalDays: g.total_days,
+            currentLevel: g.current_level,
+            levelCount: g.level_count,
+            targetCompletions: g.target_completions,
+            currentValue: g.current_value,
+            targetValue: g.target_value,
+            valueUnit: g.value_unit,
+            firstReviewAfterDays: g.first_review_after_days,
+            firstReviewDate: firstReviewDateOf(g),
+          },
+          milestoneCount: milestoneCountByTask.get(g.task_id) ?? 0,
+          completionCount: completionCountByTask.get(g.task_id) ?? 0,
+        });
         return {
           id: g.id,
           taskId: g.task_id,
-          name: nameMap.get(g.task_id) ?? '未命名任務',
+          name: task?.name ?? '未命名任務',
           goalType: g.goal_type,
           status: g.status,
-          progressPct: pct,
-          progressLabel: label,
+          progressPct: progressPercentOf(progress),
+          progressLabel: progress.label,
+          progress,
           weeklyCompleted: weeklyDoneByTask.get(g.task_id) ?? 0,
           previousWeeklyCompleted: previousDoneByTask.get(g.task_id) ?? 0,
         };

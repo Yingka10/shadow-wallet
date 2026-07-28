@@ -57,7 +57,7 @@ function deriveProgress(g: GoalRow): { pct: number; label: string } {
         label: `第 ${cur} 關 / 共 ${total} 關`,
       };
     }
-    case 'family': {
+    case 'responsibility': {
       const total = g.target_completions ?? 1;
       return {
         pct: Math.min(100, Math.round((g.current_day / total) * 100)),
@@ -105,7 +105,7 @@ export function useLongTermTasks(childId: string): LongTermTasksData {
 
       // Guard against legacy/bad rows: only keep goals with a known goal_type so
       // downstream UI lookups (GOAL_TYPE_META, deriveProgress) never hit undefined.
-      const validGoalTypes: LongTermType[] = ['habit', 'skill', 'family', 'challenge'];
+      const validGoalTypes: LongTermType[] = ['habit', 'skill', 'responsibility', 'challenge'];
       const validGoals = ((goals ?? []) as GoalRow[]).filter(g =>
         validGoalTypes.includes(g.goal_type),
       );

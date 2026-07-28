@@ -764,7 +764,7 @@ describe('LongTermDetailScreen', () => {
   it('does not apply a returned milestone to family current_day', async () => {
     mockReadingGoal = {
       ...mockBaseGoal,
-      goal_type: 'family',
+      goal_type: 'responsibility',
       current_day: 4,
     };
     mockCompleteTask.mockResolvedValueOnce({
