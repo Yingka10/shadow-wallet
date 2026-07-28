@@ -71,8 +71,10 @@ export type GoalPresentation = {
   overallPercent: number;
   focusText: string;
   nextText: string;
+  planNotice?: string | null;
   todayTitle: string;
   todayAction: string;
+  todayStatusText?: string | null;
   preferredTimeWindow: PreferredTimeWindow | null;
   canCompleteToday: boolean;
   isReadingPlan: boolean;
@@ -177,11 +179,14 @@ function getActiveDays(
   goal: LongTermGoal,
   isReadingHabit: boolean,
   isSkill: boolean,
+  isChallenge: boolean,
 ): number[] {
+  if (isSkill || isChallenge) return [];
+
   const configuredDays =
     goal.active_days
     ?? task.recurrence_days
-    ?? (isSkill ? [] : isReadingHabit ? MONDAY_TO_FRIDAY : ALL_WEEK_DAYS);
+    ?? (isReadingHabit ? MONDAY_TO_FRIDAY : ALL_WEEK_DAYS);
 
   return Array.from(
     new Set(configuredDays.filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)),
@@ -199,31 +204,42 @@ function getValidStartDate(startedAt: string): Dayjs | null {
   return start.isValid() ? start : null;
 }
 
-function getValidDueDate(startedAt: string, dueDate: string): Dayjs | null {
-  const start = getValidStartDate(startedAt);
+function getPlanStart(goal: LongTermGoal, task: Task, now: Dayjs): Dayjs {
+  return getValidStartDate(goal.started_at)
+    ?? getValidStartDate(goal.created_at)
+    ?? getValidStartDate(task.created_at)
+    ?? now.tz(TZ).startOf('day');
+}
+
+function getValidDueDate(start: Dayjs, dueDate: string): Dayjs | null {
   const end = parseTaipeiDate(dueDate).startOf('day');
-  if (!start || !end.isValid() || end.isBefore(start, 'day')) {
+  if (!end.isValid() || end.isBefore(start, 'day')) {
     return null;
   }
 
   return end;
 }
 
-function getCoveredWeeks(startedAt: string, dueDate: string): number | null {
-  const start = getValidStartDate(startedAt);
-  const end = getValidDueDate(startedAt, dueDate);
-  if (!start || !end) return null;
-
+function getCoveredWeeks(start: Dayjs, end: Dayjs): number {
   const coveredDays = end.diff(start, 'day') + 1;
   return Math.max(Math.ceil(coveredDays / 7), 1);
 }
 
-function getCurrentPlanWeek(startedAt: string, now: Dayjs, totalWeeks: number): number {
-  const start = getValidStartDate(startedAt);
-  if (!start) return 1;
-
+function getCurrentPlanWeek(start: Dayjs, now: Dayjs, totalWeeks: number): number {
   const elapsedDays = Math.max(now.tz(TZ).startOf('day').diff(start, 'day'), 0);
   return Math.min(Math.floor(elapsedDays / 7) + 1, totalWeeks);
+}
+
+function countScheduledDates(
+  start: Dayjs,
+  end: Dayjs,
+  activeDays: number[],
+): number {
+  let count = 0;
+  for (let date = start; !date.isAfter(end, 'day'); date = date.add(1, 'day')) {
+    if (activeDays.includes(date.day())) count += 1;
+  }
+  return count;
 }
 
 function getNextCheckpoint(
@@ -242,6 +258,24 @@ function getNextCheckpoint(
     threshold,
     coin: Number(goal.checkpoint_rewards[String(threshold)] ?? 0),
   };
+}
+
+function getPendingCheckpoint(
+  goal: LongTermGoal,
+  effortCurrent: number,
+  rewardCurrent: number,
+): number | null {
+  if (!goal.checkpoint_rewards) return null;
+
+  return Object.keys(goal.checkpoint_rewards)
+    .map(Number)
+    .filter(
+      (threshold) =>
+        Number.isFinite(threshold)
+        && threshold > rewardCurrent
+        && threshold <= effortCurrent,
+    )
+    .sort((left, right) => left - right)[0] ?? null;
 }
 
 function getNextSkillReward(
@@ -269,8 +303,8 @@ function getCurrentSkillStage(goal: LongTermGoal): string {
 
 function buildMilestones(
   goal: LongTermGoal,
-  checkpointCurrent: number,
-  overallCurrent: number,
+  rewardCurrent: number,
+  effortCurrent: number,
   target: number,
   totalWeeks: number,
   isReadingHabit: boolean,
@@ -283,30 +317,55 @@ function buildMilestones(
     .filter(({ threshold }) => Number.isFinite(threshold) && threshold >= 1)
     .sort((left, right) => left.threshold - right.threshold);
   const firstCheckpoint = checkpoints.find(({ threshold }) => threshold === 1);
+  const firstRewardRecorded = firstCheckpoint !== undefined && rewardCurrent >= 1;
+  const firstEffortCompleted = effortCurrent >= 1;
   const milestones: GoalMilestone[] = [
-    {
-      id: 'start',
-      title: checkpointCurrent > 0 ? '完成第 1 次' : '開始計畫',
-      detail: checkpointCurrent > 0 && firstCheckpoint && firstCheckpoint.coin > 0
-        ? `成長幣 +${firstCheckpoint.coin}`
-        : null,
-      status: 'completed',
-    },
+    firstCheckpoint
+      ? {
+          id: 'start',
+          title: firstRewardRecorded
+            ? '完成第 1 次'
+            : firstEffortCompleted
+              ? '第 1 次已完成'
+              : '完成第 1 次',
+          detail: firstRewardRecorded && firstCheckpoint.coin > 0
+            ? `成長幣 +${firstCheckpoint.coin} 已記下`
+            : firstEffortCompleted
+              ? '里程碑回饋待同步'
+              : firstCheckpoint.coin > 0
+                ? `達成後成長幣 +${firstCheckpoint.coin}`
+                : null,
+          status: firstRewardRecorded ? 'completed' : 'next',
+        }
+      : {
+          id: 'start',
+          title: effortCurrent > 0 ? '完成第 1 次' : '開始計畫',
+          detail: null,
+          status: 'completed',
+        },
   ];
 
-  const remainingCheckpoints = checkpoints.filter(
-    ({ threshold }) => threshold > 1 || checkpointCurrent < 1,
-  );
-  const nextCheckpoint = remainingCheckpoints.find(
-    ({ threshold }) => threshold > checkpointCurrent,
+  const remainingCheckpoints = checkpoints.filter(({ threshold }) => threshold > 1);
+  const nextCheckpoint = checkpoints.find(
+    ({ threshold }) => threshold > rewardCurrent,
   )?.threshold;
 
   for (const checkpoint of remainingCheckpoints) {
+    const rewardRecorded = checkpoint.threshold <= rewardCurrent;
+    const effortCompleted = checkpoint.threshold <= effortCurrent;
     milestones.push({
       id: `checkpoint-${checkpoint.threshold}`,
-      title: `完成第 ${checkpoint.threshold} 次`,
-      detail: checkpoint.coin > 0 ? `成長幣 +${checkpoint.coin}` : null,
-      status: checkpoint.threshold <= checkpointCurrent
+      title: effortCompleted && !rewardRecorded
+        ? `第 ${checkpoint.threshold} 次已完成`
+        : `完成第 ${checkpoint.threshold} 次`,
+      detail: effortCompleted && !rewardRecorded
+        ? '里程碑回饋待同步'
+        : checkpoint.coin > 0
+          ? rewardRecorded
+            ? `成長幣 +${checkpoint.coin} 已記下`
+            : `達成後成長幣 +${checkpoint.coin}`
+          : null,
+      status: rewardRecorded
         ? 'completed'
         : checkpoint.threshold === nextCheckpoint
           ? 'next'
@@ -314,7 +373,7 @@ function buildMilestones(
     });
   }
 
-  const finalIsCompleted = goal.status === 'completed' || overallCurrent >= target;
+  const finalIsCompleted = goal.status === 'completed' || effortCurrent >= target;
   const finalIsNext = !finalIsCompleted && nextCheckpoint === undefined;
   const chineseWeekCounts: Record<number, string> = {
     1: '一',
@@ -451,14 +510,16 @@ function buildRecentRecords(
 
 function buildPlanPeriodLabel(
   goal: LongTermGoal,
-  task: Task,
+  start: Dayjs,
+  dueDate: Dayjs | null,
   totalWeeks: number,
+  isSkill: boolean,
 ): string {
-  const start = parseTaipeiDate(goal.started_at);
-  const calculatedEnd = start.add(totalWeeks, 'week').subtract(1, 'day');
-  const end = task.due_date
-    ? getValidDueDate(goal.started_at, task.due_date) ?? calculatedEnd
-    : calculatedEnd;
+  const exactSkillDays = isSkill ? Math.max(goal.total_days ?? 0, 0) : 0;
+  const calculatedEnd = exactSkillDays > 0
+    ? start.add(exactSkillDays - 1, 'day')
+    : start.add(totalWeeks, 'week').subtract(1, 'day');
+  const end = dueDate ?? calculatedEnd;
 
   return `${start.format('YYYY-MM-DD')} ～ ${end.format('YYYY-MM-DD')}（共 ${totalWeeks} 週）`;
 }
@@ -480,10 +541,10 @@ export function buildGoalPresentation(
     && Number.isFinite(goal.target_value)
     && Number(goal.target_value) > 0;
   const challengeUnit = hasChallengeValues ? goal.value_unit?.trim() ?? '' : '';
-  const activeDays = getActiveDays(task, goal, isReadingHabit, isSkill);
-  const planStart = getValidStartDate(goal.started_at);
+  const activeDays = getActiveDays(task, goal, isReadingHabit, isSkill, isChallenge);
+  const planStart = getPlanStart(goal, task, now);
   const planEnd = task.due_date
-    ? getValidDueDate(goal.started_at, task.due_date)
+    ? getValidDueDate(planStart, task.due_date)
     : null;
   const weeklyCompletions = completionsThisWeek(
     completions,
@@ -517,19 +578,19 @@ export function buildGoalPresentation(
   const completionWeekSize = Math.max(activeDays.length, 1);
   const fallbackTotalWeeks = isSkill && goal.total_days
     ? Math.max(Math.ceil(goal.total_days / 7), 1)
-    : Math.max(Math.ceil(completionTarget / completionWeekSize), 1);
-  const dueDateWeeks = task.due_date
-    ? getCoveredWeeks(goal.started_at, task.due_date)
-    : null;
+    : activeDays.length === 0
+      ? 1
+      : Math.max(Math.ceil(completionTarget / completionWeekSize), 1);
+  const dueDateWeeks = planEnd ? getCoveredWeeks(planStart, planEnd) : null;
   const totalWeeks = dueDateWeeks ?? fallbackTotalWeeks;
-  const currentWeek = getCurrentPlanWeek(goal.started_at, now, totalWeeks);
+  const currentWeek = getCurrentPlanWeek(planStart, now, totalWeeks);
   const overallPercent = Math.max(
     Math.min(Math.round((current / target) * 100), 100),
     0,
   );
   const today = now.tz(TZ).startOf('day');
   const todayIsInsidePlan =
-    (planStart === null || !today.isBefore(planStart, 'day'))
+    !today.isBefore(planStart, 'day')
     && (planEnd === null || !today.isAfter(planEnd, 'day'));
   const todayIsActive = todayIsInsidePlan && activeDays.includes(today.day());
   const currentStage = getCurrentSkillStage(goal);
@@ -538,12 +599,53 @@ export function buildGoalPresentation(
   const nextReward = isSkill
     ? getNextSkillReward(goal, current)
     : getNextCheckpoint(goal, isChallenge ? current : checkpointCurrent);
+  const pendingCheckpoint = !isSkill && !isChallenge
+    ? getPendingCheckpoint(goal, completionCurrent, checkpointCurrent)
+    : null;
   const hasReachedTarget = current >= target;
+  const isFuture = today.isBefore(planStart, 'day');
+  const isExpired = planEnd !== null && today.isAfter(planEnd, 'day');
   const canCompleteToday =
     goal.status === 'active'
     && !hasReachedTarget
     && (goal.goal_type === 'habit' || goal.goal_type === 'family')
     && todayIsActive;
+  let todayTitle = '今天的小步驟';
+  let todayStatusText: string | null = null;
+
+  if (goal.status === 'paused') {
+    todayTitle = '計畫暫停中';
+    todayStatusText = '這個計畫暫停中';
+  } else if (goal.status === 'completed' || hasReachedTarget) {
+    todayTitle = '這段計畫已完成';
+    todayStatusText = '這段計畫已完成';
+  } else if (isFuture) {
+    todayTitle = '計畫還沒開始';
+    todayStatusText = '計畫還沒開始';
+  } else if (isExpired) {
+    todayTitle = '一起回顧這段計畫';
+    todayStatusText = '一起回顧這段計畫';
+  } else if (isSkill) {
+    todayTitle = '目前階段';
+    todayStatusText = '這個階段由家長確認完成';
+  } else if (isChallenge) {
+    todayTitle = '目前的累積進度';
+    todayStatusText = '累積進度由家長一起確認';
+  } else if (activeDays.length === 0) {
+    todayTitle = '尚未安排日期';
+    todayStatusText = '這個計畫尚未安排日期';
+  } else if (!todayIsActive) {
+    todayTitle = '今天不用記錄';
+    todayStatusText = '今天不用記錄，照自己的節奏休息';
+  }
+  const scheduledCapacity =
+    planEnd !== null && (goal.goal_type === 'habit' || goal.goal_type === 'family')
+      ? countScheduledDates(planStart, planEnd, activeDays)
+      : null;
+  const planNotice =
+    scheduledCapacity !== null && scheduledCapacity < target
+      ? `目前期間最多安排 ${scheduledCapacity} 次，和 ${target} 次目標不一致，可以和家人一起調整。`
+      : null;
   const planWeekLabel = isSkill
     ? `第 ${Math.min(current + 1, target)} 階段／共 ${target} 階段`
     : `第 ${currentWeek} 週／共 ${totalWeeks} 週`;
@@ -580,11 +682,13 @@ export function buildGoalPresentation(
         ? `第 ${Math.min(current + 1, target)} 階段`
         : '成長旅程',
     planWeekLabel,
-    weekProgressLabel: isSkill && activeDays.length === 0
+    weekProgressLabel: isSkill
       ? '依自己的節奏練習'
       : isChallenge
         ? '累積進度由家長確認'
-        : `本週完成 ${weeklyCompletions.length}／${weekTarget} 次`,
+        : activeDays.length === 0
+          ? '本週尚未安排日期'
+          : `本週完成 ${weeklyCompletions.length}／${weekTarget} 次`,
     weekCompleted: weeklyCompletions.length,
     weekTarget,
     totalWeeks,
@@ -612,20 +716,17 @@ export function buildGoalPresentation(
           : isFamily
             ? '每一次參與，都讓家裡的節奏更穩一點'
             : '先找到適合自己的生活節奏',
-    nextText: isSkill && nextSkillLevel
-      ? `下一個里程碑：${String(nextSkillLevel.name ?? `第 ${current + 1} 階段`)}`
-      : nextReward
-        ? hasChallengeValues
-          ? `下一個里程碑：累積 ${nextReward.threshold}${challengeUnit ? ` ${challengeUnit}` : ''}`
-          : `下一個里程碑：完成第 ${nextReward.threshold} 次`
-        : '下一個里程碑：一起看看這段時間的成長',
-    todayTitle: isChallenge
-      ? '目前的累積進度'
-      : !todayIsActive && !isSkill
-        ? '今天是休息日'
-        : isSkill
-          ? '目前的小步驟'
-          : '今天的小步驟',
+    nextText: pendingCheckpoint !== null
+      ? `第 ${pendingCheckpoint} 次已完成，里程碑回饋待同步`
+      : isSkill && nextSkillLevel
+        ? `下一個里程碑：${String(nextSkillLevel.name ?? `第 ${current + 1} 階段`)}`
+        : nextReward
+          ? hasChallengeValues
+            ? `下一個里程碑：累積 ${nextReward.threshold}${challengeUnit ? ` ${challengeUnit}` : ''}`
+            : `下一個里程碑：完成第 ${nextReward.threshold} 次`
+          : '下一個里程碑：一起看看這段時間的成長',
+    planNotice,
+    todayTitle,
     todayAction: isReadingHabit
       ? `自己選一本喜歡的書，閱讀 ${Math.max(task.base_time_min, 15)} 分鐘`
       : isSkill
@@ -635,6 +736,7 @@ export function buildGoalPresentation(
             ? `已累積 ${current}${challengeUnit ? ` ${challengeUnit}` : ''}，由家長確認後更新`
             : '這項累積進度由家長確認後更新'
           : task.name,
+    todayStatusText,
     preferredTimeWindow: goal.preferred_time_window,
     canCompleteToday,
     isReadingPlan: isReadingHabit,
@@ -649,7 +751,7 @@ export function buildGoalPresentation(
     nextReward,
     milestones,
     recentRecords: buildRecentRecords(task, completions),
-    planPeriodLabel: buildPlanPeriodLabel(goal, task, totalWeeks),
+    planPeriodLabel: buildPlanPeriodLabel(goal, planStart, planEnd, totalWeeks, isSkill),
     completionConditionLabel,
     adjustableItemsLabel,
     finalRewardText: isReadingHabit
