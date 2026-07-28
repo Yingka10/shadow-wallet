@@ -250,12 +250,11 @@ describe('LongTermGoalDetailView', () => {
       />,
     );
 
-    fireEvent.press(screen.getByText('記錄今天的閱讀'));
-
-    await waitFor(() => {
-      expect(onComplete).toHaveBeenCalledTimes(1);
-      expect(screen.queryByTestId('completion-loading')).toBeNull();
+    await act(async () => {
+      fireEvent.press(screen.getByText('記錄今天的閱讀'));
     });
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('completion-loading')).toBeNull();
     expect(screen.queryByText('今天已完成 15 分鐘')).toBeNull();
 
     rerender(
@@ -307,6 +306,34 @@ describe('LongTermGoalDetailView', () => {
     expect(onSelectTimeWindow).toHaveBeenCalledWith('after_dinner');
   });
 
+  it('does not show reading time controls on a reading rest day', () => {
+    renderView(makePresentation({
+      todayTitle: '今天是休息日',
+      canCompleteToday: false,
+      preferredTimeWindow: 'after_dinner',
+    }));
+
+    expect(screen.queryByText(/今天預計：/)).toBeNull();
+    expect(screen.queryByLabelText('調整今天的預計時段')).toBeNull();
+    expect(screen.queryByTestId('time-options')).toBeNull();
+  });
+
+  it('does not offer reading time choices to a completable non-reading task', () => {
+    renderView(makePresentation({
+      headerTitle: '鋼琴家之路',
+      todayAction: '練習雙手合奏 15 分鐘',
+      canCompleteToday: true,
+      isReadingPlan: false,
+      preferredTimeWindow: null,
+      recentRecords: [],
+    }));
+
+    expect(screen.queryByText(/今天預計：/)).toBeNull();
+    expect(screen.queryByLabelText('選擇今天的預計時段')).toBeNull();
+    expect(screen.queryByText('晚餐後')).toBeNull();
+    expect(screen.queryByText('睡前')).toBeNull();
+  });
+
   it('guards a pending completion from double submission and allows retry afterward', async () => {
     let resolveFirst: ((value: void | boolean) => void) | undefined;
     const firstCompletion = new Promise<void | boolean>((resolve) => {
@@ -334,11 +361,11 @@ describe('LongTermGoalDetailView', () => {
       expect(screen.queryByTestId('completion-loading')).toBeNull();
     });
 
-    fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
-    await waitFor(() => {
-      expect(onComplete).toHaveBeenCalledTimes(2);
-      expect(screen.queryByTestId('completion-loading')).toBeNull();
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
     });
+    expect(onComplete).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId('completion-loading')).toBeNull();
   });
 
   it('contains completion rejection and restores the action for another try', async () => {
@@ -349,20 +376,19 @@ describe('LongTermGoalDetailView', () => {
 
     renderView(makePresentation(), { onComplete });
 
-    fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
-
-    await waitFor(() => {
-      expect(
-        screen.getByText('剛才沒有記錄成功，請再試一次。'),
-      ).toBeTruthy();
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
     });
+    expect(
+      screen.getByText('剛才沒有記錄成功，請再試一次。'),
+    ).toBeTruthy();
     expect(screen.queryByTestId('completion-loading')).toBeNull();
 
-    fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
-    await waitFor(() => {
-      expect(onComplete).toHaveBeenCalledTimes(2);
-      expect(screen.queryByTestId('completion-loading')).toBeNull();
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
     });
+    expect(onComplete).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId('completion-loading')).toBeNull();
   });
 
   it('allows long hero copy to grow and keeps seven-day captions readable', () => {

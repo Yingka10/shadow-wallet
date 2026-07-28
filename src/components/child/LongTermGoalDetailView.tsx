@@ -406,6 +406,8 @@ function TodayStepCard({
   const completionPendingRef = useRef(false);
   const completed = isCompletedToday;
   const busy = checking || completing;
+  const showReadingTimeControls =
+    presentation.isReadingPlan && presentation.canCompleteToday;
   const todayCompletion = isCompletedToday
     ? presentation.recentRecords[0]
     : undefined;
@@ -448,7 +450,7 @@ function TodayStepCard({
           </View>
           <View style={styles.actionCopy}>
             <Text style={styles.actionTitle}>{presentation.todayAction}</Text>
-            {presentation.preferredTimeWindow || presentation.canCompleteToday ? (
+            {showReadingTimeControls ? (
               <View style={styles.scheduleRow}>
                 <View style={styles.scheduleLabel}>
                   <DetailIcon name="clock" size={16} color={Colors.fgMuted} />
@@ -514,7 +516,7 @@ function TodayStepCard({
           </View>
         ) : null}
 
-        {showTimeOptions && !completed ? (
+        {showReadingTimeControls && showTimeOptions && !completed ? (
           <View testID="time-options" style={styles.timeOptions}>
             {([
               ['after_dinner', '晚餐後'],
