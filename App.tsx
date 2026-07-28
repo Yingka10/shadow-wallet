@@ -6,6 +6,9 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { SelectedChildProvider } from './src/context/SelectedChildContext';
+import EnvironmentBadge from './src/components/EnvironmentBadge';
+import EnvironmentFailureScreen from './src/components/EnvironmentFailureScreen';
+import { supabaseEnvironment } from './src/lib/environment';
 
 import EntryScreen from './src/screens/auth/EntryScreen';
 import ParentLoginScreen from './src/screens/auth/ParentLoginScreen';
@@ -105,6 +108,16 @@ const Stack = createStackNavigator<RootStackParamList>();
 export default function App() {
   const { height } = useWindowDimensions();
 
+  // 環境講不清楚就不要進 App。這裡在任何畫面掛載之前擋下來 ——
+  // 讓使用者看見登入畫面，就等於邀請他往一個不確定的資料庫寫東西。
+  if (!supabaseEnvironment.ok) {
+    return (
+      <SafeAreaProvider>
+        <EnvironmentFailureScreen />
+      </SafeAreaProvider>
+    );
+  }
+
   return (
     <SafeAreaProvider>
       <SelectedChildProvider>
@@ -143,6 +156,8 @@ export default function App() {
           </Stack.Navigator>
         </NavigationContainer>
       </SelectedChildProvider>
+      {/* 放在最後：它要疊在畫面之上，但 pointerEvents="none" 不吃任何點擊。 */}
+      <EnvironmentBadge />
     </SafeAreaProvider>
   );
 }

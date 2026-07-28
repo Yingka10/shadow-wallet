@@ -756,8 +756,13 @@ export default function ParentTaskManagementTablet() {
                             {parentProposals[0] ? `｜${parentProposals[0].coin_cost} 枚` : ''}
                           </Text>
                         </View>
+                        {/*
+                          不寫「AI 建議幣值」：幣值是規則引擎依年齡段、任務類型與
+                          時間分級算出來的（taskReward/coinPolicy），LLM 沒有參與。
+                          說成 AI 決定，家長對數字的疑問會沒有著落。
+                        */}
                         <RailText>
-                          設定成長幣任務時，可參考獎勵目標與 AI 建議幣值。
+                          設定成長幣任務時，系統會依孩子年齡、任務類型與投入時間提供建議幣值。
                         </RailText>
                       </RailCard>
                       <RailCard title="管理提醒" icon={<BellIcon size={18} color={ParentColors.pine500} />}>

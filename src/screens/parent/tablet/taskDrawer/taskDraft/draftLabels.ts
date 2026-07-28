@@ -162,17 +162,46 @@ export const WEEKDAYS: Array<{ value: number; label: string }> = [
   { value: 0, label: '日' },
 ];
 
-/** 家長端能看懂的回饋方式標籤（catalog 的 REWARD_LABEL 是說明句，這裡是短標籤）。 */
+/**
+ * 回饋方式的正式名稱。**這是唯一一份**——選項、預覽、成功摘要都讀這裡。
+ *
+ * 先前同一個政策在不同畫面上有不同說法（選項上叫「可建議成長幣」、
+ * 預覽卡叫「可獲得成長幣」、分區叫「成長幣任務」），家長會以為是三件事。
+ *
+ * 「可建議成長幣」另外還有一個問題：它在講系統的動作（系統建議），
+ * 不是在講孩子會得到什麼。家長要判斷的是後者。
+ */
 export const REWARD_POLICY_SHORT_LABEL: Record<string, string> = {
-  record_only: '留下紀錄',
-  family_contribution: '家庭貢獻',
+  record_only: '一般紀錄',
+  family_contribution: '家庭參與',
   progress_only: '進度與肯定',
-  coin_eligible: '可建議成長幣',
+  coin_eligible: '成長幣回饋',
   time_saving_eligible: '可記錄時間投入',
 };
 
 export const REWARD_POLICY_NOTE =
   '回饋的是投入、持續與進步，不以一次成績或作品結果作為條件。';
+
+// 量詞用的中文數字。二 → 兩：「兩週」是口語，「二週」不是中文說法。
+const CN_WEEKS = ['零', '一', '兩', '三', '四', '五', '六', '七', '八', '九', '十'];
+
+/**
+ * 定期回顧那一行。
+ *
+ * 「28 天後一起看看」有兩個問題：家長設定時想的是「四週」而不是 28 天，
+ * 而「看看」聽起來像順便瞄一眼 —— 那是這個產品裡最需要坐下來談的一次對話。
+ *
+ * 整週講週、不整週才講天。**不把所有期間都寫成四週** ——
+ * 家長剛才選的是幾天，就用那個數字說回去。
+ */
+export function reviewCycleText(days: number): string {
+  if (days > 0 && days % 7 === 0) {
+    const weeks = days / 7;
+    const label = weeks < CN_WEEKS.length ? CN_WEEKS[weeks] : String(weeks);
+    return `${label}週後一起回顧`;
+  }
+  return `${days} 天後一起回顧`;
+}
 
 // ---------------------------------------------------------------------------
 // 「只存在本地草稿」提示

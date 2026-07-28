@@ -276,11 +276,15 @@ export const BROWSE_LABEL: Record<BrowseCategory, string> = {
   life_routine: '生活小計畫',
 };
 
+/**
+ * catalog 的說明句。短標籤在 taskDraft 的 `REWARD_POLICY_SHORT_LABEL`，
+ * 兩者不可互相矛盾 —— 這裡是「這個政策在做什麼」，那裡是「它叫什麼」。
+ */
 export const REWARD_LABEL: Record<RewardPolicy, string> = {
   record_only: '只留下完成紀錄',
   family_contribution: '記錄家庭參與，不發成長幣',
   progress_only: '以進度與肯定回饋',
-  coin_eligible: '可獲得成長幣',
+  coin_eligible: '完成後給予成長幣回饋',
   time_saving_eligible: '可累積時間儲蓄',
 };
 

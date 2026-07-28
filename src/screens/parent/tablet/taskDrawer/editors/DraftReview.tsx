@@ -42,6 +42,7 @@ import {
   SUPPORT_TIME_OPTIONS,
   WEEKDAYS,
   dateStringPlusDays,
+  reviewCycleText,
   isFamilyRoleDraft,
   isGrowthPlanDraft,
   isOneTimeDraft,
@@ -51,7 +52,11 @@ import {
 } from '../taskDraft';
 import { PresetGlyph } from '../drawerIcons';
 import { useShowsImplementationNotes } from '../displayMode';
-import type { TaskRewardDecision } from '../taskReward/types';
+import { AGE_GROUP_LABEL, BROWSE_LABEL } from '../taskCatalog';
+import type {
+  TaskRewardCalculationBasis,
+  TaskRewardDecision,
+} from '../taskReward/types';
 import { LocalOnlyNotice, PolicyNotice, ReadOnlyOutcomeList } from './EditorControls';
 
 function weekdayText(days: number[]): string {
@@ -116,31 +121,56 @@ const NON_COIN_COPY: Record<
   { title: string; body: string }
 > = {
   family_contribution: {
-    title: '家庭貢獻',
+    title: REWARD_POLICY_SHORT_LABEL.family_contribution,
     body: '這項任務會記錄孩子對共同生活的投入，不發成長幣。',
   },
   record_only: {
-    title: '留下完成紀錄',
+    title: REWARD_POLICY_SHORT_LABEL.record_only,
     body: '完成後保留紀錄，不發成長幣。',
   },
   progress_only: {
-    title: '進度與肯定',
+    title: REWARD_POLICY_SHORT_LABEL.progress_only,
     body: '回饋投入、持續與進步，不直接發成長幣。',
   },
 };
 
 /**
- * development 模式下可展開的計算依據。
+ * demo 模式下，幣值那一句話。
  *
- * 顯示的是「家長語言的欄位」——年齡段、時間分級、每次分鐘。
- * 刻意不印整包 JSON，也不出現 difficultyDelta / base_time_min 這類
- * 政策與資料庫的內部名稱：那些在正式畫面上只會讓人以為系統壞了。
+ * 舊版直接印 decision.explanation，那句是政策引擎寫給自己看的
+ * 「6-9 歲段、D 類、每次約 20 分鐘」——「D 類」是內部分類代號，
+ * 家長讀到只會想「什麼是 D 類、我是不是選錯了」。
+ *
+ * 這裡只講家長自己剛才做過的三個選擇：孩子幾歲、這是什麼任務、每次花多久。
+ */
+function demoExplanation(basis: TaskRewardCalculationBasis): string {
+  return basis.estimatedMinutes
+    ? `依孩子的年齡、任務類型與每次 ${basis.estimatedMinutes} 分鐘的投入估算。`
+    : '依孩子的年齡與任務類型估算。';
+}
+
+const DIFFICULTY_LABEL: Record<string, string> = {
+  easy: '較輕鬆',
+  standard: '一般',
+  hard: '較挑戰',
+};
+
+/**
+ * development 模式下可展開的估算依據。
+ *
+ * demo 看不到這一段：時間分級、難度、可調整範圍、政策版本都是實作細節，
+ * 而且在沒有家長幣值調整 UI 之前，「可調整範圍 5–25」只會讓家長找一個
+ * 不存在的滑桿。這些欄位對開發與驗收有用，所以留在 development。
+ *
+ * 一律用中文標籤逐列呈現，不印整包 JSON，也不出現 difficultyDelta /
+ * base_time_min 這類政策與資料庫的內部名稱。
  */
 function CalculationBasis({ decision }: { decision: TaskRewardDecision }) {
   const [open, setOpen] = useState(false);
   if (decision.eligibility !== 'allowed' || decision.coin === null) return null;
 
   const basis = decision.coin.calculationBasis;
+  const { minAllowed, maxAllowed } = decision.coin;
 
   return (
     <View style={s.basis}>
@@ -148,20 +178,24 @@ function CalculationBasis({ decision }: { decision: TaskRewardDecision }) {
         onPress={() => setOpen(current => !current)}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
-        accessibilityLabel={open ? '收合計算依據' : '展開計算依據'}
+        accessibilityLabel={open ? '收合估算依據' : '展開估算依據'}
       >
-        <Text style={s.basisToggle}>{open ? '收合計算依據' : '查看計算依據'}</Text>
+        <Text style={s.basisToggle}>{open ? '收合估算依據' : '查看估算依據'}</Text>
       </Pressable>
       {open ? (
         <View style={s.basisBody}>
-          <Row label="年齡段" value={basis.ageGroup} />
-          <Row label="時間分級" value={basis.band} />
+          <Row label="年齡段" value={AGE_GROUP_LABEL[basis.ageGroup] ?? basis.ageGroup} />
+          <Row label="任務類型" value={BROWSE_LABEL[basis.purposeCategory]} />
           <Row
             label="每次時間"
             value={basis.estimatedMinutes ? `${basis.estimatedMinutes} 分鐘` : undefined}
           />
-          <Row label="難度" value={basis.difficulty} />
-          <Row label="建議幣值" value={`${decision.coin.suggestedAmount} 枚`} />
+          <Row
+            label="難度"
+            value={basis.difficulty ? DIFFICULTY_LABEL[basis.difficulty] : '未指定'}
+          />
+          <Row label="可調整範圍" value={`${minAllowed}–${maxAllowed} 枚`} />
+          <Row label="幣值政策版本" value={decision.rewardPolicyVersion} />
         </View>
       ) : null}
     </View>
@@ -185,19 +219,19 @@ export function RewardDecisionBlock({ decision }: { decision: TaskRewardDecision
   }
 
   if (decision.rewardPolicy === 'coin_eligible') {
-    const { finalAmount, minAllowed, maxAllowed } = decision.coin;
     return (
       <View style={s.rewardCard}>
-        <Text style={s.rewardTitle}>可獲得成長幣</Text>
+        <Text style={s.rewardTitle}>{REWARD_POLICY_SHORT_LABEL.coin_eligible}</Text>
         <View style={s.rewardAmountRow}>
-          <Text style={s.rewardAmount}>{finalAmount}</Text>
+          <Text style={s.rewardAmount}>{decision.coin.finalAmount}</Text>
           <Text style={s.rewardAmountUnit}>枚</Text>
         </View>
-        <Text style={s.rewardBody}>
-          政策允許範圍 {minAllowed}–{maxAllowed} 枚
-        </Text>
-        <Text style={s.rewardBody}>{decision.explanation}</Text>
-        <Text style={s.rewardVersion}>幣值政策版本 {decision.rewardPolicyVersion}</Text>
+        {/*
+          demo 只有這一句。可調整範圍、時間分級、難度、政策版本都收進
+          development 的「查看估算依據」——在沒有幣值調整 UI 之前，
+          把範圍寫在正式畫面上，家長會去找一個不存在的滑桿。
+        */}
+        <Text style={s.rewardBody}>{demoExplanation(decision.coin.calculationBasis)}</Text>
         {showsImplementationNotes ? <CalculationBasis decision={decision} /> : null}
       </View>
     );
@@ -359,7 +393,7 @@ export function DraftReview({
             label="定期回顧"
             value={
               recurring.reviewEnabled && recurring.reviewAfterDays
-                ? `${recurring.reviewAfterDays} 天後一起看看`
+                ? reviewCycleText(recurring.reviewAfterDays)
                 : '不設定'
             }
           />

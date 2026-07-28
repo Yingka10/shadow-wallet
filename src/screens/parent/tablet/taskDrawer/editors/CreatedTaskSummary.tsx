@@ -58,7 +58,7 @@ function rewardText(command: CreateParentTaskCommand): string {
   }
   switch (decision.rewardPolicy) {
     case 'family_contribution':
-      return '會記錄在本週的家庭參與中';
+      return '記入本週家庭參與';
     case 'progress_only':
       return '完成後會累積進度，並在回顧時一起看見';
     case 'record_only':

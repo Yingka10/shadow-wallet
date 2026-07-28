@@ -347,7 +347,7 @@ describe('成功畫面', () => {
     const { r } = openFamilyRoleReview();
     await confirmCreate(r);
 
-    expect(r.getByText('會記錄在本週的家庭參與中')).toBeTruthy();
+    expect(r.getByText('記入本週家庭參與')).toBeTruthy();
     expect(r.queryByText(/0 枚/)).toBeNull();
     expect(r.queryByText(/成長幣/)).toBeNull();
   });
@@ -410,29 +410,40 @@ describe('成功畫面', () => {
 // ---------------------------------------------------------------------------
 
 describe('預覽顯示的回饋決策', () => {
-  it('可發幣的任務在按下建立之前就看得到金額與範圍', () => {
+  it('可發幣的任務在按下建立之前就看得到金額', () => {
     const { r } = openReadingReview();
-    expect(r.getByText('可獲得成長幣')).toBeTruthy();
-    expect(r.getByText(/政策允許範圍 \d+–\d+ 枚/)).toBeTruthy();
-    expect(r.getByText(/幣值政策版本 coin-policy-/)).toBeTruthy();
+    // 回饋卡標題與下方的「回饋方式」都叫「成長幣回饋」—— 統一標籤之後本來就該一致。
+    expect(r.getAllByText('成長幣回饋').length).toBeGreaterThan(0);
+    expect(r.getByText('枚')).toBeTruthy();
+  });
+
+  it('demo 的幣值卡不出現範圍與版本號', () => {
+    // 在沒有家長幣值調整 UI 之前，「政策允許範圍 5–25」只會讓家長
+    // 去找一個不存在的滑桿；版本號則是稽核資訊，不是家長要判斷的東西。
+    const { r } = openReadingReview();
+    expect(r.queryByText(/政策允許範圍|可調整範圍/)).toBeNull();
+    expect(r.queryByText(/coin-policy-/)).toBeNull();
+    expect(r.queryByText(/D\s*類|時間分級|standard/)).toBeNull();
   });
 
   it('家庭參與顯示的是貢獻說明，不是 0 幣', () => {
     const { r } = openFamilyRoleReview();
-    // 「家庭貢獻」在回饋摘要與下方的「回饋方式」各出現一次，兩處說的是同一件事。
-    expect(r.getAllByText('家庭貢獻').length).toBeGreaterThan(0);
+    // 「家庭參與」在回饋摘要與下方的「回饋方式」各出現一次，兩處說的是同一件事 ——
+    // 這正是統一標籤之後該有的樣子（先前一邊叫「家庭貢獻」、一邊叫別的）。
+    expect(r.getAllByText('家庭參與').length).toBeGreaterThan(0);
     expect(r.getByText('這項任務會記錄孩子對共同生活的投入，不發成長幣。')).toBeTruthy();
     expect(r.queryByText(/0 枚/)).toBeNull();
   });
 
-  it('demo 模式不顯示計算依據，development 才展得開', () => {
-    expect(openReadingReview().r.queryByText('查看計算依據')).toBeNull();
+  it('demo 模式不顯示估算依據，development 才展得開', () => {
+    expect(openReadingReview().r.queryByText('查看估算依據')).toBeNull();
 
     const dev = openReadingReview({ displayMode: 'development' });
-    const toggle = dev.r.getByText('查看計算依據');
+    const toggle = dev.r.getByText('查看估算依據');
     fireEvent.press(toggle);
     // 展開後也只有家長看得懂的欄位，沒有 difficultyDelta / base_time_min 這類內部名稱。
-    expect(dev.r.getByText('時間分級')).toBeTruthy();
+    expect(dev.r.getByText('年齡段')).toBeTruthy();
+    expect(dev.r.getByText('任務類型')).toBeTruthy();
     expect(dev.r.queryByText(/difficultyDelta|base_time_min|bandBaseCoins/)).toBeNull();
   });
 });

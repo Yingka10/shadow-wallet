@@ -18,7 +18,7 @@ import { FakeParentTaskCreationService } from '../../../../../testing/fakeParent
 const CHILD = { id: 'child-1', nickname: '承恩', birthDate: '2018-03-05', familyId: 'family-1' };
 
 const TIME_SAVING_LABEL = '可記錄時間投入';
-const COIN_LABEL = '可建議成長幣';
+const COIN_LABEL = '成長幣回饋';
 
 function openEditor(
   title: string,
@@ -68,7 +68,7 @@ describe('14. 正式畫面不出現時間儲蓄', () => {
 // ---------------------------------------------------------------------------
 
 describe('15. 算不出幣值就不給這個選項', () => {
-  it('閱讀（每次 20 分鐘）算得出來 → 顯示可建議成長幣', () => {
+  it('閱讀（每次 20 分鐘）算得出來 → 顯示成長幣回饋', () => {
     const r = openEditor('閱讀與共讀');
     expect(r.getByText(COIN_LABEL)).toBeTruthy();
   });

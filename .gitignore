@@ -56,3 +56,11 @@ docs/
 .superpowers/
 skills-lock.json
 /.codegraph
+
+
+.tmp-expo-web*
+
+# Supabase CLI 的本機連線狀態（project-ref / pooler-url / 各服務版本）。
+# 這是「這台機器現在連哪一個 project」，不是專案設定 —— 由 Git 決定的話，
+# 任何人 link 到自己的 staging 都會產生 diff，也容易把別人的目標帶進 PR。
+supabase/.temp/
