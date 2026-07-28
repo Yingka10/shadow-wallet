@@ -12,8 +12,10 @@ import {
 import {
   createLongTermTaskProgressPresentation,
   progressPercentOf,
+  type LongTermMilestone,
   type LongTermTaskProgressPresentation,
 } from '../lib/longTermTaskProgress';
+import { todayDateString } from '../lib/dateOnly';
 import type { LongTermType, GoalStatus, RewardPolicyValue } from '../types/database';
 
 dayjs.extend(utc);
@@ -83,7 +85,20 @@ type TaskShapeRow = {
   plan_mode: 'growth_plan' | 'short_support' | 'family_role' | null;
 };
 
+type MilestoneRow = {
+  id: string;
+  task_id: string;
+  title: string;
+  target_day: number | null;
+  sort_order: number | null;
+};
+
 const VALID_GOAL_TYPES: LongTermType[] = ['habit', 'skill', 'responsibility', 'challenge'];
+
+/** 計畫開始日（本地時區的日期，不含時間）。里程碑的第 N 天從這裡算起。 */
+function startDateOf(g: GoalRow): string | null {
+  return g.started_at ? dayjs(g.started_at).tz(TZ).format('YYYY-MM-DD') : null;
+}
 
 /** started_at + firstReviewAfterDays 的日期。算不出來就不給。 */
 function firstReviewDateOf(g: GoalRow): string | null {
@@ -134,8 +149,7 @@ export function useParentLongTermGoals(childId: string): ParentLongTermGoalsData
       const prevEnd = weekEnd.subtract(1, 'week');
 
       const [
-        tasksRes, weeklyCompletionsRes, previousCompletionsRes,
-        milestonesRes, allCompletionsRes,
+        tasksRes, weeklyCompletionsRes, previousCompletionsRes, milestonesRes,
       ] = await Promise.all([
         supabase
           .from('tasks')
@@ -156,15 +170,11 @@ export function useParentLongTermGoals(childId: string): ParentLongTermGoalsData
           .in('task_id', taskIds)
           .gte('completed_at', prevStart.toISOString())
           .lte('completed_at', prevEnd.toISOString()),
-        // 成長計畫的階段數。沒有里程碑的計畫不會編一個分母出來。
+        // 成長計畫的里程碑。要 target_day 才講得出「下一個在第幾天」，
+        // 要 sort_order 只是為了穩定順序 —— 真正的排序在 presenter 依日期做。
         supabase
           .from('task_plan_milestones')
-          .select('task_id')
-          .in('task_id', taskIds),
-        supabase
-          .from('task_completions')
-          .select('task_id')
-          .eq('child_id', childId)
+          .select('id, task_id, title, target_day, sort_order')
           .in('task_id', taskIds),
       ]);
 
@@ -173,18 +183,20 @@ export function useParentLongTermGoals(childId: string): ParentLongTermGoalsData
       if (previousCompletionsRes.error) throw previousCompletionsRes.error;
       // 里程碑子表是抽屜這一版才有的。舊專案沒有這張表時不該讓整頁掛掉 ——
       // 沒有里程碑就是「進行中的成長計畫」，那本來就是合法的呈現。
-      if (allCompletionsRes.error) throw allCompletionsRes.error;
 
       const taskMap = new Map(
         ((tasksRes.data ?? []) as TaskShapeRow[]).map(row => [row.id, row]),
       );
-      const milestoneCountByTask = new Map<string, number>();
-      for (const row of milestonesRes.data ?? []) {
-        milestoneCountByTask.set(row.task_id, (milestoneCountByTask.get(row.task_id) ?? 0) + 1);
-      }
-      const completionCountByTask = new Map<string, number>();
-      for (const row of allCompletionsRes.data ?? []) {
-        completionCountByTask.set(row.task_id, (completionCountByTask.get(row.task_id) ?? 0) + 1);
+      const milestonesByTask = new Map<string, LongTermMilestone[]>();
+      for (const row of (milestonesRes.data ?? []) as MilestoneRow[]) {
+        const list = milestonesByTask.get(row.task_id) ?? [];
+        list.push({
+          id: row.id,
+          title: row.title,
+          targetDay: row.target_day,
+          sortOrder: row.sort_order,
+        });
+        milestonesByTask.set(row.task_id, list);
       }
       const weeklyDoneByTask = new Map<string, number>();
       const previousDoneByTask = new Map<string, number>();
@@ -214,9 +226,10 @@ export function useParentLongTermGoals(childId: string): ParentLongTermGoalsData
             valueUnit: g.value_unit,
             firstReviewAfterDays: g.first_review_after_days,
             firstReviewDate: firstReviewDateOf(g),
+            startDate: startDateOf(g),
           },
-          milestoneCount: milestoneCountByTask.get(g.task_id) ?? 0,
-          completionCount: completionCountByTask.get(g.task_id) ?? 0,
+          milestones: milestonesByTask.get(g.task_id) ?? [],
+          today: todayDateString(),
         });
         return {
           id: g.id,
@@ -225,7 +238,7 @@ export function useParentLongTermGoals(childId: string): ParentLongTermGoalsData
           goalType: g.goal_type,
           status: g.status,
           progressPct: progressPercentOf(progress),
-          progressLabel: progress.label,
+          progressLabel: progress.headline,
           progress,
           weeklyCompleted: weeklyDoneByTask.get(g.task_id) ?? 0,
           previousWeeklyCompleted: previousDoneByTask.get(g.task_id) ?? 0,

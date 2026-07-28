@@ -182,26 +182,9 @@ export const REWARD_POLICY_SHORT_LABEL: Record<string, string> = {
 export const REWARD_POLICY_NOTE =
   '回饋的是投入、持續與進步，不以一次成績或作品結果作為條件。';
 
-// 量詞用的中文數字。二 → 兩：「兩週」是口語，「二週」不是中文說法。
-const CN_WEEKS = ['零', '一', '兩', '三', '四', '五', '六', '七', '八', '九', '十'];
-
-/**
- * 定期回顧那一行。
- *
- * 「28 天後一起看看」有兩個問題：家長設定時想的是「四週」而不是 28 天，
- * 而「看看」聽起來像順便瞄一眼 —— 那是這個產品裡最需要坐下來談的一次對話。
- *
- * 整週講週、不整週才講天。**不把所有期間都寫成四週** ——
- * 家長剛才選的是幾天，就用那個數字說回去。
- */
-export function reviewCycleText(days: number): string {
-  if (days > 0 && days % 7 === 0) {
-    const weeks = days / 7;
-    const label = weeks < CN_WEEKS.length ? CN_WEEKS[weeks] : String(weeks);
-    return `${label}週後一起回顧`;
-  }
-  return `${days} 天後一起回顧`;
-}
+// 期間與回顧的說法統一在 lib/durationCopy —— 抽屜的預覽與任務列表的長期任務卡
+// 講的是同一件事，先前各寫一次的結果是同一個 28 天有兩種說法。
+export { reviewCycleText } from '../../../../../lib/durationCopy';
 
 // ---------------------------------------------------------------------------
 // 「只存在本地草稿」提示

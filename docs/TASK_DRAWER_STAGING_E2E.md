@@ -344,30 +344,63 @@ ERROR: new row for relation "tasks"
 
 ---
 
-## 8. 長期任務進度標籤（§十一）✅
+## 8. 長期任務進度標籤 ✅（第七階段 F 修正過一次）
 
 新建立的長期任務原本顯示「第 0 關 / 共 1 關」、「完成 0 次 / 目標 1 次」——
 那兩行是 `?? 1` / `?? 0` 生出來的，宣稱一個孩子從沒同意過的目標。
+
+第一次修正改成「已完成 X / Y 個階段」，其中 X 是 `task_completions` 的筆數。
+**那同樣是假的**，而且更難察覺，因為它看起來很合理 ——
+孩子讀了 7 次書、全都還在第一個里程碑範圍內，畫面會說「已完成 5 / 5 個階段」。
+
+現在的規則是：**里程碑只講規劃與時程，不講完成**。
 
 `src/lib/longTermTaskProgress.ts`：
 
 | 形式 | 顯示 |
 |---|---|
-| 成長計畫（有里程碑） | 已完成 X / Y 個階段 |
+| 成長計畫（有里程碑） | 已規劃 5 個里程碑＋「下一個里程碑：第 14 天」 |
+| 成長計畫（時程都過了） | 已規劃 5 個里程碑＋「里程碑時程已到，建議一起回顧」 |
 | 成長計畫（無里程碑） | 進行中的成長計畫 |
-| 短期支援 | 預計第 7 天一起回顧／14 天生活小計畫 |
-| 家庭角色 | 預計第 7 天一起回顧／4 週家庭角色 |
-| legacy（`reward_policy` 為 null） | **原本的關卡／次數，一字未改** |
+| 短期支援 | 14 天生活小計畫＋「預計一週後一起回顧」 |
+| 家庭角色 | 四週家庭角色＋「預計一週後一起回顧」 |
+| legacy（`reward_policy` 為 null） | **原本的關卡／次數／進度條，一字未改** |
 
-`progressPercentOf` 算不出比例時回 **null 而不是 0**，
-畫面據此**不渲染進度條** —— 空的進度條同樣是在說「一點都沒做」。
+`showProgressBar` 是型別的一部分：新任務的四種形式全部是**字面型別 `false`**，
+有人想在成長計畫上畫進度條時 TypeScript 會先擋下來。
+`progressPercentOf` 只有 legacy 算得出數字，其餘一律 null（**不是 0** ——
+空的進度條同樣是在說「一點都沒做」）。
 
-### ⚠️ 已知不精確
+「下一個里程碑」由 `findNextPlannedMilestone` 算：依 `targetDay` 重排
+（不相信資料原順序）、今天正好是里程碑日期時仍算「下一個」、
+**不因完成次數跳過任何里程碑**、不修改傳入陣列、全程用 `YYYY-MM-DD`
+字串與 `Date.UTC` 計算避免時區位移。
 
-成長計畫的「已完成 X 個階段」用的是 `task_completions` 的次數。
-**完成次數不等於階段數**：沒有任何一張表記錄「哪個里程碑被達成了」。
-規格 §十一 指定了 `completionCount` 這個參數，所以照做，
-但要真的準確需要里程碑完成紀錄（列入待辦）。
+### ⚠️ milestone completion 尚未實作
+
+`task_plan_milestones` 只有 `title` / `target_day` / `sort_order`。
+要真的顯示「已完成 X / Y 個里程碑」，需要一張 completion 表
+（`milestone_id` / `completed_at` / `completed_by` / 可撤銷的狀態）。
+在那之前任何 X 都是推測。詳見 [DEMO_DATA_GUIDE.md](DEMO_DATA_GUIDE.md)。
+
+---
+
+## 8b. staging 上的兩組資料
+
+| | QA regression | Demo showcase |
+|---|---|---|
+| 腳本 | `qa_seed.sql` | `demo_reset.sql` / `demo_seed.sql` / `run_demo.sh` |
+| 家庭 | QA Family A／B | GrowBook Demo Family |
+| 孩子 | QA Child 8 | 承恩（8 歲） |
+| 名稱 | **刻意技術性**，E2E 會斷言 | 家長會唸出口的話 |
+
+`demo_reset.sql` 的每一條 DELETE 都以 Demo family 的固定 id 為範圍，
+動手前先確認那個 id 的 `family_name` 真的是 `GrowBook Demo Family`。
+沒有 TRUNCATE、沒有無 WHERE 的 DELETE。**QA 那組不會被波及**（有測試盯著）。
+
+reset → seed 連跑兩次結果完全一致，實測比對過所有計數。
+
+完整說明見 [DEMO_DATA_GUIDE.md](DEMO_DATA_GUIDE.md)。
 
 ---
 

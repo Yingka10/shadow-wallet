@@ -134,17 +134,26 @@ function formatWeeklyChange(goal: LongTermGoalItem) {
 }
 
 /**
- * 「下一個里程碑」。
+ * 右側那一塊要寫什麼。
  *
- * 只有算得出百分比的任務才講得出下一步 —— 期間型的家庭角色與生活小計畫
- * 沒有里程碑，它們的下一件事是「一起回顧」，而那句話已經在 progressLabel 裡。
- * 回 null 時整塊不渲染，不要編一個「第 10 天」出來。
+ * 舊版是依百分比猜的：`< 50%` 就寫「第 10 天」。那個 10 完全是編的 ——
+ * 沒有任何一個里程碑叫第 10 天，家長照著它去對計畫只會對不上。
+ *
+ * 現在一律來自 presenter：成長計畫講家長自己排的日期，短期支援與家庭角色
+ * 講回顧日。講不出來就回 null，整塊不渲染。
  */
-function nextMilestone(goal: LongTermGoalItem): string | null {
-  if (goal.progressPct === null) return null;
-  if (goal.progressPct < 50) return '第 10 天';
-  if (goal.progressPct < 80) return '下一個階段';
-  return '接近完成';
+function longTermSideNote(goal: LongTermGoalItem): { label: string; value: string } | null {
+  const p = goal.progress;
+  if (p.kind === 'planned_milestones' && p.nextMilestoneLabel) {
+    // nextMilestoneLabel 自己就是完整的一句（「下一個里程碑：第 14 天」
+    // 或「里程碑時程已到，建議一起回顧」），拆開反而會讀不通。
+    const [label, value] = p.nextMilestoneLabel.split('：');
+    return value ? { label: `${label}：`, value } : { label: '', value: p.nextMilestoneLabel };
+  }
+  if ((p.kind === 'short_support' || p.kind === 'family_role') && p.reviewLabel) {
+    return { label: '', value: p.reviewLabel };
+  }
+  return null;
 }
 
 function SectionCard({
@@ -261,10 +270,11 @@ function LongTermCard({
         </View>
         <Text style={s.longTermProgressLabel}>{goal.progressLabel}</Text>
         {/*
-          算不出比例就不畫進度條。空的進度條看起來是「一點都沒做」，
-          而家庭角色與生活小計畫本來就沒有可以填滿的分母。
+          只有 legacy 任務畫進度條。新的三種長期形式沒有可以填滿的分母 ——
+          里程碑目前沒有完成狀態，用完成次數推出來的比例是假的，
+          而空的進度條看起來是「一點都沒做」。
         */}
-        {goal.progressPct !== null ? (
+        {goal.progress.showProgressBar && goal.progressPct !== null ? (
           <View style={s.bigProgressTrack}>
             <View style={[s.bigProgressFill, { width: `${Math.min(100, goal.progressPct)}%` }]} />
           </View>
@@ -273,12 +283,16 @@ function LongTermCard({
           {weeklyText}{quiet ? '　查看調整建議 ›' : ''}
         </Text>
       </View>
-      {nextMilestone(goal) ? (
-        <View style={s.longTermSide}>
-          <Text style={s.milestoneLabel}>下一個里程碑：</Text>
-          <Text style={s.milestoneValue}>{nextMilestone(goal)}</Text>
-        </View>
-      ) : null}
+      {(() => {
+        const note = longTermSideNote(goal);
+        if (!note) return null;
+        return (
+          <View style={s.longTermSide}>
+            {note.label ? <Text style={s.milestoneLabel}>{note.label}</Text> : null}
+            <Text style={s.milestoneValue}>{note.value}</Text>
+          </View>
+        );
+      })()}
       <View style={s.longTermActions}>
         <TouchableOpacity style={s.secondaryButton} onPress={() => onEdit(goal)} activeOpacity={0.7}>
           <Text style={s.secondaryButtonText}>編輯挑戰</Text>
