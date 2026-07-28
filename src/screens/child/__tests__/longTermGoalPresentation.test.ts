@@ -265,10 +265,133 @@ describe('buildGoalPresentation', () => {
     expect(result.focusText).toBe('目前階段：雙手合奏');
     expect(result.sectionOrder).toEqual(['hero', 'today', 'week', 'rewards', 'review']);
     expect(result.weekDays).toHaveLength(7);
-    expect(result.nextReward).toBeNull();
-    expect(result.milestones.some((milestone) => milestone.detail?.includes('成長幣'))).toBe(
-      false,
+    expect(result.nextReward).toEqual({ threshold: 3, coin: 30 });
+    expect(result.milestones).toEqual([
+      {
+        id: 'skill-level-1',
+        title: '基礎指法',
+        detail: '成長幣 +10',
+        status: 'completed',
+      },
+      {
+        id: 'skill-level-2',
+        title: '簡單曲目',
+        detail: '成長幣 +20',
+        status: 'completed',
+      },
+      {
+        id: 'skill-level-3',
+        title: '雙手合奏',
+        detail: '成長幣 +30',
+        status: 'next',
+      },
+      {
+        id: 'skill-level-4',
+        title: '完整演奏',
+        detail: '成長幣 +40',
+        status: 'upcoming',
+      },
+      {
+        id: 'final-review',
+        title: '完成計畫後一起回顧',
+        detail: '可以繼續、調整，或讓計畫先告一段落。',
+        status: 'upcoming',
+      },
+    ]);
+    expect(result.canCompleteToday).toBe(false);
+  });
+
+  it('uses challenge values consistently for progress and completion meaning', () => {
+    const result = buildGoalPresentation(
+      makeTask({
+        id: 'task-pages',
+        name: '閱讀一百頁',
+        long_term_type: 'challenge',
+      }),
+      makeGoal({
+        id: 'goal-pages',
+        task_id: 'task-pages',
+        goal_type: 'challenge',
+        target_value: 100,
+        current_value: 25,
+        value_unit: '頁',
+        checkpoint_rewards: null,
+      }),
+      [makeCompletion('c1', '2026-07-27T19:00:00+08:00', null)],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
     );
+
+    expect(result.overallLabel).toBe('25 / 100 頁');
+    expect(result.overallPercent).toBe(25);
+    expect(result.completionConditionLabel).toBe('累積 100 頁');
+    expect(result.milestones[0].title).toBe('已累積 25 頁');
+    expect(result.milestones[result.milestones.length - 1].title).toBe('達到 100 頁');
+  });
+
+  it('falls back to completion counts when challenge values are incomplete', () => {
+    const result = buildGoalPresentation(
+      makeTask({
+        id: 'task-pages',
+        name: '閱讀挑戰',
+        long_term_type: 'challenge',
+      }),
+      makeGoal({
+        id: 'goal-pages',
+        task_id: 'task-pages',
+        goal_type: 'challenge',
+        target_value: 100,
+        current_value: null,
+        value_unit: '頁',
+        checkpoint_rewards: null,
+      }),
+      [
+        makeCompletion('c1', '2026-07-27T19:00:00+08:00', null),
+        makeCompletion('c2', '2026-07-28T19:00:00+08:00', null),
+      ],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.overallLabel).toBe('2 / 20 次');
+    expect(result.overallPercent).toBe(10);
+    expect(result.completionConditionLabel).toBe('完成 20 次');
+  });
+
+  it('deduplicates weekly completions by Taipei date and excludes unscheduled days', () => {
+    const result = buildGoalPresentation(
+      makeTask({ recurrence_days: [1, 4] }),
+      makeGoal({ active_days: [1, 4], total_days: 8 }),
+      [
+        makeCompletion('monday-early', '2026-07-26T16:30:00Z', null),
+        makeCompletion('monday-late', '2026-07-27T12:00:00Z', null),
+        makeCompletion('tuesday-off', '2026-07-28T12:00:00Z', null),
+        makeCompletion('thursday', '2026-07-30T01:00:00Z', null),
+      ],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.weekCompleted).toBe(2);
+    expect(result.weekTarget).toBe(2);
+    expect(result.weekProgressLabel).toBe('本週完成 2／2 次');
+    expect(result.weekSummary).toBe(
+      '這週已閱讀 2 次。少一天沒有關係，找到適合自己的節奏更重要。',
+    );
+    expect(result.weekDays.find((day) => day.day === 1)?.state).toBe('completed');
+    expect(result.weekDays.find((day) => day.day === 2)?.state).toBe('unscheduled');
+    expect(result.weekDays.find((day) => day.day === 4)?.state).toBe('completed');
+    expect(result.recentRecords).toHaveLength(3);
+  });
+
+  it('uses the due date to derive one consistent covered-week count', () => {
+    const result = buildGoalPresentation(
+      makeTask({ due_date: '2026-08-09' }),
+      makeGoal({ started_at: '2026-07-27', total_days: 20 }),
+      [makeCompletion('c1', '2026-07-27T19:00:00+08:00', null)],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.totalWeeks).toBe(2);
+    expect(result.planWeekLabel).toBe('第 1 週／共 2 週');
+    expect(result.planPeriodLabel).toBe('2026-07-27 ～ 2026-08-09（共 2 週）');
   });
 
   it('keeps family goals on the shared presentation skeleton', () => {
