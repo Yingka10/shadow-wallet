@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Circle, Path } from 'react-native-svg';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
@@ -16,7 +16,11 @@ import dayjs from 'dayjs';
 import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
 import type { RootStackParamList } from '../../../App';
-import BottomNav from '../../components/BottomNav';
+import LongTermGoalDetailSheets, {
+  type AdjustmentDraft,
+  type LongTermSheet,
+  type ReviewDraft,
+} from '../../components/child/LongTermGoalDetailSheets';
 import LongTermGoalDetailView from '../../components/child/LongTermGoalDetailView';
 import { Colors } from '../../constants/colors';
 import { webScreen } from '../../constants/webStyles';
@@ -39,7 +43,12 @@ const TZ = 'Asia/Taipei';
 
 type LongTermDetailRoute = RouteProp<RootStackParamList, 'LongTermDetail'>;
 type Nav = StackNavigationProp<RootStackParamList, 'LongTermDetail'>;
-type ChildTabId = 'home' | 'wallet' | 'wish' | 'profile';
+
+const EMPTY_REVIEW_DRAFT: ReviewDraft = {
+  favoriteNote: '',
+  preferredWindow: null,
+  nextStep: null,
+};
 
 function isMissingCompletionContextColumn(error: {
   code?: string;
@@ -66,6 +75,21 @@ function BackIcon() {
   );
 }
 
+function MoreIcon() {
+  return (
+    <Svg
+      width={24}
+      height={24}
+      viewBox="0 0 24 24"
+      accessibilityElementsHidden
+    >
+      <Circle cx={5} cy={12} r={1.6} fill={Colors.ink700} />
+      <Circle cx={12} cy={12} r={1.6} fill={Colors.ink700} />
+      <Circle cx={19} cy={12} r={1.6} fill={Colors.ink700} />
+    </Svg>
+  );
+}
+
 export default function LongTermDetailScreen() {
   const route = useRoute<LongTermDetailRoute>();
   const navigation = useNavigation<Nav>();
@@ -80,6 +104,14 @@ export default function LongTermDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeSheet, setActiveSheet] = useState<LongTermSheet>(null);
+  const [selectedCompletionId, setSelectedCompletionId] =
+    useState<string | null>(null);
+  const [reviewDraft, setReviewDraft] =
+    useState<ReviewDraft>(EMPTY_REVIEW_DRAFT);
+  const [adjustmentDraft, setAdjustmentDraft] =
+    useState<AdjustmentDraft | null>(null);
+  const [correctingTimeWindow, setCorrectingTimeWindow] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,6 +145,7 @@ export default function LongTermDetailScreen() {
         .select('id, completed_at, planned_time_window, start_mode')
         .eq('task_id', taskId)
         .eq('child_id', loadedGoal.child_id)
+        .eq('status', 'completed')
         .gte('completed_at', loadedGoal.started_at)
         .lt('completed_at', tomorrow)
         .order('completed_at', { ascending: true });
@@ -132,6 +165,7 @@ export default function LongTermDetailScreen() {
           .select('id, completed_at')
           .eq('task_id', taskId)
           .eq('child_id', loadedGoal.child_id)
+          .eq('status', 'completed')
           .gte('completed_at', loadedGoal.started_at)
           .lt('completed_at', tomorrow)
           .order('completed_at', { ascending: true });
@@ -188,6 +222,19 @@ export default function LongTermDetailScreen() {
       preferredTimeWindow: selectedTimeWindow,
     };
   }, [completions, goal, selectedTimeWindow, task]);
+
+  const todayCompletion = useMemo(
+    () => completions.find((completion) =>
+      dayjs(completion.completed_at).tz(TZ).isSame(dayjs().tz(TZ), 'day'),
+    ) ?? null,
+    [completions],
+  );
+
+  const selectedCompletion = useMemo(
+    () => completions.find((completion) =>
+      completion.id === selectedCompletionId) ?? null,
+    [completions, selectedCompletionId],
+  );
 
   const handleComplete = useCallback(async (): Promise<boolean> => {
     if (!goal || !task || isCompletedToday || checking) return false;
@@ -253,20 +300,43 @@ export default function LongTermDetailScreen() {
     taskId,
   ]);
 
-  const handleTabPress = useCallback((tab: ChildTabId) => {
-    const childId = goal?.child_id;
-    if (!childId) return;
+  const handleOpenRecord = useCallback((completionId?: string) => {
+    const completion = completionId
+      ? completions.find((item) => item.id === completionId)
+      : todayCompletion;
+    setSelectedCompletionId(completion?.id ?? null);
+    setActiveSheet('record');
+  }, [completions, todayCompletion]);
 
-    if (tab === 'home') {
-      navigation.navigate('Home', { childId });
-    } else if (tab === 'wallet') {
-      navigation.navigate('Wallet', { childId });
-    } else if (tab === 'wish') {
-      navigation.navigate('Wish', { childId });
-    } else {
-      navigation.navigate('Profile', { childId });
+  const handleCorrectTimeWindow = useCallback(async (
+    nextWindow: PreferredTimeWindow,
+  ) => {
+    if (!selectedCompletion || correctingTimeWindow) return;
+
+    setCorrectingTimeWindow(true);
+    try {
+      await recordCompletionContext(selectedCompletion.id, nextWindow, null);
+      setCompletions((current) => current.map((completion) =>
+        completion.id === selectedCompletion.id
+          ? { ...completion, planned_time_window: nextWindow }
+          : completion));
+      if (
+        dayjs(selectedCompletion.completed_at)
+          .tz(TZ)
+          .isSame(dayjs().tz(TZ), 'day')
+      ) {
+        setSelectedTimeWindow(nextWindow);
+      }
+    } catch (caught) {
+      Alert.alert(
+        '更正失敗',
+        caught instanceof Error ? caught.message : '請稍後再試。',
+      );
+      throw caught;
+    } finally {
+      setCorrectingTimeWindow(false);
     }
-  }, [goal?.child_id, navigation]);
+  }, [correctingTimeWindow, selectedCompletion]);
 
   return (
     <View style={webScreen}>
@@ -286,8 +356,20 @@ export default function LongTermDetailScreen() {
           </Text>
           <View style={styles.weekPill}>
             <View style={styles.weekDot} />
-            <Text style={styles.weekText}>{presentation?.weekLabel ?? '成長旅程'}</Text>
+            <Text style={styles.weekText} numberOfLines={1}>
+              {presentation?.weekLabel ?? '成長旅程'}
+            </Text>
           </View>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="更多計畫選項"
+            style={styles.moreButton}
+            onPress={() => setActiveSheet('menu')}
+            activeOpacity={0.72}
+            hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+          >
+            <MoreIcon />
+          </TouchableOpacity>
         </View>
 
         {loading ? (
@@ -301,10 +383,28 @@ export default function LongTermDetailScreen() {
             checking={checking}
             onComplete={handleComplete}
             onSelectTimeWindow={setSelectedTimeWindow}
+            onOpenRecord={handleOpenRecord}
+            onOpenReview={() => setActiveSheet('review')}
+            onOpenDetails={() => setActiveSheet('details')}
           />
         ) : null}
 
-        <BottomNav activeTab="wallet" onTabPress={handleTabPress} />
+        {presentation && task ? (
+          <LongTermGoalDetailSheets
+            activeSheet={activeSheet}
+            onClose={() => setActiveSheet(null)}
+            onOpenSheet={setActiveSheet}
+            presentation={presentation}
+            completion={selectedCompletion}
+            taskMinutes={task.base_time_min}
+            reviewDraft={reviewDraft}
+            adjustmentDraft={adjustmentDraft}
+            onSaveReviewDraft={setReviewDraft}
+            onSaveAdjustmentDraft={setAdjustmentDraft}
+            onCorrectTimeWindow={handleCorrectTimeWindow}
+            correctingTimeWindow={correctingTimeWindow}
+          />
+        ) : null}
       </SafeAreaView>
     </View>
   );
@@ -321,7 +421,7 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 6,
     backgroundColor: Colors.bgCanvas,
   },
   backButton: {
@@ -334,14 +434,15 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     flex: 1,
+    minWidth: 0,
     color: Colors.ink900,
-    fontSize: 23,
+    fontSize: 20,
     fontWeight: '900',
   },
   weekPill: {
     minHeight: 38,
-    maxWidth: 112,
-    paddingHorizontal: 12,
+    maxWidth: 78,
+    paddingHorizontal: 9,
     borderRadius: 19,
     borderWidth: 1,
     borderColor: Colors.borderSoft,
@@ -349,7 +450,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 7,
+    gap: 5,
   },
   weekDot: {
     width: 8,
@@ -362,6 +463,14 @@ const styles = StyleSheet.create({
     color: Colors.ink700,
     fontSize: 13,
     fontWeight: '900',
+  },
+  moreButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.cream50,
   },
   loader: {
     marginTop: 80,

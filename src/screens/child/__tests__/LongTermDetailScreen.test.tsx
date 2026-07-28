@@ -1,10 +1,18 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { Alert } from 'react-native';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react-native';
 import { webMouseDraggableScroll } from '../../../constants/webStyles';
 
 const mockGoBack = jest.fn();
 const mockCompleteTask = jest.fn();
 const mockRecordCompletionContext = jest.fn();
+const mockSupabaseUpdate = jest.fn();
 let mockMissingContextColumns = false;
 
 let mockRouteParams = {
@@ -41,7 +49,7 @@ const mockBaseGoal = {
   status: 'active',
   checkpoint_rewards: { '5': 10 },
   motivation_note: null,
-  started_at: '2026-07-01',
+  started_at: '2026-07-27',
   next_review_at: null,
   completed_at: null,
   created_at: '2026-07-01',
@@ -163,6 +171,7 @@ jest.mock('../../../lib/supabase', () => ({
         eq: jest.fn(() => builder),
         gte: jest.fn(() => builder),
         lt: jest.fn(() => builder),
+        update: mockSupabaseUpdate.mockImplementation(() => builder),
         single: jest.fn(async () => {
           if (table === 'long_term_goals') {
             return {
@@ -234,15 +243,19 @@ describe('LongTermDetailScreen', () => {
       milestone: null,
     });
     mockRecordCompletionContext.mockResolvedValue(undefined);
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
   });
 
-  it('renders the reading plan with total progress and meaningful weekly behavior', async () => {
+  it('renders week-first progress without self-start scoring', async () => {
     render(<LongTermDetailScreen />);
 
     expect(await screen.findByText('自主閱讀計畫')).toBeTruthy();
-    expect(screen.getByText('3 / 20 次')).toBeTruthy();
+    expect(screen.getAllByText('第 1 週／共 4 週').length).toBeGreaterThan(0);
+    expect(screen.getByText('本週完成 3／5 次')).toBeTruthy();
     expect(screen.getByText('今天預計：晚餐後')).toBeTruthy();
-    expect(screen.getByText(/這週已閱讀 3 次，其中 2 次是自己開始的。/)).toBeTruthy();
+    expect(screen.getByText(/這週已閱讀 3 次。/)).toBeTruthy();
+    expect(screen.queryByText(/自己開始/)).toBeNull();
+    expect(screen.queryByText('3 / 20 次')).toBeNull();
     expect(screen.getByTestId('goal-hero')).toBeTruthy();
     expect(screen.getByTestId('goal-rewards')).toBeTruthy();
   });
@@ -253,14 +266,14 @@ describe('LongTermDetailScreen', () => {
     render(<LongTermDetailScreen />);
 
     expect(await screen.findByText('自主閱讀計畫')).toBeTruthy();
-    expect(screen.getByText('3 / 20 次')).toBeTruthy();
+    expect(screen.getByText('本週完成 3／5 次')).toBeTruthy();
     expect(screen.queryByText('讀取任務進度失敗，請稍後再試。')).toBeNull();
   });
 
   it('records the chosen schedule without asking how reading started', async () => {
     render(<LongTermDetailScreen />);
 
-    fireEvent.press(await screen.findByText('完成今天閱讀'));
+    fireEvent.press(await screen.findByLabelText('記錄今天的閱讀'));
 
     await waitFor(() => {
       expect(mockRecordCompletionContext).toHaveBeenCalledWith(
@@ -274,12 +287,100 @@ describe('LongTermDetailScreen', () => {
     expect(screen.queryByText('提醒後開始')).toBeNull();
   });
 
-  it('keeps the bottom tab visible and applies mouse-friendly web scrolling', async () => {
+  it('acts as a stack detail page while preserving mouse-friendly web scrolling', async () => {
     render(<LongTermDetailScreen />);
 
-    expect(await screen.findByTestId('bottom-nav')).toBeTruthy();
+    await screen.findByText('自主閱讀計畫');
+    expect(screen.queryByTestId('bottom-nav')).toBeNull();
     const scroll = screen.getByTestId('long-term-detail-scroll');
     expect(scroll.props.style).toEqual(expect.arrayContaining([webMouseDraggableScroll]));
+  });
+
+  it('opens the local plan menu and shows its three choices', async () => {
+    render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('更多計畫選項'));
+
+    expect(screen.getByText('查看計畫詳情')).toBeTruthy();
+    expect(screen.getByText('提出調整')).toBeTruthy();
+    expect(screen.getByText('暫停一下')).toBeTruthy();
+  });
+
+  it('shows truthful plan details from the presentation', async () => {
+    render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('更多計畫選項'));
+    fireEvent.press(screen.getByText('查看計畫詳情'));
+
+    expect(screen.getByText('2026-07-27 ～ 2026-08-23（共 4 週）')).toBeTruthy();
+    expect(screen.getByText('完成 20 次')).toBeTruthy();
+    expect(screen.getByText('閱讀時段、每週次數、閱讀方式或內容')).toBeTruthy();
+  });
+
+  it('opens pause as a local adjustment without updating Supabase', async () => {
+    render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('更多計畫選項'));
+    fireEvent.press(screen.getByText('暫停一下'));
+
+    expect(screen.getByText('提出調整')).toBeTruthy();
+    expect(screen.getByLabelText('想先暫停一下').props.accessibilityState.selected).toBe(true);
+    expect(mockSupabaseUpdate).not.toHaveBeenCalled();
+  });
+
+  it('keeps a weekend review as local draft state', async () => {
+    render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('開始週末回顧'));
+    fireEvent.changeText(screen.getByLabelText('最喜歡的閱讀內容'), '神奇樹屋');
+    fireEvent.press(screen.getByText('保留回顧草稿'));
+    fireEvent.press(screen.getByLabelText('開始週末回顧'));
+
+    expect(screen.getByLabelText('最喜歡的閱讀內容').props.value).toBe('神奇樹屋');
+    expect(mockSupabaseUpdate).not.toHaveBeenCalled();
+  });
+
+  it('immediately controls the completed state after recording today', async () => {
+    render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('記錄今天的閱讀'));
+
+    expect(await screen.findByText('今天已完成 15 分鐘')).toBeTruthy();
+    expect(screen.queryByLabelText('記錄今天的閱讀')).toBeNull();
+  });
+
+  it('corrects the selected real completion and updates the record sheet', async () => {
+    render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('查看2026/07/29的紀錄'));
+    await act(async () => {
+      fireEvent.press(screen.getByText('改成睡前'));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(mockRecordCompletionContext).toHaveBeenCalledWith(
+        'completion-wed',
+        'before_bed',
+        null,
+      );
+    });
+    expect(screen.getAllByText('睡前').length).toBeGreaterThan(0);
+  });
+
+  it('shows both the alert and sheet error when correcting a record fails', async () => {
+    mockRecordCompletionContext.mockRejectedValueOnce(new Error('network'));
+    render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('查看2026/07/29的紀錄'));
+    await act(async () => {
+      fireEvent.press(screen.getByText('改成睡前'));
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByText('更正失敗，請再試一次。')).toBeTruthy();
+    expect(Alert.alert).toHaveBeenCalledWith('更正失敗', 'network');
+    expect(screen.getAllByText('晚餐後').length).toBeGreaterThan(0);
   });
 
   it('renders skill goals with the same visual skeleton and no unsupported recording action', async () => {
@@ -292,7 +393,7 @@ describe('LongTermDetailScreen', () => {
     render(<LongTermDetailScreen />);
 
     expect(await screen.findByText('鋼琴家之路')).toBeTruthy();
-    expect(screen.getByText('第 2 / 4 階段')).toBeTruthy();
+    expect(screen.getByText('目前階段：雙手合奏')).toBeTruthy();
     expect(screen.getByTestId('goal-hero')).toBeTruthy();
     expect(screen.getByTestId('goal-today')).toBeTruthy();
     expect(screen.getByTestId('goal-week')).toBeTruthy();
