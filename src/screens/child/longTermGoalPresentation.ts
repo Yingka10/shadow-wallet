@@ -162,11 +162,11 @@ function buildWeekDays(
   });
 }
 
-function getActiveDays(task: Task, goal: LongTermGoal, isReadingPlan: boolean): number[] {
+function getActiveDays(task: Task, goal: LongTermGoal, isReadingHabit: boolean): number[] {
   const configuredDays =
     goal.active_days
     ?? task.recurrence_days
-    ?? (isReadingPlan ? MONDAY_TO_FRIDAY : ALL_WEEK_DAYS);
+    ?? (isReadingHabit ? MONDAY_TO_FRIDAY : ALL_WEEK_DAYS);
 
   return Array.from(
     new Set(configuredDays.filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)),
@@ -179,10 +179,22 @@ function parseTaipeiDate(value: string): Dayjs {
     : dayjs(value).tz(TZ);
 }
 
-function getCoveredWeeks(startedAt: string, dueDate: string): number {
+function getValidDueDate(startedAt: string, dueDate: string): Dayjs | null {
   const start = parseTaipeiDate(startedAt).startOf('day');
   const end = parseTaipeiDate(dueDate).startOf('day');
-  const coveredDays = Math.max(end.diff(start, 'day') + 1, 1);
+  if (!start.isValid() || !end.isValid() || end.isBefore(start, 'day')) {
+    return null;
+  }
+
+  return end;
+}
+
+function getCoveredWeeks(startedAt: string, dueDate: string): number | null {
+  const start = parseTaipeiDate(startedAt).startOf('day');
+  const end = getValidDueDate(startedAt, dueDate);
+  if (!end) return null;
+
+  const coveredDays = end.diff(start, 'day') + 1;
   return Math.max(Math.ceil(coveredDays / 7), 1);
 }
 
@@ -232,7 +244,7 @@ function buildMilestones(
   current: number,
   target: number,
   totalWeeks: number,
-  isReadingPlan: boolean,
+  isReadingHabit: boolean,
 ): GoalMilestone[] {
   const checkpoints = Object.entries(goal.checkpoint_rewards ?? {})
     .map(([threshold, coin]) => ({
@@ -291,7 +303,7 @@ function buildMilestones(
 
   milestones.push({
     id: 'final-review',
-    title: isReadingPlan ? `${weekCount}週後一起回顧` : '完成計畫後一起回顧',
+    title: isReadingHabit ? `${weekCount}週後一起回顧` : '完成計畫後一起回顧',
     detail: '可以繼續、調整，或讓計畫先告一段落。',
     status: finalIsCompleted ? 'completed' : finalIsNext ? 'next' : 'upcoming',
   });
@@ -416,7 +428,7 @@ function buildPlanPeriodLabel(
   const start = parseTaipeiDate(goal.started_at);
   const calculatedEnd = start.add(totalWeeks, 'week').subtract(1, 'day');
   const end = task.due_date
-    ? parseTaipeiDate(task.due_date)
+    ? getValidDueDate(goal.started_at, task.due_date) ?? calculatedEnd
     : calculatedEnd;
 
   return `${start.format('YYYY-MM-DD')} ～ ${end.format('YYYY-MM-DD')}（共 ${totalWeeks} 週）`;
@@ -432,13 +444,14 @@ export function buildGoalPresentation(
   const isSkill = goal.goal_type === 'skill';
   const isFamily = goal.goal_type === 'family';
   const isChallenge = goal.goal_type === 'challenge';
+  const isReadingHabit = isReadingPlan && !isSkill && !isFamily && !isChallenge;
   const hasChallengeValues =
     isChallenge
     && Number.isFinite(goal.current_value)
     && Number.isFinite(goal.target_value)
     && Number(goal.target_value) > 0;
   const challengeUnit = hasChallengeValues ? goal.value_unit?.trim() ?? '' : '';
-  const activeDays = getActiveDays(task, goal, isReadingPlan);
+  const activeDays = getActiveDays(task, goal, isReadingHabit);
   const weeklyCompletions = completionsThisWeek(completions, activeDays, now);
   const completionCurrent = completions.length;
   const current = isSkill
@@ -459,9 +472,10 @@ export function buildGoalPresentation(
   const fallbackTotalWeeks = isSkill && goal.total_days
     ? Math.max(Math.ceil(goal.total_days / 7), 1)
     : Math.max(Math.ceil(completionTarget / completionWeekSize), 1);
-  const totalWeeks = task.due_date
+  const dueDateWeeks = task.due_date
     ? getCoveredWeeks(goal.started_at, task.due_date)
-    : fallbackTotalWeeks;
+    : null;
+  const totalWeeks = dueDateWeeks ?? fallbackTotalWeeks;
   const scheduleCurrent = isSkill ? current : completionCurrent;
   const currentWeek = Math.min(
     Math.floor(Math.max(scheduleCurrent - 1, 0) / completionWeekSize) + 1,
@@ -490,7 +504,7 @@ export function buildGoalPresentation(
     : hasChallengeValues
       ? `累積 ${target}${challengeUnit ? ` ${challengeUnit}` : ''}`
       : `完成 ${target} 次`;
-  const adjustableItemsLabel = isReadingPlan
+  const adjustableItemsLabel = isReadingHabit
     ? '閱讀時段、每週次數、閱讀方式或內容'
     : isSkill
       ? '練習時段、每週次數、階段內容'
@@ -501,11 +515,11 @@ export function buildGoalPresentation(
     ? buildSkillMilestones(goal, current, target)
     : hasChallengeValues
       ? buildChallengeMilestones(goal, current, target, challengeUnit)
-      : buildMilestones(goal, current, target, totalWeeks, isReadingPlan);
+      : buildMilestones(goal, current, target, totalWeeks, isReadingHabit);
 
   return {
     headerTitle: task.name,
-    weekLabel: isReadingPlan
+    weekLabel: isReadingHabit
       ? `第 ${readingWeek} 週`
       : isSkill
         ? `第 ${Math.min(current + 1, target)} 階段`
@@ -526,7 +540,7 @@ export function buildGoalPresentation(
         ? `${current} / ${target}${challengeUnit ? ` ${challengeUnit}` : ''}`
         : `${current} / ${target} 次`,
     overallPercent,
-    focusText: isReadingPlan
+    focusText: isReadingHabit
       ? '第一週：先找到適合自己的閱讀節奏'
       : isSkill
         ? `目前階段：${currentStage}`
@@ -547,7 +561,7 @@ export function buildGoalPresentation(
       : isSkill
         ? '目前的小步驟'
         : '今天的小步驟',
-    todayAction: isReadingPlan
+    todayAction: isReadingHabit
       ? `自己選一本喜歡的書，閱讀 ${Math.max(task.base_time_min, 15)} 分鐘`
       : isSkill
         ? `這一階段先練習：${currentStage}`
@@ -556,7 +570,7 @@ export function buildGoalPresentation(
     canCompleteToday: !isSkill && todayIsActive,
     isReadingPlan,
     weekDays: buildWeekDays(activeDays, weeklyCompletions, now),
-    weekSummary: isReadingPlan
+    weekSummary: isReadingHabit
       ? `這週已閱讀 ${weeklyCompletions.length} 次。少一天沒有關係，找到適合自己的節奏更重要。`
       : isSkill
         ? '這週可以依自己的節奏，繼續目前的練習階段。'
@@ -567,13 +581,13 @@ export function buildGoalPresentation(
     planPeriodLabel: buildPlanPeriodLabel(goal, task, totalWeeks),
     completionConditionLabel,
     adjustableItemsLabel,
-    finalRewardText: isReadingPlan
-      ? '四週後一起回顧，可以繼續、調整閱讀方式，或讓計畫先告一段落'
+    finalRewardText: isReadingHabit
+      ? `第 ${totalWeeks} 週結束後一起回顧，可以繼續、調整閱讀方式，或讓計畫先告一段落`
       : isSkill
         ? '完成最後階段後，一起留下這段學習成果'
         : '完成旅程後，一起選一個值得記住的時刻',
-    reviewTitle: isReadingPlan ? '週末一起回顧' : '一起回顧這段成長',
-    reviewPrompt: isReadingPlan
+    reviewTitle: isReadingHabit ? '週末一起回顧' : '一起回顧這段成長',
+    reviewPrompt: isReadingHabit
       ? '哪一本最喜歡？晚餐後還是睡前比較適合？'
       : isSkill
         ? '哪一段練習最有感？下一步想怎麼調整？'

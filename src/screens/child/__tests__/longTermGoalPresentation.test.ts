@@ -234,9 +234,10 @@ describe('buildGoalPresentation', () => {
     const result = buildGoalPresentation(
       makeTask({
         id: 'task-piano',
-        name: '鋼琴家之路',
+        name: '閱讀技能進階',
         long_term_type: 'skill',
         base_time_min: 20,
+        recurrence_days: null,
       }),
       makeGoal({
         id: 'goal-piano',
@@ -260,9 +261,11 @@ describe('buildGoalPresentation', () => {
       dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
     );
 
-    expect(result.headerTitle).toBe('鋼琴家之路');
+    expect(result.headerTitle).toBe('閱讀技能進階');
     expect(result.overallLabel).toBe('第 2 / 4 階段');
     expect(result.focusText).toBe('目前階段：雙手合奏');
+    expect(result.todayAction).toBe('這一階段先練習：雙手合奏');
+    expect(result.weekTarget).toBe(7);
     expect(result.sectionOrder).toEqual(['hero', 'today', 'week', 'rewards', 'review']);
     expect(result.weekDays).toHaveLength(7);
     expect(result.nextReward).toEqual({ threshold: 3, coin: 30 });
@@ -324,6 +327,9 @@ describe('buildGoalPresentation', () => {
     expect(result.overallLabel).toBe('25 / 100 頁');
     expect(result.overallPercent).toBe(25);
     expect(result.completionConditionLabel).toBe('累積 100 頁');
+    expect(result.focusText).toBe('目前已累積 25 頁');
+    expect(result.todayAction).toBe('閱讀一百頁');
+    expect(result.weekSummary).toBe('這週已完成 1 次。');
     expect(result.milestones[0].title).toBe('已累積 25 頁');
     expect(result.milestones[result.milestones.length - 1].title).toBe('達到 100 頁');
   });
@@ -392,6 +398,22 @@ describe('buildGoalPresentation', () => {
     expect(result.totalWeeks).toBe(2);
     expect(result.planWeekLabel).toBe('第 1 週／共 2 週');
     expect(result.planPeriodLabel).toBe('2026-07-27 ～ 2026-08-09（共 2 週）');
+    expect(result.finalRewardText).toBe(
+      '第 2 週結束後一起回顧，可以繼續、調整閱讀方式，或讓計畫先告一段落',
+    );
+  });
+
+  it('ignores a due date earlier than the goal start date', () => {
+    const result = buildGoalPresentation(
+      makeTask({ due_date: '2026-07-20' }),
+      makeGoal({ started_at: '2026-07-27', total_days: 20 }),
+      [],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.totalWeeks).toBe(4);
+    expect(result.planWeekLabel).toBe('第 1 週／共 4 週');
+    expect(result.planPeriodLabel).toBe('2026-07-27 ～ 2026-08-23（共 4 週）');
   });
 
   it('keeps family goals on the shared presentation skeleton', () => {
