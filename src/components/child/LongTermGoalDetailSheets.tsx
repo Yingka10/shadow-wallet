@@ -108,20 +108,10 @@ const READING_ADJUSTMENT_OPTIONS: Array<{
   { value: 'discuss', label: '想和家人討論' },
 ];
 
-type PresentationKind = 'reading' | 'skill' | 'family' | 'challenge' | 'general';
-
-function getPresentationKind(
-  presentation: GoalPresentation,
-): PresentationKind {
-  if (presentation.isReadingPlan) return 'reading';
-  if (presentation.categoryLabel === '學習與技能') return 'skill';
-  if (presentation.categoryLabel === '家庭參與') return 'family';
-  if (presentation.categoryLabel === '自主挑戰') return 'challenge';
-  return 'general';
-}
+type PresentationKind = GoalPresentation['goalKind'];
 
 function getReviewPrompt(kind: PresentationKind): string {
-  if (kind === 'reading') return '這週最喜歡哪一本書或哪一段？';
+  if (kind === 'reading_habit') return '這週最喜歡哪一本書或哪一段？';
   if (kind === 'skill') return '這週哪一段練習最有感？';
   if (kind === 'family') return '這週哪一次一起做最有感？';
   if (kind === 'challenge') return '這週哪一步最有感？';
@@ -131,7 +121,7 @@ function getReviewPrompt(kind: PresentationKind): string {
 function getAdjustmentOptions(
   kind: PresentationKind,
 ): Array<{ value: AdjustmentDraft; label: string }> {
-  if (kind === 'reading') return READING_ADJUSTMENT_OPTIONS;
+  if (kind === 'reading_habit') return READING_ADJUSTMENT_OPTIONS;
 
   const contentLabel =
     kind === 'skill'
@@ -416,7 +406,12 @@ function DetailsSheet({
   return (
     <View>
       {presentation.planNotice ? (
-        <View accessibilityRole="summary" style={styles.planNotice}>
+        <View
+          accessible
+          accessibilityRole="summary"
+          accessibilityLabel={`計畫提醒：${presentation.planNotice}`}
+          style={styles.planNotice}
+        >
           <Text style={styles.planNoticeText}>{presentation.planNotice}</Text>
         </View>
       ) : null}
@@ -488,7 +483,7 @@ function RecordSheet({
     }
   };
   const loading = correctingTimeWindow || localLoading;
-  const isReadingPlan = presentation.isReadingPlan;
+  const isReadingPlan = presentation.goalKind === 'reading_habit';
 
   return (
     <View>
@@ -498,7 +493,7 @@ function RecordSheet({
           value={formatCompletionDate(completion.completed_at)}
         />
         <DetailRow
-          label={isReadingPlan ? '閱讀時間' : '投入時間'}
+          label="計畫時間"
           value={`${taskMinutes} 分鐘`}
         />
         <DetailRow
@@ -583,8 +578,8 @@ function ReviewSheet({
   onChange: (draft: ReviewDraft) => void;
   onSave: () => void;
 }) {
-  const kind = getPresentationKind(presentation);
-  const isReadingPlan = kind === 'reading';
+  const kind = presentation.goalKind;
+  const isReadingPlan = kind === 'reading_habit';
   const nextOptions = isReadingPlan
     ? READING_REVIEW_NEXT_OPTIONS
     : GENERAL_REVIEW_NEXT_OPTIONS;
@@ -658,7 +653,7 @@ function AdjustmentSheet({
   onSelect: (draft: AdjustmentDraft) => void;
   onSave: () => void;
 }) {
-  const options = getAdjustmentOptions(getPresentationKind(presentation));
+  const options = getAdjustmentOptions(presentation.goalKind);
 
   return (
     <View>

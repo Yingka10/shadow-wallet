@@ -84,6 +84,42 @@ function makeCompletion(
 }
 
 describe('buildGoalPresentation', () => {
+  it.each([
+    ['reading_habit', makeTask(), makeGoal()],
+    [
+      'habit',
+      makeTask({ name: '每天整理書包' }),
+      makeGoal({ goal_type: 'habit' }),
+    ],
+    [
+      'skill',
+      makeTask({ name: '鋼琴家之路', long_term_type: 'skill' }),
+      makeGoal({ goal_type: 'skill' }),
+    ],
+    [
+      'challenge',
+      makeTask({ name: '自主閱讀挑戰', long_term_type: 'challenge' }),
+      makeGoal({ goal_type: 'challenge' }),
+    ],
+    [
+      'family',
+      makeTask({ name: '一起整理客廳', long_term_type: 'family' }),
+      makeGoal({ goal_type: 'family' }),
+    ],
+  ] as const)(
+    'exposes the stable %s goal kind independently from display labels',
+    (expectedKind, task, goal) => {
+      const result = buildGoalPresentation(
+        task,
+        goal,
+        [],
+        dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+      );
+
+      expect(result.goalKind).toBe(expectedKind);
+    },
+  );
+
   it('models the reading demo with week-first progress and a truthful seven-day schedule', () => {
     const result = buildGoalPresentation(
       makeTask(),

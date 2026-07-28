@@ -58,6 +58,13 @@ export type GoalRecentRecord = {
   timeWindowLabel: string | null;
 };
 
+export type GoalKind =
+  | 'reading_habit'
+  | 'habit'
+  | 'skill'
+  | 'challenge'
+  | 'family';
+
 export type GoalPresentation = {
   headerTitle: string;
   weekLabel: string;
@@ -66,6 +73,7 @@ export type GoalPresentation = {
   weekCompleted: number;
   weekTarget: number;
   totalWeeks: number;
+  goalKind: GoalKind;
   categoryLabel: string;
   overallLabel: string;
   overallPercent: number;
@@ -567,6 +575,15 @@ export function buildGoalPresentation(
   const isFamily = goal.goal_type === 'family';
   const isChallenge = goal.goal_type === 'challenge';
   const isReadingHabit = isReadingPlan && !isSkill && !isFamily && !isChallenge;
+  const goalKind: GoalKind = isReadingHabit
+    ? 'reading_habit'
+    : isSkill
+      ? 'skill'
+      : isFamily
+        ? 'family'
+        : isChallenge
+          ? 'challenge'
+          : 'habit';
   const hasChallengeValues =
     isChallenge
     && Number.isFinite(goal.current_value)
@@ -741,6 +758,7 @@ export function buildGoalPresentation(
     weekCompleted: weeklyCompletions.length,
     weekTarget,
     totalWeeks,
+    goalKind,
     categoryLabel: isChallenge
       ? '自主挑戰'
       : isReadingPlan || isSkill
