@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -8,13 +8,15 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import Svg, { Circle, Path } from 'react-native-svg';
+import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 import { Colors } from '../../constants/colors';
 import { webMouseDraggableScroll } from '../../constants/webStyles';
 import type { PreferredTimeWindow } from '../../types/database';
 import type {
   GoalDayStatus,
+  GoalMilestone,
   GoalPresentation,
+  GoalRecentRecord,
 } from '../../screens/child/longTermGoalPresentation';
 
 type Props = {
@@ -23,16 +25,224 @@ type Props = {
   checking: boolean;
   onComplete: () => void | boolean | Promise<void | boolean>;
   onSelectTimeWindow: (window: PreferredTimeWindow) => void;
+  onOpenRecord?: (completionId?: string) => void;
+  onOpenReview?: () => void;
+  onOpenDetails?: () => void;
+};
+
+type IconName =
+  | 'sprout'
+  | 'book'
+  | 'calendar'
+  | 'milestone'
+  | 'conversation'
+  | 'document'
+  | 'check'
+  | 'chevron'
+  | 'clock'
+  | 'info';
+
+const DAY_STATE_LABELS: Record<GoalDayStatus['state'], string> = {
+  completed: '已完成',
+  today: '今天待完成',
+  upcoming: '尚未到',
+  missed: '這次跳過',
+  unscheduled: '沒有安排',
+};
+
+const DAY_CAPTIONS: Record<GoalDayStatus['state'], string> = {
+  completed: '完成',
+  today: '今天',
+  upcoming: '尚未到',
+  missed: '這次跳過',
+  unscheduled: '未安排',
+};
+
+const WEEKDAY_NAMES: Record<number, string> = {
+  0: '星期日',
+  1: '星期一',
+  2: '星期二',
+  3: '星期三',
+  4: '星期四',
+  5: '星期五',
+  6: '星期六',
 };
 
 function formatTimeWindow(window: PreferredTimeWindow): string {
   return window === 'after_dinner' ? '晚餐後' : '睡前';
 }
 
-function SectionHeading({ icon, title }: { icon: string; title: string }) {
+function minutesFromAction(action: string): string | null {
+  return action.match(/(\d+)\s*分鐘/)?.[1] ?? null;
+}
+
+function DetailIcon({
+  name,
+  size = 22,
+  color = Colors.fgSecondary,
+}: {
+  name: IconName;
+  size?: number;
+  color?: string;
+}) {
+  const common = {
+    stroke: color,
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    fill: 'none',
+  };
+
+  if (name === 'sprout') {
+    return (
+      <Svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        accessibilityElementsHidden
+      >
+        <Path d="M12 20V9" {...common} />
+        <Path d="M12 13C8 13 5 11 5 7c4 0 7 2 7 6Z" {...common} />
+        <Path d="M12 10c0-4 3-6 7-6 0 4-3 6-7 6Z" {...common} />
+        <Path d="M6 20h12" {...common} />
+      </Svg>
+    );
+  }
+
+  if (name === 'book') {
+    return (
+      <Svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        accessibilityElementsHidden
+      >
+        <Path d="M4 5.5c3.5-.7 6.2.2 8 2.1v11c-1.8-1.9-4.5-2.8-8-2.1v-11Z" {...common} />
+        <Path d="M20 5.5c-3.5-.7-6.2.2-8 2.1v11c1.8-1.9 4.5-2.8 8-2.1v-11Z" {...common} />
+      </Svg>
+    );
+  }
+
+  if (name === 'calendar') {
+    return (
+      <Svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        accessibilityElementsHidden
+      >
+        <Rect x={4} y={5.5} width={16} height={14} rx={2} {...common} />
+        <Path d="M8 3.5v4M16 3.5v4M4 10h16" {...common} />
+        <Circle cx={9} cy={14} r={1} fill={color} />
+        <Circle cx={15} cy={14} r={1} fill={color} />
+      </Svg>
+    );
+  }
+
+  if (name === 'milestone') {
+    return (
+      <Svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        accessibilityElementsHidden
+      >
+        <Path d="M12 3.5 14.5 8l5 .8-3.6 3.6.8 5-4.7-2.3-4.7 2.3.8-5-3.6-3.6 5-.8L12 3.5Z" {...common} />
+      </Svg>
+    );
+  }
+
+  if (name === 'conversation') {
+    return (
+      <Svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        accessibilityElementsHidden
+      >
+        <Path d="M5 5h14v10H9l-4 4V5Z" {...common} />
+        <Path d="M8.5 9h7M8.5 12h4.5" {...common} />
+      </Svg>
+    );
+  }
+
+  if (name === 'document') {
+    return (
+      <Svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        accessibilityElementsHidden
+      >
+        <Path d="M6 3.5h8l4 4v13H6v-17Z" {...common} />
+        <Path d="M14 3.5v4h4M9 12h6M9 16h6" {...common} />
+      </Svg>
+    );
+  }
+
+  if (name === 'check') {
+    return (
+      <Svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        accessibilityElementsHidden
+      >
+        <Path d="m5.5 12.5 4 4 9-9" {...common} />
+      </Svg>
+    );
+  }
+
+  if (name === 'chevron') {
+    return (
+      <Svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        accessibilityElementsHidden
+      >
+        <Path d="m9 5 7 7-7 7" {...common} />
+      </Svg>
+    );
+  }
+
+  if (name === 'clock') {
+    return (
+      <Svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        accessibilityElementsHidden
+      >
+        <Circle cx={12} cy={12} r={8.5} {...common} />
+        <Path d="M12 7.5V12l3 2" {...common} />
+      </Svg>
+    );
+  }
+
+  return (
+    <Svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      accessibilityElementsHidden
+    >
+      <Circle cx={12} cy={12} r={9} {...common} />
+      <Path d="M12 10.5v6M12 7.3v.2" {...common} />
+    </Svg>
+  );
+}
+
+function SectionHeading({
+  icon,
+  title,
+}: {
+  icon: IconName;
+  title: string;
+}) {
   return (
     <View style={styles.sectionHeading}>
-      <Text style={styles.sectionHeadingIcon}>{icon}</Text>
+      <DetailIcon name={icon} size={20} color={Colors.leaf700} />
       <Text style={styles.sectionHeadingText}>{title}</Text>
     </View>
   );
@@ -40,40 +250,78 @@ function SectionHeading({ icon, title }: { icon: string; title: string }) {
 
 function GoalHero({ presentation }: { presentation: GoalPresentation }) {
   return (
-    <View testID="goal-hero" style={styles.hero}>
-      <Svg style={StyleSheet.absoluteFill} viewBox="0 0 380 194" preserveAspectRatio="none">
-        <Path d="M0 0H380V194H0z" fill="#172A4D" />
-        <Path d="M0 122C76 86 145 98 211 128C278 158 330 124 380 101V194H0z" fill="#253D61" />
-        <Path d="M0 154C86 126 151 139 218 164C290 191 337 156 380 142V194H0z" fill="#2E4B3B" />
-        <Circle cx={45} cy={37} r={22} fill="#F8DE86" opacity={0.2} />
-        <Path d="M51 19C39 25 34 37 39 48C44 59 56 65 67 61C58 58 51 49 51 39C51 31 55 24 63 20C59 18 55 18 51 19z" fill="#FFE48A" />
-        <Circle cx={118} cy={25} r={2.2} fill="#FFE48A" />
-        <Circle cx={151} cy={51} r={1.8} fill="#FFE48A" />
-        <Circle cx={342} cy={28} r={2.2} fill="#FFE48A" />
+    <View
+      testID="goal-hero"
+      style={styles.hero}
+      accessibilityLabel={`${presentation.planWeekLabel}，${presentation.weekProgressLabel}`}
+    >
+      <Svg
+        style={StyleSheet.absoluteFill}
+        viewBox="0 0 380 156"
+        preserveAspectRatio="none"
+        accessibilityElementsHidden
+      >
+        <Path d="M0 0H380V156H0z" fill={Colors.grass.nightHillBackBottom} />
+        <Path
+          d="M0 98c80-28 145-20 210 5 70 27 121 10 170-13v66H0V98Z"
+          fill={Colors.grass.nightHillMidBottom}
+        />
+        <Path
+          d="M0 125c81-22 151-10 219 12 68 22 117 5 161-12v31H0v-31Z"
+          fill={Colors.grass.nightHillFrontBottom}
+        />
+        <Circle cx={34} cy={29} r={15} fill={Colors.gold100} opacity={0.2} />
+        <Path
+          d="M39 16c-8 4-11 12-8 20 3 8 11 12 19 9-6-2-10-8-10-14 0-6 3-11 8-14-3-2-6-2-9-1Z"
+          fill={Colors.gold300}
+        />
+        <Circle cx={115} cy={21} r={1.7} fill={Colors.gold300} />
+        <Circle cx={158} cy={38} r={1.4} fill={Colors.gold300} />
+        <Circle cx={337} cy={23} r={1.8} fill={Colors.gold300} />
       </Svg>
 
       <Image
         source={require('../../../assets/images/child/treehouse-night.png')}
         style={styles.treehouse}
         resizeMode="contain"
+        accessibilityIgnoresInvertColors
       />
 
       <View style={styles.heroCopy}>
-        <View style={styles.categoryPill}>
-          <Text style={styles.categoryText}>📚 {presentation.categoryLabel}</Text>
+        <View style={styles.categoryBadge}>
+          <Text style={styles.categoryText} numberOfLines={1}>
+            {presentation.categoryLabel}
+          </Text>
         </View>
-        <Text style={styles.overallLabel}>{presentation.overallLabel}</Text>
-        <View style={styles.progressRow}>
-          <View style={styles.progressTrack}>
-            <View
-              testID="goal-progress-fill"
-              style={[styles.progressFill, { width: `${presentation.overallPercent}%` as any }]}
-            />
-          </View>
-          <Text style={styles.progressPercent}>{presentation.overallPercent}%</Text>
+        <Text style={styles.planWeekLabel} numberOfLines={1}>
+          {presentation.planWeekLabel}
+        </Text>
+        <Text style={styles.weekProgressLabel} numberOfLines={1}>
+          {presentation.weekProgressLabel}
+        </Text>
+        <View
+          style={styles.progressTrack}
+          accessibilityRole="progressbar"
+          accessibilityValue={{
+            min: 0,
+            max: 100,
+            now: presentation.overallPercent,
+          }}
+        >
+          <View
+            testID="goal-progress-fill"
+            style={[
+              styles.progressFill,
+              { width: `${presentation.overallPercent}%` as `${number}%` },
+            ]}
+          />
         </View>
-        <Text style={styles.focusText}>{presentation.focusText}</Text>
-        <Text style={styles.nextText}>{presentation.nextText}</Text>
+        <Text style={styles.focusText} numberOfLines={2}>
+          {presentation.focusText}
+        </Text>
+        <Text style={styles.nextText} numberOfLines={2}>
+          {presentation.nextText}
+        </Text>
       </View>
     </View>
   );
@@ -86,7 +334,60 @@ type TodayStepCardProps = Pick<
   | 'checking'
   | 'onComplete'
   | 'onSelectTimeWindow'
+  | 'onOpenRecord'
 >;
+
+function CompletedTodayState({
+  presentation,
+  completion,
+  onOpenRecord,
+}: {
+  presentation: GoalPresentation;
+  completion?: GoalRecentRecord;
+  onOpenRecord?: Props['onOpenRecord'];
+}) {
+  const minutes = minutesFromAction(presentation.todayAction);
+  const completedLabel = minutes ? `今天已完成 ${minutes} 分鐘` : '今天已完成';
+  const openRecord = () => onOpenRecord?.(completion?.id);
+
+  return (
+    <View style={styles.completedState}>
+      <View style={styles.completedTitleRow}>
+        <View style={styles.completedCheck}>
+          <DetailIcon name="check" size={18} color={Colors.bgSurface} />
+        </View>
+        <View style={styles.completedCopy}>
+          <Text style={styles.completedTitle}>{completedLabel}</Text>
+          {completion?.timeWindowLabel ? (
+            <Text style={styles.completedMeta}>
+              {completion.timeWindowLabel}記錄
+            </Text>
+          ) : null}
+        </View>
+      </View>
+      <View style={styles.completedActions}>
+        <TouchableOpacity
+          style={styles.secondaryAction}
+          onPress={openRecord}
+          accessibilityRole="button"
+          accessibilityLabel="查看紀錄"
+          activeOpacity={0.72}
+        >
+          <Text style={styles.secondaryActionText}>查看紀錄</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.secondaryAction}
+          onPress={openRecord}
+          accessibilityRole="button"
+          accessibilityLabel="需要更正"
+          activeOpacity={0.72}
+        >
+          <Text style={styles.secondaryActionText}>需要更正</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
 
 function TodayStepCard({
   presentation,
@@ -94,10 +395,15 @@ function TodayStepCard({
   checking,
   onComplete,
   onSelectTimeWindow,
+  onOpenRecord,
 }: TodayStepCardProps) {
   const [showTimeOptions, setShowTimeOptions] = useState(false);
+  const [showExplanation, setShowExplanation] = useState(false);
   const [completedLocally, setCompletedLocally] = useState(isCompletedToday);
   const completed = isCompletedToday || completedLocally;
+  const todayCompletion = isCompletedToday
+    ? presentation.recentRecords[0]
+    : undefined;
 
   useEffect(() => {
     if (isCompletedToday) setCompletedLocally(true);
@@ -113,27 +419,40 @@ function TodayStepCard({
     setShowTimeOptions(false);
   };
 
+  const explanationLabel = showExplanation
+    ? '收合小步驟說明'
+    : '展開小步驟說明';
+
   return (
-    <>
-      <SectionHeading icon="🌱" title={presentation.todayTitle} />
+    <View>
+      <SectionHeading icon="sprout" title={presentation.todayTitle} />
       <View testID="goal-today" style={styles.card}>
         <View style={styles.actionHead}>
           <View style={styles.actionIcon}>
-            <Text style={styles.actionIconText}>{presentation.isReadingPlan ? '📖' : '🌿'}</Text>
+            <DetailIcon
+              name={presentation.isReadingPlan ? 'book' : 'sprout'}
+              color={Colors.leaf700}
+            />
           </View>
           <View style={styles.actionCopy}>
             <Text style={styles.actionTitle}>{presentation.todayAction}</Text>
             {presentation.preferredTimeWindow ? (
               <View style={styles.scheduleRow}>
-                <Text style={styles.scheduleText}>
-                  今天預計：{formatTimeWindow(presentation.preferredTimeWindow)}
-                </Text>
+                <View style={styles.scheduleLabel}>
+                  <DetailIcon name="clock" size={16} color={Colors.fgMuted} />
+                  <Text style={styles.scheduleText}>
+                    今天預計：{formatTimeWindow(presentation.preferredTimeWindow)}
+                  </Text>
+                </View>
                 {!completed && presentation.canCompleteToday ? (
                   <TouchableOpacity
+                    style={styles.inlineAction}
                     accessibilityRole="button"
+                    accessibilityLabel="調整今天的預計時段"
                     onPress={() => setShowTimeOptions((visible) => !visible)}
+                    activeOpacity={0.72}
                   >
-                    <Text style={styles.adjustTimeText}>今天要調整</Text>
+                    <Text style={styles.inlineActionText}>調整時段</Text>
                   </TouchableOpacity>
                 ) : null}
               </View>
@@ -141,80 +460,154 @@ function TodayStepCard({
           </View>
         </View>
 
-        {showTimeOptions ? (
+        <TouchableOpacity
+          style={styles.explanationToggle}
+          accessibilityRole="button"
+          accessibilityLabel={explanationLabel}
+          accessibilityState={{ expanded: showExplanation }}
+          onPress={() => setShowExplanation((visible) => !visible)}
+          activeOpacity={0.72}
+        >
+          <View style={styles.explanationToggleText}>
+            <DetailIcon name="info" size={17} color={Colors.fgMuted} />
+            <Text style={styles.explanationLabel}>小步驟說明</Text>
+          </View>
+          <View
+            style={[
+              styles.explanationChevron,
+              showExplanation && styles.explanationChevronExpanded,
+            ]}
+          >
+            <DetailIcon name="chevron" size={18} color={Colors.fgMuted} />
+          </View>
+        </TouchableOpacity>
+
+        {showExplanation ? (
+          <View style={styles.explanationBody}>
+            <Text style={styles.explanationText}>{presentation.focusText}</Text>
+            <Text style={styles.explanationHint}>
+              {presentation.isReadingPlan
+                ? '不知道選哪一本時，可以先從最想翻開的那一本開始。'
+                : '先完成今天最小的一步，覺得不合適時再和家人一起調整。'}
+            </Text>
+          </View>
+        ) : null}
+
+        {showTimeOptions && !completed ? (
           <View testID="time-options" style={styles.timeOptions}>
             {([
               ['after_dinner', '晚餐後'],
               ['before_bed', '睡前'],
-            ] as const).map(([value, label]) => (
-              <TouchableOpacity
-                key={value}
-                style={[
-                  styles.timeOption,
-                  presentation.preferredTimeWindow === value && styles.timeOptionSelected,
-                ]}
-                onPress={() => handleTimeSelect(value)}
-              >
-                <Text
+            ] as const).map(([value, label]) => {
+              const selected = presentation.preferredTimeWindow === value;
+              return (
+                <TouchableOpacity
+                  key={value}
                   style={[
-                    styles.timeOptionText,
-                    presentation.preferredTimeWindow === value && styles.timeOptionTextSelected,
+                    styles.timeOption,
+                    selected && styles.timeOptionSelected,
                   ]}
+                  onPress={() => handleTimeSelect(value)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`改成${label}`}
+                  accessibilityState={{ selected }}
+                  activeOpacity={0.72}
                 >
-                  {label}
-                </Text>
-              </TouchableOpacity>
-            ))}
+                  <Text
+                    style={[
+                      styles.timeOptionText,
+                      selected && styles.timeOptionTextSelected,
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         ) : null}
 
-        {presentation.canCompleteToday ? (
+        {completed ? (
+          <CompletedTodayState
+            presentation={presentation}
+            completion={todayCompletion}
+            onOpenRecord={onOpenRecord}
+          />
+        ) : presentation.canCompleteToday ? (
           <TouchableOpacity
-            style={[styles.completeButton, (checking || completed) && styles.completeButtonDisabled]}
-            disabled={checking || completed}
+            style={[styles.completeButton, checking && styles.buttonBusy]}
+            disabled={checking}
             onPress={() => void handleComplete()}
+            accessibilityRole="button"
+            accessibilityLabel={
+              presentation.isReadingPlan
+                ? '記錄今天的閱讀'
+                : '記下今天的完成'
+            }
+            accessibilityState={{ disabled: checking }}
+            activeOpacity={0.78}
           >
             {checking ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
+              <ActivityIndicator size="small" color={Colors.bgSurface} />
             ) : (
-              <Text style={styles.completeButtonText}>
-                {completed
-                  ? '今天的閱讀已記下'
-                  : presentation.isReadingPlan
-                    ? '完成今天閱讀'
+              <>
+                <DetailIcon name="check" size={19} color={Colors.bgSurface} />
+                <Text style={styles.completeButtonText}>
+                  {presentation.isReadingPlan
+                    ? '記錄今天的閱讀'
                     : '記下今天的完成'}
-              </Text>
+                </Text>
+              </>
             )}
           </TouchableOpacity>
         ) : (
           <View style={styles.restNote}>
             <Text style={styles.restNoteText}>
               {presentation.todayTitle === '今天是休息日'
-                ? '今天不用打卡，照自己的節奏休息。'
-                : '這個階段由家長確認完成，今天可以照自己的節奏練習。'}
+                ? '今天沒有安排，照自己的節奏休息就好。'
+                : '今天先照自己的節奏前進，需要時再和家人一起確認。'}
             </Text>
           </View>
         )}
-
       </View>
-    </>
+    </View>
   );
 }
 
-function dayIcon(state: GoalDayStatus['state']): string {
-  if (state === 'self_started') return '★';
-  if (state === 'completed') return '✓';
-  if (state === 'today') return '📖';
-  if (state === 'future') return '···';
-  return '○';
-}
+function DayStatusGlyph({ state }: { state: GoalDayStatus['state'] }) {
+  if (state === 'completed') {
+    return <DetailIcon name="check" size={18} color={Colors.bgSurface} />;
+  }
 
-function dayCaption(state: GoalDayStatus['state']): string {
-  if (state === 'self_started') return '自己開始';
-  if (state === 'completed') return '完成';
-  if (state === 'today') return '今天';
-  if (state === 'future') return '還沒到';
-  return '未記錄';
+  if (state === 'today') {
+    return <Circle cx={12} cy={12} r={3.2} fill={Colors.leaf600} />;
+  }
+
+  if (state === 'missed') {
+    return <Circle cx={12} cy={12} r={3} fill={Colors.fruit700} />;
+  }
+
+  if (state === 'unscheduled') {
+    return (
+      <Line
+        x1={8}
+        y1={12}
+        x2={16}
+        y2={12}
+        stroke={Colors.ink300}
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+    );
+  }
+
+  return (
+    <>
+      <Circle cx={9} cy={12} r={1.2} fill={Colors.ink300} />
+      <Circle cx={12} cy={12} r={1.2} fill={Colors.ink300} />
+      <Circle cx={15} cy={12} r={1.2} fill={Colors.ink300} />
+    </>
+  );
 }
 
 function WeekProgressCard({
@@ -225,104 +618,239 @@ function WeekProgressCard({
   summary: string;
 }) {
   return (
-    <>
-      <SectionHeading icon="📊" title="本週進度" />
-      <View testID="goal-week" style={[styles.card, styles.weekCard]}>
+    <View>
+      <SectionHeading icon="calendar" title="本週安排" />
+      <View testID="goal-week" style={styles.card}>
         <View style={styles.weekRow}>
-          {days.map((day) => {
-            const isDone = day.state === 'completed' || day.state === 'self_started';
-            return (
-              <View key={day.day} style={styles.dayCell}>
-                <Text style={styles.dayLabel}>{day.label}</Text>
+          {days.map((day) => (
+            <View
+              key={day.isoDate}
+              style={styles.dayCell}
+              accessible
+              accessibilityLabel={`${WEEKDAY_NAMES[day.day]}，${DAY_STATE_LABELS[day.state]}`}
+            >
+              <Text style={styles.dayLabel}>{day.label}</Text>
+              <View
+                style={[
+                  styles.dayCircle,
+                  day.state === 'completed' && styles.dayCircleCompleted,
+                  day.state === 'today' && styles.dayCircleToday,
+                  day.state === 'upcoming' && styles.dayCircleUpcoming,
+                  day.state === 'missed' && styles.dayCircleMissed,
+                  day.state === 'unscheduled' && styles.dayCircleUnscheduled,
+                ]}
+              >
+                <Svg
+                  width={24}
+                  height={24}
+                  viewBox="0 0 24 24"
+                  accessibilityElementsHidden
+                >
+                  <DayStatusGlyph state={day.state} />
+                </Svg>
+              </View>
+              <Text style={styles.dayCaption} numberOfLines={2}>
+                {DAY_CAPTIONS[day.state]}
+              </Text>
+            </View>
+          ))}
+        </View>
+        <View style={styles.weekInsight}>
+          <DetailIcon name="sprout" size={16} color={Colors.leaf700} />
+          <Text style={styles.weekInsightText}>{summary}</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function milestoneStatusLabel(milestone: GoalMilestone): string {
+  if (milestone.status === 'completed') return '已完成';
+  if (milestone.status === 'next') return '下一個里程碑';
+  return '之後一起回顧';
+}
+
+function MilestoneTimeline({
+  milestones,
+}: {
+  milestones: GoalMilestone[];
+}) {
+  return (
+    <View>
+      <SectionHeading icon="milestone" title="成長里程碑" />
+      <View testID="goal-rewards" style={styles.timeline}>
+        {milestones.map((milestone, index) => (
+          <View key={milestone.id} style={styles.timelineRow}>
+            <View style={styles.timelineRail}>
+              <View
+                style={[
+                  styles.timelineNode,
+                  milestone.status === 'completed' && styles.timelineNodeCompleted,
+                  milestone.status === 'next' && styles.timelineNodeNext,
+                ]}
+              >
+                {milestone.status === 'completed' ? (
+                  <DetailIcon name="check" size={15} color={Colors.bgSurface} />
+                ) : (
+                  <DetailIcon
+                    name="milestone"
+                    size={14}
+                    color={
+                      milestone.status === 'next'
+                        ? Colors.gold700
+                        : Colors.ink300
+                    }
+                  />
+                )}
+              </View>
+              {index < milestones.length - 1 ? (
+                <View style={styles.timelineLine} />
+              ) : null}
+            </View>
+            <View
+              style={[
+                styles.timelineContent,
+                index < milestones.length - 1 && styles.timelineContentDivider,
+              ]}
+            >
+              <View style={styles.timelineTitleRow}>
+                <Text style={styles.timelineTitle}>{milestone.title}</Text>
                 <View
                   style={[
-                    styles.dayCircle,
-                    isDone && styles.dayCircleDone,
-                    day.state === 'today' && styles.dayCircleToday,
+                    styles.statusBadge,
+                    milestone.status === 'completed' && styles.statusBadgeCompleted,
+                    milestone.status === 'next' && styles.statusBadgeNext,
                   ]}
                 >
                   <Text
                     style={[
-                      styles.dayIcon,
-                      isDone && styles.dayIconDone,
-                      day.state === 'today' && styles.dayIconToday,
+                      styles.statusBadgeText,
+                      milestone.status === 'completed' && styles.statusBadgeTextCompleted,
+                      milestone.status === 'next' && styles.statusBadgeTextNext,
                     ]}
                   >
-                    {dayIcon(day.state)}
+                    {milestoneStatusLabel(milestone)}
                   </Text>
                 </View>
-                <Text style={styles.dayCaption} numberOfLines={2}>
-                  {dayCaption(day.state)}
-                </Text>
               </View>
-            );
-          })}
-        </View>
-        <View style={styles.weekInsight}>
-          <Text style={styles.weekInsightText}>🌿 {summary}</Text>
-        </View>
+              {milestone.detail ? (
+                <Text style={styles.timelineDetail}>{milestone.detail}</Text>
+              ) : null}
+            </View>
+          </View>
+        ))}
       </View>
-    </>
+    </View>
   );
 }
 
-function JourneyRewardsCard({ presentation }: { presentation: GoalPresentation }) {
+function ReviewCard({
+  presentation,
+  onOpenReview,
+}: {
+  presentation: GoalPresentation;
+  onOpenReview?: Props['onOpenReview'];
+}) {
   return (
-    <>
-      <SectionHeading icon="⭐" title="旅程回饋" />
-      <View testID="goal-rewards" style={[styles.card, styles.rewardsCard]}>
-        {presentation.nextReward ? (
-          <View style={styles.rewardRow}>
-            <View style={styles.rewardIcon}>
-              <Text style={styles.rewardIconText}>🌿</Text>
-            </View>
-            <View style={styles.rewardCopy}>
-              <Text style={styles.rewardTitle}>
-                {presentation.isReadingPlan
-                  ? `完成第 ${presentation.nextReward.threshold} 次閱讀`
-                  : `抵達第 ${presentation.nextReward.threshold} 個里程碑`}
-              </Text>
-              <Text style={styles.rewardSub}>
-                成長被記下 · 成長幣 +{presentation.nextReward.coin}
-              </Text>
-            </View>
-            <View style={styles.rewardStatus}>
-              <Text style={styles.rewardStatusText}>下一站</Text>
-            </View>
-          </View>
-        ) : null}
-        <View style={[styles.rewardRow, styles.rewardRowFinal]}>
-          <View style={styles.rewardIcon}>
-            <Text style={styles.rewardIconText}>📚</Text>
-          </View>
-          <View style={styles.rewardCopy}>
-            <Text style={styles.rewardTitle}>完成整段旅程</Text>
-            <Text style={styles.rewardSub}>{presentation.finalRewardText}</Text>
-          </View>
-          <View style={[styles.rewardStatus, styles.rewardStatusFinal]}>
-            <Text style={styles.rewardStatusText}>最終目標</Text>
-          </View>
-        </View>
-      </View>
-    </>
-  );
-}
-
-function ReviewCard({ presentation }: { presentation: GoalPresentation }) {
-  return (
-    <>
-      <SectionHeading icon="❤️" title={presentation.reviewTitle} />
-      <View testID="goal-review" style={[styles.card, styles.reviewCard]}>
+    <View>
+      <SectionHeading icon="conversation" title={presentation.reviewTitle} />
+      <TouchableOpacity
+        testID="goal-review"
+        style={[styles.card, styles.reviewCard]}
+        onPress={onOpenReview}
+        accessibilityRole="button"
+        accessibilityLabel="開始週末回顧"
+        activeOpacity={0.75}
+      >
         <View style={styles.reviewIcon}>
-          <Text style={styles.reviewIconText}>🌳</Text>
+          <DetailIcon name="conversation" color={Colors.leaf700} />
         </View>
         <View style={styles.reviewCopy}>
-          <Text style={styles.reviewTitle}>一起聊聊</Text>
           <Text style={styles.reviewPrompt}>{presentation.reviewPrompt}</Text>
+          <Text style={styles.reviewAction}>開始週末回顧</Text>
         </View>
-        <Text style={styles.reviewArrow}>›</Text>
+        <DetailIcon name="chevron" size={20} color={Colors.gold700} />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function RecentRecords({
+  records,
+  onOpenRecord,
+}: {
+  records: GoalRecentRecord[];
+  onOpenRecord?: Props['onOpenRecord'];
+}) {
+  const visibleRecords = records.slice(0, 3);
+  if (visibleRecords.length === 0) return null;
+
+  return (
+    <View>
+      <SectionHeading icon="document" title="最近紀錄" />
+      <View style={styles.recordList}>
+        {visibleRecords.map((record, index) => (
+          <TouchableOpacity
+            key={record.id}
+            style={[
+              styles.recordRow,
+              index < visibleRecords.length - 1 && styles.recordRowDivider,
+            ]}
+            onPress={() => onOpenRecord?.(record.id)}
+            disabled={!onOpenRecord}
+            accessibilityRole={onOpenRecord ? 'button' : undefined}
+            accessibilityLabel={`查看${record.dateLabel}的紀錄`}
+            activeOpacity={0.72}
+          >
+            <View style={styles.recordDateWrap}>
+              <Text style={styles.recordDate}>{record.dateLabel}</Text>
+            </View>
+            <View style={styles.recordCopy}>
+              <Text style={styles.recordDetail}>{record.detail}</Text>
+              {record.timeWindowLabel ? (
+                <Text style={styles.recordTime}>{record.timeWindowLabel}</Text>
+              ) : null}
+            </View>
+            {onOpenRecord ? (
+              <DetailIcon name="chevron" size={18} color={Colors.ink300} />
+            ) : null}
+          </TouchableOpacity>
+        ))}
       </View>
-    </>
+    </View>
+  );
+}
+
+function PlanDetailsEntry({
+  presentation,
+  onOpenDetails,
+}: {
+  presentation: GoalPresentation;
+  onOpenDetails?: Props['onOpenDetails'];
+}) {
+  return (
+    <View>
+      <SectionHeading icon="document" title="計畫詳情" />
+      <TouchableOpacity
+        testID="goal-details"
+        style={styles.detailsRow}
+        onPress={onOpenDetails}
+        accessibilityRole="button"
+        accessibilityLabel="查看計畫詳情"
+        activeOpacity={0.72}
+      >
+        <View style={styles.detailsIcon}>
+          <DetailIcon name="document" color={Colors.fgMuted} />
+        </View>
+        <View style={styles.detailsCopy}>
+          <Text style={styles.detailsTitle}>查看計畫安排</Text>
+          <Text style={styles.detailsMeta} numberOfLines={2}>
+            {presentation.planPeriodLabel} · {presentation.completionConditionLabel}
+          </Text>
+        </View>
+        <DetailIcon name="chevron" size={20} color={Colors.ink300} />
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -332,7 +860,15 @@ export default function LongTermGoalDetailView({
   checking,
   onComplete,
   onSelectTimeWindow,
+  onOpenRecord,
+  onOpenReview,
+  onOpenDetails,
 }: Props) {
+  const recentRecords = useMemo(
+    () => presentation.recentRecords.slice(0, 3),
+    [presentation.recentRecords],
+  );
+
   return (
     <ScrollView
       testID="long-term-detail-scroll"
@@ -347,10 +883,25 @@ export default function LongTermGoalDetailView({
         checking={checking}
         onComplete={onComplete}
         onSelectTimeWindow={onSelectTimeWindow}
+        onOpenRecord={onOpenRecord}
       />
-      <WeekProgressCard days={presentation.weekDays} summary={presentation.weekSummary} />
-      <JourneyRewardsCard presentation={presentation} />
-      <ReviewCard presentation={presentation} />
+      <WeekProgressCard
+        days={presentation.weekDays}
+        summary={presentation.weekSummary}
+      />
+      <MilestoneTimeline milestones={presentation.milestones} />
+      <ReviewCard
+        presentation={presentation}
+        onOpenReview={onOpenReview}
+      />
+      <RecentRecords
+        records={recentRecords}
+        onOpenRecord={onOpenRecord}
+      />
+      <PlanDetailsEntry
+        presentation={presentation}
+        onOpenDetails={onOpenDetails}
+      />
     </ScrollView>
   );
 }
@@ -361,189 +912,237 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 14,
-    paddingBottom: 112,
-    gap: 12,
+    paddingBottom: 44,
+    gap: 14,
   },
   hero: {
-    minHeight: 194,
-    borderRadius: 22,
+    height: 156,
+    borderRadius: 8,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255, 236, 179, 0.2)',
+    borderColor: Colors.grass.nightHillBackTop,
   },
   treehouse: {
     position: 'absolute',
-    left: -14,
-    bottom: -12,
-    width: 176,
-    height: 176,
-    zIndex: 3,
+    right: -8,
+    bottom: -10,
+    width: 116,
+    height: 116,
   },
   heroCopy: {
-    width: '58%',
-    marginLeft: '42%',
-    paddingTop: 22,
-    paddingRight: 15,
-    paddingBottom: 14,
-    zIndex: 5,
+    height: '100%',
+    paddingTop: 12,
+    paddingRight: 108,
+    paddingBottom: 10,
+    paddingLeft: 14,
   },
-  categoryPill: {
+  categoryBadge: {
     alignSelf: 'flex-start',
-    minHeight: 25,
-    borderRadius: 13,
+    minHeight: 20,
+    maxWidth: '100%',
+    borderRadius: 7,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderColor: Colors.grass.nightHillBackTop,
+    backgroundColor: Colors.grass.nightHillMidTop,
     justifyContent: 'center',
-    paddingHorizontal: 9,
+    paddingHorizontal: 7,
   },
   categoryText: {
-    color: '#FFF0B5',
+    color: Colors.gold100,
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '800',
+  },
+  planWeekLabel: {
+    marginTop: 5,
+    color: Colors.bgSurface,
+    fontSize: 18,
+    lineHeight: 22,
+    fontWeight: '900',
+  },
+  weekProgressLabel: {
+    marginTop: 1,
+    color: Colors.gold100,
     fontSize: 11,
-    fontWeight: '900',
-  },
-  overallLabel: {
-    marginTop: 10,
-    color: '#FFFFFF',
-    fontSize: 23,
-    lineHeight: 28,
-    fontWeight: '900',
-  },
-  progressRow: {
-    marginTop: 9,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    lineHeight: 15,
+    fontWeight: '800',
   },
   progressTrack: {
-    flex: 1,
-    height: 8,
-    borderRadius: 4,
+    width: '100%',
+    height: 6,
+    marginTop: 6,
+    borderRadius: 3,
     overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.24)',
+    backgroundColor: Colors.grass.nightHillBackTop,
   },
   progressFill: {
     height: '100%',
-    borderRadius: 4,
-    backgroundColor: '#B3D564',
-  },
-  progressPercent: {
-    color: '#D8EF9A',
-    fontSize: 12,
-    fontWeight: '900',
+    borderRadius: 3,
+    backgroundColor: Colors.leaf300,
   },
   focusText: {
-    marginTop: 10,
-    color: '#FFF3C6',
-    fontSize: 12,
-    lineHeight: 17,
+    marginTop: 6,
+    color: Colors.cream100,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '800',
   },
   nextText: {
-    marginTop: 8,
-    paddingTop: 7,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.16)',
-    color: '#DFE7ED',
+    marginTop: 3,
+    color: Colors.cream200,
     fontSize: 10,
-    lineHeight: 14,
+    lineHeight: 13,
     fontWeight: '700',
   },
   sectionHeading: {
-    minHeight: 28,
+    minHeight: 34,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: 2,
-  },
-  sectionHeadingIcon: {
-    fontSize: 18,
+    marginBottom: 6,
   },
   sectionHeadingText: {
-    color: Colors.ink900,
-    fontSize: 20,
-    lineHeight: 26,
+    flex: 1,
+    color: Colors.fgPrimary,
+    fontSize: 18,
+    lineHeight: 24,
     fontWeight: '900',
   },
   card: {
-    padding: 15,
-    borderRadius: 18,
+    padding: 14,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: Colors.borderSoft,
     backgroundColor: Colors.bgSurface,
     shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.05,
-    shadowRadius: 18,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    elevation: 1,
   },
   actionHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 11,
+    gap: 10,
   },
   actionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#D9CEE1',
-    backgroundColor: '#F4EFF8',
-  },
-  actionIconText: {
-    fontSize: 24,
+    borderColor: Colors.leaf100,
+    backgroundColor: Colors.leaf50,
   },
   actionCopy: {
     flex: 1,
     minWidth: 0,
   },
   actionTitle: {
-    color: Colors.ink900,
-    fontSize: 16,
-    lineHeight: 22,
+    color: Colors.fgPrimary,
+    fontSize: 15,
+    lineHeight: 21,
     fontWeight: '900',
   },
   scheduleRow: {
-    marginTop: 5,
+    marginTop: 4,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
+    gap: 6,
+  },
+  scheduleLabel: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
   },
   scheduleText: {
-    flex: 1,
-    color: Colors.ink500,
-    fontSize: 12,
+    flexShrink: 1,
+    color: Colors.fgMuted,
+    fontSize: 11,
+    lineHeight: 16,
     fontWeight: '700',
   },
-  adjustTimeText: {
+  inlineAction: {
+    minWidth: 70,
+    minHeight: 44,
+    paddingHorizontal: 6,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  inlineActionText: {
     color: Colors.leaf700,
     fontSize: 11,
     fontWeight: '900',
   },
+  explanationToggle: {
+    minHeight: 44,
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: Colors.hairline,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  explanationToggleText: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  explanationLabel: {
+    color: Colors.fgSecondary,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  explanationChevron: {
+    transform: [{ rotate: '90deg' }],
+  },
+  explanationChevronExpanded: {
+    transform: [{ rotate: '-90deg' }],
+  },
+  explanationBody: {
+    borderTopWidth: 1,
+    borderTopColor: Colors.hairline,
+    paddingTop: 9,
+    paddingBottom: 3,
+  },
+  explanationText: {
+    color: Colors.fgSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
+  },
+  explanationHint: {
+    marginTop: 5,
+    color: Colors.fgMuted,
+    fontSize: 11,
+    lineHeight: 17,
+  },
   timeOptions: {
-    marginTop: 10,
+    marginTop: 8,
     flexDirection: 'row',
     gap: 8,
   },
   timeOption: {
     flex: 1,
-    minHeight: 36,
-    borderRadius: 10,
+    minHeight: 44,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: Colors.borderSoft,
+    borderColor: Colors.borderMedium,
     backgroundColor: Colors.cream50,
     alignItems: 'center',
     justifyContent: 'center',
   },
   timeOptionSelected: {
-    borderColor: Colors.leaf300,
+    borderColor: Colors.leaf400,
     backgroundColor: Colors.leaf50,
   },
   timeOptionText: {
-    color: Colors.ink700,
+    color: Colors.fgSecondary,
     fontSize: 12,
     fontWeight: '900',
   },
@@ -551,206 +1150,371 @@ const styles = StyleSheet.create({
     color: Colors.leaf700,
   },
   completeButton: {
-    minHeight: 47,
-    marginTop: 13,
-    borderRadius: 13,
-    backgroundColor: '#5B7F3E',
+    minHeight: 48,
+    marginTop: 10,
+    borderRadius: 8,
+    backgroundColor: Colors.accent,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  buttonBusy: {
+    opacity: 0.65,
+  },
+  completeButtonText: {
+    color: Colors.bgSurface,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  completedState: {
+    marginTop: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.leaf100,
+    backgroundColor: Colors.leaf50,
+    paddingHorizontal: 11,
+    paddingTop: 10,
+    paddingBottom: 7,
+  },
+  completedTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  completedCheck: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.success,
+  },
+  completedCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  completedTitle: {
+    color: Colors.leaf700,
+    fontSize: 14,
+    lineHeight: 19,
+    fontWeight: '900',
+  },
+  completedMeta: {
+    marginTop: 1,
+    color: Colors.fgMuted,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '700',
+  },
+  completedActions: {
+    minHeight: 44,
+    marginTop: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 6,
+  },
+  secondaryAction: {
+    minHeight: 44,
+    paddingHorizontal: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  completeButtonDisabled: {
-    opacity: 0.58,
-  },
-  completeButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
+  secondaryActionText: {
+    color: Colors.leaf700,
+    fontSize: 11,
     fontWeight: '900',
   },
   restNote: {
-    marginTop: 12,
-    minHeight: 42,
-    borderRadius: 11,
+    minHeight: 44,
+    marginTop: 10,
+    borderRadius: 8,
     backgroundColor: Colors.cream50,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
   },
   restNoteText: {
-    color: Colors.ink500,
-    fontSize: 12,
+    color: Colors.fgMuted,
+    fontSize: 11,
     lineHeight: 17,
     fontWeight: '700',
     textAlign: 'center',
-  },
-  weekCard: {
-    paddingBottom: 13,
   },
   weekRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    gap: 3,
+    gap: 2,
   },
   dayCell: {
     flex: 1,
     minWidth: 0,
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
   },
   dayLabel: {
-    color: Colors.ink700,
-    fontSize: 11,
+    color: Colors.fgSecondary,
+    fontSize: 10,
+    lineHeight: 14,
     fontWeight: '900',
   },
   dayCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: Colors.ink300,
-    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dayCircleDone: {
-    borderStyle: 'solid',
-    borderColor: '#7FA94F',
-    backgroundColor: '#7FA94F',
+  dayCircleCompleted: {
+    borderColor: Colors.success,
+    backgroundColor: Colors.success,
   },
   dayCircleToday: {
-    borderStyle: 'solid',
-    borderColor: '#D5BD85',
-    backgroundColor: '#FFF4DC',
+    borderWidth: 2,
+    borderColor: Colors.leaf500,
+    backgroundColor: Colors.leaf50,
   },
-  dayIcon: {
-    color: Colors.ink300,
-    fontSize: 15,
-    fontWeight: '900',
+  dayCircleUpcoming: {
+    borderStyle: 'dashed',
+    borderColor: Colors.ink300,
+    backgroundColor: Colors.bgSurface,
   },
-  dayIconDone: {
-    color: '#FFFFFF',
+  dayCircleMissed: {
+    borderColor: Colors.fruit300,
+    backgroundColor: Colors.fruit100,
   },
-  dayIconToday: {
-    fontSize: 16,
+  dayCircleUnscheduled: {
+    borderColor: Colors.ink100,
+    backgroundColor: Colors.cream50,
   },
   dayCaption: {
-    minHeight: 25,
-    color: Colors.ink500,
-    fontSize: 9,
-    lineHeight: 12,
+    minHeight: 24,
+    color: Colors.fgMuted,
+    fontSize: 8,
+    lineHeight: 11,
     textAlign: 'center',
   },
   weekInsight: {
-    marginTop: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
-    borderRadius: 10,
-    backgroundColor: '#F1F6E7',
-  },
-  weekInsightText: {
-    color: Colors.ink700,
-    fontSize: 11,
-    lineHeight: 16,
-    fontWeight: '800',
-  },
-  rewardsCard: {
-    gap: 8,
-  },
-  rewardRow: {
-    minHeight: 54,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#EAD8A8',
-    backgroundColor: '#FFF9E8',
+    marginTop: 8,
+    borderRadius: 8,
+    backgroundColor: Colors.leaf50,
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 10,
+    alignItems: 'flex-start',
+    gap: 7,
+    paddingHorizontal: 9,
     paddingVertical: 8,
   },
-  rewardRowFinal: {
-    borderColor: '#D7DFC9',
-    backgroundColor: '#F5F8EF',
-  },
-  rewardIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rewardIconText: {
-    fontSize: 20,
-  },
-  rewardCopy: {
+  weekInsightText: {
     flex: 1,
-    minWidth: 0,
-  },
-  rewardTitle: {
-    color: Colors.ink900,
-    fontSize: 12,
-    fontWeight: '900',
-  },
-  rewardSub: {
-    marginTop: 2,
-    color: Colors.ink500,
-    fontSize: 10,
-    lineHeight: 14,
+    color: Colors.fgSecondary,
+    fontSize: 11,
+    lineHeight: 16,
     fontWeight: '700',
   },
-  rewardStatus: {
-    borderRadius: 9,
-    backgroundColor: '#F0B63B',
-    paddingHorizontal: 7,
-    paddingVertical: 4,
+  timeline: {
+    paddingHorizontal: 2,
   },
-  rewardStatusFinal: {
-    backgroundColor: '#76925F',
+  timelineRow: {
+    flexDirection: 'row',
+    minHeight: 62,
   },
-  rewardStatusText: {
-    color: '#FFFFFF',
-    fontSize: 9,
+  timelineRail: {
+    width: 36,
+    alignItems: 'center',
+  },
+  timelineNode: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.ink100,
+    backgroundColor: Colors.cream50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  timelineNodeCompleted: {
+    borderColor: Colors.success,
+    backgroundColor: Colors.success,
+  },
+  timelineNodeNext: {
+    borderColor: Colors.gold500,
+    backgroundColor: Colors.gold100,
+  },
+  timelineLine: {
+    flex: 1,
+    width: 1,
+    backgroundColor: Colors.hairline,
+  },
+  timelineContent: {
+    flex: 1,
+    minWidth: 0,
+    paddingLeft: 6,
+    paddingBottom: 12,
+  },
+  timelineContentDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.hairline,
+    marginBottom: 10,
+  },
+  timelineTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  timelineTitle: {
+    flex: 1,
+    minWidth: 0,
+    color: Colors.fgPrimary,
+    fontSize: 13,
+    lineHeight: 18,
     fontWeight: '900',
   },
+  timelineDetail: {
+    marginTop: 3,
+    color: Colors.fgMuted,
+    fontSize: 10,
+    lineHeight: 15,
+    fontWeight: '700',
+  },
+  statusBadge: {
+    maxWidth: 104,
+    borderRadius: 7,
+    backgroundColor: Colors.cream100,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  statusBadgeCompleted: {
+    backgroundColor: Colors.leaf50,
+  },
+  statusBadgeNext: {
+    backgroundColor: Colors.gold100,
+  },
+  statusBadgeText: {
+    color: Colors.fgMuted,
+    fontSize: 8,
+    lineHeight: 11,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  statusBadgeTextCompleted: {
+    color: Colors.leaf700,
+  },
+  statusBadgeTextNext: {
+    color: Colors.gold700,
+  },
   reviewCard: {
+    minHeight: 82,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    borderColor: '#ECD9B8',
-    backgroundColor: '#FFF8ED',
+    borderColor: Colors.cream300,
+    backgroundColor: Colors.cream50,
   },
   reviewIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#EFF5DF',
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: Colors.leaf50,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  reviewIconText: {
-    fontSize: 27,
   },
   reviewCopy: {
     flex: 1,
     minWidth: 0,
   },
-  reviewTitle: {
-    color: Colors.ink900,
-    fontSize: 13,
+  reviewPrompt: {
+    color: Colors.fgSecondary,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '700',
+  },
+  reviewAction: {
+    marginTop: 4,
+    color: Colors.leaf700,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: '900',
   },
-  reviewPrompt: {
-    marginTop: 3,
-    color: Colors.ink700,
-    fontSize: 10,
-    lineHeight: 15,
-    fontWeight: '700',
+  recordList: {
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: Colors.hairline,
   },
-  reviewArrow: {
-    color: Colors.gold700,
-    fontSize: 26,
-    fontWeight: '700',
+  recordRow: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 2,
+    paddingVertical: 7,
+  },
+  recordRowDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.hairline,
+  },
+  recordDateWrap: {
+    width: 58,
+  },
+  recordDate: {
+    color: Colors.fgSecondary,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '900',
+  },
+  recordCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  recordDetail: {
+    color: Colors.fgPrimary,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '800',
+  },
+  recordTime: {
+    marginTop: 2,
+    color: Colors.fgMuted,
+    fontSize: 10,
+    lineHeight: 14,
+  },
+  detailsRow: {
+    minHeight: 64,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: Colors.hairline,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 2,
+    paddingVertical: 8,
+  },
+  detailsIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 8,
+    backgroundColor: Colors.cream100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailsCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  detailsTitle: {
+    color: Colors.fgPrimary,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '900',
+  },
+  detailsMeta: {
+    marginTop: 2,
+    color: Colors.fgMuted,
+    fontSize: 9,
+    lineHeight: 13,
   },
 });
