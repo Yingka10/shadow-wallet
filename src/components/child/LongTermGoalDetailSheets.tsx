@@ -76,7 +76,7 @@ const REVIEW_TIME_OPTIONS: Array<{
   { value: 'unsure', label: '還不確定' },
 ];
 
-const REVIEW_NEXT_OPTIONS: Array<{
+const READING_REVIEW_NEXT_OPTIONS: Array<{
   value: NonNullable<ReviewDraft['nextStep']>;
   label: string;
 }> = [
@@ -86,7 +86,17 @@ const REVIEW_NEXT_OPTIONS: Array<{
   { value: 'method', label: '調整方式' },
 ];
 
-const ADJUSTMENT_OPTIONS: Array<{
+const GENERAL_REVIEW_NEXT_OPTIONS: Array<{
+  value: NonNullable<ReviewDraft['nextStep']>;
+  label: string;
+}> = [
+  { value: 'keep', label: '維持現在安排' },
+  { value: 'time', label: '調整進行時間' },
+  { value: 'frequency', label: '調整每週安排' },
+  { value: 'method', label: '調整進行方式' },
+];
+
+const READING_ADJUSTMENT_OPTIONS: Array<{
   value: AdjustmentDraft;
   label: string;
 }> = [
@@ -97,6 +107,50 @@ const ADJUSTMENT_OPTIONS: Array<{
   { value: 'pause', label: '想先暫停一下' },
   { value: 'discuss', label: '想和家人討論' },
 ];
+
+type PresentationKind = 'reading' | 'skill' | 'family' | 'challenge' | 'general';
+
+function getPresentationKind(
+  presentation: GoalPresentation,
+): PresentationKind {
+  if (presentation.isReadingPlan) return 'reading';
+  if (presentation.categoryLabel === '學習與技能') return 'skill';
+  if (presentation.categoryLabel === '家庭參與') return 'family';
+  if (presentation.categoryLabel === '自主挑戰') return 'challenge';
+  return 'general';
+}
+
+function getReviewPrompt(kind: PresentationKind): string {
+  if (kind === 'reading') return '這週最喜歡哪一本書或哪一段？';
+  if (kind === 'skill') return '這週哪一段練習最有感？';
+  if (kind === 'family') return '這週哪一次一起做最有感？';
+  if (kind === 'challenge') return '這週哪一步最有感？';
+  return '這週哪一段最有感？';
+}
+
+function getAdjustmentOptions(
+  kind: PresentationKind,
+): Array<{ value: AdjustmentDraft; label: string }> {
+  if (kind === 'reading') return READING_ADJUSTMENT_OPTIONS;
+
+  const contentLabel =
+    kind === 'skill'
+      ? '想調整練習內容'
+      : kind === 'family'
+        ? '想調整參與內容'
+        : kind === 'challenge'
+          ? '想調整挑戰內容'
+          : '想調整進行內容';
+
+  return [
+    { value: 'time', label: '想調整進行時間' },
+    { value: 'frequency', label: '想調整每週安排' },
+    { value: 'method', label: '想換一種進行方式' },
+    { value: 'content', label: contentLabel },
+    { value: 'pause', label: '想先暫停一下' },
+    { value: 'discuss', label: '想和家人討論' },
+  ];
+}
 
 const SHEET_TITLES: Record<OpenSheet, string> = {
   menu: '計畫選單',
@@ -308,6 +362,15 @@ function formatCompletionDate(completedAt: string): string {
   return `${value('year')}/${value('month')}/${value('day')}`;
 }
 
+function formatCompletionTime(completedAt: string): string {
+  return new Intl.DateTimeFormat('zh-TW', {
+    timeZone: 'Asia/Taipei',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(completedAt));
+}
+
 function MenuSheet({
   onOpenSheet,
   onPause,
@@ -352,6 +415,11 @@ function DetailsSheet({
 
   return (
     <View>
+      {presentation.planNotice ? (
+        <View accessibilityRole="summary" style={styles.planNotice}>
+          <Text style={styles.planNoticeText}>{presentation.planNotice}</Text>
+        </View>
+      ) : null}
       <View style={styles.detailList}>
         <DetailRow label="計畫期間" value={presentation.planPeriodLabel} />
         <DetailRow label="目標類型" value={presentation.categoryLabel} />
@@ -368,13 +436,18 @@ function DetailsSheet({
 }
 
 function RecordSheet({
+  presentation,
   completion,
   taskMinutes,
   onCorrectTimeWindow,
   correctingTimeWindow = false,
 }: Pick<
   Props,
-  'completion' | 'taskMinutes' | 'onCorrectTimeWindow' | 'correctingTimeWindow'
+  | 'presentation'
+  | 'completion'
+  | 'taskMinutes'
+  | 'onCorrectTimeWindow'
+  | 'correctingTimeWindow'
 >) {
   const [lastConfirmedWindow, setLastConfirmedWindow] =
     useState<PreferredTimeWindow | null>(
@@ -415,91 +488,117 @@ function RecordSheet({
     }
   };
   const loading = correctingTimeWindow || localLoading;
+  const isReadingPlan = presentation.isReadingPlan;
 
   return (
     <View>
       <View style={styles.recordSummary}>
-        <DetailRow label="完成日期" value={formatCompletionDate(completion.completed_at)} />
-        <DetailRow label="閱讀時間" value={`${taskMinutes} 分鐘`} />
-          <DetailRow
-            label="記錄時段"
-            value={
-              lastConfirmedWindow
+        <DetailRow
+          label="完成日期"
+          value={formatCompletionDate(completion.completed_at)}
+        />
+        <DetailRow
+          label={isReadingPlan ? '閱讀時間' : '投入時間'}
+          value={`${taskMinutes} 分鐘`}
+        />
+        <DetailRow
+          label="完成時段"
+          value={
+            isReadingPlan
+              ? lastConfirmedWindow
                 ? TIME_WINDOW_LABELS[lastConfirmedWindow]
                 : '尚未記錄時段'
-            }
+              : formatCompletionTime(completion.completed_at)
+          }
         />
       </View>
 
-      <Text style={styles.questionLabel}>需要更正時段嗎？</Text>
-      <View style={styles.optionGrid}>
-        {(
-          Object.entries(TIME_WINDOW_LABELS) as Array<
-            [PreferredTimeWindow, string]
-          >
-        ).map(([value, label]) => (
-          <TouchableOpacity
-            key={value}
-            accessibilityRole="button"
-              accessibilityLabel={label}
-              accessibilityState={{
-                selected: lastConfirmedWindow === value,
-                disabled: loading,
-              }}
-            disabled={loading}
-            onPress={() => handleCorrection(value)}
-            activeOpacity={0.76}
-              style={[
-                styles.compactOption,
-                lastConfirmedWindow === value && styles.compactOptionSelected,
-                loading && styles.disabled,
-              ]}
-          >
-            <Text
+      {isReadingPlan ? (
+        <>
+          <Text style={styles.questionLabel}>需要更正時段嗎？</Text>
+          <View style={styles.optionGrid}>
+            {(
+              Object.entries(TIME_WINDOW_LABELS) as Array<
+                [PreferredTimeWindow, string]
+              >
+            ).map(([value, label]) => (
+              <TouchableOpacity
+                key={value}
+                accessibilityRole="button"
+                accessibilityLabel={label}
+                accessibilityState={{
+                  selected: lastConfirmedWindow === value,
+                  disabled: loading,
+                }}
+                disabled={loading}
+                onPress={() => handleCorrection(value)}
+                activeOpacity={0.76}
                 style={[
-                  styles.compactOptionText,
-                  lastConfirmedWindow === value && styles.compactOptionTextSelected,
+                  styles.compactOption,
+                  lastConfirmedWindow === value && styles.compactOptionSelected,
+                  loading && styles.disabled,
                 ]}
-            >
-              改成{label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-        {loading ? (
-          <View style={styles.loadingRow}>
-            <ActivityIndicator color={Colors.accent} />
-            <Text style={styles.loadingText}>正在更正紀錄</Text>
+              >
+                <Text
+                  style={[
+                    styles.compactOptionText,
+                    lastConfirmedWindow === value &&
+                      styles.compactOptionTextSelected,
+                  ]}
+                >
+                  改成{label}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
-        ) : null}
-        {correctionError ? (
-          <Text
-            accessibilityRole="alert"
-            accessibilityLiveRegion="polite"
-            style={styles.errorText}
-          >
-            {correctionError}
-          </Text>
-        ) : null}
-      </View>
+          {loading ? (
+            <View style={styles.loadingRow}>
+              <ActivityIndicator color={Colors.accent} />
+              <Text style={styles.loadingText}>正在更正紀錄</Text>
+            </View>
+          ) : null}
+          {correctionError ? (
+            <Text
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+              style={styles.errorText}
+            >
+              {correctionError}
+            </Text>
+          ) : null}
+        </>
+      ) : null}
+    </View>
   );
 }
 
 function ReviewSheet({
+  presentation,
   draft,
   onChange,
   onSave,
 }: {
+  presentation: GoalPresentation;
   draft: ReviewDraft;
   onChange: (draft: ReviewDraft) => void;
   onSave: () => void;
 }) {
+  const kind = getPresentationKind(presentation);
+  const isReadingPlan = kind === 'reading';
+  const nextOptions = isReadingPlan
+    ? READING_REVIEW_NEXT_OPTIONS
+    : GENERAL_REVIEW_NEXT_OPTIONS;
+
   return (
     <View>
-      <Text style={styles.questionLabel}>這週最喜歡哪一本書或哪一段？</Text>
+      <Text style={styles.questionLabel}>{getReviewPrompt(kind)}</Text>
       <TextInput
-        accessibilityLabel="最喜歡的閱讀內容"
-        placeholder="想記下哪一本書或哪一段？"
+        accessibilityLabel={isReadingPlan ? '最喜歡的閱讀內容' : '這週最有感的片段'}
+        placeholder={
+          isReadingPlan
+            ? '想記下哪一本書或哪一段？'
+            : '想記下這週最有感的一段嗎？'
+        }
         placeholderTextColor={Colors.fgMuted}
         value={draft.favoriteNote}
         onChangeText={(favoriteNote) => onChange({ ...draft, favoriteNote })}
@@ -508,23 +607,27 @@ function ReviewSheet({
         style={styles.textInput}
       />
 
-      <Text style={styles.questionLabel}>哪個時間比較適合？</Text>
-      <View style={styles.optionGrid}>
-        {REVIEW_TIME_OPTIONS.map((option) => (
-          <OptionButton
-            key={option.label}
-            label={option.label}
-            selected={draft.preferredWindow === option.value}
-            onPress={() =>
-              onChange({ ...draft, preferredWindow: option.value })
-            }
-          />
-        ))}
-      </View>
+      {isReadingPlan ? (
+        <>
+          <Text style={styles.questionLabel}>哪個時間比較適合？</Text>
+          <View style={styles.optionGrid}>
+            {REVIEW_TIME_OPTIONS.map((option) => (
+              <OptionButton
+                key={option.label}
+                label={option.label}
+                selected={draft.preferredWindow === option.value}
+                onPress={() =>
+                  onChange({ ...draft, preferredWindow: option.value })
+                }
+              />
+            ))}
+          </View>
+        </>
+      ) : null}
 
       <Text style={styles.questionLabel}>下週想維持還是調整？</Text>
       <View style={styles.optionGrid}>
-        {REVIEW_NEXT_OPTIONS.map((option) => (
+        {nextOptions.map((option) => (
           <OptionButton
             key={option.value}
             label={option.label}
@@ -545,21 +648,25 @@ function ReviewSheet({
 }
 
 function AdjustmentSheet({
+  presentation,
   selected,
   onSelect,
   onSave,
 }: {
+  presentation: GoalPresentation;
   selected: AdjustmentDraft | null;
   onSelect: (draft: AdjustmentDraft) => void;
   onSave: () => void;
 }) {
+  const options = getAdjustmentOptions(getPresentationKind(presentation));
+
   return (
     <View>
       <Text style={styles.sheetIntro}>
         先選一個最想調整的地方，之後可以再和家人一起討論。
       </Text>
       <View style={styles.adjustmentList}>
-        {ADJUSTMENT_OPTIONS.map((option) => (
+        {options.map((option) => (
           <OptionButton
             key={option.value}
             label={option.label}
@@ -657,6 +764,7 @@ export default function LongTermGoalDetailSheets({
     case 'record':
       content = (
         <RecordSheet
+          presentation={presentation}
           completion={completion}
           taskMinutes={taskMinutes}
           onCorrectTimeWindow={onCorrectTimeWindow}
@@ -667,6 +775,7 @@ export default function LongTermGoalDetailSheets({
     case 'review':
       content = (
         <ReviewSheet
+          presentation={presentation}
           draft={localReviewDraft}
           onChange={setLocalReviewDraft}
           onSave={handleSaveReview}
@@ -676,6 +785,7 @@ export default function LongTermGoalDetailSheets({
     case 'adjustment':
       content = (
         <AdjustmentSheet
+          presentation={presentation}
           selected={localAdjustmentDraft}
           onSelect={setLocalAdjustmentDraft}
           onSave={handleSaveAdjustment}
@@ -819,6 +929,20 @@ const styles = StyleSheet.create({
   detailList: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.hairline,
+  },
+  planNotice: {
+    marginBottom: 14,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.warning,
+    backgroundColor: Colors.gold100,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  planNoticeText: {
+    color: Colors.fgSecondary,
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: '700',
   },
   detailRow: {
     minHeight: 50,

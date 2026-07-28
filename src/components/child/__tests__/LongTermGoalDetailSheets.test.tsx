@@ -88,6 +88,9 @@ function renderSheet(
   return { ...render(<LongTermGoalDetailSheets {...props} />), props };
 }
 
+const READING_ONLY_COPY =
+  /閱讀時間|最喜歡哪一本書|閱讀時段|閱讀內容|晚餐後還是睡前比較適合/;
+
 describe('LongTermGoalDetailSheets', () => {
   it('renders truthful plan details and opens the adjustment sheet', () => {
     const onOpenSheet = jest.fn();
@@ -347,5 +350,107 @@ describe('LongTermGoalDetailSheets', () => {
     expect(screen.getAllByLabelText('關閉長期任務選單')).toHaveLength(1);
     fireEvent.press(screen.getByLabelText('關閉長期任務選單'));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses skill review copy without changing an existing time-window draft', () => {
+    const onSaveReviewDraft = jest.fn();
+    const rendered = renderSheet('review', {
+      presentation: makePresentation({
+        isReadingPlan: false,
+        categoryLabel: '學習與技能',
+      }),
+      reviewDraft: {
+        favoriteNote: '',
+        preferredWindow: 'after_dinner',
+        nextStep: null,
+      },
+      onSaveReviewDraft,
+    });
+
+    expect(screen.getByText('這週哪一段練習最有感？')).toBeTruthy();
+    expect(screen.getByPlaceholderText('想記下這週最有感的一段嗎？')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '調整進行方式' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '晚餐後' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '睡前' })).toBeNull();
+    expect(JSON.stringify(rendered.toJSON())).not.toMatch(READING_ONLY_COPY);
+
+    fireEvent.press(screen.getByRole('button', { name: '調整進行方式' }));
+    fireEvent.press(screen.getByRole('button', { name: '保留回顧草稿' }));
+
+    expect(onSaveReviewDraft).toHaveBeenCalledWith({
+      favoriteNote: '',
+      preferredWindow: 'after_dinner',
+      nextStep: 'method',
+    });
+  });
+
+  it('uses family adjustment copy without reading-only wording', () => {
+    const rendered = renderSheet('adjustment', {
+      presentation: makePresentation({
+        isReadingPlan: false,
+        categoryLabel: '家庭參與',
+      }),
+    });
+
+    expect(screen.getByRole('button', { name: '想調整進行時間' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '想調整每週安排' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '想調整參與內容' })).toBeTruthy();
+    expect(JSON.stringify(rendered.toJSON())).not.toMatch(READING_ONLY_COPY);
+  });
+
+  it('keeps challenge records generic and hides reading time corrections', () => {
+    const onCorrectTimeWindow = jest.fn(async () => undefined);
+    const rendered = renderSheet('record', {
+      presentation: makePresentation({
+        isReadingPlan: false,
+        categoryLabel: '自主挑戰',
+      }),
+      onCorrectTimeWindow,
+    });
+
+    expect(screen.getByText('完成時段')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '晚餐後' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '睡前' })).toBeNull();
+    expect(JSON.stringify(rendered.toJSON())).not.toMatch(READING_ONLY_COPY);
+    expect(onCorrectTimeWindow).not.toHaveBeenCalled();
+  });
+
+  it('uses challenge review and adjustment wording', () => {
+    const review = renderSheet('review', {
+      presentation: makePresentation({
+        isReadingPlan: false,
+        categoryLabel: '自主挑戰',
+      }),
+    });
+
+    expect(screen.getByText('這週哪一步最有感？')).toBeTruthy();
+    expect(JSON.stringify(review.toJSON())).not.toMatch(READING_ONLY_COPY);
+
+    review.rerender(
+      <LongTermGoalDetailSheets
+        {...review.props}
+        activeSheet="adjustment"
+        presentation={makePresentation({
+          isReadingPlan: false,
+          categoryLabel: '自主挑戰',
+        })}
+      />,
+    );
+    expect(screen.getByRole('button', { name: '想調整挑戰內容' })).toBeTruthy();
+    expect(JSON.stringify(review.toJSON())).not.toMatch(READING_ONLY_COPY);
+  });
+
+  it('shows a warm plan notice above the truthful details', () => {
+    renderSheet('details', {
+      presentation: makePresentation({
+        planNotice: '目前期間最多可安排 10 次，和 20 次目標不一致。',
+      }),
+    });
+
+    expect(
+      screen.getByText('目前期間最多可安排 10 次，和 20 次目標不一致。'),
+    ).toBeTruthy();
+    expect(screen.getByText('完成 20 次')).toBeTruthy();
+    expect(screen.getByText('2026-07-28 至 2026-08-24（共 4 週）')).toBeTruthy();
   });
 });
