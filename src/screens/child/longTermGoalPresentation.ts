@@ -65,6 +65,14 @@ export type GoalKind =
   | 'challenge'
   | 'family';
 
+export type GoalPlanState =
+  | 'active'
+  | 'upcoming'
+  | 'paused'
+  | 'completed'
+  | 'expired'
+  | 'unplanned';
+
 export type GoalPresentation = {
   headerTitle: string;
   weekLabel: string;
@@ -74,6 +82,7 @@ export type GoalPresentation = {
   weekTarget: number;
   totalWeeks: number;
   goalKind: GoalKind;
+  planState: GoalPlanState;
   categoryLabel: string;
   overallLabel: string;
   overallPercent: number;
@@ -667,35 +676,49 @@ export function buildGoalPresentation(
   const hasReachedTarget = current >= target;
   const isFuture = today.isBefore(planStart, 'day');
   const isExpired = planEnd !== null && today.isAfter(planEnd, 'day');
+  const hasEmptyDailySchedule =
+    activeDays.length === 0
+    && (goal.goal_type === 'habit' || goal.goal_type === 'family');
+  const planState: GoalPlanState =
+    goal.status === 'paused'
+      ? 'paused'
+      : goal.status === 'completed' || hasReachedTarget
+        ? 'completed'
+        : isFuture
+          ? 'upcoming'
+          : isExpired
+            ? 'expired'
+            : hasEmptyDailySchedule
+              ? 'unplanned'
+              : 'active';
   const canCompleteToday =
-    goal.status === 'active'
-    && !hasReachedTarget
+    planState === 'active'
     && (goal.goal_type === 'habit' || goal.goal_type === 'family')
     && todayIsActive;
   let todayTitle = '今天的小步驟';
   let todayStatusText: string | null = null;
 
-  if (goal.status === 'paused') {
+  if (planState === 'paused') {
     todayTitle = '計畫暫停中';
     todayStatusText = '這個計畫暫停中';
-  } else if (goal.status === 'completed' || hasReachedTarget) {
+  } else if (planState === 'completed') {
     todayTitle = '這段計畫已完成';
     todayStatusText = '這段計畫已完成';
-  } else if (isFuture) {
+  } else if (planState === 'upcoming') {
     todayTitle = '計畫還沒開始';
     todayStatusText = '計畫還沒開始';
-  } else if (isExpired) {
+  } else if (planState === 'expired') {
     todayTitle = '一起回顧這段計畫';
     todayStatusText = '一起回顧這段計畫';
+  } else if (planState === 'unplanned') {
+    todayTitle = '尚未安排日期';
+    todayStatusText = '這個計畫尚未安排日期';
   } else if (isSkill) {
     todayTitle = '目前階段';
     todayStatusText = '這個階段由家長確認完成';
   } else if (isChallenge) {
     todayTitle = '目前的累積進度';
     todayStatusText = '累積進度由家長一起確認';
-  } else if (activeDays.length === 0) {
-    todayTitle = '尚未安排日期';
-    todayStatusText = '這個計畫尚未安排日期';
   } else if (!todayIsActive) {
     todayTitle = '今天不用記錄';
     todayStatusText = '今天不用記錄，照自己的節奏休息';
@@ -705,7 +728,9 @@ export function buildGoalPresentation(
       ? countScheduledDates(planStart, planEnd, activeDays)
       : null;
   const planNotice =
-    scheduledCapacity !== null && scheduledCapacity < target
+    (planState === 'active' || planState === 'unplanned')
+    && scheduledCapacity !== null
+    && scheduledCapacity < target
       ? `目前期間最多安排 ${scheduledCapacity} 次，和 ${target} 次目標不一致，可以和家人一起調整。`
       : null;
   const planWeekLabel = isSkill
@@ -759,6 +784,7 @@ export function buildGoalPresentation(
     weekTarget,
     totalWeeks,
     goalKind,
+    planState,
     categoryLabel: isChallenge
       ? '自主挑戰'
       : isReadingPlan || isSkill

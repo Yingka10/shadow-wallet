@@ -28,6 +28,7 @@ function makePresentation(
     weekTarget: 5,
     totalWeeks: 4,
     goalKind: 'reading_habit',
+    planState: 'active',
     categoryLabel: '學習與技能',
     overallLabel: '1 / 20 次',
     overallPercent: 5,

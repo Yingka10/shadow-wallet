@@ -293,10 +293,10 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
             {presentation.categoryLabel}
           </Text>
         </View>
-        <Text style={styles.planWeekLabel} numberOfLines={1}>
+        <Text style={styles.planWeekLabel} numberOfLines={2}>
           {presentation.planWeekLabel}
         </Text>
-        <Text style={styles.weekProgressLabel} numberOfLines={1}>
+        <Text style={styles.weekProgressLabel} numberOfLines={2}>
           {presentation.weekProgressLabel}
         </Text>
         <View
@@ -650,12 +650,22 @@ function WeekProgressCard({
   presentation: GoalPresentation;
 }) {
   const showsDailySchedule =
-    presentation.weekTarget > 0
+    presentation.planState === 'active'
+    && presentation.weekTarget > 0
     && (
       presentation.goalKind === 'reading_habit'
       || presentation.goalKind === 'habit'
       || presentation.goalKind === 'family'
     );
+  const showsOverallProgress =
+    presentation.planState === 'active'
+    && (
+      presentation.goalKind === 'skill'
+      || presentation.goalKind === 'challenge'
+    );
+  const compactPrimaryText = showsOverallProgress
+    ? presentation.overallLabel
+    : presentation.todayStatusText ?? presentation.weekProgressLabel;
 
   return (
     <View>
@@ -704,9 +714,16 @@ function WeekProgressCard({
             ))}
           </View>
         ) : (
-          <Text style={styles.compactWeekLabel}>
-            {presentation.weekProgressLabel}
-          </Text>
+          <View style={styles.compactWeekProgress}>
+            <Text style={styles.compactWeekLabel}>
+              {compactPrimaryText}
+            </Text>
+            {showsOverallProgress ? (
+              <Text style={styles.compactWeekMeta}>
+                {presentation.weekProgressLabel}
+              </Text>
+            ) : null}
+          </View>
         )}
         <View style={styles.weekInsight}>
           <DetailIcon name="sprout" size={16} color={Colors.leaf700} />
@@ -966,6 +983,11 @@ export default function LongTermGoalDetailView({
     () => presentation.recentRecords.slice(0, 3),
     [presentation.recentRecords],
   );
+  const visiblePlanNotice =
+    presentation.planState === 'active'
+    || presentation.planState === 'unplanned'
+      ? presentation.planNotice
+      : null;
 
   return (
     <ScrollView
@@ -975,8 +997,8 @@ export default function LongTermGoalDetailView({
       showsVerticalScrollIndicator={false}
     >
       <GoalHero presentation={presentation} />
-      {presentation.planNotice ? (
-        <PlanNotice notice={presentation.planNotice} />
+      {visiblePlanNotice ? (
+        <PlanNotice notice={visiblePlanNotice} />
       ) : null}
       <TodayStepCard
         presentation={presentation}
@@ -1061,8 +1083,8 @@ const styles = StyleSheet.create({
   weekProgressLabel: {
     marginTop: 1,
     color: Colors.gold100,
-    fontSize: 11,
-    lineHeight: 15,
+    fontSize: 12,
+    lineHeight: 17,
     fontWeight: '800',
   },
   progressTrack: {
@@ -1081,15 +1103,15 @@ const styles = StyleSheet.create({
   focusText: {
     marginTop: 6,
     color: Colors.cream100,
-    fontSize: 11,
-    lineHeight: 14,
+    fontSize: 12,
+    lineHeight: 17,
     fontWeight: '800',
   },
   nextText: {
     marginTop: 3,
     color: Colors.cream200,
-    fontSize: 11,
-    lineHeight: 15,
+    fontSize: 12,
+    lineHeight: 17,
     fontWeight: '700',
   },
   planNotice: {
@@ -1107,8 +1129,8 @@ const styles = StyleSheet.create({
   planNoticeText: {
     flex: 1,
     color: Colors.fgSecondary,
-    fontSize: 11,
-    lineHeight: 17,
+    fontSize: 12,
+    lineHeight: 18,
     fontWeight: '700',
   },
   sectionHeading: {
@@ -1362,8 +1384,8 @@ const styles = StyleSheet.create({
   },
   restNoteText: {
     color: Colors.fgMuted,
-    fontSize: 11,
-    lineHeight: 17,
+    fontSize: 12,
+    lineHeight: 18,
     fontWeight: '700',
     textAlign: 'center',
   },
@@ -1422,11 +1444,20 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     textAlign: 'center',
   },
+  compactWeekProgress: {
+    gap: 3,
+  },
   compactWeekLabel: {
     color: Colors.fgPrimary,
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 15,
+    lineHeight: 21,
     fontWeight: '900',
+  },
+  compactWeekMeta: {
+    color: Colors.fgMuted,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '700',
   },
   weekInsight: {
     marginTop: 8,
@@ -1508,8 +1539,8 @@ const styles = StyleSheet.create({
   timelineDetail: {
     marginTop: 3,
     color: Colors.fgMuted,
-    fontSize: 11,
-    lineHeight: 16,
+    fontSize: 12,
+    lineHeight: 17,
     fontWeight: '700',
   },
   statusBadge: {

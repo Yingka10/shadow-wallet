@@ -117,6 +117,128 @@ describe('buildGoalPresentation', () => {
       );
 
       expect(result.goalKind).toBe(expectedKind);
+      expect(result.planState).toBe('active');
+    },
+  );
+
+  it.each([
+    ['active scheduled', makeTask(), makeGoal(), '2026-07-30T12:00:00', 'active'],
+    ['active rest day', makeTask(), makeGoal(), '2026-08-01T12:00:00', 'active'],
+    [
+      'upcoming',
+      makeTask(),
+      makeGoal({ started_at: '2026-08-03' }),
+      '2026-07-30T12:00:00',
+      'upcoming',
+    ],
+    [
+      'paused',
+      makeTask(),
+      makeGoal({ status: 'paused' }),
+      '2026-07-30T12:00:00',
+      'paused',
+    ],
+    [
+      'completed',
+      makeTask(),
+      makeGoal({ status: 'completed' }),
+      '2026-07-30T12:00:00',
+      'completed',
+    ],
+    [
+      'expired',
+      makeTask({ due_date: '2026-07-29' }),
+      makeGoal(),
+      '2026-07-30T12:00:00',
+      'expired',
+    ],
+    [
+      'unplanned',
+      makeTask({ recurrence_days: [] }),
+      makeGoal({ active_days: [] }),
+      '2026-07-30T12:00:00',
+      'unplanned',
+    ],
+    [
+      'active skill',
+      makeTask({ name: '鋼琴家之路', long_term_type: 'skill' }),
+      makeGoal({ goal_type: 'skill' }),
+      '2026-07-30T12:00:00',
+      'active',
+    ],
+    [
+      'active challenge',
+      makeTask({ name: '自主閱讀挑戰', long_term_type: 'challenge' }),
+      makeGoal({
+        goal_type: 'challenge',
+        current_value: 25,
+        target_value: 100,
+        value_unit: '頁',
+      }),
+      '2026-07-30T12:00:00',
+      'active',
+    ],
+  ] as const)(
+    'derives the stable plan state for %s',
+    (_label, task, goal, currentTime, expectedState) => {
+      const result = buildGoalPresentation(
+        task,
+        goal,
+        [],
+        dayjs.tz(currentTime, 'Asia/Taipei'),
+      );
+
+      expect(result.planState).toBe(expectedState);
+    },
+  );
+
+  it('treats a reached target as completed before status synchronization', () => {
+    const completions = Array.from({ length: 20 }, (_, index) =>
+      makeCompletion(
+        `done-${index}`,
+        `2026-07-27T${String(index).padStart(2, '0')}:00:00+08:00`,
+        null,
+      ),
+    );
+
+    const result = buildGoalPresentation(
+      makeTask(),
+      makeGoal(),
+      completions,
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.planState).toBe('completed');
+  });
+
+  it.each([
+    [
+      'paused',
+      makeTask({ due_date: '2026-08-09' }),
+      makeGoal({ status: 'paused' }),
+    ],
+    [
+      'completed',
+      makeTask({ due_date: '2026-08-09' }),
+      makeGoal({ status: 'completed' }),
+    ],
+    [
+      'upcoming',
+      makeTask({ due_date: '2026-08-09' }),
+      makeGoal({ started_at: '2026-08-03' }),
+    ],
+    ['expired', makeTask({ due_date: '2026-07-29' }), makeGoal()],
+  ] as const)(
+    'suppresses capacity notices for a %s plan',
+    (_label, task, goal) => {
+      const result = buildGoalPresentation(
+        task,
+        goal,
+        [],
+        dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+      );
+
+      expect(result.planNotice).toBeNull();
     },
   );
 

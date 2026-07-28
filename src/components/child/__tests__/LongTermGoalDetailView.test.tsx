@@ -1,4 +1,5 @@
 import React from 'react';
+import dayjs from 'dayjs';
 import { StyleSheet } from 'react-native';
 import {
   act,
@@ -9,8 +10,15 @@ import {
   waitFor,
 } from '@testing-library/react-native';
 import { Colors } from '../../../constants/colors';
-import type { PreferredTimeWindow } from '../../../types/database';
-import type { GoalPresentation } from '../../../screens/child/longTermGoalPresentation';
+import type {
+  LongTermGoal,
+  PreferredTimeWindow,
+  Task,
+} from '../../../types/database';
+import {
+  buildGoalPresentation,
+  type GoalPresentation,
+} from '../../../screens/child/longTermGoalPresentation';
 import LongTermGoalDetailView from '../LongTermGoalDetailView';
 
 function makePresentation(
@@ -25,6 +33,7 @@ function makePresentation(
     weekTarget: 5,
     totalWeeks: 4,
     goalKind: 'reading_habit',
+    planState: 'active',
     categoryLabel: '學習與技能',
     overallLabel: '1 / 20 次',
     overallPercent: 5,
@@ -131,6 +140,68 @@ function makePresentation(
     reviewTitle: '週末一起回顧',
     reviewPrompt: '這週哪個時間最適合閱讀？',
     sectionOrder: ['hero', 'today', 'week', 'rewards', 'review'],
+    ...overrides,
+  };
+}
+
+function makeTask(overrides: Partial<Task> = {}): Task {
+  return {
+    id: 'task-visual-state',
+    family_id: 'family-1',
+    name: '自主閱讀計畫',
+    category: 'D',
+    day_type: 'custom',
+    long_term_type: 'habit',
+    is_long_term: true,
+    base_time_min: 15,
+    difficulty: 1,
+    coin_override: null,
+    is_system_default: false,
+    allow_repeat: false,
+    min_age: 6,
+    max_age: 9,
+    is_active: true,
+    time_saving_min: 0,
+    recurrence_days: [1, 2, 3, 4, 5],
+    due_date: null,
+    created_at: '2026-07-27T00:00:00+08:00',
+    ...overrides,
+  };
+}
+
+function makeGoal(overrides: Partial<LongTermGoal> = {}): LongTermGoal {
+  return {
+    id: 'goal-visual-state',
+    child_id: 'child-1',
+    task_id: 'task-visual-state',
+    goal_type: 'habit',
+    total_days: 20,
+    current_day: 0,
+    status: 'active',
+    checkpoint_rewards: null,
+    motivation_note: null,
+    started_at: '2026-07-27',
+    next_review_at: null,
+    completed_at: null,
+    created_at: '2026-07-27T00:00:00+08:00',
+    min_age: 6,
+    interrupt_count: 0,
+    last_active_date: null,
+    active_days: [1, 2, 3, 4, 5],
+    preferred_time_window: null,
+    level_definitions: null,
+    current_level: null,
+    level_count: null,
+    role_title: null,
+    salary_mode: null,
+    base_salary: null,
+    weekly_target_rate: null,
+    privilege_reward: null,
+    family_time_per_completion: null,
+    target_completions: null,
+    target_value: null,
+    current_value: null,
+    value_unit: null,
     ...overrides,
   };
 }
@@ -347,37 +418,62 @@ describe('LongTermGoalDetailView', () => {
   });
 
   it.each([
-    ['暫停中的計畫', '這個計畫暫停中'],
-    ['還沒開始的計畫', '計畫還沒開始'],
-    ['已經結束的計畫', '一起回顧這段計畫'],
-    ['完成的計畫', '這段計畫已完成'],
-    ['技能階段', '這個階段由家長確認完成'],
-    ['自主挑戰', '累積進度由家長一起確認'],
-    ['尚未排定的計畫', '這個計畫尚未安排日期'],
-  ])('shows the model status for %s', (todayTitle, todayStatusText) => {
-    renderView(makePresentation({
-      todayTitle,
-      todayStatusText,
-      canCompleteToday: false,
-    }));
+    ['paused', '暫停中的計畫', '這個計畫暫停中'],
+    ['upcoming', '還沒開始的計畫', '計畫還沒開始'],
+    ['expired', '已經結束的計畫', '一起回顧這段計畫'],
+    ['completed', '完成的計畫', '這段計畫已完成'],
+    ['unplanned', '尚未排定的計畫', '這個計畫尚未安排日期'],
+  ] as const)(
+    'shows the model status for %s',
+    (planState, todayTitle, todayStatusText) => {
+      renderView(makePresentation({
+        planState,
+        todayTitle,
+        todayStatusText,
+        canCompleteToday: false,
+      }));
 
-    expect(screen.getByText(todayTitle)).toBeTruthy();
-    expect(screen.getByText(todayStatusText)).toBeTruthy();
-    expect(screen.queryByText('今天先照自己的節奏前進，需要時再和家人一起確認。')).toBeNull();
-  });
+      expect(screen.getByText(todayTitle)).toBeTruthy();
+      expect(screen.getAllByText(todayStatusText).length).toBeGreaterThanOrEqual(2);
+      expect(
+        screen.queryByText('今天先照自己的節奏前進，需要時再和家人一起確認。'),
+      ).toBeNull();
 
-  it('shows a quiet accessible plan notice after the hero', () => {
-    const notice = '目前的日期範圍最多可安排 10 次，和原本的 20 次目標不同。';
-    renderView(makePresentation({ planNotice: notice }));
+      const week = within(screen.getByTestId('goal-week'));
+      expect(week.getByText(todayStatusText)).toBeTruthy();
+      expect(
+        week.getByText('少一天沒有關係，找到適合自己的節奏更重要。'),
+      ).toBeTruthy();
+      expect(week.queryByTestId('goal-day-caption-1')).toBeNull();
+    },
+  );
 
-    const noticeStrip = screen.getByLabelText(`計畫提醒：${notice}`);
-    expect(noticeStrip).toBeTruthy();
-    expect(screen.getByText(notice)).toBeTruthy();
+  it.each(['active', 'unplanned'] as const)(
+    'shows a quiet accessible plan notice for a %s plan',
+    (planState) => {
+      const notice = '目前的日期範圍最多可安排 10 次，和原本的 20 次目標不同。';
+      renderView(makePresentation({ planState, planNotice: notice }));
 
-    const noticeStyle = StyleSheet.flatten(noticeStrip.props.style);
-    expect(noticeStyle.backgroundColor).toBe(Colors.gold100);
-    expect(noticeStyle.backgroundColor).not.toBe(Colors.error);
-  });
+      const noticeStrip = screen.getByLabelText(`計畫提醒：${notice}`);
+      expect(noticeStrip).toBeTruthy();
+      expect(screen.getByText(notice)).toBeTruthy();
+
+      const noticeStyle = StyleSheet.flatten(noticeStrip.props.style);
+      expect(noticeStyle.backgroundColor).toBe(Colors.gold100);
+      expect(noticeStyle.backgroundColor).not.toBe(Colors.error);
+    },
+  );
+
+  it.each(['paused', 'completed', 'upcoming', 'expired'] as const)(
+    'does not show an adjustment notice for a %s plan',
+    (planState) => {
+      const notice = '目前期間最多安排 10 次，可以和家人一起調整。';
+      renderView(makePresentation({ planState, planNotice: notice }));
+
+      expect(screen.queryByLabelText(`計畫提醒：${notice}`)).toBeNull();
+      expect(screen.queryByText(notice)).toBeNull();
+    },
+  );
 
   it('guards a pending completion from double submission and allows retry afterward', async () => {
     let resolveFirst: ((value: void | boolean) => void) | undefined;
@@ -437,10 +533,19 @@ describe('LongTermGoalDetailView', () => {
   });
 
   it('allows long hero copy to grow and keeps seven-day captions readable', () => {
+    const longPlanWeek = '第 1 週／這是一段可以依生活節奏慢慢調整的四週計畫';
+    const longWeekProgress = '本週已完成一次，也保留接下來依狀況調整的空間';
     const longFocus = '這一週先慢慢找出最適合自己的時間，也可以在需要時和家人一起調整閱讀方式。';
     const longNext = '下一個里程碑：完成第五次閱讀後，一起看看目前的方法是否仍然適合。';
-    renderView(makePresentation({ focusText: longFocus, nextText: longNext }));
+    renderView(makePresentation({
+      planWeekLabel: longPlanWeek,
+      weekProgressLabel: longWeekProgress,
+      focusText: longFocus,
+      nextText: longNext,
+    }));
 
+    expect(screen.getByText(longPlanWeek).props.numberOfLines).toBe(2);
+    expect(screen.getByText(longWeekProgress).props.numberOfLines).toBe(2);
     expect(screen.getByText(longFocus)).toBeTruthy();
     expect(screen.getByText(longNext)).toBeTruthy();
 
@@ -663,9 +768,66 @@ describe('LongTermGoalDetailView', () => {
     expect(week.queryByTestId('goal-day-caption-1')).toBeNull();
   });
 
+  it.each([
+    [
+      'skill',
+      makeTask({
+        name: '鋼琴家之路',
+        long_term_type: 'skill',
+      }),
+      makeGoal({
+        goal_type: 'skill',
+        current_level: 2,
+        level_count: 4,
+        level_definitions: [
+          { name: '基礎指法' },
+          { name: '簡單曲目' },
+          { name: '雙手合奏' },
+          { name: '完整演奏' },
+        ],
+      }),
+      '第 2 / 4 階段',
+      '依自己的節奏練習',
+    ],
+    [
+      'challenge',
+      makeTask({
+        name: '閱讀一百頁',
+        long_term_type: 'challenge',
+      }),
+      makeGoal({
+        goal_type: 'challenge',
+        current_value: 25,
+        target_value: 100,
+        value_unit: '頁',
+      }),
+      '25 / 100 頁',
+      '累積進度由家長確認',
+    ],
+  ] as const)(
+    'renders truthful %s compact progress from the presentation builder',
+    (_kind, task, goal, overallLabel, weekProgressLabel) => {
+      const presentation = buildGoalPresentation(
+        task,
+        goal,
+        [],
+        dayjs('2026-07-30T12:00:00+08:00'),
+      );
+
+      renderView(presentation);
+
+      const week = within(screen.getByTestId('goal-week'));
+      expect(week.getByText(overallLabel)).toBeTruthy();
+      expect(week.getByText(weekProgressLabel)).toBeTruthy();
+      expect(week.getByText(presentation.weekSummary)).toBeTruthy();
+      expect(week.queryByTestId('goal-day-caption-1')).toBeNull();
+    },
+  );
+
   it('uses compact weekly status when a habit has no scheduled days', () => {
     renderView(makePresentation({
       goalKind: 'habit',
+      planState: 'unplanned',
       weekProgressLabel: '本週尚未安排',
       weekSummary: '先和家人一起選出適合的日子。',
       weekTarget: 0,
