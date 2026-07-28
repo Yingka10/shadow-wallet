@@ -35,6 +35,10 @@ import type { TaskCategory } from '../../../types/database';
 import { ParentSidebar, type ManageSection } from './ParentSidebar';
 import { ManageTabBar } from './ManageTabBar';
 import {
+  PresetTaskDrawer,
+  type PresetTaskDrawerChild,
+} from './taskDrawer/PresetTaskDrawer';
+import {
   BellIcon,
   CheckSquareIcon,
   ChevronRightIcon,
@@ -392,6 +396,7 @@ export default function ParentTaskManagementTablet() {
   const { childId, childName, allChildren, setSelectedChild } = useSelectedChild();
   const [activeTab, setActiveTab] = useState<TaskManageTab>('daily');
   const [resumeMessage, setResumeMessage] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const {
     child,
@@ -502,9 +507,20 @@ export default function ParentTaskManagementTablet() {
     navigation.navigate('AddChild');
   }, [navigation]);
 
+  // 平板端改開抽屜 overlay（不是新 route）；ParentTaskCreate route 保留給手機版流程。
   const handleNewTask = useCallback(() => {
-    navigation.navigate('ParentTaskCreate');
-  }, [navigation]);
+    setDrawerOpen(true);
+  }, []);
+
+  // 抽屜只吃它需要的三個欄位，年齡由 birth_date 即時算（不改 SelectedChildContext、不另查 DB）。
+  const drawerChild: PresetTaskDrawerChild | null = useMemo(() => {
+    if (!child) return null;
+    return {
+      nickname: child.nickname,
+      birthDate: child.birth_date,
+      familyId: child.family_id,
+    };
+  }, [child]);
 
   const handleEditTask = useCallback((task: TaskListItem) => {
     navigation.navigate('ParentTaskEdit', {
@@ -766,6 +782,13 @@ export default function ParentTaskManagementTablet() {
           </ScrollView>
         </View>
       </View>
+
+      <PresetTaskDrawer
+        visible={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        child={drawerChild}
+        childLoading={taskLoading}
+      />
     </View>
   );
 }
