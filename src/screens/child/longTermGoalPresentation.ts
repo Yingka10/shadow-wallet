@@ -260,7 +260,31 @@ function getNextCheckpoint(
   };
 }
 
-function getPendingCheckpoint(
+function getNextUnreachedCheckpoint(
+  goal: LongTermGoal,
+  effortCurrent: number,
+  rewardCurrent: number,
+): { threshold: number; coin: number } | null {
+  if (!goal.checkpoint_rewards) return null;
+
+  const threshold = Object.keys(goal.checkpoint_rewards)
+    .map(Number)
+    .filter(
+      (value) =>
+        Number.isFinite(value)
+        && value > effortCurrent
+        && value > rewardCurrent,
+    )
+    .sort((left, right) => left - right)[0];
+
+  if (threshold === undefined) return null;
+  return {
+    threshold,
+    coin: Number(goal.checkpoint_rewards[String(threshold)] ?? 0),
+  };
+}
+
+function getUnconfirmedCheckpoint(
   goal: LongTermGoal,
   effortCurrent: number,
   rewardCurrent: number,
@@ -326,12 +350,12 @@ function buildMilestones(
           title: firstRewardRecorded
             ? '完成第 1 次'
             : firstEffortCompleted
-              ? '第 1 次已完成'
+              ? '已完成第 1 次'
               : '完成第 1 次',
           detail: firstRewardRecorded && firstCheckpoint.coin > 0
             ? `成長幣 +${firstCheckpoint.coin} 已記下`
             : firstEffortCompleted
-              ? '里程碑回饋待同步'
+              ? '里程碑回饋可以和家人一起確認'
               : firstCheckpoint.coin > 0
                 ? `達成後成長幣 +${firstCheckpoint.coin}`
                 : null,
@@ -356,10 +380,10 @@ function buildMilestones(
     milestones.push({
       id: `checkpoint-${checkpoint.threshold}`,
       title: effortCompleted && !rewardRecorded
-        ? `第 ${checkpoint.threshold} 次已完成`
+        ? `已完成第 ${checkpoint.threshold} 次`
         : `完成第 ${checkpoint.threshold} 次`,
       detail: effortCompleted && !rewardRecorded
-        ? '里程碑回饋待同步'
+        ? '里程碑回饋可以和家人一起確認'
         : checkpoint.coin > 0
           ? rewardRecorded
             ? `成長幣 +${checkpoint.coin} 已記下`
@@ -391,7 +415,11 @@ function buildMilestones(
 
   milestones.push({
     id: 'final-review',
-    title: isReadingHabit ? `${weekCount}週後一起回顧` : '完成計畫後一起回顧',
+    title: totalWeeks === 0
+      ? '安排好週期後一起回顧'
+      : isReadingHabit
+        ? `${weekCount}週後一起回顧`
+      : '完成計畫後一起回顧',
     detail: '可以繼續、調整，或讓計畫先告一段落。',
     status: finalIsCompleted ? 'completed' : finalIsNext ? 'next' : 'upcoming',
   });
@@ -515,6 +543,10 @@ function buildPlanPeriodLabel(
   totalWeeks: number,
   isSkill: boolean,
 ): string {
+  if (totalWeeks === 0 && dueDate === null) {
+    return `${start.format('YYYY-MM-DD')} ～ 尚未安排執行日期`;
+  }
+
   const exactSkillDays = isSkill ? Math.max(goal.total_days ?? 0, 0) : 0;
   const calculatedEnd = exactSkillDays > 0
     ? start.add(exactSkillDays - 1, 'day')
@@ -576,9 +608,15 @@ export function buildGoalPresentation(
       : completionTarget;
   const weekTarget = weekDays.filter((day) => day.isScheduled).length;
   const completionWeekSize = Math.max(activeDays.length, 1);
+  const hasUnplannedCycle =
+    planEnd === null
+    && activeDays.length === 0
+    && (goal.goal_type === 'habit' || goal.goal_type === 'family');
   const fallbackTotalWeeks = isSkill && goal.total_days
     ? Math.max(Math.ceil(goal.total_days / 7), 1)
-    : activeDays.length === 0
+    : hasUnplannedCycle
+      ? 0
+      : activeDays.length === 0
       ? 1
       : Math.max(Math.ceil(completionTarget / completionWeekSize), 1);
   const dueDateWeeks = planEnd ? getCoveredWeeks(planStart, planEnd) : null;
@@ -598,9 +636,11 @@ export function buildGoalPresentation(
   const checkpointCurrent = Math.max(goal.current_day ?? 0, 0);
   const nextReward = isSkill
     ? getNextSkillReward(goal, current)
-    : getNextCheckpoint(goal, isChallenge ? current : checkpointCurrent);
-  const pendingCheckpoint = !isSkill && !isChallenge
-    ? getPendingCheckpoint(goal, completionCurrent, checkpointCurrent)
+    : isChallenge
+      ? getNextCheckpoint(goal, current)
+      : getNextUnreachedCheckpoint(goal, completionCurrent, checkpointCurrent);
+  const unconfirmedCheckpoint = !isSkill && !isChallenge
+    ? getUnconfirmedCheckpoint(goal, completionCurrent, checkpointCurrent)
     : null;
   const hasReachedTarget = current >= target;
   const isFuture = today.isBefore(planStart, 'day');
@@ -648,7 +688,9 @@ export function buildGoalPresentation(
       : null;
   const planWeekLabel = isSkill
     ? `第 ${Math.min(current + 1, target)} 階段／共 ${target} 階段`
-    : `第 ${currentWeek} 週／共 ${totalWeeks} 週`;
+    : hasUnplannedCycle
+      ? '尚未安排週期'
+      : `第 ${currentWeek} 週／共 ${totalWeeks} 週`;
   const completionConditionLabel = isSkill
     ? `完成 ${target} 個階段`
     : hasChallengeValues
@@ -676,7 +718,9 @@ export function buildGoalPresentation(
 
   return {
     headerTitle: task.name,
-    weekLabel: isReadingHabit
+    weekLabel: hasUnplannedCycle
+      ? '尚未安排週期'
+      : isReadingHabit
       ? `第 ${currentWeek} 週`
       : isSkill
         ? `第 ${Math.min(current + 1, target)} 階段`
@@ -705,7 +749,9 @@ export function buildGoalPresentation(
         ? `${current} / ${target}${challengeUnit ? ` ${challengeUnit}` : ''}`
         : `${current} / ${target} 次`,
     overallPercent,
-    focusText: isReadingHabit
+    focusText: hasUnplannedCycle
+      ? '先和家人一起安排適合的執行日期'
+      : isReadingHabit
       ? currentWeek === 1
         ? '第 1 週：先找到適合自己的閱讀節奏'
         : `第 ${currentWeek} 週：繼續找到適合自己的閱讀節奏`
@@ -716,8 +762,8 @@ export function buildGoalPresentation(
           : isFamily
             ? '每一次參與，都讓家裡的節奏更穩一點'
             : '先找到適合自己的生活節奏',
-    nextText: pendingCheckpoint !== null
-      ? `第 ${pendingCheckpoint} 次已完成，里程碑回饋待同步`
+    nextText: unconfirmedCheckpoint !== null
+      ? `已完成第 ${unconfirmedCheckpoint} 次，里程碑回饋可以和家人一起確認`
       : isSkill && nextSkillLevel
         ? `下一個里程碑：${String(nextSkillLevel.name ?? `第 ${current + 1} 階段`)}`
         : nextReward
@@ -754,11 +800,13 @@ export function buildGoalPresentation(
     planPeriodLabel: buildPlanPeriodLabel(goal, planStart, planEnd, totalWeeks, isSkill),
     completionConditionLabel,
     adjustableItemsLabel,
-    finalRewardText: isReadingHabit
-      ? `第 ${totalWeeks} 週結束後一起回顧，可以繼續、調整閱讀方式，或讓計畫先告一段落`
-      : isSkill
-        ? '完成最後階段後，一起留下這段學習成果'
-        : '完成旅程後，一起選一個值得記住的時刻',
+    finalRewardText: hasUnplannedCycle
+      ? '安排好週期後，再一起回顧這段計畫'
+      : isReadingHabit
+        ? `第 ${totalWeeks} 週結束後一起回顧，可以繼續、調整閱讀方式，或讓計畫先告一段落`
+        : isSkill
+          ? '完成最後階段後，一起留下這段學習成果'
+          : '完成旅程後，一起選一個值得記住的時刻',
     reviewTitle: isReadingHabit ? '週末一起回顧' : '一起回顧這段成長',
     reviewPrompt: isReadingHabit
       ? '哪一本最喜歡？晚餐後還是睡前比較適合？'

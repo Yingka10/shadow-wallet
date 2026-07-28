@@ -527,12 +527,14 @@ describe('buildGoalPresentation', () => {
     expect(beforeReward.overallLabel).toBe('5 / 20 次');
     expect(beforeReward.milestones.find((item) => item.id === 'checkpoint-5')).toEqual({
       id: 'checkpoint-5',
-      title: '第 5 次已完成',
-      detail: '里程碑回饋待同步',
+      title: '已完成第 5 次',
+      detail: '里程碑回饋可以和家人一起確認',
       status: 'next',
     });
-    expect(beforeReward.nextReward).toEqual({ threshold: 5, coin: 10 });
-    expect(beforeReward.nextText).toBe('第 5 次已完成，里程碑回饋待同步');
+    expect(beforeReward.nextReward).toBeNull();
+    expect(beforeReward.nextText).toBe(
+      '已完成第 5 次，里程碑回饋可以和家人一起確認',
+    );
     expect(afterReward.overallLabel).toBe('3 / 20 次');
     expect(afterReward.milestones.find((item) => item.id === 'checkpoint-5')).toEqual({
       id: 'checkpoint-5',
@@ -544,7 +546,7 @@ describe('buildGoalPresentation', () => {
     expect(afterReward.nextText).toBe('下一個里程碑：一起看看這段時間的成長');
   });
 
-  it('keeps only the first unsynced checkpoint as the next milestone', () => {
+  it('keeps only the first unconfirmed checkpoint as the next milestone', () => {
     const result = buildGoalPresentation(
       makeTask(),
       makeGoal({
@@ -557,14 +559,17 @@ describe('buildGoalPresentation', () => {
 
     expect(result.milestones[0]).toEqual({
       id: 'start',
-      title: '第 1 次已完成',
-      detail: '里程碑回饋待同步',
+      title: '已完成第 1 次',
+      detail: '里程碑回饋可以和家人一起確認',
       status: 'next',
     });
     expect(result.milestones.find((item) => item.id === 'checkpoint-5')?.status).toBe(
       'upcoming',
     );
-    expect(result.nextText).toBe('第 1 次已完成，里程碑回饋待同步');
+    expect(result.nextReward).toEqual({ threshold: 5, coin: 20 });
+    expect(result.nextText).toBe(
+      '已完成第 1 次，里程碑回饋可以和家人一起確認',
+    );
   });
 
   it.each([
@@ -697,13 +702,32 @@ describe('buildGoalPresentation', () => {
 
       expect(result.weekTarget).toBe(0);
       expect(result.weekProgressLabel).toBe('本週尚未安排日期');
-      expect(result.totalWeeks).toBe(1);
+      expect(result.totalWeeks).toBe(0);
+      expect(result.planWeekLabel).toBe('尚未安排週期');
+      expect(result.weekLabel).toBe('尚未安排週期');
+      expect(result.planPeriodLabel).toBe('2026-07-27 ～ 尚未安排執行日期');
+      expect(result.focusText).toBe('先和家人一起安排適合的執行日期');
+      expect(result.milestones.at(-1)?.title).toBe('安排好週期後一起回顧');
+      expect(result.finalRewardText).toBe('安排好週期後，再一起回顧這段計畫');
       expect(result.weekDays.every((day) => day.state === 'unscheduled')).toBe(true);
       expect(result.canCompleteToday).toBe(false);
       expect(result.todayTitle).toBe('尚未安排日期');
       expect(result.todayStatusText).toBe('這個計畫尚未安排日期');
     },
   );
+
+  it('uses a valid due date to derive weeks for an otherwise empty schedule', () => {
+    const result = buildGoalPresentation(
+      makeTask({ due_date: '2026-08-09' }),
+      makeGoal({ active_days: [] }),
+      [],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.totalWeeks).toBe(2);
+    expect(result.planWeekLabel).toBe('第 1 週／共 2 週');
+    expect(result.planPeriodLabel).toBe('2026-07-27 ～ 2026-08-09（共 2 週）');
+  });
 
   it('ignores configured daily recurrence for skill and challenge goals', () => {
     const skill = buildGoalPresentation(
