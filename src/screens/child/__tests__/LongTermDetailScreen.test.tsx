@@ -22,6 +22,11 @@ const mockSupabaseEqCalls: Array<{
   column: string;
   value: unknown;
 }> = [];
+const mockSupabaseGteCalls: Array<{
+  table: string;
+  column: string;
+  value: unknown;
+}> = [];
 let mockMissingContextColumns = false;
 
 let mockRouteParams = {
@@ -101,6 +106,7 @@ const mockSkillGoal = {
   current_level: 2,
   level_count: 4,
 };
+let mockReadingGoal = { ...mockBaseGoal };
 
 const mockTasks = {
   'task-reading': {
@@ -196,7 +202,10 @@ jest.mock('../../../lib/supabase', () => ({
           eqFilters.push({ column, value });
           return builder;
         }),
-        gte: jest.fn(() => builder),
+        gte: jest.fn((column: string, value: unknown) => {
+          mockSupabaseGteCalls.push({ table, column, value });
+          return builder;
+        }),
         lt: jest.fn(() => builder),
         update: mockSupabaseUpdate.mockImplementation(() => builder),
         insert: mockSupabaseInsert.mockImplementation(() => builder),
@@ -205,7 +214,7 @@ jest.mock('../../../lib/supabase', () => ({
         single: jest.fn(async () => {
           if (table === 'long_term_goals') {
             return {
-              data: mockRouteParams.goalId === 'goal-skill' ? mockSkillGoal : mockBaseGoal,
+              data: mockRouteParams.goalId === 'goal-skill' ? mockSkillGoal : mockReadingGoal,
               error: null,
             };
           }
@@ -291,7 +300,9 @@ describe('LongTermDetailScreen', () => {
     };
     mockMissingContextColumns = false;
     mockReadingCompletions = [...baseReadingCompletions];
+    mockReadingGoal = { ...mockBaseGoal };
     mockSupabaseEqCalls.length = 0;
+    mockSupabaseGteCalls.length = 0;
     mockCompleteTask.mockResolvedValue({
       completionId: 'completion-thu',
       milestone: null,
@@ -338,7 +349,75 @@ describe('LongTermDetailScreen', () => {
         && column === 'status'
         && value === 'completed'),
     ).toHaveLength(2);
+    expect(
+      mockSupabaseGteCalls.filter(({ table, column }) =>
+        table === 'task_completions' && column === 'completed_at'),
+    ).toEqual([
+      {
+        table: 'task_completions',
+        column: 'completed_at',
+        value: '2026-07-26T16:00:00.000Z',
+      },
+      {
+        table: 'task_completions',
+        column: 'completed_at',
+        value: '2026-07-26T16:00:00.000Z',
+      },
+    ]);
     expect(screen.queryByText('讀取任務進度失敗，請稍後再試。')).toBeNull();
+  });
+
+  it('normalizes a date-only goal start to the start of that day in Taipei', async () => {
+    mockReadingGoal = {
+      ...mockBaseGoal,
+      started_at: '2026-07-27',
+    };
+
+    render(<LongTermDetailScreen />);
+
+    await screen.findByText('自主閱讀計畫');
+    expect(mockSupabaseGteCalls).toContainEqual({
+      table: 'task_completions',
+      column: 'completed_at',
+      value: '2026-07-26T16:00:00.000Z',
+    });
+  });
+
+  it('normalizes an offset goal start through Taipei before taking start of day', async () => {
+    mockReadingGoal = {
+      ...mockBaseGoal,
+      started_at: '2026-07-27T18:30:00-04:00',
+    };
+
+    render(<LongTermDetailScreen />);
+
+    await screen.findByText('自主閱讀計畫');
+    expect(mockSupabaseGteCalls).toContainEqual({
+      table: 'task_completions',
+      column: 'completed_at',
+      value: '2026-07-27T16:00:00.000Z',
+    });
+  });
+
+  it('falls back to the created date when the goal start is invalid', async () => {
+    mockReadingGoal = {
+      ...mockBaseGoal,
+      started_at: 'not-a-date',
+      created_at: '2026-07-01',
+    };
+
+    render(<LongTermDetailScreen />);
+
+    await screen.findByText('自主閱讀計畫');
+    expect(mockSupabaseGteCalls).toContainEqual({
+      table: 'task_completions',
+      column: 'completed_at',
+      value: '2026-06-30T16:00:00.000Z',
+    });
+    expect(
+      mockSupabaseGteCalls.some(({ value }) =>
+        String(value).includes('Invalid Date')),
+    ).toBe(false);
   });
 
   it('filters flagged completions from the normal context query', async () => {
@@ -455,6 +534,61 @@ describe('LongTermDetailScreen', () => {
     expect(screen.queryByLabelText('記錄今天的閱讀')).toBeNull();
   });
 
+  it('keeps the completion but not an unsaved time when context recording fails', async () => {
+    mockRecordCompletionContext.mockRejectedValueOnce(new Error('network'));
+    render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('記錄今天的閱讀'));
+
+    expect(await screen.findByText('今天已完成 15 分鐘')).toBeTruthy();
+    await waitFor(() => {
+      expect(Alert.alert).toHaveBeenCalledWith('閱讀時段尚未記下', 'network');
+    });
+    expect(screen.queryByText('晚餐後記錄')).toBeNull();
+
+    fireEvent.press(screen.getByLabelText('查看紀錄'));
+    expect(screen.getByText('尚未記錄時段')).toBeTruthy();
+    expect(screen.queryByText('晚餐後記錄')).toBeNull();
+  });
+
+  it('shows the chosen time only after context recording succeeds', async () => {
+    const contextRequest = deferred<void>();
+    mockRecordCompletionContext.mockReturnValueOnce(contextRequest.promise);
+    render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('記錄今天的閱讀'));
+
+    expect(await screen.findByText('今天已完成 15 分鐘')).toBeTruthy();
+    expect(screen.queryByText('晚餐後記錄')).toBeNull();
+
+    await act(async () => {
+      contextRequest.resolve();
+      await contextRequest.promise;
+    });
+
+    expect(await screen.findByText('晚餐後記錄')).toBeTruthy();
+    fireEvent.press(screen.getByLabelText('查看紀錄'));
+    expect(screen.getByText('記錄時段')).toBeTruthy();
+    expect(screen.getAllByText('晚餐後').length).toBeGreaterThan(0);
+  });
+
+  it('updates the local checkpoint progress after a habit milestone succeeds', async () => {
+    mockReadingGoal = {
+      ...mockBaseGoal,
+      current_day: 4,
+    };
+    mockCompleteTask.mockResolvedValueOnce({
+      completionId: 'completion-thu',
+      milestone: { day: 5, reward: 10 },
+    });
+    render(<LongTermDetailScreen />);
+
+    expect(await screen.findByText('達成後成長幣 +10')).toBeTruthy();
+    fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
+
+    expect(await screen.findByText('成長幣 +10 已記下')).toBeTruthy();
+  });
+
   it('corrects the selected real completion and updates the record sheet', async () => {
     render(<LongTermDetailScreen />);
 
@@ -535,7 +669,9 @@ describe('LongTermDetailScreen', () => {
       taskName: '鋼琴家之路',
     };
     rerender(<LongTermDetailScreen />);
-    expect(await screen.findByText('本週完成 0／7 次')).toBeTruthy();
+    expect(
+      await screen.findByText('這週可以依自己的節奏，繼續目前的練習階段。'),
+    ).toBeTruthy();
 
     await act(async () => {
       completionRequest.resolve({
@@ -545,7 +681,9 @@ describe('LongTermDetailScreen', () => {
       await completionRequest.promise;
     });
 
-    expect(screen.getByText('本週完成 0／7 次')).toBeTruthy();
+    expect(
+      screen.getByText('這週可以依自己的節奏，繼續目前的練習階段。'),
+    ).toBeTruthy();
     expect(screen.queryByText('今天已完成')).toBeNull();
   });
 

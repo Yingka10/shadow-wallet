@@ -67,6 +67,29 @@ function isMissingCompletionContextColumn(error: {
     );
 }
 
+function taipeiDayStart(value: string | null | undefined) {
+  if (!value) return null;
+
+  try {
+    const parsed = /^\d{4}-\d{2}-\d{2}$/.test(value)
+      ? dayjs.tz(value, TZ)
+      : dayjs(value).tz(TZ);
+    return parsed.isValid() ? parsed.startOf('day') : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeGoalStartIso(
+  goal: Pick<LongTermGoal, 'started_at' | 'created_at'>,
+): string {
+  return (
+    taipeiDayStart(goal.started_at)
+    ?? taipeiDayStart(goal.created_at)
+    ?? dayjs.tz('1970-01-01', TZ).startOf('day')
+  ).toISOString();
+}
+
 function BackIcon() {
   return (
     <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
@@ -159,6 +182,7 @@ export default function LongTermDetailScreen() {
 
       const loadedGoal = goalRes.data as LongTermGoal;
       const loadedTask = taskRes.data as Task;
+      const normalizedStartIso = normalizeGoalStartIso(loadedGoal);
       const tomorrow = dayjs().tz(TZ).add(1, 'day').startOf('day').toISOString();
       const contextCompletionRes = await supabase
         .from('task_completions')
@@ -166,7 +190,7 @@ export default function LongTermDetailScreen() {
         .eq('task_id', taskId)
         .eq('child_id', loadedGoal.child_id)
         .eq('status', 'completed')
-        .gte('completed_at', loadedGoal.started_at)
+        .gte('completed_at', normalizedStartIso)
         .lt('completed_at', tomorrow)
         .order('completed_at', { ascending: true });
 
@@ -186,7 +210,7 @@ export default function LongTermDetailScreen() {
           .eq('task_id', taskId)
           .eq('child_id', loadedGoal.child_id)
           .eq('status', 'completed')
-          .gte('completed_at', loadedGoal.started_at)
+          .gte('completed_at', normalizedStartIso)
           .lt('completed_at', tomorrow)
           .order('completed_at', { ascending: true });
 
@@ -276,11 +300,30 @@ export default function LongTermDetailScreen() {
       const completion: GoalCompletionRecord = {
         id: result.completionId,
         completed_at: now.toISOString(),
-        planned_time_window: selectedTimeWindow,
+        planned_time_window: null,
         start_mode: null,
       };
 
       setCompletions((current) => [...current, completion]);
+      if (goal.goal_type === 'habit' || goal.goal_type === 'family') {
+        setGoal((current) => {
+          if (
+            !current
+            || current.id !== goalId
+            || (current.goal_type !== 'habit' && current.goal_type !== 'family')
+          ) {
+            return current;
+          }
+
+          return {
+            ...current,
+            current_day: Math.max(
+              (current.current_day ?? 0) + 1,
+              result.milestone?.day ?? 0,
+            ),
+          };
+        });
+      }
 
       if (selectedTimeWindow) {
         try {
@@ -290,6 +333,10 @@ export default function LongTermDetailScreen() {
             null,
           );
           if (routeKeyRef.current !== requestRouteKey) return false;
+          setCompletions((current) => current.map((item) =>
+            item.id === result.completionId
+              ? { ...item, planned_time_window: selectedTimeWindow }
+              : item));
         } catch (contextError) {
           if (routeKeyRef.current !== requestRouteKey) return false;
           Alert.alert(
