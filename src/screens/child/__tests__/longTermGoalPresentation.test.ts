@@ -211,6 +211,25 @@ describe('buildGoalPresentation', () => {
     expect(JSON.stringify(result.recentRecords)).not.toContain('self_started');
   });
 
+  it('preserves a real first-completion checkpoint reward in the starting milestone', () => {
+    const result = buildGoalPresentation(
+      makeTask(),
+      makeGoal({ checkpoint_rewards: { '1': 10, '5': 20 } }),
+      [makeCompletion('c1', '2026-07-27T19:00:00+08:00', null)],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.milestones[0]).toEqual({
+      id: 'start',
+      title: '完成第 1 次',
+      detail: '成長幣 +10',
+      status: 'completed',
+    });
+    expect(result.milestones.filter((milestone) => milestone.title === '完成第 1 次')).toHaveLength(
+      1,
+    );
+  });
+
   it('uses the same section structure for a skill goal', () => {
     const result = buildGoalPresentation(
       makeTask({

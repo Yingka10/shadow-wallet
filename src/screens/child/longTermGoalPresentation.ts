@@ -191,25 +191,33 @@ function buildMilestones(
   totalWeeks: number,
   isReadingPlan: boolean,
 ): GoalMilestone[] {
-  const milestones: GoalMilestone[] = [
-    {
-      id: 'start',
-      title: current > 0 ? '完成第 1 次' : '開始計畫',
-      detail: null,
-      status: 'completed',
-    },
-  ];
-
   const checkpoints = Object.entries(goal.checkpoint_rewards ?? {})
     .map(([threshold, coin]) => ({
       threshold: Number(threshold),
       coin: Number(coin),
     }))
-    .filter(({ threshold }) => Number.isFinite(threshold) && threshold > 1)
+    .filter(({ threshold }) => Number.isFinite(threshold) && threshold >= 1)
     .sort((left, right) => left.threshold - right.threshold);
-  const nextCheckpoint = checkpoints.find(({ threshold }) => threshold > current)?.threshold;
+  const firstCheckpoint = checkpoints.find(({ threshold }) => threshold === 1);
+  const milestones: GoalMilestone[] = [
+    {
+      id: 'start',
+      title: current > 0 ? '完成第 1 次' : '開始計畫',
+      detail: current > 0 && firstCheckpoint && firstCheckpoint.coin > 0
+        ? `成長幣 +${firstCheckpoint.coin}`
+        : null,
+      status: 'completed',
+    },
+  ];
 
-  for (const checkpoint of checkpoints) {
+  const remainingCheckpoints = checkpoints.filter(
+    ({ threshold }) => threshold > 1 || current < 1,
+  );
+  const nextCheckpoint = remainingCheckpoints.find(
+    ({ threshold }) => threshold > current,
+  )?.threshold;
+
+  for (const checkpoint of remainingCheckpoints) {
     milestones.push({
       id: `checkpoint-${checkpoint.threshold}`,
       title: `完成第 ${checkpoint.threshold} 次`,
