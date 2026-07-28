@@ -10,50 +10,62 @@
 | | |
 |---|---|
 | 日期 | 2026-07-28 |
-| Supabase staging | **不存在**。整個帳號只有一個 project，那就是正式專案 |
-| 因此 §六～§十、§十三～§十四 | ⛔ **未執行** |
-| schema baseline | ✅ 已從正式專案取得（schema-only，唯讀） |
-| bootstrap 策略 | ✅ 已決定並**在本機 PostgreSQL 17.4 實測通過** |
-| 真實 schema 上的 RPC 驗證 | ✅ 36 條 assertion，`REAL SCHEMA E2E PASSED` |
-| database types | ⛔ **未產生**（機制已驗證，缺 staging ref） |
-| 長期任務進度標籤 | ✅ 已修 |
-| 列表分組語意 | ✅ 已修 |
+| Supabase staging | ✅ 已建立（`growbook-staging`，Singapore），ref 與正式專案不同 |
+| §六 bootstrap | ✅ baseline + `20260730` + `20260731` 已套用 |
+| §七 QA 資料 | ✅ 1 家庭 / 2 家長 / 1 個 8 歲孩子 / 1 錢包（＋第二家庭供跨家庭測試） |
+| §八 database types | ✅ 已從 staging 產生並 commit |
+| §九 五種任務建立 | ✅ 走 PostgREST + 真 JWT，通過 |
+| §十 idempotency | ✅ PostgREST 層通過 |
+| §十三 完成流程 | ✅ 通過（13 條） |
+| §十四 App 人工驗收 | ⛔ **未執行**（需要人在 Expo 上實際操作） |
+| 長期任務進度標籤（§十一） | ✅ 已修 |
+| 列表分組語意（§十二） | ✅ 已修 |
 | 發現的 production bug | **1 個 P0**（家庭角色任務在正式資料庫上建不出來） |
+| 對 production 的操作 | **只有一次唯讀 schema dump**。沒有推送任何 migration |
+
+staging 的 project ref 在本文件一律寫成 `<STAGING_REF>`，正式的寫成 `<PROD_REF>`。
 
 ---
 
-## 1. 為什麼沒有 staging
+## 1. 目標確認（§二～§四）
 
 ```
 $ supabase projects list
-LINKED | REFERENCE ID   | NAME
-  ●    | <PROD_REF>     | (正式專案)
+LINKED | REFERENCE ID   | NAME               | REGION
+       | <PROD_REF>     | (正式專案)          | Sydney
+  ●    | <STAGING_REF>  | growbook-staging   | Singapore
 ```
 
-整個帳號只有這一個 project，`supabase/config.toml` 的 `project_id` 與 `.env` 的
-`EXPO_PUBLIC_SUPABASE_URL` 指向的都是它，而它裝著承恩的 Demo 資料。
+執行前的檢查，全部通過：
 
-依規格 §四：**沒有 staging 時不可拿正式專案代替**。建立 project 是會產生
-計費資源的動作，需要由使用者在 Supabase Dashboard 執行。
+| 檢查 | 結果 |
+|---|---|
+| staging ref ≠ 正式 ref | ✅ |
+| `.env.local` 指向 staging | ✅ 0 次正式 ref |
+| `.env.local` 被 Git 忽略 | ✅ `.gitignore:45`，且未被追蹤 |
+| staging 沒有正式家庭資料 | ✅ `public` 0 張表、`auth.users` 0 筆（正式專案有 27 張表） |
+| 有沒有連過 production 的 DB | **沒有**。對正式專案只跑過 `projects list`（管理 API 列 metadata） |
 
-### 使用者需要做的事
+每一個會寫入的指令執行前都先印出目標 ref，不符就中止。
 
-1. 在 Supabase 建立一個新 project（名稱建議 `growbook-staging`）
-2. 把它的 URL 與 anon key 寫進 `.env.local`
-   （`.gitignore` 第 45 行已經擋著，不會進 Git）
-3. 把 **project ref** 告訴我 —— 只要 ref，**不要貼 key**
+### ⚠️ `.env` 仍指向 production
 
-拿到 ref 之後的第一件事是確認它與正式專案的 ref 不同、且裡面沒有家庭資料，
-確認完才會套任何 migration。
+`.env`（未追蹤、`.gitignore:44` 有擋）裡的 `EXPO_PUBLIC_SUPABASE_URL` 是正式專案。
+Expo 的載入順序讓 `.env.local` 蓋過它，所以現在 App 連的是 staging；
+但只要 `.env.local` 被刪掉或改名，**App 會無聲地退回連正式專案**，畫面上看不出差別。
+QA 期間值得留意。
+
+### 修正過的一個設定錯誤
+
+`.env.local` 原本填的是 `https://<STAGING_REF>.supabase.co/rest/v1/`（REST endpoint）。
+`EXPO_PUBLIC_SUPABASE_URL` 要的是專案根 URL —— supabase-js 會自己接 `/rest/v1`，
+填了會組出 `.../rest/v1//rest/v1`。已改成根 URL。
 
 ---
 
 ## 2. schema baseline（§五）✅
 
-`supabase/migrations/` 從來沒有建立過核心表（AUDIT P1-7），
-所以 staging 需要一份 schema 起點。
-
-### 取得方式
+`supabase/migrations/` 從來沒有建立過核心表（AUDIT P1-7），所以 staging 需要一份 schema 起點。
 
 ```bash
 supabase db dump --linked --schema public -f supabase/baseline/public_schema.sql
@@ -74,89 +86,227 @@ awk '/^#!\/usr\/bin\/env bash/{f=1} f' dump_raw.txt > dump.sh
 bash dump.sh > supabase/baseline/public_schema.sql
 ```
 
-⚠️ `--dry-run` 會把 CLI 臨時建立的登入角色密碼印到 stdout。
-那份腳本用完就刪，沒有進 repo。
+⚠️ `--dry-run` 會把 CLI 臨時建立的登入角色密碼印到 stdout。那份腳本用完就刪，沒有進 repo。
 
 ### 驗證結果
 
 | 檢查 | 結果 |
 |---|---|
-| 核心表 | families / parents / children / child_profiles / tasks / child_tasks / task_completions / long_term_goals / wallets / transactions / reward_items / redemption_requests / overrides / intervention_log / time_savings / weekly_reports 全在（27 張表） |
-| `COPY` / `INSERT INTO` | **0**（沒有任何資料） |
+| 核心表 | 27 張全在 |
+| top-level `INSERT` / `COPY` / `FROM stdin` / `setval` | **0**（沒有任何資料） |
+| 檔內的 `INSERT INTO` | 32 處，**全部縮排在 plpgsql 函式主體內**，不是資料 |
 | 家庭真實資料（「承恩」） | **0** |
 | `auth.users` 資料 | **0**（只有外鍵參照） |
 | vault / 正式 URL / project ref / 密碼 | **0** |
 | verification harness 的表 | **0** |
 | OWNER | 只有 `postgres` 與 `pg_database_owner`，沒有個人帳號 |
+| RLS | 27 張表啟用，48 條 policy |
 
-檔案大小 124 KB，3176 行。
-
----
-
-## 3. bootstrap 策略：**A** ✅
-
-`supabase migration list --linked` 顯示遠端已經套到 `20260729000000`：
-
-```
-20260728000000 | 20260728000000 | ← 已套用
-20260729000000 | 20260729000000 | ← 已套用
-20260730000000 |                | ← 只在本機
-```
-
-而 dump 出來的 schema 確實含 `reward_policy`、`task_policy_version` +
-`reward_policy_version`（沒有殘留舊的模糊 `policy_version`）、
-`create_parent_task_v1`，但**沒有** `creation_request_id`。
-
-所以 baseline = 「所有舊 migration 套用完成後的基準」，採 **策略 A**：
-
-> staging 先套 `supabase/baseline/public_schema.sql`，
-> 之後**只套 `20260730000000` 起的新 migration**。
-
-重複套 20260728/20260729 會造成 duplicate column，絕對不要做。
-
-### Supabase 平台提供、baseline 不含的前置條件
-
-在真 staging 上這些由平台提供；本機模擬時要自己建：
-
-```sql
-CREATE SCHEMA auth;
-CREATE SCHEMA extensions;
-CREATE EXTENSION "uuid-ossp" WITH SCHEMA extensions;   -- families.id 的 default
-CREATE EXTENSION pgcrypto     WITH SCHEMA extensions;
-CREATE TABLE auth.users (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), email text);
-CREATE ROLE anon / authenticated / service_role / supabase_admin;
-```
-
-`public` schema 有三條外鍵指向 `auth.users`
-（families.created_by、parents.user_id、parent_observations.parent_id）。
+檔案 124 KB / 3176 行。
 
 ---
 
-## 4. 在真實 schema 上驗證 RPC ✅
+## 3. bootstrap 策略：**A** ✅ 已在 staging 執行
 
-staging 沒有，但 baseline 有 —— 所以在本機一次性 PostgreSQL 17.4 cluster 上
-用**正式專案的 schema** 跑了一輪。
+正式專案的 migration history 停在 `20260729000000`，baseline 就是「所有舊 migration
+套用完成後的基準」，所以採 **策略 A**：baseline 先落地，之後只套 `20260730` 起。
+
+### 為什麼不能直接 `db push` 27 支
+
+staging 是全新專案，migration history 是空的，`db push --dry-run` 一開始列出全部 27 支。
+**不能就這樣跑** —— 這正是這一輪 P0 的成因：
+
+```
+supabase/baseline/public_schema.sql:1988
+    CONSTRAINT "tasks_long_term_type_check" CHECK (long_term_type = ANY
+      (ARRAY['habit','skill','responsibility','challenge']))
+```
+
+這條 CHECK **不存在於任何一支 repo migration**，只活在 live DB。
+用 27 支 migration 建出來的 staging 會缺這條約束，E2E 會全過，然後 production 一樣爆掉 ——
+等於重演 §三 禁止的「假設 harness 等於 production schema」。
+
+### 實際執行順序
 
 ```bash
-initdb -D <tmp> -U postgres --auth=trust
-postgres -D <tmp> -p 55433
-createdb growbook_staging_sim
-psql -f <前置條件>
-psql -v ON_ERROR_STOP=1 -f supabase/baseline/public_schema.sql       # 0 errors
-psql -v ON_ERROR_STOP=1 -f supabase/migrations/20260730000000_*.sql  # 0 errors
-psql -v ON_ERROR_STOP=1 -f supabase/migrations/20260731000000_*.sql  # 0 errors
-psql -v ON_ERROR_STOP=1 -f supabase/verify/real_schema_e2e.sql
+# 1. 25 支歷史 migration 標記為已套用（只寫 migration history，不執行 SQL）
+supabase migration repair --status applied 20260518000000 … 20260729000000
+
+# 2. baseline 灌進 staging（單一 transaction，ON_ERROR_STOP）
+psql "$POOLER_URL" -v ON_ERROR_STOP=1 --single-transaction \
+     -f supabase/baseline/public_schema.sql          # exit 0，無錯誤
+
+# 3. 確認只剩該套的兩支
+supabase db push --dry-run
+#  • 20260730000000_create_parent_task_idempotency.sql
+#  • 20260731000000_fix_family_role_long_term_type.sql
+
+# 4. 套用
+supabase db push
 ```
 
-結果：**36 條 assertion 全過，`REAL SCHEMA E2E PASSED`**。
+全程沒有在 Dashboard 手動點過任何欄位。
 
-### 這比既有的 harness 強在哪裡
+### 套用後驗證
 
-`supabase/verify/task_reward_verification.sql` 自己建 13 張**簡化**的表。
-它的 93 條 assertion 全過，卻抓不到下面這個 bug ——
-因為簡化的 `tasks` 表沒有真的 CHECK。
+| 物件 | 結果 |
+|---|---|
+| `tasks.creation_request_id` | `uuid` |
+| `tasks_creation_request_id_key` | UNIQUE INDEX（partial，`WHERE creation_request_id IS NOT NULL`） |
+| `tasks_preset_needs_request_id_check` | `CHECK (NOT created_from_preset OR creation_request_id IS NOT NULL)` |
+| `preset_task_replay_payload` | 存在；`EXECUTE` 只給 `postgres` 與 `service_role`，**`anon` / `authenticated` 都沒有** |
+| `create_parent_task_v1` 的 `long_term_type` | `family_role → 'responsibility'`（不再是 `'family'`） |
 
-### 🔴 發現的 production bug（P0）
+---
+
+## 4. QA 資料（§七）✅
+
+`supabase/verify/staging/qa_seed.sql`。**沒有使用任何正式 Demo 的真實帳號資料**，
+也沒有寫進 `supabase/seed.sql` 或任何 production 路徑。
+
+| | |
+|---|---|
+| 家庭 | QA Family A（主要）、QA Family B（跨家庭測試用） |
+| 家長 | QA Parent A、QA Parent B（同 A 家）、QA Parent C（B 家） |
+| 孩子 | QA Child 8，`age_group = 6-9` |
+| 錢包 | spending，初始 0 |
+| auth | 三個帳號都有真實可登入的 `auth.users` + `auth.identities` |
+
+QA 帳號密碼以 `QA_PASSWORD` 環境變數傳入，**不寫進 repo**。
+
+### 兩個踩過的坑
+
+**GoTrue「Database error querying schema」**：手動建 `auth.users` 時，
+`confirmation_token` / `recovery_token` / `email_change_token_new` / `email_change`
+沒有 default，會是 NULL；GoTrue 以非 nullable 的 Go 字串掃這些欄位，一 NULL 就 500。
+補成空字串即可，已寫進 seed。
+
+**GoTrue 的 email 驗證與寄信 rate limit**：`signup` 端點會擋掉沒有 MX 的網域，
+而且預設每小時只能寄兩封。改成直接建 `auth.users` 再用
+`/auth/v1/token?grant_type=password` 登入，兩個限制都不會碰到。
+
+### ⚠️ 規格 §七 與真實 schema 的衝突
+
+§七 要求「1 個 parent 額外屬第二個家庭」。**真實 schema 做不到**：
+
+```sql
+CREATE UNIQUE INDEX idx_parents_user_id ON public.parents (user_id);
+```
+
+一個 auth 帳號只能對應一個 parent 列、也就是一個家庭。
+seed 改成把這個約束本身斷言出來（把同一個 user 塞進第二個家庭 → `unique_violation`），
+而不是假裝做到了。
+
+順帶一提：第七階段 B 修 `parents ... LIMIT 1` 授權時，理由之一是
+「同一個 auth 帳號在兩個家庭時會挑到錯的那一個」。有了這個 unique index，
+**那個情境目前不可能發生**。改成集合比對仍然是對的（它同時修掉了
+「比對某一個 family 而不是這個孩子的 family」這個真的 bug），
+但當時對多家庭風險的描述講過頭了。
+
+---
+
+## 5. database types（§八）✅
+
+```bash
+supabase gen types typescript --linked --schema public > src/types/database.generated.ts
+```
+
+用 `--linked`，**指令裡不出現 project ref**（`--db-url` / `--local` 需要 Docker；
+`--linked` / `--project-id` 走 management API 不需要）。
+
+產出 1715 行，含 `creation_request_id`（Row / Insert / Update 三處），0 個 project ref。
+`npx tsc --noEmit` 加入這個檔案後仍是既有的 2 個 baseline error，沒有增加。
+
+### 採用的策略：**B**
+
+- `database.generated.ts` 描述真實的 Row / Insert / Functions（DB source of truth）
+- 現有的 `Task` 等 application interface 保留為**投影型別**：畫面真的 select 的欄位
+- 兩者之間用 mapper 銜接
+
+理由：`tasks` 現在有 40 多欄、大部分 nullable。讓它們直接流進每個 component，
+會讓每一處都要處理一堆與該畫面無關的 `| null`。
+
+### 核對（§十六 #11）
+
+```ts
+create_parent_task_v1: { Args: { p_command: Json }; Returns: Json }
+```
+
+與 `SupabaseParentTaskCreationService` 的
+`supabase.rpc(CREATE_PARENT_TASK_RPC, { p_command: command })` 一致。
+
+`preset_task_replay_payload` 也出現在 generated 的 Functions 裡 —— 那只是
+`gen types` 會列出 public schema 所有函式，它的 `EXECUTE` 並沒有給
+`authenticated`，客戶端呼叫不到。
+
+---
+
+## 6. staging E2E（§九／§十／§十三）✅
+
+腳本在 `supabase/verify/staging/`，可重跑：
+
+```bash
+export STAGING_REF=<STAGING_REF>          # 必填，腳本不猜目標
+export FORBIDDEN_REF=<PROD_REF>           # 選填，多一道保險
+export QA_PASSWORD=...                    # QA 帳號密碼，不寫進 repo
+export QA_OUT=/tmp/created.json
+
+python supabase/verify/staging/create_and_idempotency.py   # 28 條
+python supabase/verify/staging/completion.py               # 13 條
+```
+
+不給 `STAGING_REF`、或 ref 與 `.env.local` 的 URL 不符，腳本直接中止（已實測）。
+
+**走的是 App 實際的路徑**：GoTrue 簽出的 access token → PostgREST → RLS → RPC。
+不是 `set_config('test.uid', …)` 假造的授權。
+
+### §九 五種任務建立（28 條中的前 15 條）
+
+| 形式 | reward_policy | 結果 |
+|---|---|---|
+| 單次｜學校作業 | `record_only` | ✅ 無幣值、`claim_period = once` |
+| 固定｜餐桌 | `family_contribution` | ✅ B 類、無幣值 |
+| 成長計畫｜四週閱讀 | `coin_eligible` | ✅ 幣值 12、`base_time_min = 0`、`long_term_goals.goal_type = skill` |
+| 短期支援｜整理書包 | `progress_only` | ✅ `total_days = 14` |
+| 家庭角色｜餐桌小幫手 | `family_contribution` | ✅ `long_term_type = responsibility`、角色與兩項負責內容都寫入 |
+
+RLS 一併驗了：家長 A 只看得到自己家庭的孩子，家長 C 看不到 A 家的孩子。
+
+### §十 idempotency（PostgREST 層）
+
+| # | 情境 | 結果 |
+|---|---|---|
+| 1-2 | 首次送出 | ✅ 成功，`idempotentReplay` 不為 true |
+| 3-5 | 同一個 `clientRequestId` 再送 | ✅ 回同一個 `taskId`，`idempotentReplay: true` |
+| 6 | 資料庫列數 | ✅ 只有一筆 |
+| 7 | 同家庭的另一位家長重送同一個識別碼 | ✅ 拿到同一筆，不重複建立 |
+| 8-9 | **另一個家庭猜中識別碼** | ✅ HTTP **403**，且沒有洩漏 `taskId` |
+| 10 | 未登入呼叫 | ✅ HTTP **401** |
+| 11 | 上述嘗試之後 | ✅ 仍然只有一筆 |
+| 12 | 換新的識別碼 | ✅ 建出不同的任務 |
+| 13 | 非 UUID 的識別碼 | ✅ `VALIDATION_FAILED`，不進資料庫 |
+
+失敗回應的鍵是 `code`（不是 `errorCode`），與 adapter 的 `payload.code` 一致。
+
+### §十三 完成流程（13 條）
+
+| 形式 | 錢包 | 結果 |
+|---|---|---|
+| `coin_eligible` | 0 → 12 | ✅ completion log 金額一致；`estimated_minutes` 是 20 而幣值是 12 —— **沒有拿分鐘當幣值** |
+| `family_contribution` | 12 → 12 | ✅ 0 幣，且**沒有寫 `time_savings`** |
+| `record_only` | 12 → 12 | ✅ 0 幣，仍留下完成紀錄 |
+| `progress_only` | 12 → 12 | ✅ 0 幣 |
+| 家庭角色 | 12 → 12 | ✅ 0 幣 |
+
+跨家庭完成 → **403**；跨家庭讀錢包 → 0 筆。
+五次完成後餘額是 12：**只有可發幣那一種給了幣**。
+
+上述結果是把 staging 清空、用 repo 裡的腳本從頭重跑一次得到的，
+不是開發過程中累積的狀態。
+
+---
+
+## 7. 🔴 發現的 production bug（P0）
 
 ```
 ERROR: new row for relation "tasks"
@@ -174,7 +324,8 @@ ERROR: new row for relation "tasks"
 
 1. 這兩個 CHECK（`tasks.long_term_type`、`long_term_goals.goal_type`）
    **從來不在 repo 的 migration 裡**，只存在 live DB。
-2. harness 的簡化表沒有這條 CHECK。
+2. `supabase/verify/task_reward_verification.sql` 自己建 13 張**簡化**的表，
+   沒有這條 CHECK —— 它的 93 條 assertion 全過。
 3. App 端也一路用 `'family'`：`LongTermType`、`useParentLongTermGoals`、
    `useLongTermTasks`、孩子端的 `longTermGoalPresentation`，
    以及 **`taskActions.createFamilyGoal`** —— 也就是說
@@ -182,90 +333,18 @@ ERROR: new row for relation "tasks"
 
 修正：
 
-- `supabase/migrations/20260731000000_fix_family_role_long_term_type.sql`
-  （只改一個 CASE 分支）
+- `supabase/migrations/20260731000000_fix_family_role_long_term_type.sql`（只改一個 CASE 分支）
 - App 端 `'family'` → `'responsibility'`（DB 值）。
-  孩子端 presentation 自己的 `goalKind: 'family'` **保留** ——
-  那是給孩子看的說法，不是資料庫的值。
+  孩子端 presentation 自己的 `goalKind: 'family'` **保留** —— 那是給孩子看的說法，不是資料庫的值。
 
 不需要資料修補：CHECK 擋著，資料庫裡不可能有 `long_term_type = 'family'` 的列。
 
-### ⚠️ 規格 §七 與真實 schema 的衝突
-
-§七 要求「1 個 parent 額外屬第二個家庭，用來驗證多家庭」。
-**真實 schema 做不到**：
-
-```sql
-CREATE UNIQUE INDEX idx_parents_user_id ON public.parents (user_id);
-```
-
-一個 auth 帳號只能屬於一個家庭。E2E 改成把這個約束本身斷言出來
-（嘗試把同一個 user 加進第二個家庭 → `unique_violation`）。
-
-順帶一提：第七階段 B 修 `parents ... LIMIT 1` 授權時，
-理由之一是「同一個 auth 帳號在兩個家庭時會挑到錯的那一個」。
-有了這個 unique index，**那個情境目前不可能發生**。
-改成集合比對仍然是對的（它同時修掉了「比對某一個 family 而不是這個孩子的 family」
-這個真的 bug），但當時對多家庭風險的描述講過頭了。
-
-### 實測涵蓋
-
-| 分類 | 內容 |
-|---|---|
-| 建立 | 五種形式全部成功；子表、稽核事件、四種版本欄位、`creation_request_id` 都正確 |
-| idempotency | 同識別碼重送回原任務、tasks 沒增加、子表與稽核事件沒重複 |
-| 授權 | 跨家庭重用識別碼 → 42501；未登入 → 42501；跨家庭完成／adjust → 42501 |
-| 完成 | coin_eligible +12 幣（completion log 一致、不是拿 `estimated_minutes` 當幣值）；family_contribution / record_only / progress_only 全部 0 幣、錢包不動、不寫 `time_savings` |
-| 單次任務 | `claim_period = once`、`max_claims_per_period = 1` |
-
-### 這**不能**取代 staging E2E
-
-沒有 PostgREST、沒有真的 JWT、RLS 沒有以 `authenticated` 身分執行過、
-`auth.uid()` 是替身。真正要驗的是那一層。
+這個 bug 是「用正式 schema 而不是簡化 harness」才抓到的，
+也是 §三 那條規則實際發揮作用的例子。
 
 ---
 
-## 5. database types（§八）⛔ 未產生
-
-`gen types --db-url` 與 `--local` 都需要 Docker。
-`--linked` / `--project-id` 走 management API，**不需要 Docker** —— 已驗證可行。
-
-所以指令本身沒有問題，缺的只是 staging ref：
-
-```bash
-supabase gen types typescript \
-  --project-id <STAGING_REF> \
-  --schema public \
-  > src/types/database.generated.ts
-```
-
-**沒有 commit 任何 generated 檔案。** 從正式專案產生的那一份缺
-`creation_request_id`（20260730 沒套用在那裡），把它放進 repo 會和 App
-實際寫入的欄位矛盾 —— 規格 §八 明文禁止「同一 RPC 在兩份型別裡互相矛盾」。
-
-### 採用的策略：**B**
-
-- `database.generated.ts` 描述真實的 Row / Insert / Functions（DB source of truth）
-- 現有的 `Task` 等 application interface 保留為**投影型別**：畫面真的 select 的欄位
-- 兩者之間用 mapper 銜接
-
-理由：`tasks` 現在有 40 多欄、大部分 nullable。讓它們直接流進每個
-component，會讓每一處都要處理一堆與該畫面無關的 `| null`。
-
-### 已經核對過的一件事（§十六 #11）
-
-從正式專案產生的 types 裡：
-
-```ts
-create_parent_task_v1: { Args: { p_command: Json }; Returns: Json }
-```
-
-與 `SupabaseParentTaskCreationService` 的
-`supabase.rpc(CREATE_PARENT_TASK_RPC, { p_command: command })` 一致。
-
----
-
-## 6. 長期任務進度標籤（§十一）✅
+## 8. 長期任務進度標籤（§十一）✅
 
 新建立的長期任務原本顯示「第 0 關 / 共 1 關」、「完成 0 次 / 目標 1 次」——
 那兩行是 `?? 1` / `?? 0` 生出來的，宣稱一個孩子從沒同意過的目標。
@@ -292,7 +371,7 @@ create_parent_task_v1: { Args: { p_command: Json }; Returns: Json }
 
 ---
 
-## 7. 列表分組語意（§十二）✅
+## 9. 列表分組語意（§十二）✅
 
 第七階段 C 把 `family_contribution` 與 `progress` 併進「生活紀錄」當作
 「不讓任務消失」的權宜。現在一對一：
@@ -311,39 +390,42 @@ create_parent_task_v1: { Args: { p_command: Json }; Returns: Json }
 
 ---
 
-## 8. ⛔ 未執行的段落
+## 10. ⛔ 未執行
 
 | 規格段落 | 內容 | 為什麼 |
 |---|---|---|
-| §六 | 在 staging 套 migration | 沒有 staging |
-| §七 | staging 測試資料 | 同上（本機模擬版已寫在 `real_schema_e2e.sql`） |
-| §八 | 產生 types | 同上 |
-| §九 | App 連 staging 人工建立五種任務 | 同上 |
-| §十 | PostgREST 層 idempotency | 同上 |
-| §十三 | staging 完成行為 | 同上（DB 層已驗，PostgREST 層未驗） |
-| §十四 | 成功／刷新人工驗收 | 同上 |
+| §十四 | App 人工驗收：在抽屜裡建立任務、看成功摘要、確認列表刷新與分頁切換 | 需要人在 Expo 上實際點擊，不是程式能代跑的 |
 
-§九、§十三、§十四 的**資料庫層**已經在真實 schema 上驗過；
-沒驗的是 PostgREST、真 JWT、RLS 以 `authenticated` 身分執行，以及 App 的手動操作。
+§九／§十／§十三 的**後端行為**已經在 staging 上以真 JWT 走 PostgREST 驗過；
+沒驗的是 App UI 本身的操作與畫面。
+
+### §十四 要怎麼跑
+
+```bash
+# .env.local 已指向 staging
+npx expo start
+```
+
+用 `qa-parent-a@example.invalid` 登入（密碼即 `QA_PASSWORD`），
+然後照 §十四 的項目逐條操作。要重置資料就重跑 `qa_seed.sql`。
 
 ---
 
-## 9. production 部署前 checklist
+## 11. production 部署前 checklist
 
-- [ ] 建立 staging project，跑完 §六～§十、§十三～§十四
 - [ ] **先確認 `20260731000000` 已套用**，否則家庭角色任務會建立失敗
-- [ ] 產生 `database.generated.ts` 並與手寫型別對齊
+- [ ] 跑完 §十四 App 人工驗收
 - [ ] 核心表 schema 回填進 migrations（AUDIT P1-7；目前無法從 repo 重建資料庫）
-- [ ] 確認 `preset_task_replay_payload` 在 Supabase 的 owner 下，
-      `REVOKE ... FROM authenticated` 真的生效
 - [ ] `taskActions.createFamilyGoal` 的 `'responsibility'` 修正需要實際回歸測試
       （它先前是壞的，沒有測試覆蓋）
 - [ ] 成長計畫的階段完成紀錄（目前用完成次數近似）
+- [ ] 移除 `.env.local` 的 `SUPABASE_DB_PASSWORD`（QA 結束後就不需要了）
+- [ ] 處理 `.env` 仍指向 production 的無聲退回風險
 - [ ] 確認 `.env.local` 沒有被 commit
 
 ---
 
 ## 附錄：本文件不含
 
-anon key、service role key、DB 密碼、家庭真實資料、正式 project URL。
-正式 project ref 一律以 `<PROD_REF>` 表示。
+anon key、service role key、DB 密碼、QA 帳號密碼、家庭真實資料、正式 project URL。
+project ref 一律以 `<PROD_REF>` / `<STAGING_REF>` 表示。
