@@ -73,17 +73,18 @@ function makeCompletion(
   id: string,
   completedAt: string,
   startMode: GoalCompletionRecord['start_mode'],
+  plannedTimeWindow: GoalCompletionRecord['planned_time_window'] = 'after_dinner',
 ): GoalCompletionRecord {
   return {
     id,
     completed_at: completedAt,
-    planned_time_window: 'after_dinner',
+    planned_time_window: plannedTimeWindow,
     start_mode: startMode,
   };
 }
 
 describe('buildGoalPresentation', () => {
-  it('models the reading demo as 20 sessions across four weeks', () => {
+  it('models the reading demo with week-first progress and a truthful seven-day schedule', () => {
     const result = buildGoalPresentation(
       makeTask(),
       makeGoal(),
@@ -98,10 +99,116 @@ describe('buildGoalPresentation', () => {
     expect(result.headerTitle).toBe('自主閱讀計畫');
     expect(result.overallLabel).toBe('3 / 20 次');
     expect(result.overallPercent).toBe(15);
+    expect(result.planWeekLabel).toBe('第 1 週／共 4 週');
+    expect(result.weekProgressLabel).toBe('本週完成 3／5 次');
+    expect(result.weekCompleted).toBe(3);
+    expect(result.weekTarget).toBe(5);
+    expect(result.totalWeeks).toBe(4);
+    expect(result.weekDays).toHaveLength(7);
+    expect(result.weekDays.map((day) => day.state)).toEqual([
+      'completed',
+      'completed',
+      'completed',
+      'today',
+      'upcoming',
+      'unscheduled',
+      'unscheduled',
+    ]);
+    expect(result.weekDays[0]).toEqual({
+      day: 1,
+      label: '一',
+      isoDate: '2026-07-27',
+      isScheduled: true,
+      state: 'completed',
+    });
     expect(result.todayAction).toBe('自己選一本喜歡的書，閱讀 15 分鐘');
-    expect(result.weekSummary).toBe('這週已閱讀 3 次，其中 2 次是自己開始的。');
+    expect(result.weekSummary).toBe(
+      '這週已閱讀 3 次。少一天沒有關係，找到適合自己的節奏更重要。',
+    );
+    expect(result.weekSummary).not.toContain('自己開始');
     expect(result.nextReward).toEqual({ threshold: 5, coin: 10 });
     expect(result.canCompleteToday).toBe(true);
+  });
+
+  it('marks only the real recurrence days as scheduled', () => {
+    const result = buildGoalPresentation(
+      makeTask({ recurrence_days: [2, 4] }),
+      makeGoal({ active_days: [2, 4], total_days: 8 }),
+      [],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.weekDays.map((day) => [day.day, day.state])).toEqual([
+      [1, 'unscheduled'],
+      [2, 'missed'],
+      [3, 'unscheduled'],
+      [4, 'today'],
+      [5, 'unscheduled'],
+      [6, 'unscheduled'],
+      [0, 'unscheduled'],
+    ]);
+    expect(result.weekDays.every((day) => /^\d{4}-\d{2}-\d{2}$/.test(day.isoDate))).toBe(
+      true,
+    );
+  });
+
+  it('derives milestones, recent records, and plan details only from real data', () => {
+    const result = buildGoalPresentation(
+      makeTask(),
+      makeGoal(),
+      [
+        makeCompletion('c1', '2026-07-27T19:00:00+08:00', 'reminded'),
+        makeCompletion('c2', '2026-07-28T22:00:00+08:00', 'self_started', 'before_bed'),
+        makeCompletion('c3', '2026-07-29T19:00:00+08:00', null),
+        makeCompletion('older', '2026-07-20T19:00:00+08:00', null),
+      ],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.milestones).toEqual([
+      {
+        id: 'start',
+        title: '完成第 1 次',
+        detail: null,
+        status: 'completed',
+      },
+      {
+        id: 'checkpoint-5',
+        title: '完成第 5 次',
+        detail: '成長幣 +10',
+        status: 'next',
+      },
+      {
+        id: 'final-review',
+        title: '四週後一起回顧',
+        detail: '可以繼續、調整，或讓計畫先告一段落。',
+        status: 'upcoming',
+      },
+    ]);
+    expect(result.recentRecords).toEqual([
+      {
+        id: 'c3',
+        dateLabel: '2026/07/29',
+        detail: '15 分鐘',
+        timeWindowLabel: '晚餐後',
+      },
+      {
+        id: 'c2',
+        dateLabel: '2026/07/28',
+        detail: '15 分鐘',
+        timeWindowLabel: '睡前',
+      },
+      {
+        id: 'c1',
+        dateLabel: '2026/07/27',
+        detail: '15 分鐘',
+        timeWindowLabel: '晚餐後',
+      },
+    ]);
+    expect(result.planPeriodLabel).toBe('2026-07-27 ～ 2026-08-23（共 4 週）');
+    expect(result.completionConditionLabel).toBe('完成 20 次');
+    expect(result.adjustableItemsLabel).toBe('閱讀時段、每週次數、閱讀方式或內容');
+    expect(JSON.stringify(result.recentRecords)).not.toContain('self_started');
   });
 
   it('uses the same section structure for a skill goal', () => {
@@ -137,6 +244,39 @@ describe('buildGoalPresentation', () => {
     expect(result.headerTitle).toBe('鋼琴家之路');
     expect(result.overallLabel).toBe('第 2 / 4 階段');
     expect(result.focusText).toBe('目前階段：雙手合奏');
+    expect(result.sectionOrder).toEqual(['hero', 'today', 'week', 'rewards', 'review']);
+    expect(result.weekDays).toHaveLength(7);
+    expect(result.nextReward).toBeNull();
+    expect(result.milestones.some((milestone) => milestone.detail?.includes('成長幣'))).toBe(
+      false,
+    );
+  });
+
+  it('keeps family goals on the shared presentation skeleton', () => {
+    const result = buildGoalPresentation(
+      makeTask({
+        id: 'task-family',
+        name: '一起整理餐桌',
+        long_term_type: 'family',
+        recurrence_days: [6],
+      }),
+      makeGoal({
+        id: 'goal-family',
+        task_id: 'task-family',
+        goal_type: 'family',
+        total_days: 4,
+        active_days: [6],
+        target_completions: 4,
+        checkpoint_rewards: null,
+      }),
+      [],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.categoryLabel).toBe('家庭參與');
+    expect(result.weekTarget).toBe(1);
+    expect(result.totalWeeks).toBe(4);
+    expect(result.weekDays).toHaveLength(7);
     expect(result.sectionOrder).toEqual(['hero', 'today', 'week', 'rewards', 'review']);
   });
 
