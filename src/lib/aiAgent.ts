@@ -187,6 +187,33 @@ export async function suggestRewardCoin(rewardName: string): Promise<SuggestRewa
   }
 }
 
+export type AdvisorChatInput = {
+  childName: string;
+  question: string;
+  doneToday: number;
+  totalToday: number;
+  todayTasks?: { name: string; status: string; rewardKind: 'coins' | 'time' | null }[];
+  /** 過去 7 天（不含今天）逐日完成的任務名稱，讓顧問答得出「這禮拜」的問題。 */
+  weekHistory?: { dateLabel: string; tasks: string[] }[];
+  longTermSummary: { name: string; progressPct: number }[];
+  history?: { role: 'parent' | 'ai'; text: string }[];
+};
+
+/**
+ * 家長端「AI 教養顧問」自由問答——只餵入畫面上本來就會顯示的彙總資料，
+ * 由 Gemini 產生溫暖白話的回覆。任何錯誤都 fallback 成誠實的「暫時無法回答」訊息，
+ * 不會假裝回答或編造數字。
+ */
+export async function chatWithAdvisor(input: AdvisorChatInput): Promise<string> {
+  try {
+    const result = await invokeAiProxy<{ reply: string }>('advisorChat', { ...input });
+    return result.reply || '目前想不到合適的回覆，可以換個方式問問看嗎？';
+  } catch (err) {
+    console.warn('[aiAgent.chatWithAdvisor] fallback due to error:', err);
+    return 'AI 顧問暫時連不上，晚點再試試看，或直接看下面的本週紀錄。';
+  }
+}
+
 export type WeeklyInsightSummary = {
   completionRate: number;
   totalTimeSavedMin: number;

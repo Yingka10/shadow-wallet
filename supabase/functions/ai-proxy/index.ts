@@ -280,6 +280,96 @@ reason 請在 60 字以內，直接說明。
   }
 }
 
+/**
+ * handleAdvisorChat — 家長端「AI 教養顧問」自由問答。
+ * 只餵入家長端畫面本來就會顯示、或家長打開紀錄頁就查得到的資料
+ * （今日任務清單、過去 7 天逐日完成紀錄、長期任務進度），不碰孩子的
+ * 原始逐筆時間戳記或任何隱私細節——顧問看得到的東西跟家長一樣多。
+ */
+async function handleAdvisorChat(payload: {
+  childName: string;
+  question: string;
+  doneToday: number;
+  totalToday: number;
+  todayTasks?: { name: string; status: string; rewardKind: 'coins' | 'time' | null }[];
+  weekHistory?: { dateLabel: string; tasks: string[] }[];
+  longTermSummary: { name: string; progressPct: number }[];
+  history?: { role: 'parent' | 'ai'; text: string }[];
+}) {
+  const STATUS_LABEL: Record<string, string> = {
+    done: '已完成',
+    pending: '待完成',
+    missed: '沒做到',
+    review: '待家長確認',
+  };
+  const taskLines = (payload.todayTasks ?? []).length > 0
+    ? (payload.todayTasks ?? [])
+        .map(t => `- ${t.name}（${STATUS_LABEL[t.status] ?? t.status}）`)
+        .join('\n')
+    : '（今天沒有排定任務）';
+
+  const weekLines = (payload.weekHistory ?? []).length > 0
+    ? (payload.weekHistory ?? [])
+        .map(d => `- ${d.dateLabel}：${d.tasks.join('、')}`)
+        .join('\n')
+    : '（過去 7 天沒有其他完成紀錄）';
+
+  const ltLines = payload.longTermSummary.length > 0
+    ? payload.longTermSummary.map(i => `- ${i.name}：進度 ${Math.round(i.progressPct)}%`).join('\n')
+    : '（目前沒有進行中的長期任務）';
+
+  // 從真實資料推斷最近的行為模式（活躍天數、單日份量、長期任務投入狀況），
+  // 不用問卷性格分類——那組欄位在這個 App 裡從沒被寫入過，是空的。
+  const weekHistory = payload.weekHistory ?? [];
+  const activeDaysInWeek = weekHistory.length;
+  const totalWeekTasks = weekHistory.reduce((sum, d) => sum + d.tasks.length, 0);
+  const avgPerActiveDay = activeDaysInWeek > 0 ? (totalWeekTasks / activeDaysInWeek).toFixed(1) : null;
+  const ltTotal = payload.longTermSummary.length;
+  const ltStarted = payload.longTermSummary.filter(i => i.progressPct > 0 && i.progressPct < 100).length;
+  const ltStalled = payload.longTermSummary.filter(i => i.progressPct === 0).length;
+
+  const behaviorLines = [
+    `- 過去 7 天有完成紀錄的天數：${activeDaysInWeek}/7${avgPerActiveDay ? `，平均每個有紀錄的天完成 ${avgPerActiveDay} 項任務` : ''}`,
+    ltTotal > 0
+      ? `- 長期任務共 ${ltTotal} 個：${ltStarted} 個持續推進中，${ltStalled} 個還沒開始`
+      : null,
+  ].filter(Boolean).join('\n');
+
+  const historyLines = (payload.history ?? [])
+    .slice(-6)
+    .map(h => `${h.role === 'parent' ? '家長' : '顧問'}：${h.text}`)
+    .join('\n');
+
+  const prompt = `你是一位溫柔、細心的親職陪伴顧問，正在跟一位家長聊聊孩子「${payload.childName}」的狀況。你就是家長身邊的助手，不是在幫某個系統代言。
+
+孩子的任務是自己回報完成的，實際情況可能比你手上的紀錄更豐富。你能看到的資料如下，看不到的部分（例如逐筆完成時間、孩子的原話）就別假裝知道、也別提到「系統」「資料庫」「我看得到的資料」這類詞——需要提醒家長資訊有限時，用「這幾天還沒特別看到相關紀錄」「可以再多留意一下」這種自然口吻帶過就好，不要解釋原因或提到任何技術性字眼。
+
+目前可參考的資料：
+- 今日任務完成：${payload.doneToday}/${payload.totalToday}
+- 今日任務清單：
+${taskLines}
+- 過去 7 天完成紀錄（不含今天）：
+${weekLines}
+- 長期任務進度：
+${ltLines}
+- 最近的行為模式（依實際紀錄推算，不是問卷分類）：
+${behaviorLines}
+
+${historyLines ? `之前的對話：\n${historyLines}\n` : ''}
+家長現在問：「${payload.question}」
+
+回覆規則：
+1. 全程用溫暖、體貼、鼓勵的白話繁體中文，不要出現「Task-A」「B類」這種代號或專有名詞。
+2. 100 字以內，簡短直接回答問題，不需要重述資料。
+3. 只根據上面給的資料回答，不要編造數字或具體事件；資料不夠判斷時自然帶過（見上），不要提「系統」「資料庫」「目前只記錄到」這類字眼，也不要交代資料從哪裡來。
+4. 若問題跟任務節奏、步調安排、要不要加/減任務有關，請依「最近的行為模式」給出貼合這個孩子實際步調的建議（例如活躍天數少就別建議加量、長期任務卡住就建議拆小），不要給空泛通用的建議，也不要提到「活躍天數」「行為模式」這種分析用詞，用生活化的說法講出來就好。
+5. 不要用條列式或標題，用一般說話的口吻，像朋友聊天，不要像在報告或客服回覆。
+6. 只回傳回覆內容本身，不要加引號或其他格式。`;
+
+  const reply = await callGemini(prompt);
+  return { reply: reply.trim() };
+}
+
 async function handleSuggestCoinWithAI(payload: { rewardName: string }) {
   const prompt = `你是一個家庭教養 App 的幣值顧問。
 這個 App 使用「幣」作為虛擬貨幣。孩子（6-9歲）每週透過完成家務賺取約 120-150 幣。
@@ -331,6 +421,18 @@ Deno.serve(async (req) => {
         break;
       case 'suggestCoinWithAI':
         result = await handleSuggestCoinWithAI(payload as { rewardName: string });
+        break;
+      case 'advisorChat':
+        result = await handleAdvisorChat(payload as {
+          childName: string;
+          question: string;
+          doneToday: number;
+          totalToday: number;
+          todayTasks?: { name: string; status: string; rewardKind: 'coins' | 'time' | null }[];
+          weekHistory?: { dateLabel: string; tasks: string[] }[];
+          longTermSummary: { name: string; progressPct: number }[];
+          history?: { role: 'parent' | 'ai'; text: string }[];
+        });
         break;
       default:
         return new Response(

@@ -19,14 +19,17 @@ ALTER TABLE tasks
     CHECK (claim_period IN ('day', 'week')),
   ADD COLUMN max_claims_per_period integer NOT NULL DEFAULT 1
     CHECK (max_claims_per_period > 0);
+
 COMMENT ON COLUMN tasks.claim_period IS
   'Window a claim frequency cap resets over. Mirrors coin-policy.json frequency.defaultClaimPeriod.';
 COMMENT ON COLUMN tasks.max_claims_per_period IS
   'Max times this task may be claimed (completed) per claim_period. Mirrors coin-policy.json frequency.defaultMaxClaimsPerPeriod. P0 guard — see complete_task.';
+
 -- Backfill: allow_repeat=true tasks previously had no cap at all. Give them a
 -- finite default (5/day) instead of leaving them unlimited; parents can lower
 -- this per-task later once the UI exposes it.
 UPDATE tasks SET max_claims_per_period = 5 WHERE allow_repeat = true;
+
 -- ── complete_task ─────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION complete_task(
   p_task_id             uuid,
