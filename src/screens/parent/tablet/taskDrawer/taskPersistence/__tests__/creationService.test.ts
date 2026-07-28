@@ -31,6 +31,7 @@ describe('CreateParentTaskResult 的形狀', () => {
       ok: true,
       taskId: 'task-1',
       relatedIds: ['child-task-1', 'goal-1'],
+      idempotentReplay: false,
     };
     if (!ok.ok) throw new Error('unreachable');
     expect(ok.relatedIds).toHaveLength(2);
@@ -53,13 +54,18 @@ describe('測試替身也吃同一個介面', () => {
   it('之後接上 RPC 或 Edge Function 時，呼叫端不用改', async () => {
     class FakeService implements ParentTaskCreationService {
       async create(command: CreateParentTaskCommand): Promise<CreateParentTaskResult> {
-        return { ok: true, taskId: `task-${command.childId}`, relatedIds: [] };
+        return {
+          ok: true, taskId: `task-${command.childId}`,
+          relatedIds: [], idempotentReplay: false,
+        };
       }
     }
     const result = await new FakeService().create({
       ...COMMAND,
       childId: 'child-9',
     } as CreateParentTaskCommand);
-    expect(result).toEqual({ ok: true, taskId: 'task-child-9', relatedIds: [] });
+    expect(result).toEqual({
+      ok: true, taskId: 'task-child-9', relatedIds: [], idempotentReplay: false,
+    });
   });
 });

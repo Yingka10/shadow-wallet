@@ -1,7 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { taipeiDayRange } from '../lib/taipeiDate';
-import type { Child, Task, TaskCategory } from '../types/database';
+import {
+  mapTaskToDisplayGroup,
+  type ParentTaskDisplayGroup,
+} from '../lib/parentTaskDisplayGroup';
+import type { Child, RewardPolicyValue, Task, TaskCategory } from '../types/database';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -19,6 +23,10 @@ export type TaskListItem = {
   isActive: boolean;    // child_tasks.is_active
   childTaskCreatedAt: string;
   taskCreatedAt: string;
+  /** NULL = 這一版之前建立的任務，分組沿用舊的 category 規則。 */
+  rewardPolicy: RewardPolicyValue | null;
+  /** 依 reward_policy（legacy 才看 category）決定的顯示分區。 */
+  displayGroup: ParentTaskDisplayGroup;
 };
 
 export type ParentTaskListData = {
@@ -28,7 +36,11 @@ export type ParentTaskListData = {
   todayCompletedIds: Set<string>;
   loading: boolean;
   error: string | null;
-  refresh: () => void;
+  /**
+   * 重新抓一次。回 Promise 是為了讓呼叫端等得到 ——
+   * 建立任務之後要「更新完再切分頁」，fire-and-forget 會讓家長切過去看到舊清單。
+   */
+  refresh: () => Promise<void>;
 };
 
 // ---------------------------------------------------------------------------
@@ -55,7 +67,24 @@ function deriveFreqLabel(task: Task): string {
 
 const CAT_ORDER: Record<TaskCategory, number> = { A: 0, B: 1, C: 2, D: 3 };
 
+/**
+ * 這個任務完成後會得到什麼。
+ *
+ * 新任務（reward_policy 有值）與 legacy 任務走完全不同的兩條路，
+ * 而且**刻意不共用計算**：新任務的幣值是政策定價後寫進 reward_coin_amount 的，
+ * legacy 的是 base_time_min × difficulty 現場算的。讓它們共用一個公式，
+ * 等於讓其中一邊的改動悄悄改掉另一邊。這與 complete_task 的分岔方式一致。
+ */
 function deriveReward(task: Task): TaskListItem['reward'] {
+  if (task.reward_policy) {
+    if (task.reward_policy !== 'coin_eligible') return null;
+    const amount = task.reward_coin_amount ?? 0;
+    // 0 幣的 coin_eligible 任務不該存在（DB 有 CHECK 擋著）。真的出現時
+    // 顯示「無」而不是「0 枚」——後者看起來像系統算出來的結果。
+    return amount > 0 ? { kind: 'coins', amount } : null;
+  }
+
+  // ── 以下是 legacy 路徑，與這一版之前完全相同 ──
   if (task.category === 'A') return null;
   if (task.category === 'B') return { kind: 'time', amount: task.time_saving_min };
   if (task.is_long_term) return null;
@@ -152,6 +181,11 @@ export function useParentTaskList(childId: string): ParentTaskListData {
           isActive:    ct.is_active,
           childTaskCreatedAt: ct.created_at,
           taskCreatedAt: task.created_at,
+          rewardPolicy: task.reward_policy ?? null,
+          displayGroup: mapTaskToDisplayGroup({
+            category: task.category,
+            rewardPolicy: task.reward_policy ?? null,
+          }),
         };
 
         if (ct.is_active) {

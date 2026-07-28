@@ -8,16 +8,23 @@
 //   （專案已用於 HomeScreen；moti 未被 jest transformIgnorePatterns 放行，會讓測試套件掛掉）。
 //   為了讓「滑出」也看得到，關閉時先播動畫、動畫結束才真的卸載 Modal（見 mounted / shown）。
 //
-// 三個畫面：
-//   pick   選任務家族
-//   edit   選執行版本 + 調整草稿（實際表單在 editors/，不寫在這支）
-//   review 唯讀預覽（本輪「確認建立」一律 disabled，尚未串資料庫）
+// 四個畫面：
+//   pick    選任務家族
+//   edit    選執行版本 + 調整草稿（實際表單在 editors/，不寫在這支）
+//   review  唯讀預覽 + 真正會送出的回饋決策
+//   success 建立完成摘要（不瞬間關掉抽屜，見 CreatedTaskSummary 的說明）
 //
 // 這支只負責：Drawer 狀態、family/variant 狀態、draft 狀態、step 切換、
-// close / discard 流程，以及把資料交給 TaskDraftEditor。表單邏輯不回流到這裡。
+// close / discard 流程、提交狀態機，以及把資料交給 TaskDraftEditor。
+// 表單邏輯與建立邏輯都不寫在這裡：前者在 editors/，後者在 submitTaskDraft。
+//
+// 建立 service 由**上層注入**（見 ParentTaskManagementTablet）。
+// 抽屜自己 new 一個的話，測試就得連真的 Supabase，而 Supabase client 在
+// import 時就要 URL 與金鑰 —— 整個抽屜會變成沒有環境變數就跑不起來的元件。
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   Platform,
   Pressable,
@@ -68,14 +75,25 @@ import {
   hasErrors,
   isDraftDirty,
   isFamilyRoleDraft,
-  LOCAL_ONLY_CREATE,
   PREVIEW_BLOCKED_NOTE,
   responsibilitiesTouched,
   shortSupportCopy,
   validateTaskDraft,
   type TaskDraft,
+  type TaskDraftValidationErrors,
 } from './taskDraft';
-import { DraftReview, TaskDraftEditor } from './editors';
+import { TASK_POLICY_VERSION } from './taskCatalog';
+import {
+  newClientRequestId,
+  previewTaskRewardDecision,
+  submitTaskDraft,
+  tabForCreatedTask,
+  type CreatedTaskTab,
+  type CreateParentTaskCommand,
+  type CreateParentTaskFailureCode,
+  type ParentTaskCreationService,
+} from './taskPersistence';
+import { CreatedTaskSummary, DraftReview, TaskDraftEditor } from './editors';
 import {
   ChevronLeftIcon,
   CloseIcon,
@@ -85,7 +103,59 @@ import {
 
 const ANIM_MS = 260;
 
-type DrawerStep = 'pick' | 'edit' | 'review';
+type DrawerStep = 'pick' | 'edit' | 'review' | 'success';
+
+/**
+ * 提交狀態機。
+ *
+ * 只有三個狀態，而且 success 刻意**不在這裡** —— 建立成功之後畫面整個換了
+ * （step 變成 'success'），把它當成第四個提交狀態會讓「按鈕該長什麼樣」
+ * 與「畫面該顯示什麼」兩件事纏在一起。
+ */
+type SubmissionState =
+  | { status: 'idle' }
+  | { status: 'submitting' }
+  | { status: 'failed'; code: CreateParentTaskFailureCode; message: string };
+
+/** 列表刷新的結果，與提交結果分開記。任務已經建立、列表沒更新，不是建立失敗。 */
+type RefreshStatus = 'pending' | 'done' | 'failed';
+
+/** 建立成功之後要記住的東西。清掉它等於「這次建立結束了」。 */
+type CreatedTaskState = {
+  command: CreateParentTaskCommand;
+  taskId: string;
+  relatedIds: string[];
+  idempotentReplay: boolean;
+  tab: CreatedTaskTab;
+};
+
+const SUBMITTING_LABEL = '建立中…';
+const SUBMITTING_BLOCK_NOTE = '任務正在建立，請稍候。';
+const REFRESH_FAILED_NOTE = '任務已建立，但列表暫時沒有更新。';
+
+/**
+ * 四種失敗各自的家長文案。
+ *
+ * PERSISTENCE_FAILED 與 UNKNOWN 一律用固定句子，**不透傳 service 的 message**：
+ * 那些可能是 Postgres 或 Supabase 的原始錯誤字串，家長看了幫不上任何忙，
+ * 而且會洩漏欄位與函式名稱。POLICY_REJECTED 相反 —— 那是我們自己寫的中文規則說明，
+ * 家長需要知道為什麼這個組合不允許。
+ */
+function failureCopy(
+  code: CreateParentTaskFailureCode,
+  message: string,
+): string {
+  switch (code) {
+    case 'VALIDATION_FAILED':
+      return '有些設定需要再確認。';
+    case 'POLICY_REJECTED':
+      return message.trim() || '這個組合目前不允許建立。';
+    case 'PERSISTENCE_FAILED':
+      return '任務尚未建立，請稍後再試。';
+    default:
+      return '建立時發生預期外的問題，任務尚未建立。';
+  }
+}
 
 /** dirty 時被攔下、等家長確認放棄後才執行的動作。 */
 type PendingAction =
@@ -96,6 +166,8 @@ type PendingAction =
   | { kind: 'selectRole'; roleOptionId: string };
 
 export type PresetTaskDrawerChild = {
+  /** children.id。建立命令一定要帶它，不可以由抽屜自己去查。 */
+  id: string;
   nickname: string;
   birthDate: string;
   familyId: string;
@@ -133,6 +205,9 @@ export function PresetTaskDrawer({
   child,
   childLoading,
   displayMode = DEFAULT_DISPLAY_MODE,
+  taskCreationService,
+  onRefreshTaskList,
+  onSwitchTab,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -141,6 +216,18 @@ export function PresetTaskDrawer({
   childLoading: boolean;
   /** demo（預設）＝乾淨畫面；development ＝顯示尚未串接的實作狀態。 */
   displayMode?: PresetTaskDrawerDisplayMode;
+  /**
+   * 建立 service。由上層注入，抽屜不自己 new。
+   * production 傳 SupabaseParentTaskCreationService，測試傳 fake。
+   */
+  taskCreationService: ParentTaskCreationService;
+  /**
+   * 重新抓任務列表。用既有 hook 的 refetch，抽屜不自己查 Supabase ——
+   * 那會變成第二套查詢，兩邊的過濾條件遲早不一樣。
+   */
+  onRefreshTaskList?: () => Promise<void>;
+  /** 建立成功後切到正確分頁。 */
+  onSwitchTab?: (tab: CreatedTaskTab) => void;
 }) {
   const { width } = useWindowDimensions();
   const panelWidth = panelWidthFor(width);
@@ -162,7 +249,27 @@ export function PresetTaskDrawer({
   const [showErrors, setShowErrors] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
 
+  /**
+   * 這份草稿的建立請求識別碼。
+   * 草稿建立時產生一次，之後預覽、返回修改、失敗重試都用同一個 ——
+   * 它是「網路重送不會建出第二筆任務」的唯一依據（見 clientRequestId.ts）。
+   */
+  const [clientRequestId, setClientRequestId] = useState<string | null>(null);
+  const [submission, setSubmission] = useState<SubmissionState>({ status: 'idle' });
+  const [created, setCreated] = useState<CreatedTaskState | null>(null);
+  const [refreshStatus, setRefreshStatus] = useState<RefreshStatus>('pending');
+  /** RPC 回來的欄位錯誤。與本地驗證的錯誤合併後餵回 editor。 */
+  const [serverFieldErrors, setServerFieldErrors] =
+    useState<TaskDraftValidationErrors | null>(null);
+
   const listRef = useRef<ScrollView>(null);
+  /**
+   * 連點防線。
+   *
+   * 光靠 submission.status 擋不住：setState 是非同步的，同一個 tick 內的第二次
+   * 點擊看到的仍然是 idle。ref 是同步的，所以它才是真正擋住第二次送出的那一道。
+   */
+  const submitLockRef = useRef(false);
 
   // 0 = 收合（面板在右側畫面外、遮罩透明）、1 = 展開。
   const progress = useSharedValue(0);
@@ -172,6 +279,13 @@ export function PresetTaskDrawer({
     [panelWidth],
   );
 
+  /**
+   * 抽屜完全關閉後的歸零。
+   *
+   * clientRequestId 一定要在這裡清掉：留著的話，下一次開抽屜建立的
+   * 另一個任務會沿用同一個識別碼，RPC 會認為那是重送並回傳上一筆 ——
+   * 家長按了建立，卻拿到上次那個任務。
+   */
   const reset = useCallback(() => {
     setStep('pick');
     setQuery('');
@@ -183,6 +297,12 @@ export function PresetTaskDrawer({
     setMinuteCustomText('');
     setShowErrors(false);
     setPendingAction(null);
+    setClientRequestId(null);
+    setSubmission({ status: 'idle' });
+    setCreated(null);
+    setRefreshStatus('pending');
+    setServerFieldErrors(null);
+    submitLockRef.current = false;
   }, []);
 
   // 開合動畫的掛載/卸載時序
@@ -225,8 +345,38 @@ export function PresetTaskDrawer({
 
   const errors = useMemo(() => {
     if (!draft || !selectedVariant) return {};
-    return validateTaskDraft(draft, selectedVariant, ageGroup ?? undefined);
-  }, [draft, selectedVariant, ageGroup]);
+    const local = validateTaskDraft(draft, selectedVariant, ageGroup ?? undefined);
+    // 本地驗證在前、RPC 回來的在後：後者是我們沒能在前端擋下的，更晚也更權威。
+    return serverFieldErrors ? { ...local, ...serverFieldErrors } : local;
+  }, [draft, selectedVariant, ageGroup, serverFieldErrors]);
+
+  const submitting = submission.status === 'submitting';
+
+  /** 命令要的孩子資訊。抽屜不查 DB，三個欄位都由呼叫端給。 */
+  const commandChild = useMemo(() => {
+    if (!child || !ageGroup) return null;
+    return { id: child.id, familyId: child.familyId, ageGroup };
+  }, [child, ageGroup]);
+
+  /**
+   * 預覽上要顯示的回饋決策。
+   *
+   * 和送出時走的是同一組函式（見 submitTaskDraft），所以畫面顯示的金額
+   * 就是等一下真的會寫進資料庫的那個。各算一份才是兩邊說法不同的來源。
+   */
+  const previewDecision = useMemo(() => {
+    if (!draft || !selectedFamily || !selectedVariant || !commandChild || !clientRequestId) {
+      return null;
+    }
+    return previewTaskRewardDecision({
+      draft,
+      family: selectedFamily,
+      variant: selectedVariant,
+      child: commandChild,
+      taskPolicyVersion: TASK_POLICY_VERSION,
+      clientRequestId,
+    });
+  }, [draft, selectedFamily, selectedVariant, commandChild, clientRequestId]);
 
   // dirty 由 initial snapshot 與 current 深度比較得出，不用手動旗標
   // （手動旗標改回原值也不會歸零，會誤觸放棄確認）。
@@ -240,6 +390,11 @@ export function PresetTaskDrawer({
       setInitialDraft(next);
       setShowErrors(false);
       setMinuteCustomText(minuteSeedOf(next));
+      // 新草稿 = 新的建立請求。舊草稿的識別碼不可以帶到這一份上，
+      // 否則家長放棄舊草稿、改建另一個任務時會被 RPC 當成重送。
+      setClientRequestId(newClientRequestId());
+      setSubmission({ status: 'idle' });
+      setServerFieldErrors(null);
     },
     [child, ageGroup],
   );
@@ -278,9 +433,13 @@ export function PresetTaskDrawer({
     [buildDraft, onClose, selectedFamily, selectedVariant],
   );
 
-  /** dirty 就先問，不 dirty 直接做。 */
+  /** dirty 就先問，不 dirty 直接做。提交進行中一律不做。 */
   const requestAction = useCallback(
     (action: PendingAction) => {
+      // 提交中不接受任何會改變草稿或關閉抽屜的動作。
+      // RPC 可能已經成功但 response 還沒回來，這時讓家長離開只會讓
+      // 「到底建立了沒有」變成猜謎 —— 而下一次重試又要重新問一次。
+      if (submitLockRef.current) return;
       if (!dirty) {
         runAction(action);
         return;
@@ -290,7 +449,101 @@ export function PresetTaskDrawer({
     [dirty, runAction],
   );
 
-  const handleClose = useCallback(() => requestAction({ kind: 'close' }), [requestAction]);
+  // ── 建立 ────────────────────────────────────────────────────────────────
+
+  /** 刷新列表。失敗不代表建立失敗，所以結果記在自己的狀態上。 */
+  const runRefresh = useCallback(async () => {
+    if (!onRefreshTaskList) {
+      // 沒有列表要刷新（例如單獨渲染抽屜的測試）。當作已完成，不要卡在 pending。
+      setRefreshStatus('done');
+      return;
+    }
+    try {
+      await onRefreshTaskList();
+      setRefreshStatus('done');
+    } catch {
+      setRefreshStatus('failed');
+    }
+  }, [onRefreshTaskList]);
+
+  const handleConfirmCreate = useCallback(async () => {
+    if (!draft || !selectedFamily || !selectedVariant || !commandChild || !clientRequestId) return;
+    // 同步鎖，擋住同一個 tick 內的第二次點擊。
+    if (submitLockRef.current) return;
+    submitLockRef.current = true;
+    setSubmission({ status: 'submitting' });
+    setServerFieldErrors(null);
+
+    try {
+      const outcome = await submitTaskDraft({
+        draft,
+        family: selectedFamily,
+        variant: selectedVariant,
+        child: commandChild,
+        taskPolicyVersion: TASK_POLICY_VERSION,
+        // 重試沿用同一個識別碼 —— 這是整套 idempotency 的重點。
+        clientRequestId,
+        service: taskCreationService,
+      });
+
+      if (outcome.ok) {
+        setCreated({
+          command: outcome.command,
+          taskId: outcome.taskId,
+          relatedIds: outcome.relatedIds,
+          idempotentReplay: outcome.idempotentReplay,
+          tab: tabForCreatedTask(outcome.command),
+        });
+        setSubmission({ status: 'idle' });
+        setRefreshStatus('pending');
+        setStep('success');
+        await runRefresh();
+        return;
+      }
+
+      setSubmission({ status: 'failed', code: outcome.code, message: outcome.message });
+
+      // 欄位問題才回編輯畫面。政策與寫入問題留在預覽 ——
+      // 把家長丟回表單卻沒有任何欄位是紅的，只會讓人以為自己填錯了什麼。
+      if (outcome.code === 'VALIDATION_FAILED') {
+        if (outcome.fieldErrors) setServerFieldErrors(outcome.fieldErrors);
+        setShowErrors(true);
+        setStep('edit');
+      }
+    } finally {
+      submitLockRef.current = false;
+    }
+  }, [
+    clientRequestId, commandChild, draft, runRefresh,
+    selectedFamily, selectedVariant, taskCreationService,
+  ]);
+
+  /** 成功之後才會用到：確保列表至少刷新過一次，但不重複刷。 */
+  const ensureRefreshed = useCallback(() => {
+    if (refreshStatus === 'done') return;
+    void runRefresh();
+  }, [refreshStatus, runRefresh]);
+
+  const handleFinishSuccess = useCallback(() => {
+    ensureRefreshed();
+    onClose();
+  }, [ensureRefreshed, onClose]);
+
+  const handleViewCreatedTask = useCallback(() => {
+    if (created) onSwitchTab?.(created.tab);
+    ensureRefreshed();
+    onClose();
+  }, [created, ensureRefreshed, onClose, onSwitchTab]);
+
+  const handleClose = useCallback(() => {
+    if (submitLockRef.current) return;
+    // 成功畫面的 X 等同「完成」：任務已經建立，這時不該再問「要放棄嗎」。
+    if (created) {
+      handleFinishSuccess();
+      return;
+    }
+    requestAction({ kind: 'close' });
+  }, [created, handleFinishSuccess, requestAction]);
 
   // web 平板：ESC 關閉。RN 沒有鍵盤事件，只在 web 掛 document listener。
   useEffect(() => {
@@ -299,6 +552,8 @@ export function PresetTaskDrawer({
     if (!doc) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      // 提交中 ESC 完全沒有作用（與 X、遮罩一致）。
+      if (submitLockRef.current) return;
       if (escapeActionFor(!!pendingActionRef.current) === 'dismissConfirmation') {
         setPendingAction(null);
         return;
@@ -374,6 +629,13 @@ export function PresetTaskDrawer({
     setStep('pick');
   }, []);
 
+  /** 預覽 → 編輯。順手清掉上一次的失敗說明：家長正要去改，那句話已經過期了。 */
+  const handleBackToEdit = useCallback(() => {
+    if (submitLockRef.current) return;
+    setSubmission({ status: 'idle' });
+    setStep('edit');
+  }, []);
+
   const handlePreview = useCallback(() => {
     if (!draft || !selectedVariant) return;
     const result = validateTaskDraft(draft, selectedVariant, ageGroup ?? undefined);
@@ -382,8 +644,10 @@ export function PresetTaskDrawer({
       return;
     }
     setShowErrors(false);
+    setSubmission({ status: 'idle' });
+    setServerFieldErrors(null);
     setStep('review');
-  }, [draft, selectedVariant]);
+  }, [draft, selectedVariant, ageGroup]);
 
   if (!mounted) return null;
 
@@ -393,8 +657,19 @@ export function PresetTaskDrawer({
   /** 家長已經按過一次、而且確實還有錯 —— 這時才在 footer 說明為什麼沒往下走。 */
   const blockedByErrors = showErrors && previewBlocked;
 
+  /**
+   * blocked 的回饋決策不可以建立。
+   *
+   * 正常流程走不到（能力閘門讓家長選不到用不了的政策），這道是為了
+   * 「預覽開著時草稿被改到能力失效」——那時按鈕必須立刻擋住，不是等 RPC 拒絕。
+   */
+  const rewardBlocked = previewDecision?.eligibility === 'blocked';
+  const canConfirmCreate =
+    !!draft && !!previewDecision && !rewardBlocked && !!clientRequestId && !submitting;
+
   const stepTitle = (() => {
     if (step === 'pick') return ready ? `為 ${child.nickname} 建立新任務` : '建立新任務';
+    if (step === 'success') return '任務已建立';
     if (step === 'review') return '預覽最終版本';
     if (draft?.editorKind === 'short_support' && selectedFamily) {
       return shortSupportCopy(selectedFamily.id).headerTitle;
@@ -408,7 +683,10 @@ export function PresetTaskDrawer({
 
   const stepHint = (() => {
     if (step === 'pick') return '先選一個適合的起點，內容仍可再調整';
-    if (step === 'review') return '確認以下內容，還可以回去修改';
+    if (step === 'success') return `已加入 ${child?.nickname ?? '孩子'}的任務清單`;
+    if (step === 'review') {
+      return submitting ? SUBMITTING_BLOCK_NOTE : '確認以下內容，還可以回去修改';
+    }
     if (draft?.editorKind === 'short_support') return '一次先處理一個具體卡點，穩定後就可以結束';
     if (draft?.editorKind === 'growth_plan') return '先看適齡起點，再改成適合你們家的版本';
     if (draft?.editorKind === 'recurring') {
@@ -426,11 +704,17 @@ export function PresetTaskDrawer({
      <DisplayModeProvider mode={displayMode}>
       <View style={s.root}>
         <Animated.View style={[StyleSheet.absoluteFill, scrimStyle]} pointerEvents="auto">
+          {/*
+            提交中遮罩仍然擋住底下的畫面，但不再是關閉按鈕 ——
+            點一下就關掉、而 RPC 其實已經成功，是最難收拾的那種狀態。
+          */}
           <Pressable
             style={[s.scrim, { backgroundColor: scrimColorFor(width) }]}
             onPress={handleClose}
+            disabled={submitting}
             accessibilityRole="button"
-            accessibilityLabel="關閉新增任務"
+            accessibilityState={{ disabled: submitting }}
+            accessibilityLabel={submitting ? '建立中，暫時無法關閉' : '關閉新增任務'}
           />
         </Animated.View>
 
@@ -457,12 +741,14 @@ export function PresetTaskDrawer({
                 ) : null}
               </View>
               <TouchableOpacity
-                style={s.closeButton}
+                style={[s.closeButton, submitting && s.closeButtonDisabled]}
                 onPress={handleClose}
+                disabled={submitting}
                 activeOpacity={0.7}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 accessibilityRole="button"
-                accessibilityLabel="關閉"
+                accessibilityState={{ disabled: submitting }}
+                accessibilityLabel={submitting ? '建立中，暫時無法關閉' : '關閉'}
               >
                 <CloseIcon />
               </TouchableOpacity>
@@ -549,6 +835,15 @@ export function PresetTaskDrawer({
                   family={selectedFamily}
                   variant={selectedVariant}
                   draft={draft}
+                  decision={previewDecision}
+                />
+              ) : null}
+
+              {step === 'success' && selectedFamily && selectedVariant && created ? (
+                <CreatedTaskSummary
+                  family={selectedFamily}
+                  variant={selectedVariant}
+                  command={created.command}
                 />
               ) : null}
             </ScrollView>
@@ -624,34 +919,84 @@ export function PresetTaskDrawer({
                   </TouchableOpacity>
                 </View>
               </View>
+            ) : step === 'success' ? (
+              <SuccessFooter
+                refreshStatus={refreshStatus}
+                onRetryRefresh={() => void runRefresh()}
+                onViewTask={handleViewCreatedTask}
+                onFinish={handleFinishSuccess}
+              />
             ) : (
               <View style={s.reviewFooter}>
-                {showsImplementationNotes ? (
-                  <Text style={s.reviewFooterNote}>{LOCAL_ONLY_CREATE}</Text>
+                {submission.status === 'failed' ? (
+                  <View
+                    style={s.errorPanel}
+                    accessibilityRole="alert"
+                    accessibilityLiveRegion="polite"
+                  >
+                    <Text style={s.errorPanelText}>
+                      {failureCopy(submission.code, submission.message)}
+                    </Text>
+                    {/*
+                      內部 code 只在 development 顯示。demo / production 看到
+                      「PERSISTENCE_FAILED」除了嚇人之外沒有任何用處。
+                    */}
+                    {showsImplementationNotes ? (
+                      <Text style={s.errorPanelCode}>
+                        {submission.code}｜{submission.message}
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : null}
+                {submitting ? (
+                  <Text style={s.reviewFooterNote}>{SUBMITTING_BLOCK_NOTE}</Text>
                 ) : null}
                 <View style={s.reviewFooterRow}>
                   <TouchableOpacity
-                    style={s.ghostButton}
-                    onPress={() => setStep('edit')}
+                    style={[s.ghostButton, submitting && s.ghostButtonDisabled]}
+                    onPress={handleBackToEdit}
+                    disabled={submitting}
                     activeOpacity={0.7}
                     accessibilityRole="button"
+                    accessibilityState={{ disabled: submitting }}
                   >
                     <ChevronLeftIcon />
                     <Text style={s.ghostButtonText}>返回修改</Text>
                   </TouchableOpacity>
-                  <View
-                    style={[s.primaryButton, s.primaryButtonDisabled]}
+                  <TouchableOpacity
+                    style={[s.primaryButton, !canConfirmCreate && s.primaryButtonDisabled]}
+                    onPress={handleConfirmCreate}
+                    disabled={!canConfirmCreate}
+                    activeOpacity={0.85}
                     accessibilityRole="button"
-                    accessibilityState={{ disabled: true }}
-                    accessibilityLabel="確認建立"
+                    accessibilityState={{ disabled: !canConfirmCreate, busy: submitting }}
+                    accessibilityLabel={submitting ? '正在建立任務，請稍候' : '確認建立'}
                     accessibilityHint={
-                      showsImplementationNotes ? LOCAL_ONLY_CREATE : '建立功能尚未開放'
+                      rewardBlocked ? '目前的回饋方式不能使用，請先返回修改' : undefined
                     }
                   >
-                    <Text style={[s.primaryButtonText, s.primaryButtonTextDisabled]}>
-                      確認建立
-                    </Text>
-                  </View>
+                    {/*
+                      loading 不只靠顏色：文案換成「建立中…」，旁邊有 indicator，
+                      accessibilityState.busy 也設好 —— 讀螢幕的人同樣知道在等什麼。
+                    */}
+                    {submitting ? (
+                      <View style={s.submittingRow}>
+                        <ActivityIndicator size="small" color={ParentColors.fgMuted} />
+                        <Text style={[s.primaryButtonText, s.primaryButtonTextDisabled]}>
+                          {SUBMITTING_LABEL}
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text
+                        style={[
+                          s.primaryButtonText,
+                          !canConfirmCreate && s.primaryButtonTextDisabled,
+                        ]}
+                      >
+                        確認建立
+                      </Text>
+                    )}
+                  </TouchableOpacity>
                 </View>
               </View>
             )}
@@ -708,6 +1053,68 @@ export function PresetTaskDrawer({
       </View>
      </DisplayModeProvider>
     </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 成功畫面的 footer
+// ---------------------------------------------------------------------------
+
+/**
+ * 刷新失敗時換一組按鈕。
+ *
+ * 關鍵是**不提供「再試一次建立」**：任務已經建立好了，重來一次只會讓家長
+ * 以為剛才失敗。這裡能重試的只有「更新列表」這件事。
+ */
+function SuccessFooter({
+  refreshStatus,
+  onRetryRefresh,
+  onViewTask,
+  onFinish,
+}: {
+  refreshStatus: RefreshStatus;
+  onRetryRefresh: () => void;
+  onViewTask: () => void;
+  onFinish: () => void;
+}) {
+  return (
+    <View style={s.reviewFooter}>
+      {refreshStatus === 'failed' ? (
+        <Text style={s.reviewFooterNote}>{REFRESH_FAILED_NOTE}</Text>
+      ) : null}
+      <View style={s.reviewFooterRow}>
+        {refreshStatus === 'failed' ? (
+          <TouchableOpacity
+            style={s.ghostButton}
+            onPress={onRetryRefresh}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="再次更新任務列表"
+          >
+            <Text style={s.ghostButtonText}>再次更新</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={s.ghostButton}
+            onPress={onFinish}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+          >
+            <Text style={s.ghostButtonText}>完成</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
+          style={s.primaryButton}
+          onPress={refreshStatus === 'failed' ? onFinish : onViewTask}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+        >
+          <Text style={s.primaryButtonText}>
+            {refreshStatus === 'failed' ? '完成' : '查看任務'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
@@ -1181,6 +1588,43 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: ParentSpacing[3],
+  },
+  ghostButtonDisabled: {
+    opacity: 0.5,
+  },
+  closeButtonDisabled: {
+    opacity: 0.4,
+  },
+  submittingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ParentSpacing[2],
+  },
+  /**
+   * 錯誤說明用淡磚紅底，不是整條紅 bar。
+   * 建立失敗多半是暫時的（網路、政策組合），把 footer 變成警報只會讓家長
+   * 以為自己剛剛弄壞了什麼。
+   */
+  errorPanel: {
+    paddingHorizontal: ParentSpacing[4],
+    paddingVertical: ParentSpacing[3],
+    borderRadius: ParentRadii.md,
+    borderWidth: 1,
+    borderColor: ParentColors.dangerSoftBorder,
+    backgroundColor: ParentColors.dangerSoftBg,
+    gap: ParentSpacing[1],
+  },
+  errorPanelText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.pMeta,
+    lineHeight: 21,
+    color: ParentColors.dangerSoft,
+  },
+  errorPanelCode: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    lineHeight: 18,
+    color: ParentColors.fgMuted,
   },
 
   // 放棄修改確認

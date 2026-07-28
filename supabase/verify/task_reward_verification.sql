@@ -230,6 +230,9 @@ CREATE TABLE intervention_log (
 \echo '── applying 20260729000000_task_reward_and_completion_authz.sql'
 \i supabase/migrations/20260729000000_task_reward_and_completion_authz.sql
 
+\echo '── applying 20260730000000_create_parent_task_idempotency.sql'
+\i supabase/migrations/20260730000000_create_parent_task_idempotency.sql
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- 3. 測試資料：兩個家庭、四位家長（其中一位跨兩個家庭）
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -319,9 +322,22 @@ CREATE FUNCTION vcmd(
       'ageGroup', '6-9', 'createdFromPreset', true,
       'taskPolicyVersion', 'task-taxonomy-2026-07',
       'presetCatalogVersion', '2026-07-28',
-      'editorKind', p_editor
+      'editorKind', p_editor,
+      -- 每次呼叫都是新的識別碼；要測重送的地方用 vreq() 明確指定同一個。
+      'clientRequestId', gen_random_uuid()
     )
   ) || p_extra;
+$$;
+
+/**
+ * 指定建立請求識別碼。
+ *
+ * vcmd 每次產生新的，那是「兩次不同的建立」；重送測試要的是相反的東西 ——
+ * 同一份草稿的第二次提交，識別碼必須一模一樣。
+ */
+CREATE FUNCTION vreq(p_cmd jsonb, p_request uuid)
+RETURNS jsonb LANGUAGE sql IMMUTABLE AS $$
+  SELECT jsonb_set(p_cmd, '{metadata,clientRequestId}', to_jsonb(p_request::text));
 $$;
 
 /** 長期形式要補上 endDate 與 durationDays。 */
@@ -846,6 +862,220 @@ BEGIN
         AND NOT EXISTS (SELECT 1 FROM task_change_events e WHERE e.task_id = t.id)
     ),
     '19b. 每一筆 preset 任務都有稽核事件');
+
+END $$;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 7. 建立請求的 idempotency（第七階段 C）
+--
+-- 要證明的事只有一句：**同一個識別碼進來幾次，資料庫裡都只有一筆任務。**
+--
+-- 這件事沒辦法在前端驗證 —— 前端分不出「沒送到」與「送到了但回不來」，
+-- 所以這一整段是這個功能唯一真正的驗收。
+-- ═══════════════════════════════════════════════════════════════════════════
+
+\echo '── idempotency'
+
+DO $$
+DECLARE
+  v_fam_a uuid; v_fam_b uuid; v_child_a uuid; v_child_b uuid;
+  v_user_1 uuid; v_user_3 uuid;
+  v_req uuid := gen_random_uuid();
+  v_req_legacy uuid := gen_random_uuid();
+  v_cmd jsonb;
+  v_res jsonb; v_res2 jsonb;
+  v_task uuid;
+  v_tasks_before int; v_ct_before int; v_sel_before int; v_ev_before int;
+  v_count int;
+BEGIN
+  SELECT v INTO v_fam_a   FROM fixture WHERE k = 'fam_a';
+  SELECT v INTO v_fam_b   FROM fixture WHERE k = 'fam_b';
+  SELECT v INTO v_child_a FROM fixture WHERE k = 'child_a';
+  SELECT v INTO v_child_b FROM fixture WHERE k = 'child_b';
+  SELECT v INTO v_user_1  FROM fixture WHERE k = 'user_1';
+  SELECT v INTO v_user_3  FROM fixture WHERE k = 'user_3';
+
+  PERFORM set_config('test.uid', v_user_1::text, false);
+
+  -- ══ 34. 同一個識別碼送兩次 ══════════════════════════════════════════════
+  v_cmd := vreq(vcmd(
+    v_child_a, v_fam_a, 'recurring', 'learning_skill', 'recurring', NULL,
+    'coin_eligible', 'ongoing', 'fixed_days', vcoin(12, 5, 25)), v_req);
+
+  SELECT count(*) INTO v_tasks_before FROM tasks;
+  SELECT count(*) INTO v_ct_before    FROM child_tasks;
+  SELECT count(*) INTO v_sel_before   FROM task_preset_selections;
+  SELECT count(*) INTO v_ev_before    FROM task_change_events;
+
+  v_res := create_parent_task_v1(v_cmd);
+  PERFORM vassert(v_res ->> 'ok' = 'true', '34. 第一次建立成功');
+  PERFORM vassert(v_res ->> 'idempotentReplay' = 'false',
+    '34a. 第一次不是 replay');
+
+  v_task := (v_res ->> 'taskId')::uuid;
+
+  PERFORM vassert(
+    (SELECT creation_request_id FROM tasks WHERE id = v_task) = v_req,
+    '34b. 識別碼真的寫進 tasks.creation_request_id');
+
+  -- 第二次：一模一樣的命令，一模一樣的識別碼。
+  v_res2 := create_parent_task_v1(v_cmd);
+
+  PERFORM vassert(v_res2 ->> 'ok' = 'true', '35. 重送仍然回成功');
+  PERFORM vassert(v_res2 ->> 'idempotentReplay' = 'true',
+    '35a. 重送被標記為 idempotentReplay');
+  PERFORM vassert((v_res2 ->> 'taskId')::uuid = v_task,
+    '35b. 重送回的是同一個 taskId');
+
+  PERFORM vassert((SELECT count(*) FROM tasks) - v_tasks_before = 1,
+    '36. tasks 只增加一筆');
+  PERFORM vassert((SELECT count(*) FROM child_tasks) - v_ct_before = 1,
+    '36a. child_tasks 只增加一筆');
+  PERFORM vassert(
+    (SELECT count(*) FROM task_preset_selections) - v_sel_before
+      = (SELECT count(*) FROM task_preset_selections WHERE task_id = v_task),
+    '36b. 選項子表沒有重複寫入');
+  PERFORM vassert((SELECT count(*) FROM task_change_events) - v_ev_before = 1,
+    '37. 稽核事件只寫一筆 created 事件');
+  PERFORM vassert(
+    (SELECT count(*) FROM task_change_events
+      WHERE task_id = v_task AND event_type = 'created_from_preset') = 1,
+    '37a. 這筆任務只有一個 created_from_preset 事件');
+
+  -- 送第三次也一樣（模擬家長按了很多下）。
+  v_res2 := create_parent_task_v1(v_cmd);
+  PERFORM vassert(
+    v_res2 ->> 'idempotentReplay' = 'true'
+    AND (SELECT count(*) FROM tasks) - v_tasks_before = 1,
+    '38. 連送三次仍然只有一筆任務');
+
+  -- ══ 39. RPC 成功但 client 逾時後重送 ════════════════════════════════════
+  -- 與上面同一條路徑，但語意不同：client 收到的是錯誤，命令內容可能被
+  -- 重新映射過（時間戳、順序）。只要識別碼相同就必須回原本那筆。
+  v_res2 := create_parent_task_v1(vreq(vcmd(
+    v_child_a, v_fam_a, 'recurring', 'learning_skill', 'recurring', NULL,
+    'coin_eligible', 'ongoing', 'fixed_days', vcoin(12, 5, 25)), v_req));
+  PERFORM vassert(
+    (v_res2 ->> 'taskId')::uuid = v_task AND v_res2 ->> 'idempotentReplay' = 'true',
+    '39. 逾時重送回原本那筆任務');
+
+  -- ══ 40. 同識別碼、不同 family ═══════════════════════════════════════════
+  -- 這是安全問題不是重複問題：猜到識別碼的人不可以拿它換到別人家的任務。
+  PERFORM set_config('test.uid', v_user_3::text, false);  -- 只屬於家庭 B
+  BEGIN
+    PERFORM create_parent_task_v1(vreq(vcmd(
+      v_child_b, v_fam_b, 'recurring', 'learning_skill', 'recurring', NULL,
+      'record_only', 'ongoing', 'fixed_days', vplain('record_only')), v_req));
+    RAISE EXCEPTION 'FAILED: 40. 跨家庭重用識別碼應該被拒絕';
+  EXCEPTION WHEN insufficient_privilege THEN
+    PERFORM vassert(true, '40. 同識別碼、不同家庭 → 42501');
+  END;
+
+  PERFORM vassert((SELECT count(*) FROM tasks) - v_tasks_before = 1,
+    '40a. 被拒絕的跨家庭重送沒有建立任何東西');
+
+  -- ══ 41. 同識別碼、同 family、不同 child ═════════════════════════════════
+  PERFORM set_config('test.uid', v_user_1::text, false);
+  INSERT INTO children (family_id, nickname, birth_date)
+  VALUES (v_fam_a, '弟弟', '2019-06-01');
+
+  BEGIN
+    PERFORM create_parent_task_v1(vreq(vcmd(
+      (SELECT id FROM children WHERE family_id = v_fam_a AND nickname = '弟弟'),
+      v_fam_a, 'recurring', 'learning_skill', 'recurring', NULL,
+      'record_only', 'ongoing', 'fixed_days', vplain('record_only')), v_req));
+    RAISE EXCEPTION 'FAILED: 41. 同家庭換孩子重用識別碼應該被拒絕';
+  EXCEPTION WHEN insufficient_privilege THEN
+    PERFORM vassert(true, '41. 同識別碼、不同孩子 → 42501');
+  END;
+
+  -- ══ 42. 不同識別碼＝不同任務 ════════════════════════════════════════════
+  -- 反向確認：idempotency 不會把兩次真正的建立誤判成同一次。
+  v_res2 := create_parent_task_v1(vreq(vcmd(
+    v_child_a, v_fam_a, 'recurring', 'learning_skill', 'recurring', NULL,
+    'coin_eligible', 'ongoing', 'fixed_days', vcoin(12, 5, 25)),
+    gen_random_uuid()));
+  PERFORM vassert(
+    v_res2 ->> 'ok' = 'true'
+    AND (v_res2 ->> 'taskId')::uuid <> v_task
+    AND v_res2 ->> 'idempotentReplay' = 'false',
+    '42. 換一個識別碼就是一筆新任務');
+
+  -- ══ 43. 缺識別碼 / 格式錯誤 ═════════════════════════════════════════════
+  v_res2 := create_parent_task_v1(
+    (vcmd(v_child_a, v_fam_a, 'recurring', 'learning_skill', 'recurring', NULL,
+          'record_only', 'ongoing', 'fixed_days', vplain('record_only')))
+    #- '{metadata,clientRequestId}');
+  PERFORM vassert(v_res2 ->> 'code' = 'VALIDATION_FAILED',
+    '43. 缺建立請求識別碼被拒絕');
+
+  v_res2 := create_parent_task_v1(jsonb_set(
+    vcmd(v_child_a, v_fam_a, 'recurring', 'learning_skill', 'recurring', NULL,
+         'record_only', 'ongoing', 'fixed_days', vplain('record_only')),
+    '{metadata,clientRequestId}', '"not-a-uuid"'::jsonb));
+  PERFORM vassert(v_res2 ->> 'code' = 'VALIDATION_FAILED',
+    '43a. 格式錯誤的識別碼回 VALIDATION_FAILED，不是 22P02');
+
+  -- ══ 44. constraint 本身 ═════════════════════════════════════════════════
+  -- legacy 任務（created_from_preset = false）可以沒有識別碼。
+  INSERT INTO tasks (family_id, name, category, day_type, base_time_min, difficulty)
+  VALUES (v_fam_a, '沒有識別碼的舊任務', 'D', 'both', 20, 1);
+  PERFORM vassert(true, '44. legacy 任務的 creation_request_id 可為 NULL');
+
+  -- 預設任務沒有識別碼會被 CHECK 擋下。
+  BEGIN
+    INSERT INTO tasks (family_id, name, category, day_type, created_from_preset,
+                       task_policy_version, reward_policy_version)
+    VALUES (v_fam_a, '沒有識別碼的預設任務', 'D', 'both', true,
+            'task-taxonomy-2026-07', 'reward-eligibility-2026-07');
+    RAISE EXCEPTION 'FAILED: 45. 預設任務缺識別碼應該被 CHECK 擋下';
+  EXCEPTION WHEN check_violation THEN
+    PERFORM vassert(true, '45. created_from_preset 的任務必須有識別碼');
+  END;
+
+  -- unique：同一個識別碼不可能有兩筆任務，連直接 INSERT 也不行。
+  BEGIN
+    INSERT INTO tasks (family_id, name, category, day_type, created_from_preset,
+                       creation_request_id, task_policy_version, reward_policy_version)
+    VALUES (v_fam_a, '搶同一個識別碼', 'D', 'both', true, v_req,
+            'task-taxonomy-2026-07', 'reward-eligibility-2026-07');
+    RAISE EXCEPTION 'FAILED: 46. 重複的識別碼應該被 unique index 擋下';
+  EXCEPTION WHEN unique_violation THEN
+    PERFORM vassert(true, '46. creation_request_id 有唯一性保證');
+  END;
+
+  -- NULL 不互相衝突（部分索引的預期行為）：兩筆 legacy 任務都沒有識別碼。
+  INSERT INTO tasks (family_id, name, category, day_type, base_time_min, difficulty)
+  VALUES (v_fam_a, '另一筆沒有識別碼的舊任務', 'D', 'both', 20, 1);
+  SELECT count(*) INTO v_count FROM tasks
+  WHERE family_id = v_fam_a AND creation_request_id IS NULL;
+  PERFORM vassert(v_count >= 2, '47. 多筆 legacy 任務的 NULL 識別碼不互相衝突');
+
+  -- ══ 48. replay 查詢不對外開放 ═══════════════════════════════════════════
+  PERFORM vassert(
+    NOT has_function_privilege('authenticated',
+      'public.preset_task_replay_payload(uuid, uuid, uuid)', 'EXECUTE'),
+    '48. preset_task_replay_payload 沒有授權給 authenticated');
+  PERFORM vassert(
+    NOT has_function_privilege('anon',
+      'public.preset_task_replay_payload(uuid, uuid, uuid)', 'EXECUTE'),
+    '48a. 也沒有授權給 anon');
+
+  -- ══ 49. 最終盤點 ════════════════════════════════════════════════════════
+  PERFORM vassert(
+    NOT EXISTS (
+      SELECT creation_request_id FROM tasks
+      WHERE creation_request_id IS NOT NULL
+      GROUP BY creation_request_id HAVING count(*) > 1
+    ),
+    '49. 整個資料庫沒有任何一個識別碼對到兩筆任務');
+  PERFORM vassert(
+    NOT EXISTS (
+      SELECT 1 FROM tasks WHERE created_from_preset AND creation_request_id IS NULL
+    ),
+    '49a. 每一筆預設任務都有識別碼');
+
+  PERFORM set_config('test.uid', '', false);
 
   RAISE NOTICE '';
   RAISE NOTICE 'ALL CHECKS PASSED';

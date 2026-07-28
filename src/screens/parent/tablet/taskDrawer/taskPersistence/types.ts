@@ -239,6 +239,16 @@ export type CreateParentTaskCommandBase = {
     presetCatalogVersion: string;
     /** 哪一支 editor 產生的。決定要寫哪些子表，不必再從 durationType 反推。 */
     editorKind: TaskEditorKind;
+    /**
+     * 這一份草稿的建立請求識別碼（UUID v4）。
+     *
+     * 由前端在草稿建立時產生一次，之後**整份草稿的生命週期都不變**：
+     * 預覽、返回修改、RPC 失敗後重試都用同一個。RPC 用它做 idempotency ——
+     * 同一個 id 進來第二次時回傳原本那筆，不會建出第二個任務。
+     *
+     * 產生方式見 clientRequestId.ts；為什麼不能只靠按鈕 loading 也在那裡說明。
+     */
+    clientRequestId: string;
   };
 };
 
@@ -271,6 +281,13 @@ export type CreateParentTaskResult =
       taskId: string;
       /** child_tasks / long_term_goals 等一併建立的資料列 id。 */
       relatedIds: string[];
+      /**
+       * true = 這個 clientRequestId 之前已經建立過，RPC 回傳的是原本那一筆。
+       *
+       * 對家長來說仍然是「成功」：任務確實存在，畫面該顯示成功摘要。
+       * 分辨它的意義在偵錯與稽核 —— 出現 replay 表示上一次的 response 沒回到 client。
+       */
+      idempotentReplay: boolean;
     }
   | {
       ok: false;
@@ -285,11 +302,13 @@ export interface ParentTaskCreationService {
 }
 
 /**
- * 目前唯一存在的實作：一定失敗。
+ * 一定失敗的實作。
+ *
+ * 第七階段 C 起，production 抽屜注入的是 SupabaseParentTaskCreationService
+ * （見 ParentTaskManagementTablet），這支只留給「明知還沒接上」的情境與測試。
  *
  * 刻意不是「回傳假的成功」——那會讓抽屜看起來已經接上，
  * 家長回到任務列表卻找不到剛建立的任務。
- * production UI 本輪根本不呼叫它（確認建立仍是 disabled 的靜態元素）。
  */
 export class UnavailableParentTaskCreationService implements ParentTaskCreationService {
   async create(_command: CreateParentTaskCommand): Promise<CreateParentTaskResult> {

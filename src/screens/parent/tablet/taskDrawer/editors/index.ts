@@ -6,6 +6,7 @@ export { ShortSupportEditor } from './ShortSupportEditor';
 export { RecurringTaskEditor } from './RecurringTaskEditor';
 export { FamilyRoleEditor } from './FamilyRoleEditor';
 export { OneTimeTaskEditor } from './OneTimeTaskEditor';
-export { DraftReview } from './DraftReview';
+export { DraftReview, RewardDecisionBlock } from './DraftReview';
+export { CreatedTaskSummary } from './CreatedTaskSummary';
 export { EditorSection, EditorField, EditorHeader } from './EditorSection';
 export * from './EditorControls';

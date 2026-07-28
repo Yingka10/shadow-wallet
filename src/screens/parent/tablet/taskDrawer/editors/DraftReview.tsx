@@ -1,10 +1,13 @@
 // Shadow Wallet · Parent Tablet — 草稿唯讀預覽
 //
-// 只是把 draft 攤開來讓家長確認，沒有任何寫入。
-// 「確認建立」在 PresetTaskDrawer 的 footer，本輪一律 disabled。
+// 把 draft 攤開來讓家長確認，沒有任何寫入。「確認建立」在 PresetTaskDrawer 的 footer。
+//
+// 這裡多做一件事：顯示**真正會送出的那份回饋決策**。
+// 「回饋方式：可獲得成長幣」只說了政策名稱，沒說會拿到幾枚 ——
+// 家長在按下建立之前看不到金額，等於在確認一份自己沒看過的內容。
 
-import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   ParentColors,
   ParentFonts,
@@ -47,6 +50,8 @@ import {
   type TaskDraft,
 } from '../taskDraft';
 import { PresetGlyph } from '../drawerIcons';
+import { useShowsImplementationNotes } from '../displayMode';
+import type { TaskRewardDecision } from '../taskReward/types';
 import { LocalOnlyNotice, PolicyNotice, ReadOnlyOutcomeList } from './EditorControls';
 
 function weekdayText(days: number[]): string {
@@ -96,14 +101,136 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
+// ---------------------------------------------------------------------------
+// 回饋決策
+// ---------------------------------------------------------------------------
+
+/**
+ * 不發幣的三種政策各自的說法。
+ *
+ * 刻意不共用一句「不發成長幣」：三者不發幣的**理由**不同，
+ * 而家長要能從這一句話判斷自己是不是選錯了。
+ */
+const NON_COIN_COPY: Record<
+  'record_only' | 'family_contribution' | 'progress_only',
+  { title: string; body: string }
+> = {
+  family_contribution: {
+    title: '家庭貢獻',
+    body: '這項任務會記錄孩子對共同生活的投入，不發成長幣。',
+  },
+  record_only: {
+    title: '留下完成紀錄',
+    body: '完成後保留紀錄，不發成長幣。',
+  },
+  progress_only: {
+    title: '進度與肯定',
+    body: '回饋投入、持續與進步，不直接發成長幣。',
+  },
+};
+
+/**
+ * development 模式下可展開的計算依據。
+ *
+ * 顯示的是「家長語言的欄位」——年齡段、時間分級、每次分鐘。
+ * 刻意不印整包 JSON，也不出現 difficultyDelta / base_time_min 這類
+ * 政策與資料庫的內部名稱：那些在正式畫面上只會讓人以為系統壞了。
+ */
+function CalculationBasis({ decision }: { decision: TaskRewardDecision }) {
+  const [open, setOpen] = useState(false);
+  if (decision.eligibility !== 'allowed' || decision.coin === null) return null;
+
+  const basis = decision.coin.calculationBasis;
+
+  return (
+    <View style={s.basis}>
+      <Pressable
+        onPress={() => setOpen(current => !current)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={open ? '收合計算依據' : '展開計算依據'}
+      >
+        <Text style={s.basisToggle}>{open ? '收合計算依據' : '查看計算依據'}</Text>
+      </Pressable>
+      {open ? (
+        <View style={s.basisBody}>
+          <Row label="年齡段" value={basis.ageGroup} />
+          <Row label="時間分級" value={basis.band} />
+          <Row
+            label="每次時間"
+            value={basis.estimatedMinutes ? `${basis.estimatedMinutes} 分鐘` : undefined}
+          />
+          <Row label="難度" value={basis.difficulty} />
+          <Row label="建議幣值" value={`${decision.coin.suggestedAmount} 枚`} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+export function RewardDecisionBlock({ decision }: { decision: TaskRewardDecision }) {
+  const showsImplementationNotes = useShowsImplementationNotes();
+
+  // 正常流程走不到這裡（能力閘門讓家長根本選不到用不了的政策）。
+  // 走到的情況是：預覽開著的時候草稿被改到讓能力失效。柔和說明 + 擋住建立，
+  // 不是紅色錯誤 —— 家長沒有做錯任何事。
+  if (decision.eligibility === 'blocked') {
+    return (
+      <View style={s.rewardBlocked}>
+        <Text style={s.rewardBlockedTitle}>這個回饋方式目前不能使用</Text>
+        <Text style={s.rewardBlockedBody}>{decision.explanation}</Text>
+        <Text style={s.rewardBlockedHint}>請返回修改，換一種回饋方式或補上需要的設定。</Text>
+      </View>
+    );
+  }
+
+  if (decision.rewardPolicy === 'coin_eligible') {
+    const { finalAmount, minAllowed, maxAllowed } = decision.coin;
+    return (
+      <View style={s.rewardCard}>
+        <Text style={s.rewardTitle}>可獲得成長幣</Text>
+        <View style={s.rewardAmountRow}>
+          <Text style={s.rewardAmount}>{finalAmount}</Text>
+          <Text style={s.rewardAmountUnit}>枚</Text>
+        </View>
+        <Text style={s.rewardBody}>
+          政策允許範圍 {minAllowed}–{maxAllowed} 枚
+        </Text>
+        <Text style={s.rewardBody}>{decision.explanation}</Text>
+        <Text style={s.rewardVersion}>幣值政策版本 {decision.rewardPolicyVersion}</Text>
+        {showsImplementationNotes ? <CalculationBasis decision={decision} /> : null}
+      </View>
+    );
+  }
+
+  const copy = NON_COIN_COPY[decision.rewardPolicy];
+  return (
+    <View style={s.rewardCard}>
+      <Text style={s.rewardTitle}>{copy.title}</Text>
+      {/* 不發幣的政策不顯示任何數字。「0 枚」看起來像賺到 0，不像「這件事不用幣衡量」。 */}
+      <Text style={s.rewardBody}>{copy.body}</Text>
+      {showsImplementationNotes ? (
+        <Text style={s.rewardVersion}>回饋政策版本 {decision.rewardPolicyVersion}</Text>
+      ) : null}
+    </View>
+  );
+}
+
 export function DraftReview({
   family,
   variant,
   draft,
+  decision,
 }: {
   family: TaskPresetFamily;
   variant: TaskPresetVariant;
   draft: TaskDraft;
+  /**
+   * 等一下真的會送出的那份決策。
+   * null = 草稿目前算不出決策（有欄位錯誤），這時不顯示回饋摘要 ——
+   * 顯示一份「還沒定案」的金額比不顯示更糟。
+   */
+  decision: TaskRewardDecision | null;
 }) {
   const growth = isGrowthPlanDraft(draft) ? draft : null;
   const support = isShortSupportDraft(draft) ? draft : null;
@@ -270,6 +397,8 @@ export function DraftReview({
       ) : null}
       {once ? <LocalOnlyNotice>{LOCAL_ONLY_SCHEDULED_DATE}</LocalOnlyNotice> : null}
 
+      {decision ? <RewardDecisionBlock decision={decision} /> : null}
+
       <Block title="回饋與結束">
         <Row
           label="回饋方式"
@@ -410,6 +539,97 @@ const s = StyleSheet.create({
   blockBody: {
     gap: ParentSpacing[2],
   },
+  // 回饋決策
+  /**
+   * 用淡松綠底而不是琥珀／金色。
+   * 金色會把「這件事值多少幣」變成畫面上最強的訊號，
+   * 而抽屜的立場是幣值只是回饋方式之一，不是任務的目的。
+   */
+  rewardCard: {
+    paddingHorizontal: ParentSpacing[5],
+    paddingVertical: ParentSpacing[5] - 5,
+    borderRadius: ParentRadii.lg,
+    borderWidth: 1,
+    borderColor: ParentColors.pine300,
+    backgroundColor: ParentColors.tintPine,
+    gap: ParentSpacing[2],
+  },
+  rewardTitle: {
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.base,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.pine500,
+  },
+  rewardAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: ParentSpacing[1],
+  },
+  rewardAmount: {
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.h2,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgPrimary,
+    lineHeight: 34,
+  },
+  rewardAmountUnit: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.pMeta,
+    color: ParentColors.fgSecondary,
+  },
+  rewardBody: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.pMeta,
+    lineHeight: 22,
+    color: ParentColors.fgSecondary,
+  },
+  rewardVersion: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+  },
+  basis: {
+    gap: ParentSpacing[2],
+    paddingTop: ParentSpacing[1],
+  },
+  basisToggle: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.pine500,
+  },
+  basisBody: {
+    gap: ParentSpacing[1],
+  },
+  /** 柔和說明，不是紅色錯誤：家長沒有做錯任何事，是能力在中途失效了。 */
+  rewardBlocked: {
+    paddingHorizontal: ParentSpacing[5],
+    paddingVertical: ParentSpacing[5] - 5,
+    borderRadius: ParentRadii.lg,
+    borderWidth: 1,
+    borderColor: ParentColors.dangerSoftBorder,
+    backgroundColor: ParentColors.dangerSoftBg,
+    gap: ParentSpacing[2],
+  },
+  rewardBlockedTitle: {
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.base,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.dangerSoft,
+  },
+  rewardBlockedBody: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.pMeta,
+    lineHeight: 22,
+    color: ParentColors.fgSecondary,
+  },
+  rewardBlockedHint: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    lineHeight: 20,
+    color: ParentColors.fgMuted,
+  },
+
   row: {
     flexDirection: 'row',
     alignItems: 'flex-start',

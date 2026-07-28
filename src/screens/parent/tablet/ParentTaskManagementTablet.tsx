@@ -38,6 +38,8 @@ import {
   PresetTaskDrawer,
   type PresetTaskDrawerChild,
 } from './taskDrawer/PresetTaskDrawer';
+import type { CreatedTaskTab } from './taskDrawer/taskPersistence';
+import { SupabaseParentTaskCreationService } from '../../../lib/parentTaskCreationService';
 import {
   BellIcon,
   CheckSquareIcon,
@@ -92,10 +94,28 @@ const CAT_DOT: Record<TaskCategory, string> = {
   D: ParentColors.amber500,
 };
 
+/**
+ * 顯示分區 → 這一頁現有的三個日常分組。
+ *
+ * 對應是刻意壓縮的：這一輪不新增分區（那會動到整頁的版面與計數），
+ * 只保證不把不發幣的任務放進成長幣區。
+ *   life_record / family_contribution → 生活紀錄（都不發幣、不累積時間）
+ *   progress                          → 生活紀錄（同上；進度回饋沒有可顯示的數量）
+ *   legacy_time_saving                → 時間儲蓄（舊的 B 類，真的會寫 time_savings）
+ *   coin_reward                       → 成長幣任務
+ *
+ * 視覺債務：家庭參與與進度回饋目前混在「生活紀錄」裡，兩者的意義並不相同。
+ * 分開需要新的區塊與文案，留給任務管理頁改版。
+ */
 function dailyGroupForTask(task: TaskListItem): DailyGroupKey {
-  if (task.cat === 'A') return 'life';
-  if (task.cat === 'B') return 'time';
-  return 'coins';
+  switch (task.displayGroup) {
+    case 'coin_reward':
+      return 'coins';
+    case 'legacy_time_saving':
+      return 'time';
+    default:
+      return 'life';
+  }
 }
 
 function formatDate(value?: string | null) {
@@ -104,6 +124,9 @@ function formatDate(value?: string | null) {
 }
 
 function formatReward(task: TaskListItem) {
+  // 分區已經說明了這一區是什麼，這裡只補上「有數量的那兩種」的數量。
+  if (task.displayGroup === 'family_contribution') return '記錄家庭參與，不發成長幣';
+  if (task.displayGroup === 'progress') return '回饋進度與肯定，不發成長幣';
   if (!task.reward) return '不兌換成長幣';
   if (task.reward.kind === 'time') return `完成後累積 ${task.reward.amount} 分鐘`;
   return `完成後記錄 ${task.reward.amount} 枚成長幣`;
@@ -512,15 +535,40 @@ export default function ParentTaskManagementTablet() {
     setDrawerOpen(true);
   }, []);
 
-  // 抽屜只吃它需要的三個欄位，年齡由 birth_date 即時算（不改 SelectedChildContext、不另查 DB）。
+  // 抽屜只吃它需要的四個欄位，年齡由 birth_date 即時算（不改 SelectedChildContext、不另查 DB）。
   const drawerChild: PresetTaskDrawerChild | null = useMemo(() => {
     if (!child) return null;
     return {
+      id: child.id,
       nickname: child.nickname,
       birthDate: child.birth_date,
       familyId: child.family_id,
     };
   }, [child]);
+
+  /**
+   * 建立 service。整頁一份，不在 render 裡 new ——
+   * 每次 render 產生一個新實例會讓抽屜的 useCallback 依賴每次都變。
+   */
+  const taskCreationService = useMemo(() => new SupabaseParentTaskCreationService(), []);
+
+  /**
+   * 建立成功後的列表更新。
+   *
+   * 用既有 hook 的 refresh，不在抽屜裡自己查 Supabase，也不手動把新任務塞進
+   * state —— 那會變成 server state 與 local state 兩個來源，下一次 refresh
+   * 就會出現「剛剛看到的那筆不見了」。
+   *
+   * 長期任務由 useParentLongTermGoals 提供，所以兩個都要更新：只更新其中一個，
+   * 家長建立成長計畫後切到長期分頁會看不到它。
+   */
+  const handleRefreshAfterCreate = useCallback(async () => {
+    await Promise.all([refreshTasks(), refreshLongTerm()]);
+  }, [refreshLongTerm, refreshTasks]);
+
+  const handleSwitchTabAfterCreate = useCallback((tab: CreatedTaskTab) => {
+    setActiveTab(tab);
+  }, []);
 
   const handleEditTask = useCallback((task: TaskListItem) => {
     navigation.navigate('ParentTaskEdit', {
@@ -788,6 +836,9 @@ export default function ParentTaskManagementTablet() {
         onClose={() => setDrawerOpen(false)}
         child={drawerChild}
         childLoading={taskLoading}
+        taskCreationService={taskCreationService}
+        onRefreshTaskList={handleRefreshAfterCreate}
+        onSwitchTab={handleSwitchTabAfterCreate}
       />
     </View>
   );

@@ -13,15 +13,17 @@ jest.mock('../../../../../lib/onboarding', () => ({ calcAgeGroup: () => '6-9' })
 
 import { PresetTaskDrawer } from '../PresetTaskDrawer';
 import { PREVIEW_BLOCKED_NOTE } from '../taskDraft';
+import { FakeParentTaskCreationService } from '../../../../../testing/fakeParentTaskCreationService';
 
-const CHILD = { nickname: '承恩', birthDate: '2018-03-05', familyId: 'family-1' };
+const CHILD = { id: 'child-1', nickname: '承恩', birthDate: '2018-03-05', familyId: 'family-1' };
 
 /** 預覽畫面獨有的字樣；出現＝真的切到 review。 */
 const REVIEW_MARKER = '預覽（尚未建立）';
 
 function open() {
   return render(
-    <PresetTaskDrawer visible onClose={() => {}} child={CHILD} childLoading={false} />,
+    <PresetTaskDrawer visible onClose={() => {}} child={CHILD} childLoading={false}
+      taskCreationService={new FakeParentTaskCreationService()} />,
   );
 }
 

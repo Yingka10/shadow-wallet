@@ -42,6 +42,13 @@ export type MapTaskDraftArgs = {
   variant: TaskPresetVariant;
   child: CommandChildContext;
   taskPolicyVersion: string;
+  /**
+   * 這份草稿的建立請求識別碼。
+   *
+   * 刻意是必填參數而不是在這裡現產：映射會被呼叫很多次（每次提交前都重跑一遍），
+   * 每次產生新 id 等於完全沒有 idempotency。它的生命週期屬於草稿，不屬於映射。
+   */
+  clientRequestId: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -203,6 +210,7 @@ export function mapTaskDraftToCommand({
   variant,
   child,
   taskPolicyVersion,
+  clientRequestId,
 }: MapTaskDraftArgs): CreateParentTaskCommandBase {
   const shared = {
     schemaVersion: TASK_COMMAND_SCHEMA_VERSION,
@@ -220,6 +228,7 @@ export function mapTaskDraftToCommand({
       taskPolicyVersion,
       presetCatalogVersion: PRESET_CATALOG_VERSION,
       editorKind: draft.editorKind,
+      clientRequestId,
     },
   };
 

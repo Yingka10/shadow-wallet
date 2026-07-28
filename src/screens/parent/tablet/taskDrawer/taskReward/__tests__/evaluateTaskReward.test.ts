@@ -27,6 +27,9 @@ const CHILD: DraftChildContext = {
   familyId: 'family-1',
 };
 
+/** 固定的建立請求識別碼。映射本身不看它的內容，只要求它存在。 */
+const REQUEST_ID = '6f1c0f7e-2a4b-4c9d-8e12-3b5a7c9d0e11';
+
 function pick(familyId: string, variantId?: string): [TaskPresetFamily, TaskPresetVariant] {
   const family = ALL_FAMILIES.find(f => f.id === familyId);
   if (!family) throw new Error(`family not found: ${familyId}`);
@@ -50,7 +53,7 @@ function commandFor(
     family,
     variant,
     child: { id: 'child-1', familyId: 'family-1', ageGroup: '6-9' },
-    taskPolicyVersion: TASK_POLICY_VERSION,
+    taskPolicyVersion: TASK_POLICY_VERSION, clientRequestId: REQUEST_ID,
   });
 
   const schedule = { ...command.schedule };

@@ -488,3 +488,76 @@ DB 對應：`tasks.task_policy_version` + `tasks.reward_policy_version`
 
 發現並修正的問題、負向對照、以及「哪些是真實 SQL、哪些仍是 Jest 靜態測試」
 都記在那兩份文件裡。
+
+---
+
+## M. 第七階段 C 的實作結果
+
+**確認建立已經接上真的 RPC。** 這是抽屜第一次真的寫資料庫。
+
+### 建立請求的 idempotency（本輪的 P0）
+
+問題不在「按鈕會不會連點」，在於 **client 分不出「沒送到」與「送到了但回不來」**。
+RPC 成功後網路斷掉，家長再按一次就是第二筆任務，前端無論加幾層 loading 都擋不住。
+
+解法是把去重交給資料庫：
+
+- `metadata.clientRequestId`（UUID v4）由前端在**草稿建立時**產生一次，
+  之後預覽、返回修改、失敗重試都用同一個
+- `tasks.creation_request_id uuid` + partial unique index
+- `create_parent_task_v1` 開頭查一次，撞到就回原本那筆並標記 `idempotentReplay`
+- tasks 的 INSERT 包一層 `EXCEPTION WHEN unique_violation`，處理兩個請求
+  幾乎同時進來的競態；子表的 unique 違反仍然往外拋（那是真的資料問題）
+- 跨 family / 跨 child 重用識別碼一律 **42501**，不透露那筆任務的任何內容
+
+識別碼產生見 `taskPersistence/clientRequestId.ts`：
+`crypto.randomUUID` → `crypto.getRandomValues` → Math.random + session salt + 序號。
+不用 `Date.now()`（同毫秒會撞，而且可預測）。
+
+### 提交時整條管線重跑
+
+不沿用進入預覽時算好的 command。家長可以「預覽 → 返回修改 → 再預覽」，
+中途把每次 15 分鐘改成 45 分鐘，幣值就從 10 變 15 ——
+沿用舊 command 會讓畫面顯示 15、資料庫寫 10，而且沒有任何一層會發現。
+
+`submitTaskDraft` 依序跑 validate → map → evaluate → finalize → service，
+任一步失敗就停在那裡、**不呼叫 RPC**。`clientRequestId` 由外面帶進來，重跑不變。
+
+### 失敗停在哪一步
+
+| stage | 家長怎麼處理 | UI 行為 |
+|---|---|---|
+| validation | 補欄位 | 回編輯畫面，錯誤餵回 field-keyed errors |
+| reward | 改不動 | 留在預覽（防線；正常流程被能力閘門擋在更前面） |
+| service | 看 code | 留在預覽，草稿全部保留 |
+
+`PERSISTENCE_FAILED` 與 `UNKNOWN` 一律用固定文案，**不透傳 service 的 message** ——
+那可能是 Postgres 原始錯誤字串。`POLICY_REJECTED` 相反，那是我們自己寫的中文規則說明。
+
+### 列表相容性
+
+`mapTaskToDisplayGroup`（`src/lib/parentTaskDisplayGroup.ts`）：
+`reward_policy` 優先、`category` 墊底。legacy 任務（`reward_policy IS NULL`）
+的分組一個字沒改。
+
+**視覺債務**：這一輪只做最小相容映射，沒有新增分區。
+`family_contribution` 與 `progress` 目前都併進「生活紀錄」區，
+兩者的意義並不相同，需要新的區塊與文案才分得開 —— 留給任務管理頁改版。
+
+長期任務的進度標籤也有債務：成長計畫寫進 `long_term_goals` 時
+`current_level` / `level_count` 為 NULL，`useParentLongTermGoals` 會顯示
+「第 0 關 / 共 1 關」；家庭角色的 `target_completions` 為 NULL，顯示
+「完成 0 次 / 目標 1 次」。任務**不會消失**，但標籤沒有意義。
+
+### 驗證
+
+93 條 SQL assertion（B.5 的 66 條 + C 的 27 條）全過，
+加上一次真正的雙 session 競態驗證。細節與過程中的三次「假通過」見
+`TASK_DRAWER_POSTGRES_VERIFICATION.md`。
+
+### 仍未做
+
+- AI 建議 UI（本輪明確排除）
+- 時間儲蓄（建立與兌換鏈路都還沒打通）
+- 家長微調幣值的 slider（`TaskRewardCoin.finalAmount` 目前恆等於 `suggestedAmount`）
+- 對真的 Supabase 專案跑 migration（需要非 production 專案或正式部署決定）

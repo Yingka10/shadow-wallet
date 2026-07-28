@@ -10,8 +10,9 @@ jest.mock('../../../../../lib/onboarding', () => ({ calcAgeGroup: () => '6-9' })
 
 import { PresetTaskDrawer } from '../PresetTaskDrawer';
 import { LOCAL_ONLY_REMINDER, LOCAL_ONLY_CREATE } from '../taskDraft';
+import { FakeParentTaskCreationService } from '../../../../../testing/fakeParentTaskCreationService';
 
-const CHILD = { nickname: '承恩', birthDate: '2018-03-05', familyId: 'family-1' };
+const CHILD = { id: 'child-1', nickname: '承恩', birthDate: '2018-03-05', familyId: 'family-1' };
 
 function open(mode?: 'demo' | 'development') {
   return render(
@@ -20,6 +21,7 @@ function open(mode?: 'demo' | 'development') {
       onClose={() => {}}
       child={CHILD}
       childLoading={false}
+      taskCreationService={new FakeParentTaskCreationService()}
       {...(mode ? { displayMode: mode } : null)}
     />,
   );
@@ -83,7 +85,12 @@ describe('顯示模式', () => {
     expect(r.queryByText(LOCAL_ONLY_REMINDER)).not.toBeNull();
   });
 
-  it('demo 的預覽 footer 不出現資料庫說明，確認建立仍 disabled', () => {
+  /**
+   * 第七階段 C 之前，這兩條測的是「確認建立永遠 disabled」與
+   * 「development 才顯示尚未串接的說明」。建立已經接上，那個說明也拿掉了 ——
+   * 留著一句「將於後續階段串接」在一顆真的會寫資料庫的按鈕旁邊，比沒有更糟。
+   */
+  it('預覽 footer 不再出現「尚未串接」說明，確認建立可以按', () => {
     const r = openReadingEditor();
     chooseReadingMethod(r);
     fireEvent.press(r.getByText('檢查並預覽'));
@@ -91,15 +98,14 @@ describe('顯示模式', () => {
     expect(r.queryByText(LOCAL_ONLY_CREATE)).toBeNull();
 
     const create = r.getByLabelText('確認建立');
-    expect(create.props.accessibilityState.disabled).toBe(true);
-    expect(create.props.accessibilityHint).toBe('建立功能尚未開放');
+    expect(create.props.accessibilityState.disabled).toBe(false);
   });
 
-  it('development 的預覽 footer 顯示資料庫說明', () => {
+  it('development 的預覽也不再顯示那句說明', () => {
     const r = openReadingEditor('development');
     chooseReadingMethod(r);
     fireEvent.press(r.getByText('檢查並預覽'));
-    expect(r.queryByText(LOCAL_ONLY_CREATE)).not.toBeNull();
+    expect(r.queryByText(LOCAL_ONLY_CREATE)).toBeNull();
   });
 });
 
@@ -140,7 +146,8 @@ describe('放棄修改確認', () => {
   it('放棄並離開才真的執行原本被攔下的動作', () => {
     const onClose = jest.fn();
     const r = render(
-      <PresetTaskDrawer visible onClose={onClose} child={CHILD} childLoading={false} />,
+      <PresetTaskDrawer visible onClose={onClose} child={CHILD} childLoading={false}
+      taskCreationService={new FakeParentTaskCreationService()} />,
     );
     fireEvent.press(r.getAllByText('閱讀與共讀')[0]);
     fireEvent.press(r.getByText('下一步'));

@@ -184,12 +184,21 @@ export const REWARD_POLICY_NOTE =
 export const LOCAL_ONLY_REMINDER =
   '通知尚未接上，提醒方式目前只保存在這份草稿裡。';
 
+// 以下三句只在 development 模式顯示（見 LocalOnlyNotice）。
+// 規則：哪一個 PR 讓敘述變真，就在同一個 PR 改掉這裡的字。
+
 export const LOCAL_ONLY_WEEKLY_FREQUENCY =
-  '「每週次數」尚待後端欄位映射，目前只存在草稿，不會寫入資料庫。';
+  '「每週次數」會寫進 tasks.weekly_frequency，但孩子端的每日清單尚未依它排程。';
 
 export const LOCAL_ONLY_SCHEDULED_DATE =
-  '安排日期目前只保存在草稿中，建立流程尚未串接資料庫。';
+  '安排日期會寫進 tasks.scheduled_date；它與 due_date 不同，過期不會自動隱藏。';
 
+/**
+ * 第七階段 C 之前掛在「確認建立」旁邊的說明。
+ *
+ * 建立已經串上真的 RPC，所以這句話**不再顯示在任何地方** ——
+ * 留著常數是為了讓 drawerFlow 的測試能守住「它沒有跑回來」。
+ */
 export const LOCAL_ONLY_CREATE =
   '建立流程將於後續階段串接，目前尚未寫入資料庫。';
 

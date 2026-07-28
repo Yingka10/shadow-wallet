@@ -26,6 +26,9 @@ import {
 import { mapTaskDraftToCommand } from '../mapTaskDraftToCommand';
 import { TASK_COMMAND_SCHEMA_VERSION, type CommandChildContext } from '../types';
 
+/** 固定的建立請求識別碼。映射本身不看它的內容，只要求它存在。 */
+const REQUEST_ID = '6f1c0f7e-2a4b-4c9d-8e12-3b5a7c9d0e11';
+
 const DRAFT_CHILD: DraftChildContext = {
   nickname: '承恩',
   birthDate: '2018-03-05',
@@ -111,7 +114,7 @@ function commandFor(familyId: string, variantId?: string) {
       family,
       variant,
       child: CHILD,
-      taskPolicyVersion: POLICY_VERSION,
+      taskPolicyVersion: POLICY_VERSION, clientRequestId: REQUEST_ID,
     }),
   };
 }
@@ -139,7 +142,7 @@ describe('共通欄位', () => {
       family,
       variant,
       child: { id: 'child-9', familyId: 'family-of-child-9', ageGroup: '9-12' },
-      taskPolicyVersion: POLICY_VERSION,
+      taskPolicyVersion: POLICY_VERSION, clientRequestId: REQUEST_ID,
     });
     expect(command.familyId).toBe('family-of-child-9');
     expect(command.childId).toBe('child-9');
@@ -221,7 +224,7 @@ describe('成長計畫', () => {
       milestones: base.milestones.map((m, i) => (i === 0 ? { ...m, enabled: false } : m)),
     };
     const command = mapTaskDraftToCommand({
-      draft, family, variant, child: CHILD, taskPolicyVersion: POLICY_VERSION,
+      draft, family, variant, child: CHILD, taskPolicyVersion: POLICY_VERSION, clientRequestId: REQUEST_ID,
     });
 
     expect(command.plan?.milestones).toHaveLength(base.milestones.length - 1);
@@ -234,7 +237,7 @@ describe('成長計畫', () => {
     const base = readyDraft(family, variant);
     const draft = { ...base, startDate: '2026-07-28' } as TaskDraft;
     const command = mapTaskDraftToCommand({
-      draft, family, variant, child: CHILD, taskPolicyVersion: POLICY_VERSION,
+      draft, family, variant, child: CHILD, taskPolicyVersion: POLICY_VERSION, clientRequestId: REQUEST_ID,
     });
     // 28 天計畫：7/28 起算的第 28 天是 8/24。
     expect(command.schedule.durationDays).toBe(28);
@@ -265,7 +268,7 @@ describe('短期支援', () => {
       supportSteps: base.supportSteps.map((s, i) => (i === 0 ? { ...s, enabled: false } : s)),
     };
     const command = mapTaskDraftToCommand({
-      draft, family, variant, child: CHILD, taskPolicyVersion: POLICY_VERSION,
+      draft, family, variant, child: CHILD, taskPolicyVersion: POLICY_VERSION, clientRequestId: REQUEST_ID,
     });
     expect(command.plan?.supportSteps).toHaveLength(base.supportSteps.length - 1);
   });
@@ -298,7 +301,7 @@ describe('固定任務', () => {
     expect(hasErrors(validateTaskDraft(draft, variant))).toBe(false);
 
     const command = mapTaskDraftToCommand({
-      draft, family, variant, child: CHILD, taskPolicyVersion: POLICY_VERSION,
+      draft, family, variant, child: CHILD, taskPolicyVersion: POLICY_VERSION, clientRequestId: REQUEST_ID,
     });
     expect(command.schedule.mode).toBe('weekly_frequency');
     expect(command.schedule.weeklyFrequency).toBe(3);
@@ -356,7 +359,7 @@ describe('家庭角色', () => {
       ],
     };
     const command = mapTaskDraftToCommand({
-      draft, family, variant, child: CHILD, taskPolicyVersion: POLICY_VERSION,
+      draft, family, variant, child: CHILD, taskPolicyVersion: POLICY_VERSION, clientRequestId: REQUEST_ID,
     });
 
     const ids = command.role?.responsibilities.map(r => r.id) ?? [];
@@ -374,7 +377,7 @@ describe('家庭角色', () => {
 
     const draft = { ...base, roleOptionId: 'other', customRoleValue: '澆花大隊長' };
     const command = mapTaskDraftToCommand({
-      draft, family, variant, child: CHILD, taskPolicyVersion: POLICY_VERSION,
+      draft, family, variant, child: CHILD, taskPolicyVersion: POLICY_VERSION, clientRequestId: REQUEST_ID,
     });
     expect(command.role?.optionId).toBe('other');
     expect(command.role?.customValue).toBe('澆花大隊長');
@@ -411,7 +414,7 @@ describe('單次任務', () => {
       family,
       variant,
       child: CHILD,
-      taskPolicyVersion: POLICY_VERSION,
+      taskPolicyVersion: POLICY_VERSION, clientRequestId: REQUEST_ID,
     });
     expect(command.task.notes).toBe('要帶尺與量角器');
   });
@@ -442,7 +445,7 @@ describe('36 個 variant 都映射得出完整命令', () => {
         .toEqual({ variant: variant.id, valid: true });
 
       const command = mapTaskDraftToCommand({
-        draft, family, variant, child: CHILD, taskPolicyVersion: POLICY_VERSION,
+        draft, family, variant, child: CHILD, taskPolicyVersion: POLICY_VERSION, clientRequestId: REQUEST_ID,
       });
 
       expect({ variant: variant.id, title: command.task.title.length > 0 })
@@ -489,7 +492,7 @@ describe('36 個 variant 都映射得出完整命令', () => {
     for (const { family, variant } of ALL) {
       const draft = readyDraft(family, variant);
       const command = mapTaskDraftToCommand({
-        draft, family, variant, child: CHILD, taskPolicyVersion: POLICY_VERSION,
+        draft, family, variant, child: CHILD, taskPolicyVersion: POLICY_VERSION, clientRequestId: REQUEST_ID,
       });
       const serialized = JSON.stringify(command);
 
@@ -512,7 +515,7 @@ describe('36 個 variant 都映射得出完整命令', () => {
     for (const { family, variant } of ALL) {
       const draft = readyDraft(family, variant);
       const command = mapTaskDraftToCommand({
-        draft, family, variant, child: CHILD, taskPolicyVersion: POLICY_VERSION,
+        draft, family, variant, child: CHILD, taskPolicyVersion: POLICY_VERSION, clientRequestId: REQUEST_ID,
       });
 
       if ('durationDays' in draft) {

@@ -73,7 +73,32 @@ describe('成功', () => {
       ok: true,
       taskId: 'task-1',
       relatedIds: ['child-task-1', 'goal-1'],
+      idempotentReplay: false,
     });
+  });
+
+  it('RPC 說這是重送時原樣帶上來', async () => {
+    mockRpc.mockResolvedValue({
+      data: { ok: true, taskId: 'task-1', relatedIds: [], idempotentReplay: true },
+      error: null,
+    });
+
+    const result = await service().create(COMMAND);
+    expect(result).toEqual({
+      ok: true, taskId: 'task-1', relatedIds: [], idempotentReplay: true,
+    });
+  });
+
+  it('回應沒有 idempotentReplay 時當作「這次真的建立了」', async () => {
+    // 保守的方向：把一次正常建立說成重送，比反過來更容易誤導偵錯。
+    mockRpc.mockResolvedValue({
+      data: { ok: true, taskId: 'task-1', relatedIds: [] },
+      error: null,
+    });
+
+    const result = await service().create(COMMAND);
+    if (!result.ok) throw new Error('unreachable');
+    expect(result.idempotentReplay).toBe(false);
   });
 
   it('relatedIds 為 null 時給空陣列，不讓呼叫端處理 null', async () => {

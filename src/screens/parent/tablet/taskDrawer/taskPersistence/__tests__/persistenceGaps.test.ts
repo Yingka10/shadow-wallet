@@ -143,9 +143,27 @@ describe('只給 migration 用，不進畫面', () => {
     return source.replace(/import\s+type\s+[\s\S]*?from\s+'[^']*';/g, '');
   }
 
+  /**
+   * 第七階段 C 起，抽屜**確實**會 import taskPersistence —— 確認建立已經接上，
+   * 提交管線就在那一層。所以這道檢查從「不准碰持久化層」縮到它原本真正的目的：
+   * gap 清單是 migration 的規格文件，不該被畫面讀。
+   *
+   * 換掉的那條界線由下面「不自己 new service」接手：抽屜可以呼叫契約，
+   * 但不可以自己接上 Supabase。
+   */
   it('抽屜的畫面程式碼沒有任何一支 import 到 persistenceGaps', () => {
     const offenders = sourceFiles(DRAWER_ROOT).filter(file =>
-      /persistenceGaps|taskPersistence/.test(runtimeSource(fs.readFileSync(file, 'utf8'))),
+      /persistenceGaps/.test(runtimeSource(fs.readFileSync(file, 'utf8'))),
+    );
+    expect(offenders.map(f => path.relative(DRAWER_ROOT, f))).toEqual([]);
+  });
+
+  it('抽屜不自己接 Supabase —— service 一律由上層注入', () => {
+    // 自己 new 一個的話，整個抽屜就需要環境變數才跑得起來（supabase client
+    // 在 import 時就要 URL 與金鑰），單元測試也會變成連真的資料庫。
+    const offenders = sourceFiles(DRAWER_ROOT).filter(file =>
+      /from '.*lib\/(supabase|parentTaskCreationService)'/
+        .test(runtimeSource(fs.readFileSync(file, 'utf8'))),
     );
     expect(offenders.map(f => path.relative(DRAWER_ROOT, f))).toEqual([]);
   });

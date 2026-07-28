@@ -11,9 +11,15 @@ harness 自己建的核心表簡化欄位刻意不列 —— 那些不是 migrat
 
 ---
 
-## tasks — 新增的 30 個欄位
+## tasks — 新增的 31 個欄位
 
 全部 nullable，只有 `created_from_preset` 例外（NOT NULL DEFAULT false）。
+
+第 31 個是第七階段 C 的 `creation_request_id`（migration 20260730000000）：
+
+| 欄位 | 型別 | nullable | 說明 |
+|---|---|---|---|
+| creation_request_id | **uuid** | YES | client 產生的建立請求識別碼；legacy 任務為 NULL |
 
 | 欄位 | 型別 | nullable |
 |---|---|---|
@@ -88,6 +94,7 @@ tasks  tasks_claim_period_check
        tasks_estimated_minutes_check
        tasks_non_coin_has_no_amount_check
        tasks_one_time_needs_date_check
+       tasks_preset_needs_request_id_check      ← 第七階段 C
        tasks_plan_mode_check
        tasks_review_after_days_check
        tasks_reward_coin_positive_check
@@ -105,6 +112,29 @@ task_plan_milestones  task_plan_milestones_target_day
 task_plan_support_steps  task_plan_support_steps_text_len
 task_preset_selections  task_preset_selections_custom_value_len
 task_role_responsibilities  task_role_responsibilities_text_len
+```
+
+## 索引（第七階段 C 新增）
+
+```
+CREATE UNIQUE INDEX tasks_creation_request_id_key
+  ON public.tasks USING btree (creation_request_id)
+  WHERE (creation_request_id IS NOT NULL)
+```
+
+部分索引：legacy 任務全部是 NULL，不佔索引空間。
+（PostgreSQL 的 NULL 在 unique 裡本來就互不相等，`WHERE` 是為了把意圖寫在 schema 上。）
+
+實測的資料分佈（harness 跑完之後）：
+
+```
+reward_policy        任務數  有識別碼
+(legacy null)          4       0
+coin_eligible          5       5
+family_contribution    1       1
+progress_only          1       1
+record_only            4       4
+time_saving_eligible   1       0   ← 直接 INSERT 造出來的，不是 RPC 建立的
 ```
 
 ## RLS
@@ -126,6 +156,7 @@ task_role_responsibilities  family members can view role responsibilities SELECT
 | 函式 | 參數 | 回傳 | SECURITY DEFINER |
 |---|---|---|---|
 | create_parent_task_v1 | `p_command jsonb` | jsonb | ✔ |
+| preset_task_replay_payload | `p_request_id uuid, p_child_id uuid, p_family_id uuid` | jsonb | ✔ |
 | complete_task | `p_task_id uuid, p_child_id uuid, p_completed_at timestamptz, p_is_prerequisite_met boolean, p_goal_id uuid DEFAULT NULL` | jsonb | ✔ |
 | mark_task_atomic | `p_task_id uuid, p_child_id uuid, p_override_type text, p_adjusted_coin integer, p_note text DEFAULT NULL` | jsonb | ✔ |
 | redeem_wish | `p_child_id uuid, p_item_id uuid, p_cost integer` | jsonb | ✔ |
@@ -138,6 +169,10 @@ task_role_responsibilities  family members can view role responsibilities SELECT
 create_parent_task_v1  anon          EXECUTE = false
                        authenticated EXECUTE = true
                        service_role  EXECUTE = false   ← 刻意未開通
+
+preset_task_replay_payload
+                       anon          EXECUTE = false
+                       authenticated EXECUTE = false   ← 只給 RPC 內部用
 
 五張子表                anon          SELECT = false, INSERT = false
                        authenticated SELECT = true,  INSERT = false
@@ -160,6 +195,7 @@ create_parent_task_v1  anon          EXECUTE = false
 | `created_from_preset` 在 DB 是 NOT NULL，TS 是 optional | 同上 | 同上 |
 | CHECK 的允許值在 TS 是字面量聯集 | CHECK 不是 enum，generated types 不會產生它 | 決定保留手寫或改成 DB enum |
 | `create_parent_task_v1` 的 `Args: { p_command: object }` | 手寫近似；generated 會是 `Json` | generated 時取代 |
+| `creation_request_id` 在 TS 是 optional `string \| null` | 與其他新欄位相同的理由 | 同上 |
 | `task_change_events` 的 `Insert: never; Update: never` | client 不可寫稽核 log。generated types 不會知道 | generated 後手動保留 |
 
 **generated types 尚未產生。** 這份 snapshot 是「用真實查詢核對手寫型別」，

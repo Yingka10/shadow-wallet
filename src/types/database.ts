@@ -170,6 +170,11 @@ export type Task = {
   preset_variant_id?: string | null;
   /** DB 上是 NOT NULL DEFAULT false —— 這裡標 optional 只是為了不動既有字面量。 */
   created_from_preset?: boolean;
+  /**
+   * 建立這筆任務的 client 請求識別碼（migration 20260730000000）。
+   * 有 unique index，是「網路重送不會建出第二筆」的唯一依據。legacy 任務為 null。
+   */
+  creation_request_id?: string | null;
 };
 
 /** tasks.reward_policy 的允許值（migration 20260728000000 的 CHECK）。 */
