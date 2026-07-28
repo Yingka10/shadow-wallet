@@ -609,6 +609,58 @@ describe('LongTermDetailScreen', () => {
     expect(screen.getAllByText('晚餐後').length).toBeGreaterThan(0);
   });
 
+  it('serializes the initial context write before correcting the same completion', async () => {
+    const initialContextRequest = deferred<void>();
+    const correctionRequest = deferred<void>();
+    mockRecordCompletionContext
+      .mockReturnValueOnce(initialContextRequest.promise)
+      .mockReturnValueOnce(correctionRequest.promise);
+    render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('記錄今天的閱讀'));
+    expect(await screen.findByText('今天已完成 15 分鐘')).toBeTruthy();
+    await waitFor(() => {
+      expect(mockRecordCompletionContext).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.press(screen.getByLabelText('查看紀錄'));
+    fireEvent.press(screen.getByText('改成睡前'));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockRecordCompletionContext).toHaveBeenCalledTimes(1);
+    expect(mockRecordCompletionContext).toHaveBeenNthCalledWith(
+      1,
+      'completion-thu',
+      'after_dinner',
+      null,
+    );
+
+    await act(async () => {
+      initialContextRequest.resolve();
+      await initialContextRequest.promise;
+    });
+    await waitFor(() => {
+      expect(mockRecordCompletionContext).toHaveBeenCalledTimes(2);
+    });
+    expect(mockRecordCompletionContext).toHaveBeenNthCalledWith(
+      2,
+      'completion-thu',
+      'before_bed',
+      null,
+    );
+
+    await act(async () => {
+      correctionRequest.resolve();
+      await correctionRequest.promise;
+    });
+
+    expect(await screen.findByText('睡前記錄')).toBeTruthy();
+    expect(screen.getAllByText('睡前').length).toBeGreaterThan(0);
+    expect(screen.queryByText('晚餐後記錄')).toBeNull();
+  });
+
   it('updates the local checkpoint progress after a habit milestone succeeds', async () => {
     mockReadingGoal = {
       ...mockBaseGoal,

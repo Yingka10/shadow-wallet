@@ -132,6 +132,8 @@ export default function LongTermDetailScreen() {
   const insets = useSafeAreaInsets();
   const { goalId, taskId, taskName } = route.params;
   const generationRef = useRef(0);
+  const pendingInitialContextWritesRef =
+    useRef<Map<string, Promise<void>>>(new Map());
 
   const [goal, setGoal] = useState<LongTermGoal | null>(null);
   const [task, setTask] = useState<Task | null>(null);
@@ -255,6 +257,7 @@ export default function LongTermDetailScreen() {
 
     void load();
     return () => {
+      pendingInitialContextWritesRef.current.clear();
       if (generationRef.current === loadGeneration) {
         generationRef.current += 1;
       }
@@ -338,12 +341,18 @@ export default function LongTermDetailScreen() {
       }
 
       if (selectedTimeWindow) {
+        let initialContextWrite: Promise<void> | null = null;
         try {
-          await recordCompletionContext(
+          initialContextWrite = recordCompletionContext(
             result.completionId,
             selectedTimeWindow,
             null,
           );
+          pendingInitialContextWritesRef.current.set(
+            result.completionId,
+            initialContextWrite,
+          );
+          await initialContextWrite;
           if (!isCurrentGeneration()) return false;
           setCompletions((current) => current.map((item) =>
             item.id === result.completionId
@@ -355,6 +364,14 @@ export default function LongTermDetailScreen() {
             '閱讀時段尚未記下',
             contextError instanceof Error ? contextError.message : '可以稍後再試。',
           );
+        } finally {
+          if (
+            initialContextWrite
+            && pendingInitialContextWritesRef.current.get(result.completionId)
+              === initialContextWrite
+          ) {
+            pendingInitialContextWritesRef.current.delete(result.completionId);
+          }
         }
       }
 
@@ -405,6 +422,17 @@ export default function LongTermDetailScreen() {
       generationRef.current === requestGeneration;
     setCorrectingTimeWindow(true);
     try {
+      const pendingInitialWrite =
+        pendingInitialContextWritesRef.current.get(selectedCompletion.id);
+      if (pendingInitialWrite) {
+        try {
+          await pendingInitialWrite;
+        } catch {
+          // A failed initial context write must not block a newer correction.
+        }
+        if (!isCurrentGeneration()) return;
+      }
+
       await recordCompletionContext(selectedCompletion.id, nextWindow, null);
       if (!isCurrentGeneration()) return;
 
