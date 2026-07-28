@@ -50,6 +50,10 @@ function makeTask(overrides: Partial<Task>): Task {
     max_age: 9,
     is_active: true,
     time_saving_min: 0,
+    // 這兩個在 Task 上是必填（`number[] | null` / `string | null`），不是 optional。
+    // 少了它們，`...overrides` 會把型別放寬成 `| undefined`，makeTask 就回不出 Task。
+    recurrence_days: null,
+    due_date: null,
     created_at: '2026-01-01',
     ...overrides,
   };

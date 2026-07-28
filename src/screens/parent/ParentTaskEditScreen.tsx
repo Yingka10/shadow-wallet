@@ -235,7 +235,10 @@ export default function ParentTaskEditScreen() {
         ? `${dueYear}-${String(dueMonth).padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`
         : null;
 
-      const updates: Record<string, unknown> = {
+      // 用 Partial<Task> 而不是 Record<string, unknown>：後者會被 supabase-js 的
+      // RejectExcessProperties 判定成「每個 key 都可能是多餘欄位」而整包拒收。
+      // 這裡也刻意不寫 reward_policy —— legacy 任務的 null 就原樣保留。
+      const updates: Partial<Task> = {
         name: name.trim(),
         day_type: taskMode === 'recurring' ? 'custom' : 'once',
         recurrence_days: taskMode === 'recurring' ? selectedDays : null,
