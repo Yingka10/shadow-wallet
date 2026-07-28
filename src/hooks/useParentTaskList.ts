@@ -76,6 +76,20 @@ export function useParentTaskList(childId: string): ParentTaskListData {
   const [error, setError] = useState<string | null>(null);
 
   const fetchAll = useCallback(async () => {
+    // childId 在孩子清單載入完成前是空字串。沒有這道防線的話會送出 `id=eq.`，
+    // Postgres 以 22P02（invalid input syntax for type uuid: ""）回 400，
+    // 畫面就停在「資料載入失敗」而不是等資料進來。
+    // useParentLongTermGoals 早就有同一道防線，這裡補齊。
+    if (!childId) {
+      setChild(null);
+      setTasks([]);
+      setInactiveTasks([]);
+      setTodayCompletedIds(new Set());
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
