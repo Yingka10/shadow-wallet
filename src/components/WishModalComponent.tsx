@@ -10,16 +10,17 @@ import {
   Animated,
   Easing,
   Image,
+  type ViewStyle,
 } from 'react-native';
 import Svg, { Circle, Path, Ellipse, G } from 'react-native-svg';
 import { Colors } from '../constants/colors';
 
 type BubbleConfig = {
   size: number;
-  top?: string;
-  bottom?: string;
-  left?: string;
-  right?: string;
+  top?: ViewStyle['top'];
+  bottom?: ViewStyle['bottom'];
+  left?: ViewStyle['left'];
+  right?: ViewStyle['right'];
   duration: number;
   delay: number;
 };
