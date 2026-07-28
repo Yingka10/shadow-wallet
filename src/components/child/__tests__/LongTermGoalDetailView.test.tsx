@@ -470,7 +470,7 @@ describe('LongTermGoalDetailView', () => {
       '星期一，已完成',
       '星期二，今天待完成',
       '星期三，尚未到',
-      '星期四，這次跳過',
+      '星期四，尚未記錄',
       '星期五，沒有安排',
       '星期六，尚未到',
       '星期日，沒有安排',
@@ -478,6 +478,33 @@ describe('LongTermGoalDetailView', () => {
       expect(screen.getByLabelText(label)).toBeTruthy();
     }
     expect(screen.queryByText(/失敗|連勝|火焰/)).toBeNull();
+  });
+
+  it('distinguishes a scheduled missed day from an unscheduled day', () => {
+    renderView(makePresentation({
+      weekDays: [
+        {
+          day: 4,
+          label: '四',
+          isoDate: '2026-07-30',
+          isScheduled: true,
+          state: 'missed',
+        },
+        {
+          day: 5,
+          label: '五',
+          isoDate: '2026-07-31',
+          isScheduled: false,
+          state: 'unscheduled',
+        },
+      ],
+    }));
+
+    expect(screen.getByLabelText('星期四，尚未記錄')).toBeTruthy();
+    expect(screen.getByText('尚未記錄')).toBeTruthy();
+    expect(screen.getByLabelText('星期五，沒有安排')).toBeTruthy();
+    expect(screen.getByText('未安排')).toBeTruthy();
+    expect(screen.queryByText('這次跳過')).toBeNull();
   });
 
   it('renders milestones as status-labelled timeline rows', () => {

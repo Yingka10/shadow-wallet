@@ -46,7 +46,7 @@ const DAY_STATE_LABELS: Record<GoalDayStatus['state'], string> = {
   completed: '已完成',
   today: '今天待完成',
   upcoming: '尚未到',
-  missed: '這次跳過',
+  missed: '尚未記錄',
   unscheduled: '沒有安排',
 };
 
@@ -54,7 +54,7 @@ const DAY_CAPTIONS: Record<GoalDayStatus['state'], string> = {
   completed: '完成',
   today: '今天',
   upcoming: '尚未到',
-  missed: '這次跳過',
+  missed: '尚未記錄',
   unscheduled: '未安排',
 };
 
