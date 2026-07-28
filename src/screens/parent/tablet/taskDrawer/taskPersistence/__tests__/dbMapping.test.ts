@@ -15,9 +15,19 @@ import {
 } from '../dbMapping';
 import { COMPLETION_LABEL, PURPOSE_LABEL, PRESET_CATALOG_VERSION } from '../../taskCatalog';
 
-const MIGRATION = readFileSync(
+/**
+ * 讀檔一律把 CRLF 正規化成 LF。
+ *
+ * 這個 repo 的 git 設定會在 checkout 時把行尾轉成 CRLF（Windows），
+ * 而下面的斷言用多行片段比對 SQL。不正規化的話，一次 `git checkout`
+ * 就能讓一堆測試「壞掉」，但程式其實一個字都沒改。
+ */
+function readText(path: string): string {
+  return readFileSync(path, 'utf8').split(/\r\n/).join('\n');
+}
+
+const MIGRATION = readText(
   join(process.cwd(), 'supabase', 'migrations', '20260728000000_task_drawer_persistence_v1.sql'),
-  'utf8',
 );
 
 // ---------------------------------------------------------------------------

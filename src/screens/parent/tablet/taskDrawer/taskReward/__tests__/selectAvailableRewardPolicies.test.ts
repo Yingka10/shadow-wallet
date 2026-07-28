@@ -21,10 +21,22 @@ import {
 } from '../selectAvailableRewardPolicies';
 import type { TaskRewardCapabilities } from '../types';
 
+/**
+ * 讀檔一律把 CRLF 正規化成 LF。
+ *
+ * 這個 repo 的 git 設定會在 checkout 時把行尾轉成 CRLF（Windows），
+ * 而下面的斷言用多行片段比對 SQL。不正規化的話，一次 `git checkout`
+ * 就能讓一堆測試「壞掉」，但程式其實一個字都沒改。
+ */
+function readText(path: string): string {
+  return readFileSync(path, 'utf8').split(/\r\n/).join('\n');
+}
+
 const POLICY_PATH = join(
   process.cwd(), 'supabase', 'functions', 'ai-proxy', 'coin-policy.json',
 );
-const POLICY_RAW = readFileSync(POLICY_PATH, 'utf8');
+const POLICY_RAW = readText(
+POLICY_PATH);
 
 const BOTH_ON: TaskRewardCapabilities = { coinRewardsEnabled: true, timeSavingEnabled: true };
 const COIN_ONLY: TaskRewardCapabilities = { coinRewardsEnabled: true, timeSavingEnabled: false };
@@ -56,7 +68,8 @@ describe('幣值來源', () => {
   });
 
   it('程式碼裡沒有自己的幣值表 —— 數字全部從 JSON 來', () => {
-    const source = readFileSync(join(__dirname, '..', 'coinPolicy.ts'), 'utf8');
+    const source = readText(
+join(__dirname, '..', 'coinPolicy.ts'));
     const code = source.split(/\r?\n/).filter(line => !line.trim().startsWith('//')).join('\n');
     // 政策檔的錨點數字（6-9 歲 D 類 21-30 分 = 15 幣）不該出現在程式碼裡。
     expect(code).not.toMatch(/bandBaseCoins\s*[:=]\s*\{/);

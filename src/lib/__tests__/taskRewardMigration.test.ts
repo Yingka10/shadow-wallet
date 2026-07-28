@@ -12,10 +12,20 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
+/**
+ * 讀檔一律把 CRLF 正規化成 LF。
+ *
+ * 這個 repo 的 git 設定會在 checkout 時把行尾轉成 CRLF（Windows），
+ * 而下面的斷言用多行片段比對 SQL。不正規化的話，一次 `git checkout`
+ * 就能讓一堆測試「壞掉」，但程式其實一個字都沒改。
+ */
+function readText(path: string): string {
+  return readFileSync(path, 'utf8').split(/\r\n/).join('\n');
+}
+
 const MIGRATIONS = join(process.cwd(), 'supabase', 'migrations');
-const SQL = readFileSync(
+const SQL = readText(
   join(MIGRATIONS, '20260729000000_task_reward_and_completion_authz.sql'),
-  'utf8',
 );
 
 /** 去掉註解行 —— 「SQL 有做這件事」不能靠註解裡提到它來證明。 */
@@ -326,9 +336,8 @@ describe('22. override 不能繞過政策', () => {
 
 describe('migration 衛生', () => {
   it('沒有修改 20260728000000 —— 那支已是既成事實', () => {
-    const previous = readFileSync(
+    const previous = readText(
       join(MIGRATIONS, '20260728000000_task_drawer_persistence_v1.sql'),
-      'utf8',
     );
     // 舊 migration 不該知道本輪的欄位。
     expect(previous).not.toContain('reward_coin_amount');
