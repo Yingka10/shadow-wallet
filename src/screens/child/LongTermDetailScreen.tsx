@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -95,6 +101,9 @@ export default function LongTermDetailScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const { goalId, taskId, taskName } = route.params;
+  const routeKey = `${goalId}:${taskId}`;
+  const routeKeyRef = useRef(routeKey);
+  routeKeyRef.current = routeKey;
 
   const [goal, setGoal] = useState<LongTermGoal | null>(null);
   const [task, setTask] = useState<Task | null>(null);
@@ -115,17 +124,28 @@ export default function LongTermDetailScreen() {
 
   useEffect(() => {
     let cancelled = false;
+    const loadRouteKey = routeKey;
+
+    setActiveSheet(null);
+    setSelectedCompletionId(null);
+    setReviewDraft(EMPTY_REVIEW_DRAFT);
+    setAdjustmentDraft(null);
+    setGoal(null);
+    setTask(null);
+    setCompletions([]);
+    setSelectedTimeWindow(null);
+    setChecking(false);
+    setCorrectingTimeWindow(false);
+    setLoading(true);
+    setError(null);
 
     const load = async () => {
-      setLoading(true);
-      setError(null);
-
       const [goalRes, taskRes] = await Promise.all([
         supabase.from('long_term_goals').select('*').eq('id', goalId).single(),
         supabase.from('tasks').select('*').eq('id', taskId).single(),
       ]);
 
-      if (cancelled) return;
+      if (cancelled || routeKeyRef.current !== loadRouteKey) return;
       if (goalRes.error || !goalRes.data) {
         setError('讀取長期目標失敗，請稍後再試。');
         setLoading(false);
@@ -150,7 +170,7 @@ export default function LongTermDetailScreen() {
         .lt('completed_at', tomorrow)
         .order('completed_at', { ascending: true });
 
-      if (cancelled) return;
+      if (cancelled || routeKeyRef.current !== loadRouteKey) return;
       let loadedCompletions: GoalCompletionRecord[];
 
       if (contextCompletionRes.error) {
@@ -170,7 +190,7 @@ export default function LongTermDetailScreen() {
           .lt('completed_at', tomorrow)
           .order('completed_at', { ascending: true });
 
-        if (cancelled) return;
+        if (cancelled || routeKeyRef.current !== loadRouteKey) return;
         if (basicCompletionRes.error) {
           setError('讀取任務進度失敗，請稍後再試。');
           setLoading(false);
@@ -206,7 +226,7 @@ export default function LongTermDetailScreen() {
     return () => {
       cancelled = true;
     };
-  }, [goalId, taskId]);
+  }, [goalId, routeKey, taskId]);
 
   const isCompletedToday = useMemo(
     () => completions.some((completion) =>
@@ -239,6 +259,7 @@ export default function LongTermDetailScreen() {
   const handleComplete = useCallback(async (): Promise<boolean> => {
     if (!goal || !task || isCompletedToday || checking) return false;
 
+    const requestRouteKey = routeKey;
     setChecking(true);
     try {
       const now = dayjs().tz(TZ);
@@ -250,6 +271,8 @@ export default function LongTermDetailScreen() {
         task,
         goalId,
       );
+      if (routeKeyRef.current !== requestRouteKey) return false;
+
       const completion: GoalCompletionRecord = {
         id: result.completionId,
         completed_at: now.toISOString(),
@@ -266,7 +289,9 @@ export default function LongTermDetailScreen() {
             selectedTimeWindow,
             null,
           );
+          if (routeKeyRef.current !== requestRouteKey) return false;
         } catch (contextError) {
+          if (routeKeyRef.current !== requestRouteKey) return false;
           Alert.alert(
             '閱讀時段尚未記下',
             contextError instanceof Error ? contextError.message : '可以稍後再試。',
@@ -282,19 +307,23 @@ export default function LongTermDetailScreen() {
       }
       return true;
     } catch (caught) {
+      if (routeKeyRef.current !== requestRouteKey) return false;
       Alert.alert(
         '記錄失敗',
         caught instanceof Error ? caught.message : '請稍後再試。',
       );
       return false;
     } finally {
-      setChecking(false);
+      if (routeKeyRef.current === requestRouteKey) {
+        setChecking(false);
+      }
     }
   }, [
     checking,
     goal,
     goalId,
     isCompletedToday,
+    routeKey,
     selectedTimeWindow,
     task,
     taskId,
@@ -313,9 +342,12 @@ export default function LongTermDetailScreen() {
   ) => {
     if (!selectedCompletion || correctingTimeWindow) return;
 
+    const requestRouteKey = routeKey;
     setCorrectingTimeWindow(true);
     try {
       await recordCompletionContext(selectedCompletion.id, nextWindow, null);
+      if (routeKeyRef.current !== requestRouteKey) return;
+
       setCompletions((current) => current.map((completion) =>
         completion.id === selectedCompletion.id
           ? { ...completion, planned_time_window: nextWindow }
@@ -328,15 +360,18 @@ export default function LongTermDetailScreen() {
         setSelectedTimeWindow(nextWindow);
       }
     } catch (caught) {
+      if (routeKeyRef.current !== requestRouteKey) return;
       Alert.alert(
         '更正失敗',
         caught instanceof Error ? caught.message : '請稍後再試。',
       );
       throw caught;
     } finally {
-      setCorrectingTimeWindow(false);
+      if (routeKeyRef.current === requestRouteKey) {
+        setCorrectingTimeWindow(false);
+      }
     }
-  }, [correctingTimeWindow, selectedCompletion]);
+  }, [correctingTimeWindow, routeKey, selectedCompletion]);
 
   return (
     <View style={webScreen}>

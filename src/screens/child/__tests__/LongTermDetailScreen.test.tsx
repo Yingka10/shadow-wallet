@@ -13,6 +13,15 @@ const mockGoBack = jest.fn();
 const mockCompleteTask = jest.fn();
 const mockRecordCompletionContext = jest.fn();
 const mockSupabaseUpdate = jest.fn();
+const mockSupabaseInsert = jest.fn();
+const mockSupabaseUpsert = jest.fn();
+const mockSupabaseDelete = jest.fn();
+const mockSupabaseRpc = jest.fn();
+const mockSupabaseEqCalls: Array<{
+  table: string;
+  column: string;
+  value: unknown;
+}> = [];
 let mockMissingContextColumns = false;
 
 let mockRouteParams = {
@@ -138,40 +147,61 @@ const mockTasks = {
   },
 };
 
-const readingCompletions = [
+type MockCompletionRow = {
+  id: string;
+  completed_at: string;
+  planned_time_window: string | null;
+  start_mode: string | null;
+  status: string;
+};
+
+const baseReadingCompletions: MockCompletionRow[] = [
   {
     id: 'completion-mon',
     completed_at: '2026-07-27T11:30:00.000Z',
     planned_time_window: 'after_dinner',
     start_mode: 'reminded',
+    status: 'completed',
   },
   {
     id: 'completion-tue',
     completed_at: '2026-07-28T11:20:00.000Z',
     planned_time_window: 'after_dinner',
     start_mode: 'self_started',
+    status: 'completed',
   },
   {
     id: 'completion-wed',
     completed_at: '2026-07-29T11:10:00.000Z',
     planned_time_window: 'after_dinner',
     start_mode: 'self_started',
+    status: 'completed',
   },
 ];
+let mockReadingCompletions: MockCompletionRow[] = [...baseReadingCompletions];
 
 jest.mock('../../../lib/supabase', () => ({
   supabase: {
+    rpc: (...args: unknown[]) => mockSupabaseRpc(...args),
     from: jest.fn((table: string) => {
       let selectedColumns = '*';
+      const eqFilters: Array<{ column: string; value: unknown }> = [];
       const builder: any = {
         select: jest.fn((columns = '*') => {
           selectedColumns = columns;
           return builder;
         }),
-        eq: jest.fn(() => builder),
+        eq: jest.fn((column: string, value: unknown) => {
+          mockSupabaseEqCalls.push({ table, column, value });
+          eqFilters.push({ column, value });
+          return builder;
+        }),
         gte: jest.fn(() => builder),
         lt: jest.fn(() => builder),
         update: mockSupabaseUpdate.mockImplementation(() => builder),
+        insert: mockSupabaseInsert.mockImplementation(() => builder),
+        upsert: mockSupabaseUpsert.mockImplementation(() => builder),
+        delete: mockSupabaseDelete.mockImplementation(() => builder),
         single: jest.fn(async () => {
           if (table === 'long_term_goals') {
             return {
@@ -202,9 +232,13 @@ jest.mock('../../../lib/supabase', () => ({
             };
           }
 
-          const rows = mockRouteParams.goalId === 'goal-reading'
-            ? readingCompletions
+          let rows = mockRouteParams.goalId === 'goal-reading'
+            ? mockReadingCompletions
             : [];
+          const statusFilter = eqFilters.find(({ column }) => column === 'status');
+          if (statusFilter) {
+            rows = rows.filter((row) => row.status === statusFilter.value);
+          }
           return {
             data: selectedColumns.includes('planned_time_window')
               ? rows
@@ -219,6 +253,24 @@ jest.mock('../../../lib/supabase', () => ({
 }));
 
 import LongTermDetailScreen from '../LongTermDetailScreen';
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function expectNoSupabaseWrites() {
+  expect(mockSupabaseUpdate).not.toHaveBeenCalled();
+  expect(mockSupabaseInsert).not.toHaveBeenCalled();
+  expect(mockSupabaseUpsert).not.toHaveBeenCalled();
+  expect(mockSupabaseDelete).not.toHaveBeenCalled();
+  expect(mockSupabaseRpc).not.toHaveBeenCalled();
+}
 
 describe('LongTermDetailScreen', () => {
   beforeAll(() => {
@@ -238,6 +290,8 @@ describe('LongTermDetailScreen', () => {
       taskName: '自主閱讀計畫',
     };
     mockMissingContextColumns = false;
+    mockReadingCompletions = [...baseReadingCompletions];
+    mockSupabaseEqCalls.length = 0;
     mockCompleteTask.mockResolvedValue({
       completionId: 'completion-thu',
       milestone: null,
@@ -262,12 +316,52 @@ describe('LongTermDetailScreen', () => {
 
   it('keeps existing long-term tasks readable before context columns are migrated', async () => {
     mockMissingContextColumns = true;
+    mockReadingCompletions = [
+      ...baseReadingCompletions,
+      {
+        id: 'completion-flagged',
+        completed_at: '2026-07-30T13:00:00.000Z',
+        planned_time_window: 'before_bed',
+        start_mode: null,
+        status: 'flagged',
+      },
+    ];
 
     render(<LongTermDetailScreen />);
 
     expect(await screen.findByText('自主閱讀計畫')).toBeTruthy();
     expect(screen.getByText('本週完成 3／5 次')).toBeTruthy();
+    expect(screen.queryByText('今天已完成 15 分鐘')).toBeNull();
+    expect(
+      mockSupabaseEqCalls.filter(({ table, column, value }) =>
+        table === 'task_completions'
+        && column === 'status'
+        && value === 'completed'),
+    ).toHaveLength(2);
     expect(screen.queryByText('讀取任務進度失敗，請稍後再試。')).toBeNull();
+  });
+
+  it('filters flagged completions from the normal context query', async () => {
+    mockReadingCompletions = [
+      ...baseReadingCompletions,
+      {
+        id: 'completion-flagged',
+        completed_at: '2026-07-30T13:00:00.000Z',
+        planned_time_window: 'before_bed',
+        start_mode: null,
+        status: 'flagged',
+      },
+    ];
+
+    render(<LongTermDetailScreen />);
+
+    expect(await screen.findByText('本週完成 3／5 次')).toBeTruthy();
+    expect(screen.queryByText('今天已完成 15 分鐘')).toBeNull();
+    expect(mockSupabaseEqCalls).toContainEqual({
+      table: 'task_completions',
+      column: 'status',
+      value: 'completed',
+    });
   });
 
   it('records the chosen schedule without asking how reading started', async () => {
@@ -325,7 +419,8 @@ describe('LongTermDetailScreen', () => {
 
     expect(screen.getByText('提出調整')).toBeTruthy();
     expect(screen.getByLabelText('想先暫停一下').props.accessibilityState.selected).toBe(true);
-    expect(mockSupabaseUpdate).not.toHaveBeenCalled();
+    fireEvent.press(screen.getByText('保留調整草稿'));
+    expectNoSupabaseWrites();
   });
 
   it('keeps a weekend review as local draft state', async () => {
@@ -337,7 +432,18 @@ describe('LongTermDetailScreen', () => {
     fireEvent.press(screen.getByLabelText('開始週末回顧'));
 
     expect(screen.getByLabelText('最喜歡的閱讀內容').props.value).toBe('神奇樹屋');
-    expect(mockSupabaseUpdate).not.toHaveBeenCalled();
+    expectNoSupabaseWrites();
+  });
+
+  it('keeps a plan adjustment local without any Supabase write', async () => {
+    render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('更多計畫選項'));
+    fireEvent.press(screen.getByText('提出調整'));
+    fireEvent.press(screen.getByLabelText('想換一個閱讀時段'));
+    fireEvent.press(screen.getByText('保留調整草稿'));
+
+    expectNoSupabaseWrites();
   });
 
   it('immediately controls the completed state after recording today', async () => {
@@ -381,6 +487,103 @@ describe('LongTermDetailScreen', () => {
     expect(await screen.findByText('更正失敗，請再試一次。')).toBeTruthy();
     expect(Alert.alert).toHaveBeenCalledWith('更正失敗', 'network');
     expect(screen.getAllByText('晚餐後').length).toBeGreaterThan(0);
+  });
+
+  it('clears sheets and local drafts when route params change', async () => {
+    const { rerender } = render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('更多計畫選項'));
+    fireEvent.press(screen.getByText('暫停一下'));
+    fireEvent.press(screen.getByText('保留調整草稿'));
+    fireEvent.press(await screen.findByLabelText('開始週末回顧'));
+    fireEvent.changeText(screen.getByLabelText('最喜歡的閱讀內容'), '神奇樹屋');
+    fireEvent.press(screen.getByText('保留回顧草稿'));
+    fireEvent.press(screen.getByLabelText('開始週末回顧'));
+    expect(screen.getByLabelText('最喜歡的閱讀內容').props.value).toBe('神奇樹屋');
+
+    mockRouteParams = {
+      goalId: 'goal-skill',
+      taskId: 'task-skill',
+      taskName: '鋼琴家之路',
+    };
+    rerender(<LongTermDetailScreen />);
+
+    expect(await screen.findByText('目前階段：雙手合奏')).toBeTruthy();
+    expect(screen.queryByLabelText('最喜歡的閱讀內容')).toBeNull();
+    fireEvent.press(screen.getByLabelText('開始週末回顧'));
+    expect(screen.getByLabelText('最喜歡的閱讀內容').props.value).toBe('');
+    fireEvent.press(screen.getByLabelText('關閉週末回顧'));
+    fireEvent.press(screen.getByLabelText('更多計畫選項'));
+    fireEvent.press(screen.getByText('提出調整'));
+    expect(
+      screen.getByLabelText('想先暫停一下').props.accessibilityState.selected,
+    ).toBe(false);
+  });
+
+  it('does not let an old completion request update the next route', async () => {
+    const completionRequest = deferred<{
+      completionId: string;
+      milestone: null;
+    }>();
+    mockCompleteTask.mockReturnValueOnce(completionRequest.promise);
+    const { rerender } = render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('記錄今天的閱讀'));
+    mockRouteParams = {
+      goalId: 'goal-skill',
+      taskId: 'task-skill',
+      taskName: '鋼琴家之路',
+    };
+    rerender(<LongTermDetailScreen />);
+    expect(await screen.findByText('本週完成 0／7 次')).toBeTruthy();
+
+    await act(async () => {
+      completionRequest.resolve({
+        completionId: 'stale-reading-completion',
+        milestone: null,
+      });
+      await completionRequest.promise;
+    });
+
+    expect(screen.getByText('本週完成 0／7 次')).toBeTruthy();
+    expect(screen.queryByText('今天已完成')).toBeNull();
+  });
+
+  it('does not let an old correction request change the next route time', async () => {
+    mockReadingCompletions = [
+      ...baseReadingCompletions,
+      {
+        id: 'completion-thu',
+        completed_at: '2026-07-30T11:10:00.000Z',
+        planned_time_window: 'after_dinner',
+        start_mode: null,
+        status: 'completed',
+      },
+    ];
+    const correctionRequest = deferred<void>();
+    mockRecordCompletionContext.mockReturnValueOnce(correctionRequest.promise);
+    const { rerender } = render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('查看紀錄'));
+    fireEvent.press(screen.getByText('改成睡前'));
+
+    mockRouteParams = {
+      goalId: 'goal-skill',
+      taskId: 'task-skill',
+      taskName: '鋼琴家之路',
+    };
+    rerender(<LongTermDetailScreen />);
+    expect(await screen.findByText('目前階段：雙手合奏')).toBeTruthy();
+
+    await act(async () => {
+      correctionRequest.resolve();
+      await correctionRequest.promise;
+    });
+    fireEvent.press(screen.getByLabelText('更多計畫選項'));
+    fireEvent.press(screen.getByText('查看計畫詳情'));
+
+    expect(screen.getByText('未設定固定時段')).toBeTruthy();
+    expect(screen.queryByText('睡前')).toBeNull();
   });
 
   it('renders skill goals with the same visual skeleton and no unsupported recording action', async () => {
