@@ -127,6 +127,8 @@ describe('buildGoalPresentation', () => {
     );
     expect(result.weekSummary).not.toContain('自己開始');
     expect(result.nextReward).toEqual({ threshold: 5, coin: 10 });
+    expect(result.nextText).toBe('下一個里程碑：完成第 5 次');
+    expect(result.nextText).not.toContain('下一站');
     expect(result.canCompleteToday).toBe(true);
     expect(result.isReadingPlan).toBe(true);
   });
@@ -266,9 +268,12 @@ describe('buildGoalPresentation', () => {
     expect(result.overallLabel).toBe('第 2 / 4 階段');
     expect(result.focusText).toBe('目前階段：雙手合奏');
     expect(result.todayAction).toBe('這一階段先練習：雙手合奏');
-    expect(result.weekTarget).toBe(7);
+    expect(result.weekTarget).toBe(0);
+    expect(result.weekProgressLabel).toBe('依自己的節奏練習');
     expect(result.sectionOrder).toEqual(['hero', 'today', 'week', 'rewards', 'review']);
     expect(result.weekDays).toHaveLength(7);
+    expect(result.weekDays.every((day) => day.state === 'unscheduled')).toBe(true);
+    expect(result.weekSummary).not.toContain('0／7');
     expect(result.nextReward).toEqual({ threshold: 3, coin: 30 });
     expect(result.milestones).toEqual([
       {
@@ -330,11 +335,38 @@ describe('buildGoalPresentation', () => {
     expect(result.overallPercent).toBe(25);
     expect(result.completionConditionLabel).toBe('累積 100 頁');
     expect(result.focusText).toBe('目前已累積 25 頁');
-    expect(result.todayAction).toBe('閱讀一百頁');
-    expect(result.weekSummary).toBe('這週已完成 1 次。');
+    expect(result.todayTitle).toBe('目前的累積進度');
+    expect(result.todayAction).toBe('已累積 25 頁，由家長確認後更新');
+    expect(result.weekSummary).toBe('累積進度會在家長確認後更新。');
     expect(result.milestones[0].title).toBe('已累積 25 頁');
     expect(result.milestones[result.milestones.length - 1].title).toBe('達到 100 頁');
+    expect(result.categoryLabel).toBe('自主挑戰');
+    expect(result.canCompleteToday).toBe(false);
     expect(result.isReadingPlan).toBe(false);
+  });
+
+  it('labels a non-reading challenge as an autonomous challenge', () => {
+    const result = buildGoalPresentation(
+      makeTask({
+        id: 'task-steps',
+        name: '累積走路里程',
+        long_term_type: 'challenge',
+      }),
+      makeGoal({
+        id: 'goal-steps',
+        task_id: 'task-steps',
+        goal_type: 'challenge',
+        target_value: 20,
+        current_value: 8,
+        value_unit: '公里',
+      }),
+      [],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.categoryLabel).toBe('自主挑戰');
+    expect(result.overallLabel).toBe('8 / 20 公里');
+    expect(result.canCompleteToday).toBe(false);
   });
 
   it('falls back to completion counts when challenge values are incomplete', () => {
@@ -457,5 +489,123 @@ describe('buildGoalPresentation', () => {
 
     expect(result.canCompleteToday).toBe(false);
     expect(result.todayTitle).toBe('今天是休息日');
+  });
+
+  it('uses the checkpoint counter instead of completion rows for reward status', () => {
+    const completions = Array.from({ length: 5 }, (_, index) =>
+      makeCompletion(
+        `completion-${index + 1}`,
+        `2026-07-${String(27 + index).padStart(2, '0')}T19:00:00+08:00`,
+        null,
+      ),
+    );
+    const beforeReward = buildGoalPresentation(
+      makeTask(),
+      makeGoal({ current_day: 3 }),
+      completions,
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+    const afterReward = buildGoalPresentation(
+      makeTask(),
+      makeGoal({ current_day: 5 }),
+      completions.slice(0, 3),
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(beforeReward.overallLabel).toBe('5 / 20 次');
+    expect(beforeReward.milestones.find((item) => item.id === 'checkpoint-5')?.status).toBe(
+      'next',
+    );
+    expect(beforeReward.nextReward).toEqual({ threshold: 5, coin: 10 });
+    expect(afterReward.overallLabel).toBe('3 / 20 次');
+    expect(afterReward.milestones.find((item) => item.id === 'checkpoint-5')?.status).toBe(
+      'completed',
+    );
+    expect(afterReward.nextReward).toBeNull();
+  });
+
+  it.each([
+    ['paused', makeGoal({ status: 'paused' }), []],
+    ['completed', makeGoal({ status: 'completed' }), []],
+    ['future', makeGoal({ started_at: '2026-07-31' }), []],
+    ['expired', makeGoal(), [], makeTask({ due_date: '2026-07-29' })],
+    [
+      'target reached',
+      makeGoal({ current_day: 20 }),
+      Array.from({ length: 20 }, (_, index) =>
+        makeCompletion(
+          `done-${index}`,
+          `2026-07-27T${String(index).padStart(2, '0')}:00:00+08:00`,
+          null,
+        ),
+      ),
+    ],
+  ] as const)(
+    'does not offer child completion when the goal is %s',
+    (_label, goal, completions, task = makeTask()) => {
+      const result = buildGoalPresentation(
+        task,
+        goal,
+        [...completions],
+        dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+      );
+
+      expect(result.canCompleteToday).toBe(false);
+    },
+  );
+
+  it('counts only scheduled dates inside a partial first week', () => {
+    const result = buildGoalPresentation(
+      makeTask(),
+      makeGoal({ started_at: '2026-07-30' }),
+      [],
+      dayjs.tz('2026-07-31T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.weekTarget).toBe(2);
+    expect(result.weekProgressLabel).toBe('本週完成 0／2 次');
+    expect(result.weekDays.map((day) => day.state)).toEqual([
+      'unscheduled',
+      'unscheduled',
+      'unscheduled',
+      'missed',
+      'today',
+      'unscheduled',
+      'unscheduled',
+    ]);
+  });
+
+  it('marks dates after the effective end date as unscheduled', () => {
+    const result = buildGoalPresentation(
+      makeTask({ due_date: '2026-07-29' }),
+      makeGoal(),
+      [],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.weekTarget).toBe(3);
+    expect(result.weekDays.map((day) => day.state)).toEqual([
+      'missed',
+      'missed',
+      'missed',
+      'unscheduled',
+      'unscheduled',
+      'unscheduled',
+      'unscheduled',
+    ]);
+    expect(result.canCompleteToday).toBe(false);
+  });
+
+  it('uses the current plan week in reading focus copy', () => {
+    const result = buildGoalPresentation(
+      makeTask(),
+      makeGoal(),
+      [makeCompletion('week-one', '2026-07-27T19:00:00+08:00', null)],
+      dayjs.tz('2026-08-03T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.planWeekLabel).toBe('第 2 週／共 4 週');
+    expect(result.weekLabel).toBe('第 2 週');
+    expect(result.focusText).toBe('第 2 週：繼續找到適合自己的閱讀節奏');
   });
 });
