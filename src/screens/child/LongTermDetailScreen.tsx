@@ -46,6 +46,7 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const TZ = 'Asia/Taipei';
+const completionContextWriteQueue = new Map<string, Promise<void>>();
 
 type LongTermDetailRoute = RouteProp<RootStackParamList, 'LongTermDetail'>;
 type Nav = StackNavigationProp<RootStackParamList, 'LongTermDetail'>;
@@ -55,6 +56,28 @@ const EMPTY_REVIEW_DRAFT: ReviewDraft = {
   preferredWindow: null,
   nextStep: null,
 };
+
+function enqueueCompletionContextWrite(
+  completionId: string,
+  write: () => Promise<void>,
+): Promise<void> {
+  const previousWrite = completionContextWriteQueue.get(completionId);
+  const queuedWrite = (
+    previousWrite
+      ? previousWrite.catch(() => undefined)
+      : Promise.resolve()
+  ).then(write);
+
+  completionContextWriteQueue.set(completionId, queuedWrite);
+  const removeSettledWrite = () => {
+    if (completionContextWriteQueue.get(completionId) === queuedWrite) {
+      completionContextWriteQueue.delete(completionId);
+    }
+  };
+  void queuedWrite.then(removeSettledWrite, removeSettledWrite);
+
+  return queuedWrite;
+}
 
 function isMissingCompletionContextColumn(error: {
   code?: string;
@@ -132,8 +155,6 @@ export default function LongTermDetailScreen() {
   const insets = useSafeAreaInsets();
   const { goalId, taskId, taskName } = route.params;
   const generationRef = useRef(0);
-  const pendingInitialContextWritesRef =
-    useRef<Map<string, Promise<void>>>(new Map());
 
   const [goal, setGoal] = useState<LongTermGoal | null>(null);
   const [task, setTask] = useState<Task | null>(null);
@@ -257,7 +278,6 @@ export default function LongTermDetailScreen() {
 
     void load();
     return () => {
-      pendingInitialContextWritesRef.current.clear();
       if (generationRef.current === loadGeneration) {
         generationRef.current += 1;
       }
@@ -341,18 +361,15 @@ export default function LongTermDetailScreen() {
       }
 
       if (selectedTimeWindow) {
-        let initialContextWrite: Promise<void> | null = null;
         try {
-          initialContextWrite = recordCompletionContext(
+          await enqueueCompletionContextWrite(
             result.completionId,
-            selectedTimeWindow,
-            null,
+            () => recordCompletionContext(
+              result.completionId,
+              selectedTimeWindow,
+              null,
+            ),
           );
-          pendingInitialContextWritesRef.current.set(
-            result.completionId,
-            initialContextWrite,
-          );
-          await initialContextWrite;
           if (!isCurrentGeneration()) return false;
           setCompletions((current) => current.map((item) =>
             item.id === result.completionId
@@ -364,14 +381,6 @@ export default function LongTermDetailScreen() {
             '閱讀時段尚未記下',
             contextError instanceof Error ? contextError.message : '可以稍後再試。',
           );
-        } finally {
-          if (
-            initialContextWrite
-            && pendingInitialContextWritesRef.current.get(result.completionId)
-              === initialContextWrite
-          ) {
-            pendingInitialContextWritesRef.current.delete(result.completionId);
-          }
         }
       }
 
@@ -422,18 +431,10 @@ export default function LongTermDetailScreen() {
       generationRef.current === requestGeneration;
     setCorrectingTimeWindow(true);
     try {
-      const pendingInitialWrite =
-        pendingInitialContextWritesRef.current.get(selectedCompletion.id);
-      if (pendingInitialWrite) {
-        try {
-          await pendingInitialWrite;
-        } catch {
-          // A failed initial context write must not block a newer correction.
-        }
-        if (!isCurrentGeneration()) return;
-      }
-
-      await recordCompletionContext(selectedCompletion.id, nextWindow, null);
+      await enqueueCompletionContextWrite(
+        selectedCompletion.id,
+        () => recordCompletionContext(selectedCompletion.id, nextWindow, null),
+      );
       if (!isCurrentGeneration()) return;
 
       setCompletions((current) => current.map((completion) =>

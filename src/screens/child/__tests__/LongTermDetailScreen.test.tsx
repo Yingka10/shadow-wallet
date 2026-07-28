@@ -661,6 +661,70 @@ describe('LongTermDetailScreen', () => {
     expect(screen.queryByText('晚餐後記錄')).toBeNull();
   });
 
+  it('preserves context write order across unmount and remount', async () => {
+    const initialContextRequest = deferred<void>();
+    const correctionRequest = deferred<void>();
+    mockRecordCompletionContext
+      .mockReturnValueOnce(initialContextRequest.promise)
+      .mockReturnValueOnce(correctionRequest.promise);
+    const initialRender = render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('記錄今天的閱讀'));
+    await waitFor(() => {
+      expect(mockRecordCompletionContext).toHaveBeenCalledTimes(1);
+    });
+    initialRender.unmount();
+
+    mockReadingCompletions = [
+      ...baseReadingCompletions,
+      {
+        id: 'completion-thu',
+        completed_at: '2026-07-30T12:00:00.000Z',
+        planned_time_window: null,
+        start_mode: null,
+        status: 'completed',
+      },
+    ];
+    render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('查看紀錄'));
+    fireEvent.press(screen.getByText('改成睡前'));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockRecordCompletionContext).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      initialContextRequest.resolve();
+      await initialContextRequest.promise;
+    });
+    await waitFor(() => {
+      expect(mockRecordCompletionContext).toHaveBeenCalledTimes(2);
+    });
+    expect(mockRecordCompletionContext).toHaveBeenNthCalledWith(
+      1,
+      'completion-thu',
+      'after_dinner',
+      null,
+    );
+    expect(mockRecordCompletionContext).toHaveBeenNthCalledWith(
+      2,
+      'completion-thu',
+      'before_bed',
+      null,
+    );
+
+    await act(async () => {
+      correctionRequest.resolve();
+      await correctionRequest.promise;
+    });
+
+    expect(await screen.findByText('睡前記錄')).toBeTruthy();
+    expect(screen.getAllByText('睡前').length).toBeGreaterThan(0);
+    expect(screen.queryByText('晚餐後記錄')).toBeNull();
+  });
+
   it('updates the local checkpoint progress after a habit milestone succeeds', async () => {
     mockReadingGoal = {
       ...mockBaseGoal,
