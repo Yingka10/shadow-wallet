@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -316,10 +316,10 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
             ]}
           />
         </View>
-        <Text style={styles.focusText} numberOfLines={2}>
+        <Text style={styles.focusText}>
           {presentation.focusText}
         </Text>
-        <Text style={styles.nextText} numberOfLines={2}>
+        <Text style={styles.nextText}>
           {presentation.nextText}
         </Text>
       </View>
@@ -365,26 +365,28 @@ function CompletedTodayState({
           ) : null}
         </View>
       </View>
-      <View style={styles.completedActions}>
-        <TouchableOpacity
-          style={styles.secondaryAction}
-          onPress={openRecord}
-          accessibilityRole="button"
-          accessibilityLabel="查看紀錄"
-          activeOpacity={0.72}
-        >
-          <Text style={styles.secondaryActionText}>查看紀錄</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.secondaryAction}
-          onPress={openRecord}
-          accessibilityRole="button"
-          accessibilityLabel="需要更正"
-          activeOpacity={0.72}
-        >
-          <Text style={styles.secondaryActionText}>需要更正</Text>
-        </TouchableOpacity>
-      </View>
+      {onOpenRecord ? (
+        <View style={styles.completedActions}>
+          <TouchableOpacity
+            style={styles.secondaryAction}
+            onPress={openRecord}
+            accessibilityRole="button"
+            accessibilityLabel="查看紀錄"
+            activeOpacity={0.72}
+          >
+            <Text style={styles.secondaryActionText}>查看紀錄</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.secondaryAction}
+            onPress={openRecord}
+            accessibilityRole="button"
+            accessibilityLabel="需要更正"
+            activeOpacity={0.72}
+          >
+            <Text style={styles.secondaryActionText}>需要更正</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -399,19 +401,29 @@ function TodayStepCard({
 }: TodayStepCardProps) {
   const [showTimeOptions, setShowTimeOptions] = useState(false);
   const [showExplanation, setShowExplanation] = useState(false);
-  const [completedLocally, setCompletedLocally] = useState(isCompletedToday);
-  const completed = isCompletedToday || completedLocally;
+  const [completing, setCompleting] = useState(false);
+  const [completionError, setCompletionError] = useState<string | null>(null);
+  const completionPendingRef = useRef(false);
+  const completed = isCompletedToday;
+  const busy = checking || completing;
   const todayCompletion = isCompletedToday
     ? presentation.recentRecords[0]
     : undefined;
 
-  useEffect(() => {
-    if (isCompletedToday) setCompletedLocally(true);
-  }, [isCompletedToday]);
-
   const handleComplete = async () => {
-    const completedSuccessfully = await onComplete();
-    if (completedSuccessfully !== false) setCompletedLocally(true);
+    if (checking || completionPendingRef.current) return;
+
+    completionPendingRef.current = true;
+    setCompleting(true);
+    setCompletionError(null);
+    try {
+      await onComplete();
+    } catch {
+      setCompletionError('剛才沒有記錄成功，請再試一次。');
+    } finally {
+      completionPendingRef.current = false;
+      setCompleting(false);
+    }
   };
 
   const handleTimeSelect = (window: PreferredTimeWindow) => {
@@ -436,23 +448,32 @@ function TodayStepCard({
           </View>
           <View style={styles.actionCopy}>
             <Text style={styles.actionTitle}>{presentation.todayAction}</Text>
-            {presentation.preferredTimeWindow ? (
+            {presentation.preferredTimeWindow || presentation.canCompleteToday ? (
               <View style={styles.scheduleRow}>
                 <View style={styles.scheduleLabel}>
                   <DetailIcon name="clock" size={16} color={Colors.fgMuted} />
                   <Text style={styles.scheduleText}>
-                    今天預計：{formatTimeWindow(presentation.preferredTimeWindow)}
+                    今天預計：
+                    {presentation.preferredTimeWindow
+                      ? formatTimeWindow(presentation.preferredTimeWindow)
+                      : '尚未選擇時段'}
                   </Text>
                 </View>
                 {!completed && presentation.canCompleteToday ? (
                   <TouchableOpacity
                     style={styles.inlineAction}
                     accessibilityRole="button"
-                    accessibilityLabel="調整今天的預計時段"
+                    accessibilityLabel={
+                      presentation.preferredTimeWindow
+                        ? '調整今天的預計時段'
+                        : '選擇今天的預計時段'
+                    }
                     onPress={() => setShowTimeOptions((visible) => !visible)}
                     activeOpacity={0.72}
                   >
-                    <Text style={styles.inlineActionText}>調整時段</Text>
+                    <Text style={styles.inlineActionText}>
+                      {presentation.preferredTimeWindow ? '調整時段' : '選擇時段'}
+                    </Text>
                   </TouchableOpacity>
                 ) : null}
               </View>
@@ -535,8 +556,8 @@ function TodayStepCard({
           />
         ) : presentation.canCompleteToday ? (
           <TouchableOpacity
-            style={[styles.completeButton, checking && styles.buttonBusy]}
-            disabled={checking}
+            style={[styles.completeButton, busy && styles.buttonBusy]}
+            disabled={busy}
             onPress={() => void handleComplete()}
             accessibilityRole="button"
             accessibilityLabel={
@@ -544,11 +565,15 @@ function TodayStepCard({
                 ? '記錄今天的閱讀'
                 : '記下今天的完成'
             }
-            accessibilityState={{ disabled: checking }}
+            accessibilityState={{ disabled: busy }}
             activeOpacity={0.78}
           >
-            {checking ? (
-              <ActivityIndicator size="small" color={Colors.bgSurface} />
+            {busy ? (
+              <ActivityIndicator
+                testID="completion-loading"
+                size="small"
+                color={Colors.bgSurface}
+              />
             ) : (
               <>
                 <DetailIcon name="check" size={19} color={Colors.bgSurface} />
@@ -569,6 +594,11 @@ function TodayStepCard({
             </Text>
           </View>
         )}
+        {completionError ? (
+          <Text accessibilityRole="alert" style={styles.completionError}>
+            {completionError}
+          </Text>
+        ) : null}
       </View>
     </View>
   );
@@ -649,7 +679,11 @@ function WeekProgressCard({
                   <DayStatusGlyph state={day.state} />
                 </Svg>
               </View>
-              <Text style={styles.dayCaption} numberOfLines={2}>
+              <Text
+                testID={`goal-day-caption-${day.day}`}
+                style={styles.dayCaption}
+                numberOfLines={2}
+              >
                 {DAY_CAPTIONS[day.state]}
               </Text>
             </View>
@@ -751,26 +785,42 @@ function ReviewCard({
   presentation: GoalPresentation;
   onOpenReview?: Props['onOpenReview'];
 }) {
+  const content = (
+    <>
+      <View style={styles.reviewIcon}>
+        <DetailIcon name="conversation" color={Colors.leaf700} />
+      </View>
+      <View style={styles.reviewCopy}>
+        <Text style={styles.reviewPrompt}>{presentation.reviewPrompt}</Text>
+        <Text style={styles.reviewAction}>
+          {onOpenReview ? '開始週末回顧' : '週末可以和家人一起聊聊'}
+        </Text>
+      </View>
+      {onOpenReview ? (
+        <DetailIcon name="chevron" size={20} color={Colors.gold700} />
+      ) : null}
+    </>
+  );
+
   return (
     <View>
       <SectionHeading icon="conversation" title={presentation.reviewTitle} />
-      <TouchableOpacity
-        testID="goal-review"
-        style={[styles.card, styles.reviewCard]}
-        onPress={onOpenReview}
-        accessibilityRole="button"
-        accessibilityLabel="開始週末回顧"
-        activeOpacity={0.75}
-      >
-        <View style={styles.reviewIcon}>
-          <DetailIcon name="conversation" color={Colors.leaf700} />
+      {onOpenReview ? (
+        <TouchableOpacity
+          testID="goal-review"
+          style={[styles.card, styles.reviewCard]}
+          onPress={onOpenReview}
+          accessibilityRole="button"
+          accessibilityLabel="開始週末回顧"
+          activeOpacity={0.75}
+        >
+          {content}
+        </TouchableOpacity>
+      ) : (
+        <View testID="goal-review" style={[styles.card, styles.reviewCard]}>
+          {content}
         </View>
-        <View style={styles.reviewCopy}>
-          <Text style={styles.reviewPrompt}>{presentation.reviewPrompt}</Text>
-          <Text style={styles.reviewAction}>開始週末回顧</Text>
-        </View>
-        <DetailIcon name="chevron" size={20} color={Colors.gold700} />
-      </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -828,28 +878,44 @@ function PlanDetailsEntry({
   presentation: GoalPresentation;
   onOpenDetails?: Props['onOpenDetails'];
 }) {
+  const content = (
+    <>
+      <View style={styles.detailsIcon}>
+        <DetailIcon name="document" color={Colors.fgMuted} />
+      </View>
+      <View style={styles.detailsCopy}>
+        <Text style={styles.detailsTitle}>
+          {onOpenDetails ? '查看計畫安排' : '計畫安排'}
+        </Text>
+        <Text style={styles.detailsMeta} numberOfLines={2}>
+          {presentation.planPeriodLabel} · {presentation.completionConditionLabel}
+        </Text>
+      </View>
+      {onOpenDetails ? (
+        <DetailIcon name="chevron" size={20} color={Colors.ink300} />
+      ) : null}
+    </>
+  );
+
   return (
     <View>
       <SectionHeading icon="document" title="計畫詳情" />
-      <TouchableOpacity
-        testID="goal-details"
-        style={styles.detailsRow}
-        onPress={onOpenDetails}
-        accessibilityRole="button"
-        accessibilityLabel="查看計畫詳情"
-        activeOpacity={0.72}
-      >
-        <View style={styles.detailsIcon}>
-          <DetailIcon name="document" color={Colors.fgMuted} />
+      {onOpenDetails ? (
+        <TouchableOpacity
+          testID="goal-details"
+          style={styles.detailsRow}
+          onPress={onOpenDetails}
+          accessibilityRole="button"
+          accessibilityLabel="查看計畫詳情"
+          activeOpacity={0.72}
+        >
+          {content}
+        </TouchableOpacity>
+      ) : (
+        <View testID="goal-details" style={styles.detailsRow}>
+          {content}
         </View>
-        <View style={styles.detailsCopy}>
-          <Text style={styles.detailsTitle}>查看計畫安排</Text>
-          <Text style={styles.detailsMeta} numberOfLines={2}>
-            {presentation.planPeriodLabel} · {presentation.completionConditionLabel}
-          </Text>
-        </View>
-        <DetailIcon name="chevron" size={20} color={Colors.ink300} />
-      </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -916,7 +982,7 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   hero: {
-    height: 156,
+    minHeight: 156,
     borderRadius: 8,
     overflow: 'hidden',
     borderWidth: 1,
@@ -930,7 +996,7 @@ const styles = StyleSheet.create({
     height: 116,
   },
   heroCopy: {
-    height: '100%',
+    minHeight: 154,
     paddingTop: 12,
     paddingRight: 108,
     paddingBottom: 10,
@@ -1167,6 +1233,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '900',
   },
+  completionError: {
+    marginTop: 7,
+    color: Colors.error,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
   completedState: {
     marginTop: 10,
     borderRadius: 8,
@@ -1293,8 +1367,8 @@ const styles = StyleSheet.create({
   dayCaption: {
     minHeight: 24,
     color: Colors.fgMuted,
-    fontSize: 8,
-    lineHeight: 11,
+    fontSize: 9,
+    lineHeight: 12,
     textAlign: 'center',
   },
   weekInsight: {

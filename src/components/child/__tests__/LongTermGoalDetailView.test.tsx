@@ -1,5 +1,12 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react-native';
 import type { PreferredTimeWindow } from '../../../types/database';
 import type { GoalPresentation } from '../../../screens/child/longTermGoalPresentation';
 import LongTermGoalDetailView from '../LongTermGoalDetailView';
@@ -192,7 +199,7 @@ describe('LongTermGoalDetailView', () => {
     expect(screen.queryByText(/不知道選哪一本/)).toBeNull();
   });
 
-  it('lets an unfinished reading plan adjust its time and record today', () => {
+  it('lets an unfinished reading plan adjust its time and record today', async () => {
     const onComplete = jest.fn(() => false);
     const onSelectTimeWindow = jest.fn<void, [PreferredTimeWindow]>();
 
@@ -206,7 +213,9 @@ describe('LongTermGoalDetailView', () => {
     fireEvent.press(screen.getByLabelText('改成睡前'));
     expect(onSelectTimeWindow).toHaveBeenCalledWith('before_bed');
 
-    fireEvent.press(screen.getByText('記錄今天的閱讀'));
+    await act(async () => {
+      fireEvent.press(screen.getByText('記錄今天的閱讀'));
+    });
     expect(onComplete).toHaveBeenCalledTimes(1);
   });
 
@@ -228,16 +237,152 @@ describe('LongTermGoalDetailView', () => {
     expect(onOpenRecord).toHaveBeenNthCalledWith(2, 'completion-today');
   });
 
-  it('switches to the completed status after a successful local completion', async () => {
+  it('waits for the controlled completion prop and can reset from true to false', async () => {
     const onComplete = jest.fn(async () => undefined);
-    renderView(makePresentation({ recentRecords: [] }), { onComplete });
+    const presentation = makePresentation({ recentRecords: [] });
+    const { rerender } = render(
+      <LongTermGoalDetailView
+        presentation={presentation}
+        isCompletedToday={false}
+        checking={false}
+        onComplete={onComplete}
+        onSelectTimeWindow={jest.fn()}
+      />,
+    );
 
     fireEvent.press(screen.getByText('記錄今天的閱讀'));
 
     await waitFor(() => {
-      expect(screen.getByText('今天已完成 15 分鐘')).toBeTruthy();
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId('completion-loading')).toBeNull();
     });
-    expect(screen.queryByText('晚餐後記錄')).toBeNull();
+    expect(screen.queryByText('今天已完成 15 分鐘')).toBeNull();
+
+    rerender(
+      <LongTermGoalDetailView
+        presentation={presentation}
+        isCompletedToday
+        checking={false}
+        onComplete={onComplete}
+        onSelectTimeWindow={jest.fn()}
+      />,
+    );
+    expect(screen.getByText('今天已完成 15 分鐘')).toBeTruthy();
+
+    rerender(
+      <LongTermGoalDetailView
+        presentation={presentation}
+        isCompletedToday={false}
+        checking={false}
+        onComplete={onComplete}
+        onSelectTimeWindow={jest.fn()}
+      />,
+    );
+    expect(screen.queryByText('今天已完成 15 分鐘')).toBeNull();
+    expect(screen.getByText('記錄今天的閱讀')).toBeTruthy();
+  });
+
+  it('does not expose record, review, or details actions without callbacks', () => {
+    renderView(makePresentation(), { isCompletedToday: true });
+
+    expect(screen.queryByText('查看紀錄')).toBeNull();
+    expect(screen.queryByText('需要更正')).toBeNull();
+    expect(screen.queryByLabelText('開始週末回顧')).toBeNull();
+    expect(screen.queryByLabelText('查看計畫詳情')).toBeNull();
+    expect(screen.getByText('這週哪個時間最適合閱讀？')).toBeTruthy();
+    expect(screen.getByText('2026-07-27 ～ 2026-08-23（共 4 週） · 完成 20 次')).toBeTruthy();
+  });
+
+  it('lets a child choose a time when no preferred window exists', () => {
+    const onSelectTimeWindow = jest.fn<void, [PreferredTimeWindow]>();
+    renderView(makePresentation({ preferredTimeWindow: null }), {
+      onSelectTimeWindow,
+    });
+
+    expect(screen.getByText('今天預計：尚未選擇時段')).toBeTruthy();
+    fireEvent.press(screen.getByLabelText('選擇今天的預計時段'));
+    expect(screen.getByTestId('time-options')).toBeTruthy();
+
+    fireEvent.press(screen.getByLabelText('改成晚餐後'));
+    expect(onSelectTimeWindow).toHaveBeenCalledWith('after_dinner');
+  });
+
+  it('guards a pending completion from double submission and allows retry afterward', async () => {
+    let resolveFirst: ((value: void | boolean) => void) | undefined;
+    const firstCompletion = new Promise<void | boolean>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const onComplete = jest
+      .fn<Promise<void | boolean>, []>()
+      .mockImplementationOnce(() => firstCompletion)
+      .mockResolvedValueOnce(false);
+
+    renderView(makePresentation(), { onComplete });
+
+    const completeButton = screen.getByLabelText('記錄今天的閱讀');
+    fireEvent.press(completeButton);
+    fireEvent.press(completeButton);
+
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('completion-loading')).toBeTruthy();
+
+    await act(async () => {
+      resolveFirst?.(undefined);
+      await firstCompletion;
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId('completion-loading')).toBeNull();
+    });
+
+    fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
+    await waitFor(() => {
+      expect(onComplete).toHaveBeenCalledTimes(2);
+      expect(screen.queryByTestId('completion-loading')).toBeNull();
+    });
+  });
+
+  it('contains completion rejection and restores the action for another try', async () => {
+    const onComplete = jest
+      .fn<Promise<void | boolean>, []>()
+      .mockRejectedValueOnce(new Error('network unavailable'))
+      .mockResolvedValueOnce(false);
+
+    renderView(makePresentation(), { onComplete });
+
+    fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('剛才沒有記錄成功，請再試一次。'),
+      ).toBeTruthy();
+    });
+    expect(screen.queryByTestId('completion-loading')).toBeNull();
+
+    fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
+    await waitFor(() => {
+      expect(onComplete).toHaveBeenCalledTimes(2);
+      expect(screen.queryByTestId('completion-loading')).toBeNull();
+    });
+  });
+
+  it('allows long hero copy to grow and keeps seven-day captions readable', () => {
+    const longFocus = '這一週先慢慢找出最適合自己的時間，也可以在需要時和家人一起調整閱讀方式。';
+    const longNext = '下一個里程碑：完成第五次閱讀後，一起看看目前的方法是否仍然適合。';
+    renderView(makePresentation({ focusText: longFocus, nextText: longNext }));
+
+    expect(screen.getByText(longFocus)).toBeTruthy();
+    expect(screen.getByText(longNext)).toBeTruthy();
+
+    const heroStyle = StyleSheet.flatten(screen.getByTestId('goal-hero').props.style);
+    expect(heroStyle.minHeight).toBeGreaterThanOrEqual(150);
+    expect(heroStyle.height).toBeUndefined();
+
+    const captionStyle = StyleSheet.flatten(
+      screen.getByTestId('goal-day-caption-1').props.style,
+    );
+    expect(captionStyle.fontSize).toBeGreaterThanOrEqual(9);
+    expect(captionStyle.lineHeight).toBeGreaterThanOrEqual(12);
+    expect(captionStyle.minHeight).toBeGreaterThanOrEqual(24);
   });
 
   it('describes all seven real schedule states without punitive language', () => {
