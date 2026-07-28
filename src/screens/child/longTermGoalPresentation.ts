@@ -541,15 +541,15 @@ function buildPlanPeriodLabel(
   start: Dayjs,
   dueDate: Dayjs | null,
   totalWeeks: number,
-  isSkill: boolean,
+  usesExactTotalDays: boolean,
 ): string {
   if (totalWeeks === 0 && dueDate === null) {
     return `${start.format('YYYY-MM-DD')} ～ 尚未安排執行日期`;
   }
 
-  const exactSkillDays = isSkill ? Math.max(goal.total_days ?? 0, 0) : 0;
-  const calculatedEnd = exactSkillDays > 0
-    ? start.add(exactSkillDays - 1, 'day')
+  const exactTotalDays = usesExactTotalDays ? Math.max(goal.total_days ?? 0, 0) : 0;
+  const calculatedEnd = exactTotalDays > 0
+    ? start.add(exactTotalDays - 1, 'day')
     : start.add(totalWeeks, 'week').subtract(1, 'day');
   const end = dueDate ?? calculatedEnd;
 
@@ -575,9 +575,14 @@ export function buildGoalPresentation(
   const challengeUnit = hasChallengeValues ? goal.value_unit?.trim() ?? '' : '';
   const activeDays = getActiveDays(task, goal, isReadingHabit, isSkill, isChallenge);
   const planStart = getPlanStart(goal, task, now);
-  const planEnd = task.due_date
+  const dueDateEnd = task.due_date
     ? getValidDueDate(planStart, task.due_date)
     : null;
+  const challengeEnd =
+    isChallenge && goal.total_days && goal.total_days > 0
+      ? planStart.add(goal.total_days - 1, 'day')
+      : null;
+  const planEnd = dueDateEnd ?? challengeEnd;
   const weeklyCompletions = completionsThisWeek(
     completions,
     activeDays,
@@ -612,7 +617,7 @@ export function buildGoalPresentation(
     planEnd === null
     && activeDays.length === 0
     && (goal.goal_type === 'habit' || goal.goal_type === 'family');
-  const fallbackTotalWeeks = isSkill && goal.total_days
+  const fallbackTotalWeeks = (isSkill || isChallenge) && goal.total_days
     ? Math.max(Math.ceil(goal.total_days / 7), 1)
     : hasUnplannedCycle
       ? 0
@@ -797,7 +802,13 @@ export function buildGoalPresentation(
     nextReward,
     milestones,
     recentRecords: buildRecentRecords(task, completions),
-    planPeriodLabel: buildPlanPeriodLabel(goal, planStart, planEnd, totalWeeks, isSkill),
+    planPeriodLabel: buildPlanPeriodLabel(
+      goal,
+      planStart,
+      planEnd,
+      totalWeeks,
+      isSkill || isChallenge,
+    ),
     completionConditionLabel,
     adjustableItemsLabel,
     finalRewardText: hasUnplannedCycle

@@ -377,6 +377,37 @@ describe('buildGoalPresentation', () => {
     expect(result.weekTarget).toBe(0);
   });
 
+  it('derives a challenge period and current week from total days without daily check-ins', () => {
+    const result = buildGoalPresentation(
+      makeTask({
+        id: 'task-distance',
+        name: '累積走路里程',
+        long_term_type: 'challenge',
+        due_date: null,
+      }),
+      makeGoal({
+        id: 'goal-distance',
+        task_id: 'task-distance',
+        goal_type: 'challenge',
+        total_days: 20,
+        current_value: 8,
+        target_value: 20,
+        value_unit: '公里',
+        active_days: [1, 3, 5],
+      }),
+      [],
+      dayjs.tz('2026-08-04T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.totalWeeks).toBe(3);
+    expect(result.planWeekLabel).toBe('第 2 週／共 3 週');
+    expect(result.planPeriodLabel).toBe('2026-07-27 ～ 2026-08-15（共 3 週）');
+    expect(result.weekProgressLabel).toBe('累積進度由家長確認');
+    expect(result.weekTarget).toBe(0);
+    expect(result.weekDays.every((day) => day.state === 'unscheduled')).toBe(true);
+    expect(result.canCompleteToday).toBe(false);
+  });
+
   it('falls back to completion counts when challenge values are incomplete', () => {
     const result = buildGoalPresentation(
       makeTask({
