@@ -80,6 +80,12 @@ import { WeekSummary } from './home/WeekSummary';
 import { TipCard, WeekDigestCard, buildWeekDigestLines, TaskPackCard } from './home/RightRailCards';
 import { ParentSidebar, type ChildOption, type ManageSection } from './ParentSidebar';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+import { taipeiDayRange } from '../../../lib/taipeiDate';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Inline SVG icons (same shapes as ParentDashboardScreen)
@@ -2429,10 +2435,12 @@ type AdvisorChatMessage = { role: 'parent' | 'ai'; text: string; at: string };
 
 /**
  * 展開後的 AI 諮詢對話面板：頭像式訊息串＋快捷後續動作＋輸入框。
- * 快捷提問與自由輸入都真的呼叫 Gemini（見 chatWithAdvisor），只餵入畫面上
- * 本來就會顯示的彙總資料（今日完成數、長期任務進度），不額外查詢逐筆紀錄。
+ * 快捷提問與自由輸入都真的呼叫 Gemini（見 chatWithAdvisor），餵入畫面上
+ * 本來就會顯示的資料（今日任務清單、長期任務進度），另外補查過去 7 天的
+ * 逐日完成紀錄（任務名稱），讓顧問答得出「這禮拜」的問題，不只是今天。
  */
 function AdvisorSideSheet({
+  childId,
   childName,
   parentName,
   initialPrompt,
@@ -2443,6 +2451,7 @@ function AdvisorSideSheet({
   onClose,
   onOpenWeekly,
 }: {
+  childId: string;
   childName: string;
   parentName: string;
   initialPrompt?: string;
@@ -2457,6 +2466,44 @@ function AdvisorSideSheet({
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const askedInitial = useRef(false);
+  const [weekHistory, setWeekHistory] = useState<{ dateLabel: string; tasks: string[] }[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadWeekHistory() {
+      try {
+        const todayStart = taipeiDayRange().startIso;
+        const weekAgoStart = taipeiDayRange(dayjs(todayStart).subtract(7, 'day')).startIso;
+
+        const { data: completions, error } = await supabase
+          .from('task_completions')
+          .select('task_id, completed_at')
+          .eq('child_id', childId)
+          .gte('completed_at', weekAgoStart)
+          .lt('completed_at', todayStart)
+          .order('completed_at', { ascending: true });
+        if (error || !completions || completions.length === 0 || cancelled) return;
+
+        const taskIds = [...new Set(completions.map(c => c.task_id))];
+        const { data: tasks } = await supabase.from('tasks').select('id, name').in('id', taskIds);
+        if (cancelled) return;
+        const nameById = new Map((tasks ?? []).map(t => [t.id, t.name]));
+
+        const byDay = new Map<string, string[]>();
+        for (const c of completions) {
+          const label = dayjs(c.completed_at).tz('Asia/Taipei').format('MM/DD（ddd）');
+          const name = nameById.get(c.task_id) ?? '（未知任務）';
+          byDay.set(label, [...(byDay.get(label) ?? []), name]);
+        }
+
+        setWeekHistory([...byDay.entries()].map(([dateLabel, dayTasks]) => ({ dateLabel, tasks: dayTasks })));
+      } catch (err) {
+        console.error('[AdvisorSideSheet] loadWeekHistory error:', err);
+      }
+    }
+    void loadWeekHistory();
+    return () => { cancelled = true; };
+  }, [childId]);
 
   const ask = useCallback(
     async (question: string, historyBefore: AdvisorChatMessage[]) => {
@@ -2471,13 +2518,14 @@ function AdvisorSideSheet({
           status: t.status,
           rewardKind: t.reward?.kind ?? null,
         })),
+        weekHistory,
         longTermSummary: ltItems.map(i => ({ name: i.name, progressPct: i.progressPct })),
         history: historyBefore.map(m => ({ role: m.role, text: m.text })),
       });
       setMessages(prev => [...prev, { role: 'ai', text: reply, at: dayjs().format('HH:mm') }]);
       setSending(false);
     },
-    [childName, doneToday, totalToday, todayTasks, ltItems],
+    [childName, doneToday, totalToday, todayTasks, weekHistory, ltItems],
   );
 
   useEffect(() => {
@@ -3071,6 +3119,7 @@ export default function ParentHomeTablet() {
       </View>
       {advisorOpen && (
         <AdvisorSideSheet
+          childId={childId}
           childName={nickname}
           parentName={parentName ?? '家長'}
           initialPrompt={advisorInitialPrompt}

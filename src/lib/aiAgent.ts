@@ -193,6 +193,8 @@ export type AdvisorChatInput = {
   doneToday: number;
   totalToday: number;
   todayTasks?: { name: string; status: string; rewardKind: 'coins' | 'time' | null }[];
+  /** 過去 7 天（不含今天）逐日完成的任務名稱，讓顧問答得出「這禮拜」的問題。 */
+  weekHistory?: { dateLabel: string; tasks: string[] }[];
   longTermSummary: { name: string; progressPct: number }[];
   history?: { role: 'parent' | 'ai'; text: string }[];
 };
