@@ -406,8 +406,9 @@ function TodayStepCard({
   const completionPendingRef = useRef(false);
   const completed = isCompletedToday;
   const busy = checking || completing;
+  const isReadingPlan = presentation.goalKind === 'reading_habit';
   const showReadingTimeControls =
-    presentation.isReadingPlan && presentation.canCompleteToday;
+    isReadingPlan && presentation.canCompleteToday;
   const todayCompletion = isCompletedToday
     ? presentation.recentRecords[0]
     : undefined;
@@ -444,7 +445,7 @@ function TodayStepCard({
         <View style={styles.actionHead}>
           <View style={styles.actionIcon}>
             <DetailIcon
-              name={presentation.isReadingPlan ? 'book' : 'sprout'}
+              name={isReadingPlan ? 'book' : 'sprout'}
               color={Colors.leaf700}
             />
           </View>
@@ -509,7 +510,7 @@ function TodayStepCard({
           <View style={styles.explanationBody}>
             <Text style={styles.explanationText}>{presentation.focusText}</Text>
             <Text style={styles.explanationHint}>
-              {presentation.isReadingPlan
+              {isReadingPlan
                 ? '不知道選哪一本時，可以先從最想翻開的那一本開始。'
                 : '先完成今天最小的一步，覺得不合適時再和家人一起調整。'}
             </Text>
@@ -563,7 +564,7 @@ function TodayStepCard({
             onPress={() => void handleComplete()}
             accessibilityRole="button"
             accessibilityLabel={
-              presentation.isReadingPlan
+              isReadingPlan
                 ? '記錄今天的閱讀'
                 : '記下今天的完成'
             }
@@ -580,7 +581,7 @@ function TodayStepCard({
               <>
                 <DetailIcon name="check" size={19} color={Colors.bgSurface} />
                 <Text style={styles.completeButtonText}>
-                  {presentation.isReadingPlan
+                  {isReadingPlan
                     ? '記錄今天的閱讀'
                     : '記下今天的完成'}
                 </Text>
@@ -590,9 +591,10 @@ function TodayStepCard({
         ) : (
           <View style={styles.restNote}>
             <Text style={styles.restNoteText}>
-              {presentation.todayTitle === '今天是休息日'
-                ? '今天沒有安排，照自己的節奏休息就好。'
-                : '今天先照自己的節奏前進，需要時再和家人一起確認。'}
+              {presentation.todayStatusText
+                ?? (presentation.todayTitle === '今天是休息日'
+                  ? '今天沒有安排，照自己的節奏休息就好。'
+                  : '今天先照自己的節奏前進，需要時再和家人一起確認。')}
             </Text>
           </View>
         )}
@@ -643,57 +645,72 @@ function DayStatusGlyph({ state }: { state: GoalDayStatus['state'] }) {
 }
 
 function WeekProgressCard({
-  days,
-  summary,
+  presentation,
 }: {
-  days: GoalDayStatus[];
-  summary: string;
+  presentation: GoalPresentation;
 }) {
+  const showsDailySchedule =
+    presentation.weekTarget > 0
+    && (
+      presentation.goalKind === 'reading_habit'
+      || presentation.goalKind === 'habit'
+      || presentation.goalKind === 'family'
+    );
+
   return (
     <View>
-      <SectionHeading icon="calendar" title="本週安排" />
+      <SectionHeading
+        icon="calendar"
+        title={showsDailySchedule ? '本週安排' : '本週進度'}
+      />
       <View testID="goal-week" style={styles.card}>
-        <View style={styles.weekRow}>
-          {days.map((day) => (
-            <View
-              key={day.isoDate}
-              style={styles.dayCell}
-              accessible
-              accessibilityLabel={`${WEEKDAY_NAMES[day.day]}，${DAY_STATE_LABELS[day.state]}`}
-            >
-              <Text style={styles.dayLabel}>{day.label}</Text>
+        {showsDailySchedule ? (
+          <View style={styles.weekRow}>
+            {presentation.weekDays.map((day) => (
               <View
-                style={[
-                  styles.dayCircle,
-                  day.state === 'completed' && styles.dayCircleCompleted,
-                  day.state === 'today' && styles.dayCircleToday,
-                  day.state === 'upcoming' && styles.dayCircleUpcoming,
-                  day.state === 'missed' && styles.dayCircleMissed,
-                  day.state === 'unscheduled' && styles.dayCircleUnscheduled,
-                ]}
+                key={day.isoDate}
+                style={styles.dayCell}
+                accessible
+                accessibilityLabel={`${WEEKDAY_NAMES[day.day]}，${DAY_STATE_LABELS[day.state]}`}
               >
-                <Svg
-                  width={24}
-                  height={24}
-                  viewBox="0 0 24 24"
-                  accessibilityElementsHidden
+                <Text style={styles.dayLabel}>{day.label}</Text>
+                <View
+                  style={[
+                    styles.dayCircle,
+                    day.state === 'completed' && styles.dayCircleCompleted,
+                    day.state === 'today' && styles.dayCircleToday,
+                    day.state === 'upcoming' && styles.dayCircleUpcoming,
+                    day.state === 'missed' && styles.dayCircleMissed,
+                    day.state === 'unscheduled' && styles.dayCircleUnscheduled,
+                  ]}
                 >
-                  <DayStatusGlyph state={day.state} />
-                </Svg>
+                  <Svg
+                    width={24}
+                    height={24}
+                    viewBox="0 0 24 24"
+                    accessibilityElementsHidden
+                  >
+                    <DayStatusGlyph state={day.state} />
+                  </Svg>
+                </View>
+                <Text
+                  testID={`goal-day-caption-${day.day}`}
+                  style={styles.dayCaption}
+                  numberOfLines={2}
+                >
+                  {DAY_CAPTIONS[day.state]}
+                </Text>
               </View>
-              <Text
-                testID={`goal-day-caption-${day.day}`}
-                style={styles.dayCaption}
-                numberOfLines={2}
-              >
-                {DAY_CAPTIONS[day.state]}
-              </Text>
-            </View>
-          ))}
-        </View>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.compactWeekLabel}>
+            {presentation.weekProgressLabel}
+          </Text>
+        )}
         <View style={styles.weekInsight}>
           <DetailIcon name="sprout" size={16} color={Colors.leaf700} />
-          <Text style={styles.weekInsightText}>{summary}</Text>
+          <Text style={styles.weekInsightText}>{presentation.weekSummary}</Text>
         </View>
       </View>
     </View>
@@ -703,7 +720,20 @@ function WeekProgressCard({
 function milestoneStatusLabel(milestone: GoalMilestone): string {
   if (milestone.status === 'completed') return '已完成';
   if (milestone.status === 'next') return '下一個里程碑';
-  return '之後一起回顧';
+  return '尚未到';
+}
+
+function PlanNotice({ notice }: { notice: string }) {
+  return (
+    <View
+      style={styles.planNotice}
+      accessible
+      accessibilityLabel={`計畫提醒：${notice}`}
+    >
+      <DetailIcon name="info" size={17} color={Colors.gold700} />
+      <Text style={styles.planNoticeText}>{notice}</Text>
+    </View>
+  );
 }
 
 function MilestoneTimeline({
@@ -945,6 +975,9 @@ export default function LongTermGoalDetailView({
       showsVerticalScrollIndicator={false}
     >
       <GoalHero presentation={presentation} />
+      {presentation.planNotice ? (
+        <PlanNotice notice={presentation.planNotice} />
+      ) : null}
       <TodayStepCard
         presentation={presentation}
         isCompletedToday={isCompletedToday}
@@ -953,10 +986,7 @@ export default function LongTermGoalDetailView({
         onSelectTimeWindow={onSelectTimeWindow}
         onOpenRecord={onOpenRecord}
       />
-      <WeekProgressCard
-        days={presentation.weekDays}
-        summary={presentation.weekSummary}
-      />
+      <WeekProgressCard presentation={presentation} />
       <MilestoneTimeline milestones={presentation.milestones} />
       <ReviewCard
         presentation={presentation}
@@ -1006,7 +1036,7 @@ const styles = StyleSheet.create({
   },
   categoryBadge: {
     alignSelf: 'flex-start',
-    minHeight: 20,
+    minHeight: 22,
     maxWidth: '100%',
     borderRadius: 7,
     borderWidth: 1,
@@ -1017,8 +1047,8 @@ const styles = StyleSheet.create({
   },
   categoryText: {
     color: Colors.gold100,
-    fontSize: 10,
-    lineHeight: 14,
+    fontSize: 11,
+    lineHeight: 16,
     fontWeight: '800',
   },
   planWeekLabel: {
@@ -1058,8 +1088,27 @@ const styles = StyleSheet.create({
   nextText: {
     marginTop: 3,
     color: Colors.cream200,
-    fontSize: 10,
-    lineHeight: 13,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '700',
+  },
+  planNotice: {
+    minHeight: 44,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.gold300,
+    backgroundColor: Colors.gold100,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingHorizontal: 11,
+    paddingVertical: 10,
+  },
+  planNoticeText: {
+    flex: 1,
+    color: Colors.fgSecondary,
+    fontSize: 11,
+    lineHeight: 17,
     fontWeight: '700',
   },
   sectionHeading: {
@@ -1332,8 +1381,8 @@ const styles = StyleSheet.create({
   },
   dayLabel: {
     color: Colors.fgSecondary,
-    fontSize: 10,
-    lineHeight: 14,
+    fontSize: 11,
+    lineHeight: 15,
     fontWeight: '900',
   },
   dayCircle: {
@@ -1367,11 +1416,17 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.cream50,
   },
   dayCaption: {
-    minHeight: 24,
+    minHeight: 28,
     color: Colors.fgMuted,
-    fontSize: 9,
-    lineHeight: 12,
+    fontSize: 11,
+    lineHeight: 14,
     textAlign: 'center',
+  },
+  compactWeekLabel: {
+    color: Colors.fgPrimary,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '900',
   },
   weekInsight: {
     marginTop: 8,
@@ -1453,12 +1508,13 @@ const styles = StyleSheet.create({
   timelineDetail: {
     marginTop: 3,
     color: Colors.fgMuted,
-    fontSize: 10,
-    lineHeight: 15,
+    fontSize: 11,
+    lineHeight: 16,
     fontWeight: '700',
   },
   statusBadge: {
-    maxWidth: 104,
+    minHeight: 26,
+    maxWidth: 112,
     borderRadius: 7,
     backgroundColor: Colors.cream100,
     paddingHorizontal: 6,
@@ -1472,8 +1528,8 @@ const styles = StyleSheet.create({
   },
   statusBadgeText: {
     color: Colors.fgMuted,
-    fontSize: 8,
-    lineHeight: 11,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '900',
     textAlign: 'center',
   },
@@ -1555,8 +1611,8 @@ const styles = StyleSheet.create({
   recordTime: {
     marginTop: 2,
     color: Colors.fgMuted,
-    fontSize: 10,
-    lineHeight: 14,
+    fontSize: 11,
+    lineHeight: 15,
   },
   detailsRow: {
     minHeight: 64,
@@ -1590,7 +1646,7 @@ const styles = StyleSheet.create({
   detailsMeta: {
     marginTop: 2,
     color: Colors.fgMuted,
-    fontSize: 9,
-    lineHeight: 13,
+    fontSize: 11,
+    lineHeight: 16,
   },
 });

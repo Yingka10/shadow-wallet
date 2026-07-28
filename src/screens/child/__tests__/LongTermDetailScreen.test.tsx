@@ -605,7 +605,7 @@ describe('LongTermDetailScreen', () => {
 
     expect(await screen.findByText('晚餐後記錄')).toBeTruthy();
     fireEvent.press(screen.getByLabelText('查看紀錄'));
-    expect(screen.getByText('記錄時段')).toBeTruthy();
+    expect(screen.getByText('完成時段')).toBeTruthy();
     expect(screen.getAllByText('晚餐後').length).toBeGreaterThan(0);
   });
 
@@ -837,7 +837,8 @@ describe('LongTermDetailScreen', () => {
     expect(await screen.findByText('目前階段：雙手合奏')).toBeTruthy();
     expect(screen.queryByLabelText('最喜歡的閱讀內容')).toBeNull();
     fireEvent.press(screen.getByLabelText('開始週末回顧'));
-    expect(screen.getByLabelText('最喜歡的閱讀內容').props.value).toBe('');
+    expect(screen.getByText('這週哪一段練習最有感？')).toBeTruthy();
+    expect(screen.getByLabelText('這週最有感的片段').props.value).toBe('');
     fireEvent.press(screen.getByLabelText('關閉週末回顧'));
     fireEvent.press(screen.getByLabelText('更多計畫選項'));
     fireEvent.press(screen.getByText('提出調整'));
