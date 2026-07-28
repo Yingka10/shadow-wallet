@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -234,10 +234,11 @@ function MenuRow({
   onPress: () => void;
 }) {
   return (
-    <TouchableOpacity
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        accessibilityHint={detail}
+        onPress={onPress}
       activeOpacity={0.76}
       style={styles.menuRow}
     >
@@ -246,7 +247,7 @@ function MenuRow({
       </View>
       <View style={styles.menuCopy}>
         <Text style={styles.menuTitle}>{label}</Text>
-        <Text style={styles.menuDetail}>{detail}</Text>
+        <Text accessible={false} style={styles.menuDetail}>{detail}</Text>
       </View>
       <Text style={styles.chevron} accessibilityElementsHidden>
         ›
@@ -375,14 +376,18 @@ function RecordSheet({
   Props,
   'completion' | 'taskMinutes' | 'onCorrectTimeWindow' | 'correctingTimeWindow'
 >) {
-  const [selectedWindow, setSelectedWindow] = useState<PreferredTimeWindow | null>(
-    completion?.planned_time_window ?? null,
-  );
+  const [lastConfirmedWindow, setLastConfirmedWindow] =
+    useState<PreferredTimeWindow | null>(
+      completion?.planned_time_window ?? null,
+    );
   const [localLoading, setLocalLoading] = useState(false);
+  const [correctionError, setCorrectionError] = useState<string | null>(null);
+  const correctionPendingRef = useRef(false);
 
   useEffect(() => {
-    setSelectedWindow(completion?.planned_time_window ?? null);
-  }, [completion]);
+    setLastConfirmedWindow(completion?.planned_time_window ?? null);
+    setCorrectionError(null);
+  }, [completion?.id, completion?.planned_time_window]);
 
   if (!completion) {
     return (
@@ -394,11 +399,18 @@ function RecordSheet({
   }
 
   const handleCorrection = async (timeWindow: PreferredTimeWindow) => {
+    if (correctionPendingRef.current || correctingTimeWindow) return;
+
+    correctionPendingRef.current = true;
     setLocalLoading(true);
+    setCorrectionError(null);
     try {
       await onCorrectTimeWindow(timeWindow);
-      setSelectedWindow(timeWindow);
+      setLastConfirmedWindow(timeWindow);
+    } catch {
+      setCorrectionError('更正失敗，請再試一次。');
     } finally {
+      correctionPendingRef.current = false;
       setLocalLoading(false);
     }
   };
@@ -409,13 +421,13 @@ function RecordSheet({
       <View style={styles.recordSummary}>
         <DetailRow label="完成日期" value={formatCompletionDate(completion.completed_at)} />
         <DetailRow label="閱讀時間" value={`${taskMinutes} 分鐘`} />
-        <DetailRow
-          label="記錄時段"
-          value={
-            completion.planned_time_window
-              ? TIME_WINDOW_LABELS[completion.planned_time_window]
-              : '尚未記錄時段'
-          }
+          <DetailRow
+            label="記錄時段"
+            value={
+              lastConfirmedWindow
+                ? TIME_WINDOW_LABELS[lastConfirmedWindow]
+                : '尚未記錄時段'
+            }
         />
       </View>
 
@@ -429,38 +441,47 @@ function RecordSheet({
           <TouchableOpacity
             key={value}
             accessibilityRole="button"
-            accessibilityLabel={label}
-            accessibilityState={{
-              selected: selectedWindow === value,
-              disabled: loading,
-            }}
+              accessibilityLabel={label}
+              accessibilityState={{
+                selected: lastConfirmedWindow === value,
+                disabled: loading,
+              }}
             disabled={loading}
             onPress={() => handleCorrection(value)}
             activeOpacity={0.76}
-            style={[
-              styles.compactOption,
-              selectedWindow === value && styles.compactOptionSelected,
-              loading && styles.disabled,
-            ]}
+              style={[
+                styles.compactOption,
+                lastConfirmedWindow === value && styles.compactOptionSelected,
+                loading && styles.disabled,
+              ]}
           >
             <Text
-              style={[
-                styles.compactOptionText,
-                selectedWindow === value && styles.compactOptionTextSelected,
-              ]}
+                style={[
+                  styles.compactOptionText,
+                  lastConfirmedWindow === value && styles.compactOptionTextSelected,
+                ]}
             >
               改成{label}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
-      {loading ? (
-        <View style={styles.loadingRow}>
-          <ActivityIndicator color={Colors.accent} />
-          <Text style={styles.loadingText}>正在更正紀錄</Text>
-        </View>
-      ) : null}
-    </View>
+        {loading ? (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator color={Colors.accent} />
+            <Text style={styles.loadingText}>正在更正紀錄</Text>
+          </View>
+        ) : null}
+        {correctionError ? (
+          <Text
+            accessibilityRole="alert"
+            accessibilityLiveRegion="polite"
+            style={styles.errorText}
+          >
+            {correctionError}
+          </Text>
+        ) : null}
+      </View>
   );
 }
 
@@ -578,20 +599,31 @@ export default function LongTermGoalDetailSheets({
   const [localReviewDraft, setLocalReviewDraft] = useState(reviewDraft);
   const [localAdjustmentDraft, setLocalAdjustmentDraft] =
     useState<AdjustmentDraft | null>(adjustmentDraft);
+  const pauseRequestRef = useRef(false);
 
   useEffect(() => {
     setLocalReviewDraft(reviewDraft);
-  }, [reviewDraft]);
+  }, [
+    activeSheet,
+    reviewDraft.favoriteNote,
+    reviewDraft.preferredWindow,
+    reviewDraft.nextStep,
+  ]);
 
   useEffect(() => {
-    if (adjustmentDraft) {
-      setLocalAdjustmentDraft(adjustmentDraft);
+    if (activeSheet === 'adjustment' && pauseRequestRef.current) {
+      pauseRequestRef.current = false;
+      setLocalAdjustmentDraft('pause');
+      return;
     }
-  }, [adjustmentDraft]);
+
+    setLocalAdjustmentDraft(adjustmentDraft);
+  }, [activeSheet, adjustmentDraft]);
 
   if (!activeSheet) return null;
 
   const handlePause = () => {
+    pauseRequestRef.current = true;
     setLocalAdjustmentDraft('pause');
     onOpenSheet('adjustment');
   };
@@ -662,8 +694,8 @@ export default function LongTermGoalDetailSheets({
     >
       <View style={styles.modalRoot}>
         <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={CLOSE_LABELS[activeSheet]}
+          accessible={false}
+          importantForAccessibility="no"
           onPress={onClose}
           style={styles.backdrop}
         />
@@ -927,6 +959,16 @@ const styles = StyleSheet.create({
     color: Colors.fgMuted,
     fontSize: 13,
     lineHeight: 18,
+  },
+  errorText: {
+    minHeight: 44,
+    marginTop: 8,
+    color: Colors.error,
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: '700',
+    textAlign: 'center',
+    textAlignVertical: 'center',
   },
   emptyState: {
     minHeight: 110,

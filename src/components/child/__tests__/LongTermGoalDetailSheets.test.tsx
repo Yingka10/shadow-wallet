@@ -1,5 +1,11 @@
 import React, { useState } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react-native';
 import type {
   GoalCompletionRecord,
   GoalPresentation,
@@ -119,6 +125,26 @@ describe('LongTermGoalDetailSheets', () => {
     });
   });
 
+  it('discards an unsaved review edit after close and reopen', () => {
+    const { props, rerender } = renderSheet('review');
+
+    fireEvent.changeText(
+      screen.getByPlaceholderText('想記下哪一本書或哪一段？'),
+      '還沒保留的內容',
+    );
+    expect(
+      screen.getByPlaceholderText('想記下哪一本書或哪一段？').props.value,
+    ).toBe('還沒保留的內容');
+
+    fireEvent.press(screen.getByLabelText('關閉週末回顧'));
+    rerender(<LongTermGoalDetailSheets {...props} activeSheet={null} />);
+    rerender(<LongTermGoalDetailSheets {...props} activeSheet="review" />);
+
+    expect(
+      screen.getByPlaceholderText('想記下哪一本書或哪一段？').props.value,
+    ).toBe('');
+  });
+
   it('saves an adjustment draft without claiming it was sent or applied', () => {
     const onSaveAdjustmentDraft = jest.fn();
     renderSheet('adjustment', { onSaveAdjustmentDraft });
@@ -134,6 +160,54 @@ describe('LongTermGoalDetailSheets', () => {
     expect(screen.queryByText('已通知家長')).toBeNull();
     expect(screen.queryByText('已套用')).toBeNull();
     expect(screen.queryByText('送出成功')).toBeNull();
+  });
+
+  it('discards unsaved adjustment edits and clears when the prop becomes null', () => {
+    const { props, rerender } = renderSheet('adjustment', {
+      adjustmentDraft: 'pause',
+    });
+
+    expect(
+      screen.getByRole('button', { name: '想先暫停一下' }).props
+        .accessibilityState,
+    ).toEqual(expect.objectContaining({ selected: true }));
+
+    rerender(
+      <LongTermGoalDetailSheets
+        {...props}
+        activeSheet="adjustment"
+        adjustmentDraft={null}
+      />,
+    );
+    expect(
+      screen.getByRole('button', { name: '想先暫停一下' }).props
+        .accessibilityState,
+    ).toEqual(expect.objectContaining({ selected: false }));
+
+    fireEvent.press(screen.getByRole('button', { name: '想調整每週次數' }));
+    rerender(
+      <LongTermGoalDetailSheets
+        {...props}
+        activeSheet={null}
+        adjustmentDraft={null}
+      />,
+    );
+    rerender(
+      <LongTermGoalDetailSheets
+        {...props}
+        activeSheet="adjustment"
+        adjustmentDraft={null}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: '想調整每週次數' }).props
+        .accessibilityState,
+    ).toEqual(expect.objectContaining({ selected: false }));
+    expect(
+      screen.getByRole('button', { name: '保留調整草稿' }).props
+        .accessibilityState,
+    ).toEqual(expect.objectContaining({ disabled: true }));
   });
 
   it('routes pause through adjustment and preselects pause without saving', () => {
@@ -182,6 +256,70 @@ describe('LongTermGoalDetailSheets', () => {
     await waitFor(() => {
       expect(onCorrectTimeWindow).toHaveBeenCalledWith('before_bed');
     });
+    expect(screen.getByText('睡前')).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: '睡前' }).props.accessibilityState,
+    ).toEqual(expect.objectContaining({ selected: true }));
+  });
+
+  it('keeps the confirmed record and announces an error when correction fails', async () => {
+    const onCorrectTimeWindow = jest.fn(async () => {
+      throw new Error('network unavailable');
+    });
+    renderSheet('record', { onCorrectTimeWindow });
+
+    fireEvent.press(screen.getByRole('button', { name: '睡前' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '更正失敗，請再試一次。',
+    );
+    expect(screen.getByText('晚餐後')).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: '晚餐後' }).props.accessibilityState,
+    ).toEqual(expect.objectContaining({ selected: true, disabled: false }));
+    expect(
+      screen.getByRole('button', { name: '睡前' }).props.accessibilityState,
+    ).toEqual(expect.objectContaining({ selected: false, disabled: false }));
+  });
+
+  it('syncs the confirmed record when completion props change', () => {
+    const { props, rerender } = renderSheet('record');
+
+    rerender(
+      <LongTermGoalDetailSheets
+        {...props}
+        completion={{ ...completion, planned_time_window: 'before_bed' }}
+      />,
+    );
+
+    expect(screen.getByText('睡前')).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: '睡前' }).props.accessibilityState,
+    ).toEqual(expect.objectContaining({ selected: true }));
+  });
+
+  it('disables correction choices and prevents duplicate calls while pending', async () => {
+    let resolveCorrection!: () => void;
+    const pendingCorrection = new Promise<void>((resolve) => {
+      resolveCorrection = resolve;
+    });
+    const onCorrectTimeWindow = jest.fn(() => pendingCorrection);
+    renderSheet('record', { onCorrectTimeWindow });
+
+    fireEvent.press(screen.getByRole('button', { name: '睡前' }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: '睡前' }).props.accessibilityState,
+      ).toEqual(expect.objectContaining({ disabled: true }));
+    });
+    fireEvent.press(screen.getByRole('button', { name: '睡前' }));
+    expect(onCorrectTimeWindow).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveCorrection();
+      await pendingCorrection;
+    });
   });
 
   it('does not invent a time window when the completion has none', () => {
@@ -199,9 +337,14 @@ describe('LongTermGoalDetailSheets', () => {
     const onOpenSheet = jest.fn();
     renderSheet('menu', { onClose, onOpenSheet });
 
-    fireEvent.press(screen.getByRole('button', { name: '查看計畫詳情' }));
+    const detailButton = screen.getByRole('button', { name: '查看計畫詳情' });
+    expect(detailButton.props.accessibilityHint).toBe(
+      '查看期間、完成方式與可以調整的內容',
+    );
+    fireEvent.press(detailButton);
     expect(onOpenSheet).toHaveBeenCalledWith('details');
 
+    expect(screen.getAllByLabelText('關閉長期任務選單')).toHaveLength(1);
     fireEvent.press(screen.getByLabelText('關閉長期任務選單'));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
