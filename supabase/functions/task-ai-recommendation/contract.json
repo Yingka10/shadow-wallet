@@ -1,0 +1,110 @@
+{
+  "_meta": {
+    "schemaVersion": 1,
+    "status": "DESIGN — 第八階段 B0，尚未部署",
+    "purpose": "client validator 與 server validator 共用的『資料』。演算法在兩邊各有一份實作，由 parity 測試釘住。",
+    "precedent": "與 supabase/functions/ai-proxy/coin-policy.json 相同做法：數字（資料）只有一份，演算法兩份。",
+    "syncedWith": "src/screens/parent/tablet/taskDrawer/taskAi/types.ts",
+    "syncTest": "src/screens/parent/tablet/taskDrawer/taskAi/__tests__/contractParity.test.ts"
+  },
+
+  "allowedFieldPaths": {
+    "title": "string",
+    "completionDescription": "string",
+    "taskDetails": "string",
+    "scopeDescription": "string",
+    "notes": "string",
+    "sessionMinutes": "number",
+    "durationDays": "number",
+    "weeklyFrequency": "number",
+    "reviewAfterDays": "number",
+    "supportSteps": "string[]",
+    "milestones": "string[]",
+    "responsibilityItems": "string[]"
+  },
+
+  "allowedSuggestionKinds": [
+    "clarify_title",
+    "clarify_completion",
+    "reduce_scope",
+    "adjust_duration",
+    "adjust_frequency",
+    "adjust_session_time",
+    "add_support_step",
+    "adjust_review_timing",
+    "preserve_child_choice",
+    "split_milestone",
+    "improve_feedback_language"
+  ],
+
+  "allowedBenefits": [
+    "clearer_expectation",
+    "more_age_appropriate",
+    "more_achievable",
+    "more_autonomy",
+    "easier_to_review",
+    "safer"
+  ],
+
+  "allowedConfidence": ["low", "medium", "high"],
+
+  "unavailableReasons": ["TIMEOUT", "INVALID_RESPONSE", "SERVICE_ERROR", "UNSAFE_OUTPUT"],
+
+  "immutableFields": [
+    "purposeCategory",
+    "durationType",
+    "source",
+    "rewardPolicy",
+    "completionPolicy",
+    "childId",
+    "familyId",
+    "presetFamilyId",
+    "presetVariantId",
+    "commandSchemaVersion",
+    "taskPolicyVersion",
+    "rewardPolicyVersion",
+    "presetCatalogVersion",
+    "coinAmount",
+    "rewardDecision",
+    "safetyPolicy",
+    "familyContributionEligibility",
+    "originalExpectation"
+  ],
+
+  "explicitlyForbiddenPaths": [
+    "rewardPolicy",
+    "reward_policy",
+    "coinAmount",
+    "coin_amount",
+    "rewardCoinAmount",
+    "reward.decision",
+    "reward.coin.finalAmount",
+    "coin",
+    "purposeCategory",
+    "durationType",
+    "source",
+    "completionPolicy",
+    "childId",
+    "familyId",
+    "originalExpectation"
+  ],
+
+  "limits": {
+    "maxSuggestions": 5,
+    "maxSummaryLength": 200,
+    "maxRationaleLength": 200,
+    "maxTextValueLength": 200,
+    "maxListItems": 8,
+    "maxListItemLength": 100,
+    "maxMinutes": 180,
+    "maxDurationDays": 365,
+    "maxWeeklyFrequency": 7,
+    "maxReviewAfterDays": 365,
+    "maxIdLength": 64
+  },
+
+  "timeouts": {
+    "geminiRequestMs": 12000,
+    "totalHandlerMs": 15000
+  }
+}
