@@ -58,6 +58,8 @@ import type {
   TaskRewardDecision,
 } from '../taskReward/types';
 import { LocalOnlyNotice, PolicyNotice, ReadOnlyOutcomeList } from './EditorControls';
+import { RuleFindingsSection, TaskAiSection, type TaskAiSectionProps } from './TaskAiSection';
+import type { TaskRuleFinding } from '../taskAi';
 
 function weekdayText(days: number[]): string {
   if (days.length === 0) return '尚未選擇';
@@ -255,6 +257,8 @@ export function DraftReview({
   variant,
   draft,
   decision,
+  ruleFindings = [],
+  ai,
 }: {
   family: TaskPresetFamily;
   variant: TaskPresetVariant;
@@ -265,6 +269,10 @@ export function DraftReview({
    * 顯示一份「還沒定案」的金額比不顯示更糟。
    */
   decision: TaskRewardDecision | null;
+  /** deterministic 規則引擎的結果。**AI 不得產生這些。** */
+  ruleFindings?: readonly TaskRuleFinding[];
+  /** 省略 = 不顯示 AI 區塊（例如尚未注入服務）。 */
+  ai?: TaskAiSectionProps;
 }) {
   const growth = isGrowthPlanDraft(draft) ? draft : null;
   const support = isShortSupportDraft(draft) ? draft : null;
@@ -430,6 +438,14 @@ export function DraftReview({
         <LocalOnlyNotice>{LOCAL_ONLY_WEEKLY_FREQUENCY}</LocalOnlyNotice>
       ) : null}
       {once ? <LocalOnlyNotice>{LOCAL_ONLY_SCHEDULED_DATE}</LocalOnlyNotice> : null}
+
+      {/*
+        順序是刻意的：規則檢查在 AI 建議之前。
+        家長先看到「這件事不能這樣做」，再看到「這件事可以怎麼更好」——
+        反過來的話，會出現「採用了三項建議，結果還是不能建立」。
+      */}
+      <RuleFindingsSection findings={ruleFindings} />
+      {ai ? <TaskAiSection {...ai} /> : null}
 
       {decision ? <RewardDecisionBlock decision={decision} /> : null}
 
