@@ -179,3 +179,72 @@ Deno.test('違規位置會帶上建議 id，稽核時分得出是哪一則', () 
   assert(hit !== null, '應該要抓到');
   assertEquals(hit?.where, 'bad-1.suggestedValue');
 });
+
+// ---------------------------------------------------------------------------
+// B2A.5 — 共現片語
+// ---------------------------------------------------------------------------
+//
+// B2A 的 red-team 量化了關鍵字層的缺口：「清理瓦斯爐」擋得住，
+// 「把煮東西的檯面擦乾淨」擋不住。5 種同義說法有 4 種通過。
+//
+// 對那個缺口，補一堆寬泛的單詞（「廚房」「爐子」「檯面」）是輸的一方：
+// 它會擋掉「幫忙擦餐桌」「整理書架」這類核心任務，
+// 然後有人把整層關掉。所以這裡加的是**共現**條件 ——
+// 要同時出現「加熱動作」與「那個東西」才算。
+//
+// ⚠️ 這不是完整的語意安全。第五種說法仍然會漏。
+// 真正的第一道防線是 eligibility 把 A／B 類整個排除在外。
+
+Deno.test('B2A 漏掉的四種同義說法現在都被擋下', () => {
+  const bypasses = [
+    ['加熱設備', '收拾時把加熱設備的外殼擦一擦'],
+    ['烹煮用的檯面', '把煮東西的檯面擦乾淨'],
+    ['爐架', '把烤箱裡的金屬架拿出來刷洗'],
+    ['加熱中的鍋具', '負責把煮完的鍋子洗好'],
+  ];
+
+  for (const [name, text] of bypasses) {
+    const violation = findSafetyViolation({
+      ageGroup: '6-9',
+      summary: '一些可以更清楚的地方。',
+      suggestions: [suggestion({ suggestedValue: text })],
+    });
+    // Boolean(violation) 而不是 `!== undefined`：這個函式安全時回的是 null，
+    // 拿 undefined 去比會讓整條斷言恆真 —— 一條永遠綠的測試比沒有測試更糟。
+    assertEquals({ name, blocked: Boolean(violation) }, { name, blocked: true });
+  }
+});
+
+Deno.test('共現條件成立才擋 —— 沒有加熱語境的同一個詞照常通過', () => {
+  // 這一組是這個做法的全部價值所在。擋掉它們的安全層會被關掉。
+  const safe = [
+    ['洗鍋子（沒有加熱語境）', '練習完把鍋子洗乾淨放回櫃子'],
+    ['書架（沒有烹煮語境）', '自己整理書桌和書架'],
+    ['擦桌子', '吃完飯把餐桌擦乾淨'],
+    ['廚房一般協助', '幫忙把買回來的東西放進冰箱'],
+    ['收碗筷', '把自己的碗筷拿到水槽'],
+    ['金屬（無關語境）', '把金屬水壺洗乾淨'],
+  ];
+
+  for (const [name, text] of safe) {
+    const violation = findSafetyViolation({
+      ageGroup: '6-9',
+      summary: '一些可以更清楚的地方。',
+      suggestions: [suggestion({ suggestedValue: text })],
+    });
+    assertEquals(
+      { name, blocked: Boolean(violation), term: violation?.matchedTerm ?? '' },
+      { name, blocked: false, term: '' },
+    );
+  }
+});
+
+Deno.test('分齡的片語只對小年齡生效', () => {
+  const text = '自己拿銳利的工具把包裝拆開';
+  const young = findSafetyViolation({
+    ageGroup: '4-6',
+    summary: 'x',
+    suggestions: [suggestion({ suggestedValue: text })],
+  });
+  assertEquals(Boolean(young), true, '4-6 歲應該擋下');
+});

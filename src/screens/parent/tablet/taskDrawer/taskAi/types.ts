@@ -253,11 +253,27 @@ export type TaskAiSuggestion = {
   confidence: TaskAiConfidence;
 };
 
+/**
+ * 為什麼 `NOT_ELIGIBLE` 與 `SERVICE_DISABLED` 是 reason 而不是新的 status：
+ *
+ * `TaskAiSection` 對 status 做窮舉，多一個 status 就要動 UI，
+ * 而 UI 的分支越多、家長越搞不清楚「AI 到底出了什麼事」。
+ * 這兩件事對家長的意義和其他 unavailable 完全一樣 ——
+ * **沒有建議，但不影響任務建立** —— 所以放在同一個 status 底下。
+ *
+ * 分開記的價值在 log 與稽核：「這種任務第一版不開放」和「服務掛了」
+ * 需要不同的處置，混成一個 SERVICE_ERROR 會讓前者看起來像故障，
+ * 於是有人去修一個沒有壞的東西。
+ *
+ * ⚠️ `NOT_ELIGIBLE` 不是錯誤。它是預期中的正常結果。
+ */
 export type TaskAiUnavailableReason =
   | 'TIMEOUT'
   | 'INVALID_RESPONSE'
   | 'SERVICE_ERROR'
-  | 'UNSAFE_OUTPUT';
+  | 'UNSAFE_OUTPUT'
+  | 'NOT_ELIGIBLE'
+  | 'SERVICE_DISABLED';
 
 export type TaskAiRecommendationResult =
   | {

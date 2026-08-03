@@ -20,10 +20,25 @@ import { assert, assertEquals } from './assert.ts';
 import { validateModelOutput } from '../outputValidator.ts';
 import { validateTaskAiInput } from '../inputValidator.ts';
 import { CASES, EDGE_CASES, TASKS, serverStatusOf, type FixtureExpect } from './fixtures.ts';
-import type { AgeGroup } from '../contract.ts';
+import { ALLOWED_FIELD_PATHS, CONTRACT, type AgeGroup } from '../contract.ts';
+
+/**
+ * parity 比的是**全域契約**，所以這裡一律傳全域 allowlist。
+ *
+ * 這不是偷懶：App 端的 validator 根本沒有 eligibility 的概念 ——
+ * 它看不到 editorKind，也不該看到。用窄清單去跑 parity 會比出
+ * 「App 比 server 寬鬆」這個假的漂移，而真正的窄化在 eligibility_test.ts 測。
+ */
+function validateGlobal(raw: unknown, ageGroup: AgeGroup) {
+  return validateModelOutput(raw, {
+    ageGroup,
+    allowedFieldPaths: ALLOWED_FIELD_PATHS,
+    allowedSuggestionKinds: CONTRACT.allowedSuggestionKinds,
+  });
+}
 
 function conclusion(raw: unknown, ageGroup: AgeGroup): { status: string; reason?: string } {
-  const { result } = validateModelOutput(raw, ageGroup);
+  const { result } = validateGlobal(raw, ageGroup);
   return result.status === 'unavailable'
     ? { status: result.status, reason: result.reason }
     : { status: result.status };
@@ -67,7 +82,7 @@ Deno.test('30b. validator 行為案例（edgeCases）', () => {
 Deno.test('所有 immutable_violation 一律整批拒絕，一張卡都不留', () => {
   for (const c of CASES.filter((x) => x.kind === 'immutable_violation')) {
     const task = TASKS.find((t) => t.id === c.taskId)!;
-    const { result } = validateModelOutput(c.modelOutput, task.input.childContext.ageGroup);
+    const { result } = validateGlobal(c.modelOutput, task.input.childContext.ageGroup);
     assertEquals(
       { id: c.id, status: result.status, kept: result.suggestions.length },
       { id: c.id, status: 'unavailable', kept: 0 },
@@ -81,7 +96,7 @@ Deno.test('所有 prompt_injection 都被擋下 —— 包含 B0 標成 knownGap
 
   for (const c of injections) {
     const task = TASKS.find((t) => t.id === c.taskId)!;
-    const { result } = validateModelOutput(c.modelOutput, task.input.childContext.ageGroup);
+    const { result } = validateGlobal(c.modelOutput, task.input.childContext.ageGroup);
     assertEquals(
       { id: c.id, status: result.status },
       { id: c.id, status: 'unavailable' },
@@ -97,7 +112,7 @@ Deno.test('injection-06 從 knownGap 變成被 contentSafety 擋下', () => {
   assertEquals(c.serverOnlySafety, true, 'fixture 應該標明這是 server 多擋的一層');
 
   const task = TASKS.find((t) => t.id === c.taskId)!;
-  const { result, rejection } = validateModelOutput(c.modelOutput, task.input.childContext.ageGroup);
+  const { result, rejection } = validateGlobal(c.modelOutput, task.input.childContext.ageGroup);
 
   assertEquals(result.status, 'unavailable');
   assertEquals(result.status === 'unavailable' ? result.reason : '', 'UNSAFE_OUTPUT');
@@ -123,7 +138,7 @@ Deno.test('serverOnlySafety 的案例：App 端會放行，server 端擋下 —�
 Deno.test('valid_suggestions 與 no_change 不會被任何一層誤擋', () => {
   for (const c of CASES.filter((x) => x.kind === 'valid_suggestions' || x.kind === 'no_change')) {
     const task = TASKS.find((t) => t.id === c.taskId)!;
-    const { result } = validateModelOutput(c.modelOutput, task.input.childContext.ageGroup);
+    const { result } = validateGlobal(c.modelOutput, task.input.childContext.ageGroup);
     assertEquals({ id: c.id, status: result.status }, { id: c.id, status: c.expect.status });
   }
 });

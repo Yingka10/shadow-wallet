@@ -63,6 +63,14 @@ function stripFence(raw: string): string {
 export async function requestRecommendation(args: {
   apiKey: string;
   input: ValidatedInput;
+  /**
+   * 這一次可以被建議修改的欄位（由 eligibility 算出）。
+   *
+   * 省略就用全域 allowlist —— 那只在測試裡合理。正式路徑一律明確傳入：
+   * 讓模型看到一份**更窄**的清單，是為了讓它少產出注定會被
+   * outputValidator 丟掉的建議，不是為了取代那一層。
+   */
+  allowedFieldPaths?: readonly string[];
   model?: string;
   fetchImpl?: FetchLike;
   timeoutMs?: number;
@@ -85,7 +93,7 @@ export async function requestRecommendation(args: {
         'content-type': 'application/json',
         'x-goog-api-key': args.apiKey,
       },
-      body: JSON.stringify(buildGeminiRequestBody(args.input)),
+      body: JSON.stringify(buildGeminiRequestBody(args.input, args.allowedFieldPaths)),
       signal: controller.signal,
     });
 

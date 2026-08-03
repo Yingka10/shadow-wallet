@@ -254,6 +254,47 @@ schema 不知道瓦斯爐是什麼。這是 client validator 不能取代 server
 
 ---
 
+## 第八階段 B2A.5 的擴充
+
+### 兩個新的 unavailable reason
+
+| reason | 意思 | 對家長 | 對我們 |
+|---|---|---|---|
+| `NOT_ELIGIBLE` | 這種任務第一版不開放 AI 建議 | 和其他 unavailable 完全一樣 | **不是錯誤**，是預期結果 |
+| `SERVICE_DISABLED` | 總開關被關掉 | 同上 | 是我們主動關的，不是它掛了 |
+
+**刻意加在 reason 而不是新增 status。** `TaskAiSection` 對 status 做窮舉，
+多一個 status 就要動 UI，而 UI 分支越多、家長越搞不清楚 AI 到底出了什麼事。
+這兩件事對家長的意義和其他 unavailable 一樣 —— 沒有建議，但不影響任務建立。
+分開記的價值在 log：「這種任務不開放」和「服務掛了」需要不同的處置，
+混成一個 `SERVICE_ERROR` 會讓前者看起來像故障，於是有人去修一個沒有壞的東西。
+
+限流走 **HTTP 429 + error envelope**（`code: "rate_limited"`，帶 `retryAfterSeconds`
+與 `Retry-After` header），不佔用 reason —— 那是**呼叫端該改變行為**的情況，
+和「AI 這次沒有建議」不一樣。
+
+### 使用範圍（context allowlist）
+
+`contract.json` 的 `eligibility` 區塊定義「哪種任務可以送、可以改哪些欄位」。
+它永遠是全域 allowlist 的**子集**，只能更窄。
+
+Server output validator 因此檢查**三層**，不是一層：
+
+1. 全域 `allowedFieldPaths`（這個欄位存不存在）
+2. 這次的 context allowlist（這種任務有沒有這個欄位）
+3. `suggestionKindFieldPaths`（kind 與 fieldPath 相不相符）
+
+第 3 點是 staging 實測長出來的：第一次真實呼叫，模型回了
+`kind: "add_support_step"` 搭 `fieldPath: "taskDetails"` —— 兩個分開看都合法。
+但 **App 依 fieldPath 決定改哪裡，依 kind 決定畫面上寫什麼**：
+不相符等於家長看到「新增支援步驟」，按下去改的是任務細節。
+那不是文案瑕疵，是家長在不知情的情況下同意了另一件事。
+
+⚠️ 這三層**都在 server**。prompt 也會列出這次的窄清單與 kind 配對，
+但那是「請求」不是「規則」——  prompt 少說一句話不會讓 validator 放行。
+
+---
+
 ## 未來的 Gemini adapter
 
 介面已經定好，接上去只需要一個實作 `TaskAiRecommendationService` 的 class

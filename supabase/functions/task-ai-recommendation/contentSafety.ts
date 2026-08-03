@@ -101,6 +101,68 @@ export const DELIBERATELY_NOT_HAZARDS = [
   '餐桌', '廚房', '碗筷', '餐具', '抹布', '垃圾', '水槽', '擦桌子', '掃地', '洗碗',
 ] as const;
 
+// ─────────────────────────────────────────────────────────────────────────
+// Phrase patterns —— B2A 發現的同義繞過
+//
+// 單詞比對擋得住「瓦斯爐」，擋不住「煮東西的檯面」。
+// 但解法**不是**把「廚房」「爐子」加進單詞清單 —— 那會擋掉
+// 「擦餐桌」「開飯前擺好碗筷」，然後整層會被關掉。
+//
+// 這裡改用**共現**：危險語境詞 ＋ 危險物件，而且要求兩者靠得夠近。
+// 「洗鍋子」不會命中（沒有加熱語境），「煮飯時幫忙顧著鍋子」會。
+//
+// ⚠️ 這仍然不是完整的語意安全。它把已知的四種說法補起來，
+// 不代表第五種說法會被擋。真正的第一道防線是 eligibility ——
+// 家庭角色與家庭參與類任務根本不會送到 Gemini。
+// ─────────────────────────────────────────────────────────────────────────
+
+type PhrasePattern = { code: string; appliesTo: 'all' | 'young'; pattern: RegExp; label: string };
+
+const PHRASE_PATTERNS: readonly PhrasePattern[] = [
+  {
+    code: 'FIRE_AND_GAS',
+    appliesTo: 'all',
+    // 「煮東西的檯面」「煮飯的台面」——「檯面」本身無害，煮＋檯面才是爐台。
+    pattern: /(煮|炒|燉|煎|加熱)[^。，、]{0,6}[檯台]面/,
+    label: '烹煮用的檯面',
+  },
+  {
+    code: 'FIRE_AND_GAS',
+    appliesTo: 'all',
+    // 「上面那圈金屬架」—— 要求與烹煮／加熱語境共現，書架不會命中。
+    pattern: /(爐|烤|煮|炒|加熱)[^。]{0,12}金屬架|金屬架[^。]{0,12}(爐|烤|煮|炒|加熱)/,
+    label: '爐架',
+  },
+  {
+    code: 'FIRE_AND_GAS',
+    appliesTo: 'all',
+    // 「加熱食物的那台機器」
+    pattern: /(加熱|保溫|烹煮)[^。，、]{0,8}(機器|設備|器具|那台)/,
+    label: '加熱設備',
+  },
+  {
+    code: 'HOT_LIQUID_AND_OIL',
+    appliesTo: 'all',
+    // 「煮飯時幫忙顧著鍋子」——「洗鍋子」沒有加熱語境，不命中。
+    pattern: /(煮|炒|燉|煎|加熱|燒)[^。，、]{0,8}鍋/,
+    label: '加熱中的鍋具',
+  },
+  {
+    code: 'SHARP_TOOLS',
+    appliesTo: 'young',
+    // 「抽屜裡那個銳利的工具」
+    pattern: /(銳利|鋒利|尖銳)[^。，、]{0,6}(工具|器具|東西|物品)/,
+    label: '銳利器具',
+  },
+  {
+    code: 'SHARP_TOOLS',
+    appliesTo: 'young',
+    // 「把水果處理成小塊」這種迂迴說法，需與器具共現才算。
+    pattern: /(切|剁|削)[^。，、]{0,6}(食材|蔬菜|水果|肉)/,
+    label: '切食材',
+  },
+];
+
 export type SafetyViolation = { code: string; matchedTerm: string; where: string };
 
 /**
@@ -120,6 +182,8 @@ function hazardApplies(hazard: Hazard, ageGroup: AgeGroup): boolean {
 
 function scan(text: string, where: string, ageGroup: AgeGroup): SafetyViolation | null {
   const normalized = normalize(text);
+
+  // 先比對單詞：命中時能講出是哪一個詞，稽核上比 regex 好讀。
   for (const hazard of HAZARDS) {
     if (!hazardApplies(hazard, ageGroup)) continue;
     for (const term of hazard.terms) {
@@ -128,6 +192,15 @@ function scan(text: string, where: string, ageGroup: AgeGroup): SafetyViolation 
       }
     }
   }
+
+  // 再比對片語：單詞漏掉的同義說法在這裡。
+  for (const phrase of PHRASE_PATTERNS) {
+    if (phrase.appliesTo === 'young' && ageGroup === '9-12') continue;
+    if (phrase.pattern.test(normalized)) {
+      return { code: phrase.code, matchedTerm: phrase.label, where };
+    }
+  }
+
   return null;
 }
 
@@ -181,6 +254,55 @@ export function findSafetyViolation(args: {
   for (const suggestion of args.suggestions) {
     const hit = validateTaskAiSuggestionSafety({ ageGroup: args.ageGroup, suggestion });
     if (hit) return { ...hit, where: `${suggestion.id}.${hit.where}` };
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Input 端的掃描
+// ---------------------------------------------------------------------------
+
+/**
+ * 草稿本身就寫著危險操作時，**不要送給 AI**。
+ *
+ * 這不是為了保護模型，是為了不讓它幫忙把一句模糊的危險描述
+ * **改寫得更具體、更可執行**。「幫忙顧一下爐子」已經不好，
+ * 「先把火轉小，等冒煙再關掉」更糟 —— 而那正是這個功能擅長的事。
+ *
+ * 掃的是家長輸入的自由文字。`scheduleSummary` 與 `selectedOptions`
+ * 是我們自己組出來的，不掃。
+ */
+export function scanInputForHighRisk(input: {
+  childContext: { ageGroup: AgeGroup };
+  parentIntent: { originalExpectation: string };
+  currentDraft: {
+    title: string;
+    completionDescription: string;
+    supportSteps?: string[];
+    milestones?: string[];
+    responsibilities?: string[];
+  };
+}): SafetyViolation | null {
+  const ageGroup = input.childContext.ageGroup;
+
+  const fields: Array<[string, string]> = [
+    ['parentIntent.originalExpectation', input.parentIntent.originalExpectation],
+    ['currentDraft.title', input.currentDraft.title],
+    ['currentDraft.completionDescription', input.currentDraft.completionDescription],
+  ];
+
+  const lists: Array<[string, string[] | undefined]> = [
+    ['currentDraft.supportSteps', input.currentDraft.supportSteps],
+    ['currentDraft.milestones', input.currentDraft.milestones],
+    ['currentDraft.responsibilities', input.currentDraft.responsibilities],
+  ];
+  for (const [name, list] of lists) {
+    (list ?? []).forEach((item, i) => fields.push([`${name}[${i}]`, item]));
+  }
+
+  for (const [where, text] of fields) {
+    const hit = scan(text, where, ageGroup);
+    if (hit) return hit;
   }
   return null;
 }

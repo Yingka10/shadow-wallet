@@ -30,6 +30,7 @@ type ContractShape = {
   unavailableReasons: readonly string[];
   immutableFields: readonly string[];
   explicitlyForbiddenPaths: readonly string[];
+  suggestionKindFieldPaths: Record<string, readonly string[]>;
   limits: {
     maxSuggestions: number;
     maxSummaryLength: number;
@@ -42,8 +43,26 @@ type ContractShape = {
     maxWeeklyFrequency: number;
     maxReviewAfterDays: number;
     maxIdLength: number;
+    /** prompt 要求的上限。**刻意小於 maxSuggestions** —— 見 prompt.ts。 */
+    promptMaxSuggestions: number;
   };
   timeouts: { geminiRequestMs: number; totalHandlerMs: number };
+  eligibility: {
+    allowedPurposeCategories: readonly string[];
+    allowedEditorKinds: readonly string[];
+    deniedEditorKinds: readonly string[];
+    baseFieldPaths: readonly string[];
+    extraFieldPathsByEditorKind: Record<string, readonly string[]>;
+    neverAllowedFieldPaths: readonly string[];
+    minimumContext: { minTitleLength: number; minOriginalExpectationLength: number };
+  };
+  rateLimit: {
+    defaultPer10Minutes: number;
+    defaultPerDay: number;
+    maxPer10Minutes: number;
+    maxPerDay: number;
+    bucketTypes: readonly string[];
+  };
 };
 
 // JSON 的推導型別把每個鍵變成字面量，沒辦法用變數索引。
@@ -59,7 +78,23 @@ export const TIMEOUTS = CONTRACT.timeouts;
 // 輸出
 // ---------------------------------------------------------------------------
 
-export type UnavailableReason = 'TIMEOUT' | 'INVALID_RESPONSE' | 'SERVICE_ERROR' | 'UNSAFE_OUTPUT';
+/**
+ * `NOT_ELIGIBLE` 與 `SERVICE_DISABLED` 是 B2A.5 新增的。
+ *
+ * 刻意加在 reason 上而**不是**新增一個 status：App 端的 `TaskAiSection`
+ * 對 status 做窮舉，多一個 status 就得改 UI，而本輪不接 UI。
+ * 加在 reason 上兩端都相容 —— 家長看到的字沒變、development 才顯示代碼、
+ * 而 log 分得出「不適用」與「服務掛了」。
+ *
+ * `NOT_ELIGIBLE` 不是錯誤，是一個正常且預期的結果。
+ */
+export type UnavailableReason =
+  | 'TIMEOUT'
+  | 'INVALID_RESPONSE'
+  | 'SERVICE_ERROR'
+  | 'UNSAFE_OUTPUT'
+  | 'NOT_ELIGIBLE'
+  | 'SERVICE_DISABLED';
 
 export type Suggestion = {
   id: string;

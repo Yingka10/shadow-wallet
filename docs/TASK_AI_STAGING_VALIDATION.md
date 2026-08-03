@@ -1,8 +1,14 @@
 # task-ai-recommendation｜Staging 驗證紀錄
 
 > 第八階段 B2A。**已部署到 staging 並以真實 Gemini 驗證。**
-> **尚未接 UI、尚未部署 production、尚未具備 rate limit。**
+> **尚未接 UI、尚未部署 production。**
 > 本文件不含 key、token、完整 prompt、raw Gemini output、真實個資或 production ref。
+>
+> ⚠️ **B2A.5 之後有數項已經改變**，以 `TASK_AI_PRODUCTION_READINESS.md` 為準：
+> 限流已完成並套用到 staging（本文件原本寫「尚未具備」）；
+> timeout 現值為 20000 而非 12000；
+> 六種 Demo 任務有三種因使用範圍閘門而不再呼叫 Gemini。
+> 本文件保留 B2A 當下的紀錄不做改寫 —— 它是那一輪的證據，不是現況說明。
 
 | | |
 |---|---|
@@ -317,3 +323,77 @@ CORS：`Access-Control-Allow-Origin: *`，**沒有** `Allow-Credentials`。
 | `ParentHomeTablet` 的兩條舊 AI 幣值路徑 | ❌ 未修改，仍排在 B3 |
 | rate limit | ❌ 見上 |
 | 付費方案 | ❌ 見上 |
+
+
+---
+
+## 11. B2A.5 追加驗證（2026-08-03）
+
+同一個 staging 專案（`growbook-staging`，ref 與 production 不同，已於每次遠端寫入前確認）。
+
+### 部署與資料庫
+
+| 項目 | 結果 |
+|---|---|
+| Function 重新部署 | ✅ 只有 `task-ai-recommendation` |
+| Migration `20260803000000_task_ai_rate_limit` | ✅ dry-run 確認**只有這一支待推**，之後套用 |
+| production | 未觸碰：無部署、無 secret、無 SQL、無 migration |
+
+`supabase db push` **沒有 `--project-ref` 旗標**（只有 `--linked`）。
+因此每次遠端寫入前都先跑 `supabase projects list` 確認 linked 專案是
+`growbook-staging`，再執行。這是 CLI 的限制，不是省略。
+
+套用後查到的權限狀態：
+
+```
+table exists / RLS enabled / policies = 0 / SECURITY DEFINER = yes
+authenticated 可 EXECUTE 函式 = yes
+authenticated 可 SELECT 表    = no
+```
+
+### 協定檢查（不消耗模型呼叫）
+
+| 情境 | 結果 |
+|---|---|
+| 沒有 token | HTTP 401 |
+| 偽造 token | HTTP 401 |
+| body 不是預期結構 | HTTP 400 |
+| 含禁止欄位（`childNickname`） | HTTP 400 |
+| 不符合資格的任務（餐後整理） | HTTP 200 + `NOT_ELIGIBLE` |
+
+最後一列同時驗證了 §九 的執行順序：它在**限流之前**返回，
+所以不符合資格的請求不會扣掉家長的額度。
+
+### fail-closed 的實測
+
+Function 部署完成、migration 尚未套用的那段時間，三個合格任務全部回
+`SERVICE_ERROR`，延遲 680–764ms —— 遠低於任何一次真實 Gemini 呼叫（8 秒起跳）。
+**限流查不動時確實沒有放行。** 這一段不是模擬，是真的發生過的部署順序。
+
+### 端到端（真實 Gemini）
+
+migration 套用後：
+
+| 任務 | 結果 | 延遲 |
+|---|---|---|
+| 完成學校作業 | suggestions（1 則） | 10,073ms |
+| 運動練習 | **TIMEOUT**（當時 12 秒） | 12,793ms |
+| 每週閱讀計畫 | suggestions（2 則） | 8,111ms |
+
+建議數都在 3 則以內，fieldPath 都落在該任務開放的範圍內。
+
+**這一輪抓到一個 validator 缺口**：學校作業那一則回的是
+`kind: "add_support_step"` 搭 `fieldPath: "taskDetails"`。當時的 validator
+分開檢查兩個欄位，因此放行。已修正為強制配對（見契約文件），
+並連帶發現 `taskDetails` 原本沒有任何 kind 指得到它 —— 一個永遠不會被建議的欄位。
+
+### 逾時基準
+
+見 `TASK_AI_PRODUCTION_READINESS.md` 第五節（6 筆樣本，含三個候選值的成功數）。
+**可用樣本只有 4 筆，算不出百分位數**，測試腳本因此拒絕輸出 p95。
+
+### 這一輪**沒有**做的事
+
+- 沒有跑新一輪 red-team（配額用在 E2E 與延遲量測上）
+- **沒有人工檢視 Dashboard 的 log。** CLI 沒有 `functions logs`，我看不到那個畫面，
+  所以逾時基準第 1 筆的 `SERVICE_ERROR`（3.5 秒返回）是 429 還是 5xx 目前不明

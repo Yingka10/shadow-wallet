@@ -169,7 +169,10 @@ export function validateTaskAiRecommendationResult(raw: unknown): TaskAiRecommen
 
   if (status === 'unavailable') {
     const reason = raw.reason;
-    const known: readonly string[] = ['TIMEOUT', 'INVALID_RESPONSE', 'SERVICE_ERROR', 'UNSAFE_OUTPUT'];
+    const known: readonly string[] = [
+      'TIMEOUT', 'INVALID_RESPONSE', 'SERVICE_ERROR', 'UNSAFE_OUTPUT',
+      'NOT_ELIGIBLE', 'SERVICE_DISABLED',
+    ];
     if (typeof reason !== 'string' || !known.includes(reason)) return unavailable('INVALID_RESPONSE');
     return unavailable(reason as TaskAiUnavailableReason);
   }

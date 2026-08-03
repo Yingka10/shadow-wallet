@@ -19,7 +19,7 @@
 // 但至少不會變成「設成 0 之後每個請求立刻失敗」。
 // ─────────────────────────────────────────────────────────────────────────
 
-import { TIMEOUTS } from './contract.ts';
+import { CONTRACT, TIMEOUTS } from './contract.ts';
 
 /**
  * 逾時的合法範圍。
@@ -104,4 +104,103 @@ export function resolveModel(raw: string | undefined | null): ModelResolution {
   }
 
   return { model: trimmed, source: 'env' };
+}
+
+// ---------------------------------------------------------------------------
+// 總開關
+// ---------------------------------------------------------------------------
+//
+// 為什麼需要一個開關：這條路徑會花錢，而且會把家長輸入送給第三方模型。
+// 出事的時候（帳單異常、red-team 發現新的繞過方式、Google 那邊改行為）
+// 需要一個**幾秒內就能關掉**的方法，而不是等一次 redeploy。
+//
+// `supabase secrets set TASK_AI_ENABLED=false` 幾秒生效，不需要動程式碼、
+// 不需要 review、不需要在半夜找人 approve PR。
+//
+// 關掉之後回的是 `unavailable / SERVICE_DISABLED`（HTTP 200），不是 5xx：
+// 對家長來說「AI 現在沒有建議」和「AI 壞了」是同一件事 —— 都不影響建立任務 ——
+// 但對我們來說「是我們主動關的」和「它自己掛了」完全不同，
+// 所以 log 分得出來。
+
+export type FeatureSwitch = {
+  enabled: boolean;
+  source: 'default' | 'env' | 'env_invalid';
+};
+
+const TRUE_VALUES = ['true', '1', 'on', 'enabled'];
+const FALSE_VALUES = ['false', '0', 'off', 'disabled'];
+
+/**
+ * 解析 `TASK_AI_ENABLED`。
+ *
+ * 沒設定 = 開啟。這樣既有部署不會因為少一個變數就整個功能消失。
+ *
+ * **設了但看不懂 = 關閉。** 這是刻意的不對稱：沒設定代表「沒有人表達意見」，
+ * 設成 `flase` 代表「有人正在試圖控制這個開關」——
+ * 而在那個當下猜錯的代價是不對等的（誤關只是少了建議，誤開是繼續花錢
+ * 或繼續送出我們正想停掉的請求）。
+ */
+export function resolveFeatureEnabled(raw: string | undefined | null): FeatureSwitch {
+  const trimmed = raw?.trim().toLowerCase();
+  if (!trimmed) return { enabled: true, source: 'default' };
+  if (TRUE_VALUES.includes(trimmed)) return { enabled: true, source: 'env' };
+  if (FALSE_VALUES.includes(trimmed)) return { enabled: false, source: 'env' };
+  return { enabled: false, source: 'env_invalid' };
+}
+
+// ---------------------------------------------------------------------------
+// 限流額度
+// ---------------------------------------------------------------------------
+//
+// ⚠️ 這裡的數字是**暫定值，未經產品驗證**。它們的來源是「一個家長在
+// 一次任務編輯裡合理會按幾次」的直覺，不是使用資料。
+// 真實值要等有人真的用過才知道。詳見 docs/TASK_AI_PRODUCTION_READINESS.md。
+//
+// **不在程式裡硬編 Gemini 的每日配額。** 那個數字屬於帳戶方案，
+// 不屬於這支 Function —— 寫進來只會在方案改變時變成一個沒有人記得的謊言。
+
+export type RateLimitConfig = {
+  per10Minutes: number;
+  perDay: number;
+  source: 'default' | 'env' | 'env_clamped' | 'env_invalid';
+};
+
+function resolveCount(
+  raw: string | undefined | null,
+  fallback: number,
+  max: number,
+): { value: number; source: FeatureSwitch['source'] | 'env_clamped' } {
+  if (raw === undefined || raw === null || raw.trim() === '') {
+    return { value: fallback, source: 'default' };
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+    return { value: fallback, source: 'env_invalid' };
+  }
+  if (parsed > max) return { value: max, source: 'env_clamped' };
+  return { value: parsed, source: 'env' };
+}
+
+/**
+ * 解析兩個視窗的額度上限。
+ *
+ * 上限夾在契約的 `maxPer10Minutes` / `maxPerDay`：一個手滑打成 6000 的
+ * 環境變數不該等於「沒有限流」。同樣的夾制在 SQL 那邊**又做了一次** ——
+ * 不是重複，是因為那支 RPC 可以被 authenticated 直接呼叫，
+ * 它不能相信參數是這裡送來的。
+ */
+export function resolveRateLimit(
+  raw10: string | undefined | null,
+  rawDay: string | undefined | null,
+): RateLimitConfig {
+  const limits = CONTRACT.rateLimit;
+  const a = resolveCount(raw10, limits.defaultPer10Minutes, limits.maxPer10Minutes);
+  const b = resolveCount(rawDay, limits.defaultPerDay, limits.maxPerDay);
+
+  // 兩個來源不同時，回報比較「值得注意」的那一個：
+  // 設錯 > 被夾 > 有設 > 預設。log 只有一個欄位，要留給最需要被看到的事。
+  const rank = { env_invalid: 3, env_clamped: 2, env: 1, default: 0 } as const;
+  const source = rank[a.source] >= rank[b.source] ? a.source : b.source;
+
+  return { per10Minutes: a.value, perDay: b.value, source };
 }

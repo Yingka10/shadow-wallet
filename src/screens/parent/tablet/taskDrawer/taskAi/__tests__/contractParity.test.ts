@@ -58,10 +58,27 @@ describe('contract.json 與 App 端型別一致', () => {
     }
   });
 
-  it('unavailable 的四種原因相同', () => {
+  it('unavailable 的原因相同', () => {
     expect(contract.unavailableReasons).toEqual([
       'TIMEOUT', 'INVALID_RESPONSE', 'SERVICE_ERROR', 'UNSAFE_OUTPUT',
+      // B2A.5 新增。刻意加在 reason 而非 status —— 理由見 types.ts。
+      'NOT_ELIGIBLE', 'SERVICE_DISABLED',
     ]);
+  });
+
+  it('契約列出的每個 reason，App validator 都收得下', () => {
+    // 這條測的是「server 回了一個 App 不認得的 reason」這個失敗。
+    // 那種情況 App 會把它降級成 INVALID_RESPONSE —— 於是「這種任務
+    // 第一版不開放」在 log 裡看起來像「模型壞掉」。
+    for (const reason of contract.unavailableReasons) {
+      const result = validateTaskAiRecommendationResult({
+        status: 'unavailable', schemaVersion: 1, reason, suggestions: [],
+      });
+      expect({ reason, got: result }).toEqual({
+        reason,
+        got: { status: 'unavailable', schemaVersion: 1, reason, suggestions: [] },
+      });
+    }
   });
 
   it('timeout 設定存在且落在合理範圍', () => {
@@ -69,6 +86,112 @@ describe('contract.json 與 App 端型別一致', () => {
     expect(contract.timeouts.geminiRequestMs).toBeGreaterThanOrEqual(10000);
     expect(contract.timeouts.totalHandlerMs).toBeLessThanOrEqual(15000);
     expect(contract.timeouts.geminiRequestMs).toBeLessThan(contract.timeouts.totalHandlerMs);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1b. B2A.5 —— 使用範圍與限流的契約內在一致性
+// ---------------------------------------------------------------------------
+//
+// 這一組不比對兩端，比對的是 contract.json **自己有沒有自相矛盾**。
+// eligibility 是一份手寫的清單，很容易在改欄位時漏掉一處；
+// 而它一旦指到不存在的 fieldPath，結果是安靜的 —— 那個欄位只是永遠
+// 不會被建議，沒有人會收到錯誤。
+
+describe('eligibility 契約自洽', () => {
+  const e = contract.eligibility;
+  const allPaths = Object.keys(contract.allowedFieldPaths);
+
+  it('context allowlist 只能是全域 allowlist 的子集', () => {
+    // 「更窄」是這一層的全部意義。如果它能開出全域沒有的路徑，
+    // 那 outputValidator 的雙重檢查就變成單重檢查了。
+    const referenced = [
+      ...e.baseFieldPaths,
+      ...Object.values(e.extraFieldPathsByEditorKind).flat(),
+    ];
+    expect(referenced.filter((p) => !allPaths.includes(p))).toEqual([]);
+  });
+
+  it('每一種 editorKind 都有明確的 extra 清單', () => {
+    // 沒列到的 kind 會拿到 `?? []`，也就是「只有 base」——
+    // 那是安全的預設，但無聲。明確列出來才看得出是決定過的。
+    const known = ['growth_plan', 'short_support', 'recurring', 'one_time', 'family_role'];
+    expect(Object.keys(e.extraFieldPathsByEditorKind).sort()).toEqual([...known].sort());
+  });
+
+  it('neverAllowed 的路徑不會從任何一種 editorKind 溜進來', () => {
+    const reachable = new Set([
+      ...e.baseFieldPaths,
+      ...Object.values(e.extraFieldPathsByEditorKind).flat(),
+    ]);
+    for (const denied of e.neverAllowedFieldPaths) {
+      // 就算它出現在 base 或 extra 裡，fieldPathsFor 也會把它濾掉；
+      // 但讓它同時出現在兩份清單只會讓下一個人看不懂哪邊說了算。
+      expect({ denied, reachable: reachable.has(denied) }).toEqual({ denied, reachable: false });
+    }
+  });
+
+  it('被拒絕的 editorKind 不會同時出現在允許清單', () => {
+    for (const denied of e.deniedEditorKinds) {
+      expect({ denied, allowed: e.allowedEditorKinds.includes(denied) })
+        .toEqual({ denied, allowed: false });
+    }
+  });
+
+  it('每個開放的 fieldPath 都至少有一個 kind 指得到它', () => {
+    // 反方向的不變量。少了它，一個欄位可以是「開放的」卻沒有任何
+    // 合法的 kind 能指向它 —— 於是它永遠不會被建議，而且沒有人會發現。
+    //
+    // 這條測試是實測長出來的：taskDetails 一度就是這個狀態。
+    const targeted = new Set(
+      Object.values(contract.suggestionKindFieldPaths as Record<string, string[]>).flat(),
+    );
+    const reachable = [
+      ...e.baseFieldPaths,
+      ...Object.values(e.extraFieldPathsByEditorKind).flat(),
+    ].filter((p) => !e.neverAllowedFieldPaths.includes(p));
+
+    expect(reachable.filter((p) => !targeted.has(p))).toEqual([]);
+  });
+
+  it('每個 suggestion kind 都對得到至少一個合法 fieldPath', () => {
+    // 對不到的 kind 是死的：模型可以回它，但目標欄位永遠被擋，
+    // 於是整批建議被丟掉 —— 一個只在 production 才看得到的失敗。
+    for (const kind of contract.allowedSuggestionKinds) {
+      const targets =
+        (contract.suggestionKindFieldPaths as Record<string, string[]>)[kind] ?? [];
+      expect({ kind, targets: targets.length > 0 }).toEqual({ kind, targets: true });
+      expect({ kind, unknown: targets.filter((t) => !allPaths.includes(t)) })
+        .toEqual({ kind, unknown: [] });
+    }
+  });
+});
+
+describe('rateLimit 契約自洽', () => {
+  const r = contract.rateLimit;
+
+  it('預設值低於上限', () => {
+    expect(r.defaultPer10Minutes).toBeLessThanOrEqual(r.maxPer10Minutes);
+    expect(r.defaultPerDay).toBeLessThanOrEqual(r.maxPerDay);
+  });
+
+  it('十分鐘的額度不會反過來大於一天的額度', () => {
+    expect(r.defaultPer10Minutes).toBeLessThanOrEqual(r.defaultPerDay);
+    expect(r.maxPer10Minutes).toBeLessThanOrEqual(r.maxPerDay);
+  });
+
+  it('bucket 種類與 migration 的 CHECK constraint 一致', () => {
+    // SQL 那邊寫死了 `CHECK (bucket_type IN ('per_10min','per_day'))`。
+    // 這裡改了那裡沒改的話，RPC 會在 insert 時炸掉 —— 而那是在
+    // 真實請求路徑上，不是在測試裡。
+    expect(r.bucketTypes).toEqual(['per_10min', 'per_day']);
+  });
+
+  it('prompt 要求的建議數不超過契約硬上限', () => {
+    // prompt 要的是 3，validator 擋的是 5。
+    // 這個差距是刻意的緩衝，但不能反過來。
+    expect(contract.limits.promptMaxSuggestions)
+      .toBeLessThanOrEqual(contract.limits.maxSuggestions);
   });
 });
 

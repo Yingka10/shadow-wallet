@@ -9,9 +9,12 @@ import {
   DEFAULT_MODEL,
   DEFAULT_TIMEOUT_MS,
   TIMEOUT_BOUNDS,
+  resolveFeatureEnabled,
   resolveModel,
+  resolveRateLimit,
   resolveTimeoutMs,
 } from '../runtimeConfig.ts';
+import { CONTRACT } from '../contract.ts';
 
 Deno.test('沒設定就用 production-safe 預設值 12000', () => {
   assertEquals(DEFAULT_TIMEOUT_MS, 12000);
@@ -85,4 +88,77 @@ Deno.test('model 名稱會被拼進 URL —— 含路徑字元的一律拒絕', 
       { raw, model: DEFAULT_MODEL, source: 'env_invalid' },
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// B2A.5 — 總開關
+// ---------------------------------------------------------------------------
+
+Deno.test('沒設定 = 開啟（少一個變數不該讓整個功能消失）', () => {
+  for (const raw of [undefined, null, '', '   ']) {
+    assertEquals(resolveFeatureEnabled(raw), { enabled: true, source: 'default' });
+  }
+});
+
+Deno.test('明確的開與關都認得，大小寫與空白不影響', () => {
+  for (const raw of ['true', 'TRUE', ' 1 ', 'on', 'Enabled']) {
+    assertEquals({ raw, ...resolveFeatureEnabled(raw) }, { raw, enabled: true, source: 'env' });
+  }
+  for (const raw of ['false', 'FALSE', '0', ' off ', 'disabled']) {
+    assertEquals({ raw, ...resolveFeatureEnabled(raw) }, { raw, enabled: false, source: 'env' });
+  }
+});
+
+Deno.test('設了但看不懂 = 關閉，而且 source 標成 env_invalid', () => {
+  // 這個不對稱是刻意的：沒設定代表沒有人表達意見，
+  // 設成 flase 代表有人正在試圖關掉它 —— 猜錯的代價不對等。
+  for (const raw of ['flase', 'no', 'yes', 'maybe', '2']) {
+    assertEquals(
+      { raw, ...resolveFeatureEnabled(raw) },
+      { raw, enabled: false, source: 'env_invalid' },
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// B2A.5 — 限流額度
+// ---------------------------------------------------------------------------
+
+Deno.test('沒設定就用契約裡的保守後備值', () => {
+  const r = resolveRateLimit(undefined, undefined);
+  assertEquals(r, {
+    per10Minutes: CONTRACT.rateLimit.defaultPer10Minutes,
+    perDay: CONTRACT.rateLimit.defaultPerDay,
+    source: 'default',
+  });
+});
+
+Deno.test('合法值直接採用', () => {
+  assertEquals(resolveRateLimit('3', '20'), { per10Minutes: 3, perDay: 20, source: 'env' });
+});
+
+Deno.test('手滑打成 6000 不等於沒有限流', () => {
+  const r = resolveRateLimit('6000', '999999');
+  assertEquals(r, {
+    per10Minutes: CONTRACT.rateLimit.maxPer10Minutes,
+    perDay: CONTRACT.rateLimit.maxPerDay,
+    source: 'env_clamped',
+  });
+});
+
+Deno.test('設成 0、負數或非數字都退回預設值', () => {
+  for (const raw of ['0', '-1', 'abc', '3.5']) {
+    const r = resolveRateLimit(raw, raw);
+    assertEquals(
+      { raw, per10: r.per10Minutes, source: r.source },
+      { raw, per10: CONTRACT.rateLimit.defaultPer10Minutes, source: 'env_invalid' },
+    );
+  }
+});
+
+Deno.test('兩個來源不同時，log 記下比較值得注意的那一個', () => {
+  // 只有一個 source 欄位，要留給最需要被看到的事。
+  assertEquals(resolveRateLimit('3', 'abc').source, 'env_invalid');
+  assertEquals(resolveRateLimit('3', '999999').source, 'env_clamped');
+  assertEquals(resolveRateLimit('3', undefined).source, 'env');
 });

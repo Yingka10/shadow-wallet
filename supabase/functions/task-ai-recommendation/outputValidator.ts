@@ -50,6 +50,21 @@ const NUMBER_MAX: Record<string, number> = {
   reviewAfterDays: LIMITS.maxReviewAfterDays,
 };
 
+/**
+ * 驗證這一份輸出時的脈絡。
+ *
+ * `allowedFieldPaths` 是**這一次請求**可以被建議修改的欄位 ——
+ * 由 eligibility 依 editorKind 算出來，永遠是全域 allowlist 的子集。
+ *
+ * 為什麼是必填而不是可選：可選的話，忘了傳就會安靜地退回全域 allowlist，
+ * 也就是安靜地失去這一層。型別上要求它，忘記就編譯不過。
+ */
+export type OutputContext = {
+  ageGroup: AgeGroup;
+  allowedFieldPaths: readonly string[];
+  allowedSuggestionKinds: readonly string[];
+};
+
 /** 為什麼被拒。只進 log，不回給家長。 */
 export type OutputRejection =
   | { kind: 'schema'; detail: string }
@@ -105,7 +120,11 @@ type SuggestionCheck =
   | { ok: true; suggestion: Suggestion }
   | { ok: false; rejection: OutputRejection };
 
-function checkSuggestion(raw: unknown): SuggestionCheck {
+function checkSuggestion(
+  raw: unknown,
+  allowedFieldPaths: readonly string[],
+  allowedSuggestionKinds: readonly string[],
+): SuggestionCheck {
   const bad = (kind: 'schema' | 'boundary', detail: string): SuggestionCheck =>
     ({ ok: false, rejection: { kind, detail } });
 
@@ -136,6 +155,34 @@ function checkSuggestion(raw: unknown): SuggestionCheck {
   }
   if (!ALLOWED_FIELD_PATHS.includes(fieldPath)) {
     return bad('schema', `fieldPath 不在 allowlist：${fieldPath}`);
+  }
+
+  // 全域 allowlist 說「這個欄位存在」，context allowlist 說「這種任務有這個欄位」。
+  //
+  // 兩者不同：`milestones` 是合法路徑，但固定任務沒有里程碑 ——
+  // 模型對一個週期任務建議 milestones，寫進去會落在一個不存在的地方。
+  // prompt 已經只列了這一份窄清單，所以越界代表模型沒照做，
+  // 那是**越界**不是格式錯。
+  if (!allowedFieldPaths.includes(fieldPath)) {
+    return bad('boundary', `fieldPath 不在此任務的可修改範圍：${fieldPath}`);
+  }
+
+  if (!allowedSuggestionKinds.includes(kind)) {
+    return bad('boundary', `kind 不在此任務的可用範圍：${kind}`);
+  }
+
+  // kind 與 fieldPath 必須相符。
+  //
+  // 這條是實測長出來的：staging 上第一次真實呼叫，模型回了
+  // `kind: "add_support_step"` 搭 `fieldPath: "taskDetails"`。
+  // 兩個欄位分開看都合法，合起來卻是錯的 ——
+  // **App 依 fieldPath 決定要改哪裡，依 kind 決定畫面上寫什麼。**
+  // 不相符就等於：家長看到「新增支援步驟」，按下去改的是任務細節。
+  //
+  // 那不是文案瑕疵，是家長在不知情的情況下同意了另一件事。
+  const targets = CONTRACT.suggestionKindFieldPaths[kind] ?? [];
+  if (!targets.includes(fieldPath)) {
+    return bad('boundary', `kind 與 fieldPath 不相符：${kind} → ${fieldPath}`);
   }
 
   if (!valueMatchesKind(fieldPath, suggestedValue)) return bad('schema', 'suggestedValue 型別或長度不符');
@@ -169,7 +216,8 @@ function checkSuggestion(raw: unknown): SuggestionCheck {
  * 驗證，要嘛一張都不給。默默扔掉第四張會讓前三張看起來比實際更可信 ——
  * 而我們既不知道第四張為什麼壞，也不知道前三張是不是同一批幻覺的產物。
  */
-export function validateModelOutput(raw: unknown, ageGroup: AgeGroup): OutputValidationResult {
+export function validateModelOutput(raw: unknown, context: OutputContext): OutputValidationResult {
+  const { ageGroup, allowedFieldPaths, allowedSuggestionKinds } = context;
   const invalid = (detail: string): OutputValidationResult => ({
     result: unavailable('INVALID_RESPONSE'),
     rejection: { kind: 'schema', detail },
@@ -216,7 +264,7 @@ export function validateModelOutput(raw: unknown, ageGroup: AgeGroup): OutputVal
 
   const suggestions: Suggestion[] = [];
   for (const item of list) {
-    const checked = checkSuggestion(item);
+    const checked = checkSuggestion(item, allowedFieldPaths, allowedSuggestionKinds);
     if (!checked.ok) {
       return checked.rejection.kind === 'schema'
         ? { result: unavailable('INVALID_RESPONSE'), rejection: checked.rejection }

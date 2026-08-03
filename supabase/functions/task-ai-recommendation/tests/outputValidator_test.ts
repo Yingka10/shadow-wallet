@@ -5,7 +5,7 @@
 
 import { assertEquals } from './assert.ts';
 import { validateModelOutput } from '../outputValidator.ts';
-import type { Suggestion } from '../contract.ts';
+import { ALLOWED_FIELD_PATHS, CONTRACT, type Suggestion } from '../contract.ts';
 
 function s(over: Partial<Suggestion> = {}): Suggestion {
   return {
@@ -25,14 +25,21 @@ function batch(suggestions: unknown[], summary = '一些可以更清楚的地方
   return { status: 'suggestions', schemaVersion: 1, summary, suggestions };
 }
 
-const run = (raw: unknown) => validateModelOutput(raw, '6-9');
+const run = (raw: unknown) => validateModelOutput(raw, {
+  ageGroup: '6-9',
+  allowedFieldPaths: ALLOWED_FIELD_PATHS,
+  allowedSuggestionKinds: CONTRACT.allowedSuggestionKinds,
+});
 
 // ---------------------------------------------------------------------------
 // 8-9. 正常路徑
 // ---------------------------------------------------------------------------
 
 Deno.test('8. suggestions 通過', () => {
-  const { result } = run(batch([s(), s({ id: 's2', fieldPath: 'title', suggestedValue: '晚餐後收碗筷' })]));
+  const { result } = run(batch([
+    s(),
+    s({ id: 's2', kind: 'clarify_title', fieldPath: 'title', suggestedValue: '晚餐後收碗筷' }),
+  ]));
   assertEquals(result.status, 'suggestions');
   assertEquals(result.suggestions.length, 2);
 });
@@ -45,23 +52,25 @@ Deno.test('9. no_change 通過', () => {
 });
 
 Deno.test('每一種合法的 fieldPath 型別都收得下', () => {
-  const cases: Array<[string, string | number | string[]]> = [
-    ['title', '晚餐後收碗筷'],
-    ['completionDescription', '把碗筷收到水槽'],
-    ['taskDetails', '寫完作業再收書包'],
-    ['scopeDescription', '負責平日晚餐'],
-    ['notes', '記得先稱讚努力'],
-    ['sessionMinutes', 15],
-    ['durationDays', 21],
-    ['weeklyFrequency', 3],
-    ['reviewAfterDays', 14],
-    ['supportSteps', ['睡前看課表', '把書包放門邊']],
-    ['milestones', ['讀完第一本', '和家人分享']],
-    ['responsibilityItems', ['擺好碗筷', '把碗拿到水槽']],
+  // kind 一併給對的：B2A.5 起 kind 與 fieldPath 必須相符，
+  // 隨便配一個 kind 會讓這條測試變成在測配對檢查，而不是在測型別。
+  const cases: Array<[string, string, string | number | string[]]> = [
+    ['clarify_title', 'title', '晚餐後收碗筷'],
+    ['clarify_completion', 'completionDescription', '把碗筷收到水槽'],
+    ['clarify_completion', 'taskDetails', '寫完作業再收書包'],
+    ['reduce_scope', 'scopeDescription', '負責平日晚餐'],
+    ['improve_feedback_language', 'notes', '記得先稱讚努力'],
+    ['adjust_session_time', 'sessionMinutes', 15],
+    ['adjust_duration', 'durationDays', 21],
+    ['adjust_frequency', 'weeklyFrequency', 3],
+    ['adjust_review_timing', 'reviewAfterDays', 14],
+    ['add_support_step', 'supportSteps', ['睡前看課表', '把書包放門邊']],
+    ['split_milestone', 'milestones', ['讀完第一本', '和家人分享']],
+    ['preserve_child_choice', 'responsibilityItems', ['擺好碗筷', '把碗拿到水槽']],
   ];
-  for (const [fieldPath, suggestedValue] of cases) {
-    const { result } = run(batch([s({ fieldPath, suggestedValue, currentValue: null })]));
-    assertEquals(result.status, 'suggestions', `${fieldPath} 應該通過`);
+  for (const [kind, fieldPath, suggestedValue] of cases) {
+    const { result } = run(batch([s({ kind, fieldPath, suggestedValue, currentValue: null })]));
+    assertEquals(result.status, 'suggestions', `${kind}/${fieldPath} 應該通過`);
   }
 });
 
@@ -83,15 +92,15 @@ Deno.test('14. 各種形狀錯誤都是 INVALID_RESPONSE', () => {
     ['no_change 帶著建議', { status: 'no_change', schemaVersion: 1, summary: 'x', suggestions: [s()] }],
     ['未知 kind', batch([s({ kind: 'rewrite_everything' })])],
     ['未知 fieldPath', batch([s({ fieldPath: 'taskTitle' })])],
-    ['suggestedValue 型別不符', batch([s({ fieldPath: 'sessionMinutes', suggestedValue: '十五分鐘' })])],
+    ['suggestedValue 型別不符', batch([s({ kind: 'adjust_session_time', fieldPath: 'sessionMinutes', suggestedValue: '十五分鐘' })])],
     ['suggestedValue 為空字串', batch([s({ suggestedValue: '' })])],
-    ['數值超出上限', batch([s({ fieldPath: 'sessionMinutes', suggestedValue: 9999, currentValue: null })])],
-    ['數值為 0', batch([s({ fieldPath: 'sessionMinutes', suggestedValue: 0, currentValue: null })])],
+    ['數值超出上限', batch([s({ kind: 'adjust_session_time', fieldPath: 'sessionMinutes', suggestedValue: 9999, currentValue: null })])],
+    ['數值為 0', batch([s({ kind: 'adjust_session_time', fieldPath: 'sessionMinutes', suggestedValue: 0, currentValue: null })])],
     ['rationale 過長', batch([s({ rationale: '因為'.repeat(120) })])],
     ['expectedBenefit 不在 allowlist', batch([s({ expectedBenefit: 'more_fun' })])],
     ['confidence 不在 allowlist', batch([s({ confidence: 'certain' })])],
     ['suggestion 多了未知欄位', batch([{ ...s(), applyImmediately: true }])],
-    ['空的字串陣列', batch([s({ fieldPath: 'milestones', suggestedValue: [], currentValue: null })])],
+    ['空的字串陣列', batch([s({ kind: 'split_milestone', fieldPath: 'milestones', suggestedValue: [], currentValue: null })])],
   ];
   for (const [name, raw] of cases) {
     const { result } = run(raw);
@@ -138,7 +147,7 @@ Deno.test('18. HTML 被拒', () => {
     batch([s({ suggestedValue: '<b>把碗筷收好</b>' })]),
     batch([s({ rationale: '<script>x</script>' })]),
     batch([s()], '<img src=x>'),
-    batch([s({ fieldPath: 'milestones', suggestedValue: ['讀完第一本', '<i>分享</i>'], currentValue: null })]),
+    batch([s({ kind: 'split_milestone', fieldPath: 'milestones', suggestedValue: ['讀完第一本', '<i>分享</i>'], currentValue: null })]),
   ]) {
     assertEquals(run(raw).result.status, 'unavailable');
   }
@@ -196,4 +205,69 @@ Deno.test('no_change 的 summary 也走內容安全', () => {
     summary: '目前設定很好，孩子甚至可以幫忙顧爐火。', suggestions: [],
   });
   assertEquals(result.status === 'unavailable' ? result.reason : '', 'UNSAFE_OUTPUT');
+});
+
+// ---------------------------------------------------------------------------
+// B2A.5 — context allowlist
+// ---------------------------------------------------------------------------
+//
+// 全域 allowlist 說「這個欄位存在」，context allowlist 說「這種任務有這個欄位」。
+// 兩者不同，而且第二層不能只靠 prompt 提醒 —— prompt 是請求，這裡才是規則。
+
+Deno.test('全域合法但這次沒開放的欄位 → 整批擋下，而且算越界不是格式錯', () => {
+  const narrow = (raw: unknown) => validateModelOutput(raw, {
+    ageGroup: '6-9',
+    // 週期任務：沒有里程碑。
+    allowedFieldPaths: ['title', 'completionDescription', 'sessionMinutes', 'weeklyFrequency'],
+    allowedSuggestionKinds: CONTRACT.allowedSuggestionKinds,
+  });
+
+  const { result, rejection } = narrow(batch([
+    s({ kind: 'split_milestone', fieldPath: 'milestones', suggestedValue: ['第一週', '第二週'] }),
+  ]));
+
+  assertEquals(result.status === 'unavailable' ? result.reason : '', 'UNSAFE_OUTPUT');
+  assertEquals(rejection?.kind, 'boundary');
+});
+
+Deno.test('一則越界就整批丟，合法的那則也不留', () => {
+  const narrow = (raw: unknown) => validateModelOutput(raw, {
+    ageGroup: '6-9',
+    allowedFieldPaths: ['title', 'completionDescription'],
+    allowedSuggestionKinds: CONTRACT.allowedSuggestionKinds,
+  });
+
+  const { result } = narrow(batch([
+    s({ id: 's1' }),
+    s({ id: 's2', kind: 'adjust_session_time', fieldPath: 'sessionMinutes', suggestedValue: 20 }),
+  ]));
+
+  assertEquals(result.status, 'unavailable');
+  assertEquals(result.suggestions.length, 0);
+});
+
+Deno.test('開放清單內的欄位照常通過', () => {
+  const narrow = (raw: unknown) => validateModelOutput(raw, {
+    ageGroup: '6-9',
+    allowedFieldPaths: ['title', 'completionDescription'],
+    allowedSuggestionKinds: CONTRACT.allowedSuggestionKinds,
+  });
+  const { result } = narrow(batch([s()]));
+  assertEquals(result.status, 'suggestions');
+});
+
+Deno.test('context allowlist 不會反過來放寬全域限制', () => {
+  // 就算有人在 eligibility 那邊把 coinAmount 塞進清單，這裡仍然擋。
+  // 幣值不是「這次沒開放」，是永遠不開放。
+  const { result, rejection } = validateModelOutput(
+    batch([s({ fieldPath: 'coinAmount', suggestedValue: 12 })]),
+    {
+      ageGroup: '6-9',
+      allowedFieldPaths: ['coinAmount', 'title'],
+      allowedSuggestionKinds: CONTRACT.allowedSuggestionKinds,
+    },
+  );
+
+  assertEquals(result.status === 'unavailable' ? result.reason : '', 'UNSAFE_OUTPUT');
+  assertEquals(rejection?.kind, 'boundary');
 });

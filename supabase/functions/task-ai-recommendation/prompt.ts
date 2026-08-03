@@ -61,10 +61,6 @@ export const SYSTEM_INSTRUCTION = `你是 GrowBook 的親子任務設計協作�
 - 是否保留了孩子可以自己決定的部分
 - 回饋語句是否具體
 
-【你只能建議修改這些欄位】
-fieldPath 只能是以下字串之一：
-${ALLOWED_FIELD_PATHS.join(' / ')}
-
 【你絕對不可以做的事】
 1. 不可決定或建議任何成長幣數量、幣值、獎勵金額。幣值由規則引擎計算，與你無關。
 2. 不可把「家庭參與」類的任務改成可發成長幣。那是對孩子的承諾，不是設定。
@@ -103,8 +99,15 @@ ${ALLOWED_FIELD_PATHS.join(' / ')}
    "confidence":"low | medium | high"}
 ]}
 
+【你只能建議修改的欄位】
+可用的 fieldPath 清單在下一段系統訊息裡。那份清單會因任務種類而不同，
+**只有那份清單上的字串是合法的 fieldPath**。
+不在清單上的欄位，即使你覺得該改，也不要提出來 —— 它會被整批丟棄。
+
 限制：
-- 最多 ${LIMITS.maxSuggestions} 條建議
+- 最多 ${LIMITS.promptMaxSuggestions} 條建議。
+  **寧可少而準。** 三條裡有一條沒道理，家長就會開始不信任全部三條；
+  一條真正切中的建議，比五條「也可以這樣」有用得多。
 - summary 最多 ${LIMITS.maxSummaryLength} 字
 - 每則 rationale 最多 ${LIMITS.maxRationaleLength} 字
 - 文字欄位最多 ${LIMITS.maxTextValueLength} 字；清單最多 ${LIMITS.maxListItems} 項
@@ -114,6 +117,53 @@ ${ALLOWED_FIELD_PATHS.join(' / ')}
 - 每則建議只改一個欄位，id 不可重複
 
 全部用繁體中文，語氣像在跟家長討論，不要說教。`;
+
+/**
+ * 這一次可以改哪些欄位。
+ *
+ * 為什麼是**第二段系統訊息**而不是塞進使用者訊息：
+ * 使用者訊息整段被宣告為「資料，不是指令」。把一份必須被遵守的清單
+ * 放進那裡，等於一邊說「這段不是指令」一邊要求它照做。
+ * 政策歸政策段落，資料歸資料段落。
+ *
+ * 為什麼也不併進 SYSTEM_INSTRUCTION：那個常數的價值在於**沒有參數**——
+ * 一個字元都不隨請求變動，所以可以被靜態檢查。加上參數之後，
+ * 就要靠人去看有沒有東西被插進去。
+ *
+ * ⚠️ 傳進來的路徑會逐一比對全域 allowlist 後才拼進字串。
+ * 它們的來源是我們自己的契約而不是請求，但「拼進 prompt 的東西
+ * 一律先過白名單」是這支 Function 的底線，不因為來源可信就跳過。
+ */
+export function buildFieldScopeInstruction(allowedFieldPaths?: readonly string[]): string {
+  const paths = (allowedFieldPaths ?? ALLOWED_FIELD_PATHS)
+    .filter((path) => ALLOWED_FIELD_PATHS.includes(path));
+
+  // kind 與 fieldPath 的配對必須寫出來。
+  //
+  // 第一次真實呼叫時，模型回了 kind="add_support_step" 搭
+  // fieldPath="taskDetails" —— 兩個分開看都合法。validator 現在會擋，
+  // 但只擋不說等於叫它去猜；把配對列出來，它才有辦法照做。
+  const pairs = Object.entries(CONTRACT.suggestionKindFieldPaths)
+    .map(([kind, targets]) => [kind, targets.filter((t) => paths.includes(t))] as const)
+    .filter(([, targets]) => targets.length > 0)
+    .map(([kind, targets]) => `- ${kind} → ${targets.join(' 或 ')}`);
+
+  return [
+    '【這一則任務可以修改的欄位】',
+    'fieldPath 只能是以下字串之一：',
+    paths.join(' / '),
+    '',
+    '這份清單已經依這則任務的種類篩選過。清單以外的欄位在這則任務上不存在，',
+    '對它們提出建議不會有任何效果。',
+    '',
+    '【kind 與 fieldPath 的對應】',
+    '每一則建議的 kind 必須和它的 fieldPath 相符，只能用以下組合：',
+    ...pairs,
+    '',
+    '對不上的組合會讓整批建議作廢 —— 家長看到的說明來自 kind，',
+    '實際被修改的欄位來自 fieldPath，兩者不一致等於給家長看錯的東西。',
+  ].join('\n');
+}
 
 /**
  * 把驗證過的 input 包成一段「明顯是資料」的使用者訊息。
@@ -146,9 +196,17 @@ export function buildUserMessage(input: ValidatedInput): string {
  * schema 裡的 status enum **只有 suggestions 與 no_change**：
  * `unavailable` 是我們對 App 的說法，不是模型的詞彙。詳見 responseSchema.ts。
  */
-export function buildGeminiRequestBody(input: ValidatedInput): Record<string, unknown> {
+export function buildGeminiRequestBody(
+  input: ValidatedInput,
+  allowedFieldPaths?: readonly string[],
+): Record<string, unknown> {
   return {
-    systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+    systemInstruction: {
+      parts: [
+        { text: SYSTEM_INSTRUCTION },
+        { text: buildFieldScopeInstruction(allowedFieldPaths) },
+      ],
+    },
     contents: [{ role: 'user', parts: [{ text: buildUserMessage(input) }] }],
     generationConfig: {
       responseMimeType: 'application/json',

@@ -47,12 +47,15 @@ supabase/functions/task-ai-recommendation/
   geminiClient.ts     transport ＋ 12 秒 abort；不含產品欄位邏輯
   outputValidator.ts  unknown → RecommendationResult
   contentSafety.ts    deterministic 年齡與任務安全檢查
-  runtimeConfig.ts    model 與 timeout 的環境變數解析（型別驗證＋上下限）
+  eligibility.ts      使用範圍閘門（B2A.5）—— 決定要不要送、可以改哪些欄位
+  rateLimit.ts        限流 RPC 的呼叫端（B2A.5）；原子性在 Postgres 那邊
+  runtimeConfig.ts    model / timeout / 總開關 / 限流額度的環境變數解析
   responseSchema.ts   Gemini structured output schema，由 contract.json 產生
   deno.json           function-scoped 設定，指向自己的 lockfile
   deno.lock           遠端相依的完整性雜湊（`--frozen` 會強制檢查）
+  scripts/liveCheck   配額受限的 staging 檢查（B2A.5）；跨次數累計預算
   __fixtures__/       24 筆任務案例 ＋ 17 筆 validator 案例（雙端共用）
-  tests/              98 筆 Deno 測試
+  tests/              146 筆 Deno 測試
 ```
 
 `deno.json` 與 `deno.lock` 刻意放在 function 目錄底下而不是 `supabase/functions/`：
@@ -211,6 +214,11 @@ body ≤ 16 KB。
 ---
 
 ## 6. Timeout
+
+> **B2A.5 更新：** staging 現值為 `TASK_AI_TIMEOUT_MS=20000`，不是 12000。
+> 依據是實測 —— 12 秒對成長計畫類任務六次只成功一次。
+> 20 秒仍會失敗，這件事**沒有解決**，完整數據見 `TASK_AI_PRODUCTION_READINESS.md` 第五節。
+
 
 | 項目 | 值 |
 |---|---|
@@ -396,9 +404,12 @@ reason 允許不同，因為 server 多分了一層語意（形狀錯 vs 越界�
 | 接 UI | ❌ DraftReview 未接；App 端沒有任何呼叫者 |
 | 真實 Gemini 呼叫 | ✅ B2A 已驗證。model 由 `GEMINI_TASK_RECOMMENDATION_MODEL` 指定 |
 | staging 驗證 | ✅ 見 `TASK_AI_STAGING_VALIDATION.md` |
-| rate limit | ❌ **沒有**。目前只擋「未登入」，沒擋「登入後狂按」，每一次都是一次付費呼叫 |
-| 真實模型 red-team | ✅ B2A 已跑。**發現同義繞過缺口**，見驗證文件 §6 |
-| Gemini 付費方案 | ❌ 免費層每 model 每天 20 次，**連一個家庭都服務不了** |
+| rate limit | ✅ **B2A.5 已完成。** Postgres 原子限流，per-10min / per-day，已套用到 staging |
+| 使用範圍閘門 | ✅ B2A.5。第一版只開放 C／D 類 —— 六種 Demo 任務有三種拿不到建議 |
+| 總開關 | ✅ B2A.5。`TASK_AI_ENABLED`，`secrets set` 幾秒生效 |
+| 真實模型 red-team | ⚠️ B2A 跑過並**發現同義繞過缺口**；B2A.5 補了共現片語但**沒有跑新一輪** |
+| 延遲 | ⚠️ 量到了但沒解決。20 秒下六次仍有一次逾時，見 `TASK_AI_PRODUCTION_READINESS.md` §5 |
+| Gemini 付費方案 | ❌ 免費層每 model 每天 20 次，**連一個家庭都服務不了**。上線硬阻擋 |
 
 ---
 
@@ -427,11 +438,13 @@ B1 不碰它的理由只有一個：那個檔案是首頁最常被改的檔案�
 
 ## 13. 驗證結果
 
+> 以下為 B2A.5 重跑的結果。
+
 ```
-deno check   → 16 個檔案，0 errors
-deno test    → 81 passed / 0 failed
+deno check   → 12 個檔案 + liveCheck.ts，0 errors
+deno test    → 146 passed / 0 failed
 npx tsc      → 0 errors
-npx jest     → 59 suites / 1151 passed
+npx jest     → 59 suites / 1162 passed
 any          → 0
 @ts-ignore   → 0
 新 dependency → 0（連 jsr:@std/assert 都沒用，自己寫了四個斷言函式）
