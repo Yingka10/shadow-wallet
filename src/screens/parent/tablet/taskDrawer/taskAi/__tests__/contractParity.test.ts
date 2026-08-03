@@ -102,19 +102,47 @@ describe('explicitlyForbiddenPaths 每一條都被 client validator 拒絕', () 
 // ---------------------------------------------------------------------------
 
 type FixtureTask = { id: string; demoTaskName: string; input: TaskAiRecommendationInput };
+
+/**
+ * fixture 的 expect 是**雙端**的：
+ *   status / appReason      —— 這一支（App 端 validator）要對上的
+ *   serverStatus / serverReason —— Edge Function 那一支要對上的
+ *
+ * 兩邊的 reason 允許不同：server 把「形狀錯」與「越界」分開，App 端不分。
+ * `serverOnlySafety` 標的是 server 多擋一層內容安全的案例 ——
+ * 那些在這裡會**通過**，而那正是「client validator 不能取代 server」的證據。
+ */
+type FixtureExpect = {
+  status: string;
+  suggestionCount?: number;
+  appReason?: string;
+  serverStatus?: string;
+  serverReason?: string;
+};
+
 type FixtureCase = {
   id: string;
   taskId: string;
   kind: 'valid_suggestions' | 'no_change' | 'immutable_violation' | 'prompt_injection';
   note?: string;
-  knownGap?: boolean;
+  serverOnlySafety?: boolean;
   inputOverride?: Record<string, unknown>;
   modelOutput: unknown;
-  expect: { status: string; reason?: string; suggestionCount?: number };
+  expect: FixtureExpect;
+};
+
+type FixtureEdgeCase = {
+  id: string;
+  ageGroup: string;
+  note?: string;
+  serverOnlySafety?: boolean;
+  modelOutput: unknown;
+  expect: FixtureExpect;
 };
 
 const TASKS = fixtures.tasks as unknown as FixtureTask[];
 const CASES = fixtures.cases as unknown as FixtureCase[];
+const EDGE_CASES = fixtures.edgeCases as unknown as FixtureEdgeCase[];
 
 const DEMO_TASK_NAMES = [
   '完成學校作業', '餐後整理', '運動練習',
@@ -202,8 +230,20 @@ describe('client validator 對每一個 fixture 的結論', () => {
     const result = validateTaskAiRecommendationResult(c.modelOutput);
 
     expect(result.status).toBe(c.expect.status);
-    if (c.expect.reason) {
-      expect(result).toMatchObject({ reason: c.expect.reason });
+    if (c.expect.appReason) {
+      expect(result).toMatchObject({ reason: c.expect.appReason });
+    }
+    if (c.expect.suggestionCount !== undefined) {
+      expect(result.suggestions).toHaveLength(c.expect.suggestionCount);
+    }
+  });
+
+  it.each(EDGE_CASES.map(c => [c.id, c] as const))('%s', (_id, c) => {
+    const result = validateTaskAiRecommendationResult(c.modelOutput);
+
+    expect(result.status).toBe(c.expect.status);
+    if (c.expect.appReason) {
+      expect(result).toMatchObject({ reason: c.expect.appReason });
     }
     if (c.expect.suggestionCount !== undefined) {
       expect(result.suggestions).toHaveLength(c.expect.suggestionCount);
@@ -230,25 +270,44 @@ describe('分組結論', () => {
     expect(resultOf(c).suggestions).toHaveLength(0);                    // 兩張都不留
   });
 
-  it('prompt_injection 除了已知缺口以外都被擋下', () => {
+  it('prompt_injection 的形狀攻擊都被擋下', () => {
     const injections = CASES.filter(c => c.kind === 'prompt_injection');
     const blocked = injections.filter(c => resultOf(c).status === 'unavailable').map(c => c.id);
-    const passed = injections.filter(c => resultOf(c).status !== 'unavailable').map(c => c.id);
 
     expect(blocked).toEqual(['injection-01', 'injection-02', 'injection-03', 'injection-04', 'injection-05']);
-    expect(passed).toEqual(['injection-06']);
   });
 
-  it('injection-06 是刻意留下的缺口：形狀合法、內容不安全', () => {
+  it('injection-06 在這一層仍然通過 —— 這正是 server validator 存在的理由', () => {
     // 這一筆通過**不是** bug，是證據。structural validation 依定義看不到
     // 「叫 6-9 歲的孩子清理瓦斯爐」有什麼問題 —— 那不是 schema 問題。
-    // B1 的內容安全層存在的理由就是這一筆；在那之前不要宣稱 injection 已經處理完。
+    //
+    // B1 起 Edge Function 的 contentSafety 會擋下它（見
+    // supabase/functions/task-ai-recommendation/tests/parity_test.ts）。
+    // 這一條留在這裡是為了釘住一件事：**client validator 不能取代 server。**
+    // 如果哪天有人把內容安全搬到 client 端當成唯一防線，這條測試會紅。
     const c = CASES.find(x => x.id === 'injection-06')!;
-    expect(c.knownGap).toBe(true);
+    expect(c.serverOnlySafety).toBe(true);
 
     const r = resultOf(c);
     expect(r.status).toBe('suggestions');
     expect(JSON.stringify(r)).toContain('瓦斯爐');
+  });
+
+  it('所有 serverOnlySafety 的案例在 App 端都通過，在 server 端都被擋', () => {
+    const all = [
+      ...CASES.filter(c => c.serverOnlySafety),
+      ...EDGE_CASES.filter(c => c.serverOnlySafety),
+    ];
+    expect(all.length).toBeGreaterThanOrEqual(5);
+
+    for (const c of all) {
+      // App 端：放行。
+      expect({ id: c.id, status: validateTaskAiRecommendationResult(c.modelOutput).status })
+        .toEqual({ id: c.id, status: 'suggestions' });
+      // fixture 上 server 端的預期：擋下。
+      expect({ id: c.id, server: c.expect.serverStatus, reason: c.expect.serverReason })
+        .toEqual({ id: c.id, server: 'unavailable', reason: 'UNSAFE_OUTPUT' });
+    }
   });
 
   it('valid_suggestions 與 no_change 都不會被誤擋', () => {

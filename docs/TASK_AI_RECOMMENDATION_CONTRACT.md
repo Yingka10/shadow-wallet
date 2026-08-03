@@ -225,12 +225,48 @@ AI request 與 create RPC 的狀態完全分離：AI loading ≠ submitting、
 
 ---
 
+## Server 端（第八階段 B1 起）
+
+上面每一條規則在 Edge Function 端**又獨立實作了一次**：
+`supabase/functions/task-ai-recommendation/`。細節見 `TASK_AI_EDGE_FUNCTION.md`。
+
+client validator 保護的是**畫面**。它擋不住直接打 API 的人，也擋不住舊版 App。
+「只在 client 驗」的實際效果是「只要不用我們的 App 就沒有驗證」。
+
+三件兩端**刻意不同**的事：
+
+| | App | Edge Function |
+|---|---|---|
+| schema 錯 | `UNSAFE_OUTPUT` | `INVALID_RESPONSE` |
+| 越界（幣值／immutable／超量） | `UNSAFE_OUTPUT` | `UNSAFE_OUTPUT` |
+| 內容安全（危險家務等） | **不檢查** | `UNSAFE_OUTPUT` |
+
+前兩列是同一個結論的不同標籤 —— 兩端對「這批能不能給家長看」永遠一致，
+只有 server 多分了「模型壞了」與「模型想越界」。
+
+第三列是真正的差異：**內容安全只在 server**。一則「讓 6-9 歲孩子清理瓦斯爐」
+的建議在 schema 上完全合法，App 端的 validator 沒有理由擋它 ——
+schema 不知道瓦斯爐是什麼。這是 client validator 不能取代 server 的具體證據，
+兩端的測試都明確釘住了這一點（fixture 上標為 `serverOnlySafety`）。
+
+防漂移：`contract.json` 是兩端共用的唯一資料來源，
+`__fixtures__/contractFixtures.json` 是兩端共用的行為 fixture。
+
+---
+
 ## 未來的 Gemini adapter
 
-介面已經定好，第八階段 B 只需要一個實作 `TaskAiRecommendationService`
-的 class。前置條件見 `TASK_AI_RECOMMENDATION_AUDIT.md` 的最後一節：
+介面已經定好，接上去只需要一個實作 `TaskAiRecommendationService` 的 class
+（B2）。B0 audit 列的四項前置條件，現況：
 
-1. `ai-proxy` 補 timeout —— 現在整個檔案沒有任何 `AbortSignal`
-2. Edge Function 端也要跑一次 validator（client 端擋不住直接打 API 的人）
-3. prompt 需要明確的資料界線與「使用者輸入不是指令」的框架
-4. `coin-policy.json` 有兩份，接 AI 之前先確認是否合併
+1. ~~`ai-proxy` 補 timeout~~ → **改為不動 `ai-proxy`**。新功能走獨立的
+   `task-ai-recommendation`，它有 12 秒 `AbortController`、不重試、不換 model
+2. ~~Edge Function 端也要跑一次 validator~~ → **B1 已完成**
+3. ~~prompt 需要明確的資料界線~~ → **B1 已完成**（政策走 `systemInstruction`、
+   資料走 `contents` 且 `JSON.stringify`、marker 明確不當成安全邊界）
+4. ~~`coin-policy.json` 有兩份~~ → **這一條是錯的**。全 repo 只有一份，
+   `taskReward/coinPolicy.ts` import 的就是同一個檔案；重複的是演算法而且是刻意的。
+   更正記錄在 `TEAMMATE_AI_WORK_COMPATIBILITY.md` 開頭
+
+B2 之前仍未完成的：部署、接 UI、真實 Gemini 呼叫、staging 驗證、
+rate limit、真實模型的 red-team fixtures。

@@ -199,10 +199,10 @@ UI 上寫著「AI 教養顧問」，**背後沒有任何 LLM** ——
 
 ---
 
-## 三、應淘汰路徑清單（給 B1 的動作項）
+## 三、應淘汰路徑清單
 
-按風險排序。**本輪一項都沒有動**，因為刪掉就會動到正在跑的畫面，
-超出 B0「不要大規模修改正式檔案」的範圍。
+按風險排序。**B0 與 B1 都一項都沒有動** —— 刪掉就會動到正在跑的畫面。
+P0 兩條已排入**第八階段 B3**（見本節末）。
 
 | 優先 | 路徑 | 為什麼 | 動作 |
 |---|---|---|---|
@@ -212,6 +212,21 @@ UI 上寫著「AI 教養顧問」，**背後沒有任何 LLM** ——
 | P2 | `aiAgent.classifyTask` / `suggestTaskCoin` / `suggestRewardCoin` / `generateDegradeSuggestion` / `generateWeeklyInsight` | 零呼叫點的死碼 | 移除 |
 | P3 | 手機版 `ParentTaskCreateScreen` → `analyzeTask` | 手機家長端不再維護，但路由還在 | 隨手機版一起處置 |
 | — | `screenRedemptionRequest` / `suggestCoinWithAI` | 屬於兌換模組，不是任務建議 | **本輪不動**，但兩者都缺 timeout 與驗證 |
+
+### Migration note — 兩條 P0 排入第八階段 B3
+
+`ParentHomeTablet.tsx` 的 `AssignTaskPanel` → `suggestTaskCoin` 與
+`NewTaskPanel` → `classifyTask` **必須在 B3 處置**，三選一：
+
+1. **移除** —— 幣值改由家長輸入，不給 AI 建議
+2. **改成規則引擎** —— 呼叫 `taskReward/priceCoin`，用同一份 `coin-policy.json`
+3. **導向新 Drawer** —— 讓建立流程統一走 `PresetTaskDrawer`
+
+**不得讓新舊兩套 AI 幣值哲學長期共存。** 一邊寫著「AI 碰不到幣值」，
+另一邊 LLM 正在決定金額 —— 那不是兩個功能，那是同一個產品在對自己說謊。
+
+B1 不碰它的理由只有一個：那個檔案 3000+ 行、是首頁最常被改的檔案，
+移除動作會動到 `handleNext`、數個 state 與兩段 JSX，應該獨立成一個 commit。
 
 ---
 
@@ -228,6 +243,10 @@ UI 上寫著「AI 教養顧問」，**背後沒有任何 LLM** ——
 | 失敗不阻擋主流程 | ✅ **這一項舊路徑做對了**，每支都有 fallback |
 | 不評價孩子人格 | ⚠️ 沒有明文禁止，靠 prompt 語氣自律 |
 | 有測試 | ❌ **0 支** |
+
+新的 `task-ai-recommendation` 對照同一張表：全部 ✅，除了「資料最小化」——
+那一項 client 端已做（姓名遮蔽），server 端只能反向檢查（拒絕任何長得像身分的東西），
+因為孩子的名字**根本沒有送到 server**，它沒有辦法再遮一次它從來不知道的字串。
 
 ---
 
