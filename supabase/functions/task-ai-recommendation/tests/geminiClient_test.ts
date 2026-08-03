@@ -6,7 +6,7 @@
 // 不 retry、不換 model。前者是家長端會卡住的原因，後兩者會讓 timeout 失效。
 
 import { assert, assertEquals } from './assert.ts';
-import { GEMINI_MODEL, requestRecommendation, type FetchLike } from '../geminiClient.ts';
+import { DEFAULT_MODEL, requestRecommendation, type FetchLike } from '../geminiClient.ts';
 import { validInput } from './fixtures.ts';
 
 const INPUT = validInput();
@@ -137,7 +137,20 @@ Deno.test('21. 不 fallback 其他 model —— 只會打同一個 endpoint', as
   await requestRecommendation({ apiKey: 'k', input: INPUT, fetchImpl: stub });
 
   assertEquals(urls.length, 1);
-  assert(urls[0].includes(GEMINI_MODEL), 'endpoint 應該是設定的那個 model');
+  assert(urls[0].includes(DEFAULT_MODEL), 'endpoint 應該是設定的那個 model');
+});
+
+Deno.test('model 由呼叫端指定，不寫死在 transport 裡', async () => {
+  const urls: string[] = [];
+  const stub: FetchLike = (url) => {
+    urls.push(url);
+    return Promise.resolve(jsonResponse({}, 500));
+  };
+  await requestRecommendation({
+    apiKey: 'k', input: INPUT, fetchImpl: stub, model: 'gemini-2.5-flash',
+  });
+  assert(urls[0].includes('gemini-2.5-flash'), 'endpoint 應該用傳進來的 model');
+  assertEquals(urls[0].includes(DEFAULT_MODEL), false, '不該還用後備值');
 });
 
 // ---------------------------------------------------------------------------

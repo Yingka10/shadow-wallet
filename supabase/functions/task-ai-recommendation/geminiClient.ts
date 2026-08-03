@@ -17,14 +17,23 @@
 //      呼叫端非驗不可。
 // ─────────────────────────────────────────────────────────────────────────
 
-import { TIMEOUTS, type ValidatedInput } from './contract.ts';
+import { type ValidatedInput } from './contract.ts';
 import { buildGeminiRequestBody } from './prompt.ts';
+import { DEFAULT_MODEL, DEFAULT_TIMEOUT_MS } from './runtimeConfig.ts';
 
-/** model 名稱集中在這裡一處。 */
-export const GEMINI_MODEL = 'gemini-flash-latest';
+/**
+ * model 名稱**不寫死在這裡**，由呼叫端從 `GEMINI_TASK_RECOMMENDATION_MODEL`
+ * 讀進來。這個常數只是後備值。
+ *
+ * 好處很實際：換 model 不需要改程式碼、不需要重新 review、不需要重新跑型別。
+ * ai-proxy 把三個 model 名稱寫死在 `MODEL_CHAIN` 裡，換一次就是一次 commit。
+ */
+export { DEFAULT_MODEL };
 
-const GEMINI_ENDPOINT =
-  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+/** model 名稱會被拼進 URL —— 呼叫端必須先過 `resolveModel` 的形狀檢查。 */
+function endpointFor(model: string): string {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+}
 
 export type TransportFailure = 'TIMEOUT' | 'SERVICE_ERROR' | 'INVALID_RESPONSE';
 
@@ -54,11 +63,13 @@ function stripFence(raw: string): string {
 export async function requestRecommendation(args: {
   apiKey: string;
   input: ValidatedInput;
+  model?: string;
   fetchImpl?: FetchLike;
   timeoutMs?: number;
 }): Promise<TransportResult> {
   const fetchImpl = args.fetchImpl ?? ((url, init) => fetch(url, init));
-  const timeoutMs = args.timeoutMs ?? TIMEOUTS.geminiRequestMs;
+  const timeoutMs = args.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const model = args.model ?? DEFAULT_MODEL;
 
   const controller = new AbortController();
   let timedOut = false;
@@ -68,7 +79,7 @@ export async function requestRecommendation(args: {
   }, timeoutMs);
 
   try {
-    const res = await fetchImpl(GEMINI_ENDPOINT, {
+    const res = await fetchImpl(endpointFor(model), {
       method: 'POST',
       headers: {
         'content-type': 'application/json',

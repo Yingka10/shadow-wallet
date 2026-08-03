@@ -1,7 +1,8 @@
 # task-ai-recommendation｜Edge Function
 
-> 第八階段 B1。**已實作、已 deno check、已測試 —— 但尚未部署、尚未接 UI。**
-> 本輪一次真實 Gemini 呼叫都沒有發生（測試全部走 fetch stub）。
+> 第八階段 B1 實作，**B2A 已部署到 staging 並以真實 Gemini 驗證**。
+> 驗證結果與已知缺口見 `docs/TASK_AI_STAGING_VALIDATION.md`。
+> 仍**尚未接 UI、尚未部署 production、尚無 rate limit**。
 > 本文件不含 API key、Supabase key、真實 prompt 資料、真實家庭資料或 production ref。
 >
 > 設計背景見 `docs/TASK_AI_EDGE_FUNCTION_DESIGN.md`（B0）。
@@ -28,8 +29,8 @@ B1 第一件事就是跑 `deno check`。結果比預期好，但有一個發現�
 
 `@ts-ignore` 也一併移除。現在全目錄 **0 個 `any`、0 個 `@ts-ignore`、0 個 `@ts-expect-error`**。
 
-> 本輪沒有部署，所以「可以部署」這句話仍然**不能**說。
-> `deno check` 通過只代表型別成立，不代表 Supabase Edge Runtime 收得下。
+> B1 當時寫著「沒有部署過就不能說它可以部署」。**B2A 部署過了，而且它動得起來** ——
+> `deno check` 通過確實不等於 Edge Runtime 收得下，但這一次兩者都成立。
 
 ---
 
@@ -46,9 +47,17 @@ supabase/functions/task-ai-recommendation/
   geminiClient.ts     transport ＋ 12 秒 abort；不含產品欄位邏輯
   outputValidator.ts  unknown → RecommendationResult
   contentSafety.ts    deterministic 年齡與任務安全檢查
+  runtimeConfig.ts    model 與 timeout 的環境變數解析（型別驗證＋上下限）
+  responseSchema.ts   Gemini structured output schema，由 contract.json 產生
+  deno.json           function-scoped 設定，指向自己的 lockfile
+  deno.lock           遠端相依的完整性雜湊（`--frozen` 會強制檢查）
   __fixtures__/       24 筆任務案例 ＋ 17 筆 validator 案例（雙端共用）
-  tests/              81 筆 Deno 測試
+  tests/              98 筆 Deno 測試
 ```
+
+`deno.json` 與 `deno.lock` 刻意放在 function 目錄底下而不是 `supabase/functions/`：
+上一層那份是所有 Edge Function 共用的，動它會改到 ai-proxy 等五支的解析方式。
+`--frozen` 已驗證真的會擋 —— 竄改一個雜湊後 `deno check --frozen --reload` 回 exit 10。
 
 **為什麼 handler 與 entry 分開：** `Deno.serve` 在模組載入時就開 port，
 測試 import 它會直接佔住通訊埠。常見解法是 `import.meta.main` 或一個
@@ -188,8 +197,16 @@ body ≤ 16 KB。
 **這九條是「請求」，不是「規則」。** 1–4 由 outputValidator 執行，
 5–8 由 contentSafety 部分執行。模型照不照做是它的事。
 
-`generationConfig` 用 `responseMimeType: 'application/json'` ——
-那是**額外**的一層，不取代 validator：它只保證是 JSON，不保證是我們要的 JSON。
+`generationConfig` 用 `responseMimeType: 'application/json'` ＋ `responseSchema` ——
+那是**額外**的一層，不取代 validator：它只保證形狀，不保證值的語意、
+內容安全、id 不重複或跨欄位一致性。
+
+`responseSchema` 的 `status` enum **只有 `suggestions` 與 `no_change`**：
+`unavailable` 是我們對 App 的說法，不是模型的詞彙。讓模型能生成它，
+等於讓它可以宣稱一個沒發生的逾時，或用它讓功能靜默失效。
+
+`maxOutputTokens` 是 **4096** 不是 2048 —— B2A 實測發現 2048 會截斷
+3 則以上的中文建議，而截斷的 JSON 會被算成 `INVALID_RESPONSE`。
 
 ---
 
@@ -197,7 +214,7 @@ body ≤ 16 KB。
 
 | 項目 | 值 |
 |---|---|
-| Gemini 單次請求 | 12 秒（`contract.json` 的 `timeouts.geminiRequestMs`）|
+| Gemini 單次請求 | 12 秒（預設值；可由 `TASK_AI_TIMEOUT_MS` 覆寫，範圍 10ms–30s）|
 | handler 總上限 | 15 秒 |
 | retry | **無** |
 | model fallback | **無** |
@@ -303,9 +320,11 @@ outputValidator 沒有任何理由擋它 —— **schema 不知道瓦斯爐是�
    而且這支 Function 不知道有沒有大人在旁邊。真要對 9-12 開放，
    應該改成「需要家長確認」而不是「直接放行」——
    那需要 `TaskAiSuggestion` 上一個目前不存在的欄位。
-4. **後續仍需真實模型的 red-team fixtures。** 目前所有 fixture 都是**我們寫的**
-   模型輸出，不是真實模型在對抗性輸入下產生的。真實模型會用我們沒想到的講法。
-   那要等 B2 接上真實呼叫之後才做得到。
+4. **~~後續仍需真實模型的 red-team fixtures~~ → B2A 已執行，而且發現了缺口。**
+   量化結果：5 種危險任務的同義說法中**4 種通過安全層**，包含
+   「把煮東西的檯面擦乾淨，包含上面那圈金屬架」與「抽屜裡那個銳利的工具」。
+   細節與處理方向見 `TASK_AI_STAGING_VALIDATION.md` §6。
+   **在那被處理之前，不得宣稱這支 Function 對危險內容是安全的。**
 
 ---
 
@@ -373,12 +392,13 @@ reason 允許不同，因為 server 多分了一層語意（形狀錯 vs 越界�
 
 | 項目 | 狀態 |
 |---|---|
-| 部署 | ❌ **未部署**。`deno check` 通過不等於 Edge Runtime 收得下 |
+| 部署 | ✅ **B2A 已部署到 staging**（version 7）。production 仍未部署 |
 | 接 UI | ❌ DraftReview 未接；App 端沒有任何呼叫者 |
-| 真實 Gemini 呼叫 | ❌ 本輪 0 次。全部走 fetch stub |
-| staging 驗證 | ❌ 未執行 |
+| 真實 Gemini 呼叫 | ✅ B2A 已驗證。model 由 `GEMINI_TASK_RECOMMENDATION_MODEL` 指定 |
+| staging 驗證 | ✅ 見 `TASK_AI_STAGING_VALIDATION.md` |
 | rate limit | ❌ **沒有**。目前只擋「未登入」，沒擋「登入後狂按」，每一次都是一次付費呼叫 |
-| 真實模型 red-team | ❌ 見 §8 限制 4 |
+| 真實模型 red-team | ✅ B2A 已跑。**發現同義繞過缺口**，見驗證文件 §6 |
+| Gemini 付費方案 | ❌ 免費層每 model 每天 20 次，**連一個家庭都服務不了** |
 
 ---
 

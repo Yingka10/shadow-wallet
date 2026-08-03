@@ -21,6 +21,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.58.0';
 import { INPUT_LIMITS, unavailable, type RecommendationResult } from './contract.ts';
 import { validateTaskAiInput } from './inputValidator.ts';
 import { requestRecommendation } from './geminiClient.ts';
+import { resolveModel, resolveTimeoutMs } from './runtimeConfig.ts';
 import { validateModelOutput } from './outputValidator.ts';
 
 // ---------------------------------------------------------------------------
@@ -92,6 +93,10 @@ type LogEvent = {
   suggestionCount?: number;
   timedOut?: boolean;
   httpStatus?: number;
+  /** 設定是怎麼來的。**不含環境變數的原始內容。** */
+  modelSource?: string;
+  timeoutSource?: string;
+  timeoutMs?: number;
 };
 
 function logEvent(event: LogEvent): void {
@@ -190,7 +195,19 @@ export async function handleRequest(req: Request): Promise<Response> {
       return errorResponse(requestId, 400, 'bad_request');
     }
 
-    const transport = await requestRecommendation({ apiKey, input: validated.input });
+    // model 與 timeout 都從環境變數解析，兩者都有型別驗證與上下限。
+    // 解析結果的 source 會進 log（`env` / `env_clamped` / `env_invalid` /
+    // `default`）—— 那是「staging 把 timeout 設成 20ms 之後忘了改回來」
+    // 唯一看得出來的地方。**原始環境變數內容不進 log。**
+    const modelChoice = resolveModel(Deno.env.get('GEMINI_TASK_RECOMMENDATION_MODEL'));
+    const timeoutChoice = resolveTimeoutMs(Deno.env.get('TASK_AI_TIMEOUT_MS'));
+
+    const transport = await requestRecommendation({
+      apiKey,
+      input: validated.input,
+      model: modelChoice.model,
+      timeoutMs: timeoutChoice.timeoutMs,
+    });
 
     if (!transport.ok) {
       logEvent({
@@ -200,6 +217,9 @@ export async function handleRequest(req: Request): Promise<Response> {
         latencyMs: Date.now() - startedAt,
         timedOut: transport.failure === 'TIMEOUT',
         httpStatus: transport.httpStatus,
+        modelSource: modelChoice.source,
+        timeoutSource: timeoutChoice.source,
+        timeoutMs: timeoutChoice.timeoutMs,
       });
       return okResponse(requestId, unavailable(transport.failure));
     }
@@ -218,6 +238,12 @@ export async function handleRequest(req: Request): Promise<Response> {
         : undefined,
       latencyMs: Date.now() - startedAt,
       suggestionCount: result.suggestions.length,
+      // 成功路徑也要記。這兩個欄位的用途是讓「staging 把 timeout 調小之後
+      // 忘了改回來」看得出來 —— 而那種情況多數請求仍然會成功，
+      // 只是變慢或偶爾逾時。只在失敗時記的話，正好漏掉最需要它的情境。
+      modelSource: modelChoice.source,
+      timeoutSource: timeoutChoice.source,
+      timeoutMs: timeoutChoice.timeoutMs,
     });
 
     // AI 不可用是這個功能的**正常狀態**之一，不是錯誤。

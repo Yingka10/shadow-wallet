@@ -268,5 +268,15 @@ schema 不知道瓦斯爐是什麼。這是 client validator 不能取代 server
    `taskReward/coinPolicy.ts` import 的就是同一個檔案；重複的是演算法而且是刻意的。
    更正記錄在 `TEAMMATE_AI_WORK_COMPATIBILITY.md` 開頭
 
-B2 之前仍未完成的：部署、接 UI、真實 Gemini 呼叫、staging 驗證、
-rate limit、真實模型的 red-team fixtures。
+**B2A 已完成**：部署到 staging、真實 Gemini 呼叫、六種 Demo 任務驗證、
+prompt injection red-team、真實 timeout 驗證。紀錄見
+`TASK_AI_STAGING_VALIDATION.md`。
+
+**仍未完成**：接 UI、production 部署、per-user rate limit、
+Gemini 付費方案（免費層每 model 每天 20 次），以及一個 B2A 發現的
+**內容安全缺口** —— 危險任務換句話說就繞得過關鍵字比對。
+
+契約本身沒有因為 B2A 而改變。唯二的調整都在 transport 層：
+`responseSchema` 的 `suggestedValue` 用 `anyOf`（實測 API 接受，
+三種契約型別都正確回傳），以及 `maxOutputTokens` 2048 → 4096
+（2048 會截斷 3 則以上的中文建議，截斷的 JSON 會被算成 `INVALID_RESPONSE`）。

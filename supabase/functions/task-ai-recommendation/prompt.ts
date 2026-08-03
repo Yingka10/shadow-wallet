@@ -27,6 +27,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { ALLOWED_FIELD_PATHS, CONTRACT, LIMITS, type ValidatedInput } from './contract.ts';
+import { RESPONSE_SCHEMA } from './responseSchema.ts';
 
 /**
  * 系統政策。
@@ -134,17 +135,34 @@ export function buildUserMessage(input: ValidatedInput): string {
   ].join('\n');
 }
 
-/** Gemini 的 request body。 */
+/**
+ * Gemini 的 request body。
+ *
+ * `responseSchema` 是**額外**的一層，不取代 outputValidator ——
+ * 它降低格式錯誤的機率，但管不到值的語意（`sessionMinutes: 9999` 型別正確、
+ * 內容荒謬）、內容安全（「清理瓦斯爐」是一個完全合法的 string）、
+ * id 是否重複、或跨欄位一致性。
+ *
+ * schema 裡的 status enum **只有 suggestions 與 no_change**：
+ * `unavailable` 是我們對 App 的說法，不是模型的詞彙。詳見 responseSchema.ts。
+ */
 export function buildGeminiRequestBody(input: ValidatedInput): Record<string, unknown> {
   return {
     systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
     contents: [{ role: 'user', parts: [{ text: buildUserMessage(input) }] }],
     generationConfig: {
-      // 這是**額外**的一層，不取代 outputValidator：
-      // responseMimeType 只保證是 JSON，不保證是我們要的 JSON。
       responseMimeType: 'application/json',
+      responseSchema: RESPONSE_SCHEMA,
       temperature: 0.2,
-      maxOutputTokens: 2048,
+      // 4096 而不是 2048：契約允許 5 則建議，每則的 rationale 與
+      // suggestedValue 各上限 200 字，加上 summary 與 JSON 結構本身，
+      // 中文輸出很容易超過 2048 token。
+      //
+      // 這不是理論上的擔心 —— B2A 探測時，唯一會產出 3 則建議的 model
+      // 有一次回傳了無法解析的 JSON，而其他只回 no_change 的 model 都正常。
+      // 截斷的 JSON 會被算成 INVALID_RESPONSE，看起來像模型壞掉，
+      // 實際上是我們給的空間不夠。
+      maxOutputTokens: 4096,
     },
   };
 }
