@@ -125,6 +125,27 @@ import {
   type CustomIntakeState,
 } from './taskCreationState';
 import {
+  applyTaskAiSuggestion,
+  buildTaskAiInput,
+  canApplyItem,
+  canUndoItem,
+  collectTaskRuleFindings,
+  createTaskAiInputSignature,
+  initialItems,
+  markItemApplied,
+  markItemKept,
+  markItemUndone,
+  refreshItemStates,
+  TASK_AI_COPY,
+  undoTaskAiSuggestion,
+  userFacingUnavailable,
+  validateTaskAiRecommendationResult,
+  type TaskAiRecommendationClient,
+  type TaskAiReviewState,
+  type TaskAiSuggestionItem,
+} from './taskAi';
+import { resolveTaskAiAvailability } from './customTask';
+import {
   confirmCustomTaskEditor,
   createCustomTaskDraft,
   purposeCategoryOf,
@@ -255,6 +276,8 @@ export function TaskCreationDrawer({
   childLoading,
   displayMode = DEFAULT_DISPLAY_MODE,
   taskCreationService,
+  taskAiClient = null,
+  taskAiDeveloperNote,
   onRefreshTaskList,
   onSwitchTab,
 }: {
@@ -270,6 +293,15 @@ export function TaskCreationDrawer({
    * production 傳 SupabaseParentTaskCreationService，測試傳 fake。
    */
   taskCreationService: ParentTaskCreationService;
+  /**
+   * AI 建議 client。由上層注入，抽屜不自己建。
+   *
+   * **null = 這個環境不提供 AI 建議**，AI 區塊整個不顯示。
+   * 不是「按了會失敗的 client」—— 那會讓家長對著一顆永遠不會成功的按鈕重試。
+   */
+  taskAiClient?: TaskAiRecommendationClient | null;
+  /** development 才顯示的一行（服務模式）。**不含任何設定值。** */
+  taskAiDeveloperNote?: string;
   /**
    * 重新抓任務列表。用既有 hook 的 refetch，抽屜不自己查 Supabase ——
    * 那會變成第二套查詢，兩邊的過濾條件遲早不一樣。
@@ -328,6 +360,23 @@ export function TaskCreationDrawer({
   const [serverFieldErrors, setServerFieldErrors] =
     useState<TaskDraftValidationErrors | null>(null);
 
+  // ── AI 建議 ─────────────────────────────────────────────────────────
+  const [aiState, setAiState] = useState<TaskAiReviewState>({ kind: 'idle' });
+  /** 上一次套用被擋下來的原因。套用成功或重新請求就清掉。 */
+  const [aiApplyError, setAiApplyError] = useState<string | undefined>(undefined);
+  /** 有建議被採用而且動到了幣值的輸入 —— 只是用來顯示一句說明。 */
+  const [aiRewardRecalculated, setAiRewardRecalculated] = useState(false);
+  /**
+   * 目前這一次 AI 請求。
+   *
+   * token 與 AbortController 兩道都要：
+   *   AbortController 讓請求真的停下來（不再耗配額、不再等）
+   *   token           讓「已經送出但來不及取消」的回應對不上號而被丟掉
+   * 只靠元件卸載是不夠的 —— 抽屜不會因為離開預覽就卸載。
+   */
+  const aiRequestTokenRef = useRef(0);
+  const aiAbortRef = useRef<AbortController | null>(null);
+
   const listRef = useRef<ScrollView>(null);
   /**
    * 連點防線。
@@ -344,6 +393,20 @@ export function TaskCreationDrawer({
     () => ({ transform: [{ translateX: (1 - progress.value) * panelWidth }] }),
     [panelWidth],
   );
+
+  /**
+   * 停掉進行中的 AI 請求。
+   *
+   * **不顯示任何東西。** 家長是自己離開的 —— 為此跳一則「取得建議失敗」
+   * 等於因為他做了正常的事而責備他。
+   */
+  const abortAiRequest = useCallback(() => {
+    aiAbortRef.current?.abort();
+    aiAbortRef.current = null;
+    // token 前進一格：已經送出、來不及取消的那一次回來時會對不上號。
+    aiRequestTokenRef.current += 1;
+    setAiState(current => (current.kind === 'loading' ? { kind: 'idle' } : current));
+  }, []);
 
   /**
    * 抽屜完全關閉後的歸零。
@@ -374,7 +437,11 @@ export function TaskCreationDrawer({
     setRefreshStatus('pending');
     setServerFieldErrors(null);
     submitLockRef.current = false;
-  }, []);
+    abortAiRequest();
+    setAiState({ kind: 'idle' });
+    setAiApplyError(undefined);
+    setAiRewardRecalculated(false);
+  }, [abortAiRequest]);
 
   // 開合動畫的掛載/卸載時序
   useEffect(() => {
@@ -456,6 +523,256 @@ export function TaskCreationDrawer({
       clientRequestId,
     });
   }, [draft, activeFamily, activeVariant, commandChild, clientRequestId]);
+
+  // ── AI 建議：輸入、資格與指紋 ────────────────────────────────────────
+
+  /**
+   * 送給 AI 的輸入。
+   *
+   * 走既有的白名單 builder，**不是**在這裡另外組一份 —— 那一支的整個
+   * 用途就是把孩子的暱稱、child id、family id、錢包、任務歷史全部拿掉。
+   * 這裡繞過它的話，最小化就只剩註解。
+   */
+  const aiInput = useMemo(() => {
+    if (!draft || !ageGroup || !child) return null;
+    return buildTaskAiInput({
+      draft,
+      ...(activeVariant ? { variant: activeVariant } : null),
+      ageGroup,
+      // 傳暱稱是為了**把它從標題與期待裡拿掉**，不是為了送出去。
+      childNickname: child.nickname,
+    });
+  }, [activeVariant, ageGroup, child, draft]);
+
+  const aiSignature = useMemo(
+    () => (aiInput ? createTaskAiInputSignature(aiInput) : null),
+    [aiInput],
+  );
+
+  /**
+   * 這則任務現在能不能取得建議。
+   *
+   * 順序有意義：先問「有沒有 client」（環境層），再問「這種任務開不開放」
+   * （B2A.5 的第一版範圍）。A／B 類任務即使服務完全正常也不該出現按鈕。
+   */
+  const aiAvailability = draft
+    ? resolveTaskAiAvailability({
+        purposeCategory: draft.purposeCategory,
+        serviceHealthy: true,
+      })
+    : null;
+  const aiEligible =
+    taskAiClient !== null && aiAvailability?.state === 'available' && aiInput !== null;
+
+  /** 拿到建議之後，家長又動過草稿嗎。 */
+  const aiDraftChanged =
+    (aiState.kind === 'suggestions' || aiState.kind === 'no_change')
+    && aiSignature !== null
+    && aiSignature !== aiState.inputSignature;
+
+  const ruleFindings = useMemo(
+    () => (draft ? collectTaskRuleFindings(draft) : []),
+    [draft],
+  );
+
+  /**
+   * 草稿一變就重算每一項還套不套得上去。
+   *
+   * 算而不是記：會改到草稿的地方有七、八處（editor 欄位、採用建議、復原、
+   * 換版本……），每一處都要記得更新一個旗標的話，漏掉的那一處
+   * 就是「套用了一個對不上的建議」。
+   */
+  useEffect(() => {
+    if (!draft) return;
+    setAiState(current =>
+      current.kind === 'suggestions'
+        ? { ...current, items: refreshItemStates(current.items, draft) }
+        : current,
+    );
+  }, [draft]);
+
+  /** 換孩子一定要停掉請求 —— 那批建議是對著上一個孩子的年齡段寫的。 */
+  const childId = child?.id ?? null;
+  useEffect(() => {
+    abortAiRequest();
+    setAiState({ kind: 'idle' });
+  }, [abortAiRequest, childId]);
+
+  // 元件卸載時收尾。這是最後一道，不是唯一一道（見 abortAiRequest 的說明）。
+  useEffect(() => () => {
+    aiAbortRef.current?.abort();
+    aiAbortRef.current = null;
+  }, []);
+
+  const handleAiRequest = useCallback(async () => {
+    const requestedDraft = draft;
+    if (!taskAiClient || !aiInput || !aiSignature || !aiEligible || !requestedDraft) return;
+    // 同一時間只允許一個請求。重複按不會產生第二次付費呼叫。
+    if (aiState.kind === 'loading') return;
+
+    abortAiRequest();
+    const controller = new AbortController();
+    aiAbortRef.current = controller;
+    const token = aiRequestTokenRef.current;
+
+    setAiApplyError(undefined);
+    setAiState({ kind: 'loading', requestToken: token, inputSignature: aiSignature });
+
+    const outcome = await taskAiClient.recommend(aiInput, controller.signal);
+
+    // 對不上號＝這中間家長已經離開或重新請求過。**這一份直接丟掉。**
+    // 少了這一道，三秒前那份對著舊草稿寫的建議會蓋在新草稿上，
+    // 而畫面上完全看不出異狀。
+    if (token !== aiRequestTokenRef.current) return;
+    aiAbortRef.current = null;
+
+    switch (outcome.kind) {
+      case 'aborted':
+        setAiState({ kind: 'idle' });
+        return;
+      case 'auth_required':
+        setAiState({ kind: 'auth_required' });
+        return;
+      case 'rate_limited':
+        setAiState(
+          outcome.retryAfterSeconds === undefined
+            ? { kind: 'rate_limited' }
+            : { kind: 'rate_limited', retryAfterSeconds: outcome.retryAfterSeconds },
+        );
+        return;
+      case 'request_invalid':
+        // 家長改不了任何東西，所以文案與一般不可用相同；
+        // 代號留給 development，那是我們要修的 bug。
+        setAiState({ kind: 'unavailable', reason: 'temporary', developerCode: 'REQUEST_INVALID' });
+        return;
+      case 'server_unavailable':
+        setAiState({ kind: 'unavailable', reason: 'temporary', developerCode: 'SERVICE_ERROR' });
+        return;
+      case 'result': {
+        const result = outcome.result;
+        if (result.status === 'unavailable') {
+          const { reason, developerCode } = userFacingUnavailable(result.reason);
+          setAiState({ kind: 'unavailable', reason, developerCode });
+          return;
+        }
+        if (result.status === 'no_change') {
+          setAiState({
+            kind: 'no_change',
+            inputSignature: aiSignature,
+            summary: result.summary,
+          });
+          return;
+        }
+        setAiState({
+          kind: 'suggestions',
+          inputSignature: aiSignature,
+          summary: result.summary,
+          // 拿到就先算一次狀態：草稿在等待期間可能已經被改過。
+          items: initialItems(result.suggestions, requestedDraft),
+        });
+      }
+    }
+  }, [abortAiRequest, aiEligible, aiInput, aiSignature, aiState.kind, draft, taskAiClient]);
+
+  /**
+   * 採用一項建議。
+   *
+   * 按下去之後**再驗一次**，不信任畫面上的狀態：
+   *   1. 這則建議仍然通過 client validator（欄位、型別、長度、禁止路徑）
+   *   2. 這一項現在仍是可套用的（currentValue 對得上）
+   *   3. 套用之後草稿仍然合法
+   *
+   * 第 3 點是最容易被忽略的：一則「把期間改成 200 天」的建議本身完全合法，
+   * 套下去卻會讓草稿超出上限，然後家長在預覽上看到一個他沒辦法建立的東西。
+   */
+  const handleAiApply = useCallback(
+    (item: TaskAiSuggestionItem) => {
+      if (!draft || aiState.kind !== 'suggestions') return;
+      if (!canApplyItem(item)) return;
+
+      // 重新走一次驗證。summary 沿用已驗過的那一份，只為了組出合法的形狀。
+      const revalidated = validateTaskAiRecommendationResult({
+        status: 'suggestions',
+        schemaVersion: 1,
+        summary: aiState.summary,
+        suggestions: [item.suggestion],
+      });
+      if (revalidated.status !== 'suggestions') {
+        setAiApplyError(TASK_AI_COPY.applyIncompatible);
+        return;
+      }
+
+      const outcome = applyTaskAiSuggestion({ draft, suggestion: revalidated.suggestions[0] });
+      if (!outcome.applied) {
+        setAiApplyError(TASK_AI_COPY.applyIncompatible);
+        return;
+      }
+
+      // 不可變欄位的最後一道。apply 的 exhaustive switch 本來就碰不到它們，
+      // 但這一行的成本是零，而它擋的是「有人之後加了一個新分支」。
+      const immutableIntact =
+        outcome.draft.purposeCategory === draft.purposeCategory
+        && outcome.draft.rewardPolicy === draft.rewardPolicy
+        && outcome.draft.durationType === draft.durationType
+        && outcome.draft.source === draft.source
+        && outcome.draft.editorKind === draft.editorKind;
+
+      const stillValid =
+        immutableIntact
+        && !hasErrors(validateTaskDraft(outcome.draft, activeVariant ?? undefined, ageGroup ?? undefined));
+
+      if (!stillValid) {
+        // **不套用，保留原草稿。** 半套的結果比沒套糟糕得多。
+        setAiApplyError(TASK_AI_COPY.applyIncompatible);
+        return;
+      }
+
+      setAiApplyError(undefined);
+      setDraft(outcome.draft);
+      setAiState(current =>
+        current.kind === 'suggestions'
+          ? {
+              ...current,
+              items: markItemApplied(current.items, item.suggestion.id, outcome.record),
+            }
+          : current,
+      );
+      if (outcome.affectsRewardDecision) setAiRewardRecalculated(true);
+    },
+    [activeVariant, ageGroup, aiState, draft],
+  );
+
+  const handleAiKeep = useCallback((item: TaskAiSuggestionItem) => {
+    setAiState(current =>
+      current.kind === 'suggestions'
+        ? { ...current, items: markItemKept(current.items, item.suggestion.id) }
+        : current,
+    );
+  }, []);
+
+  /**
+   * 復原一項。
+   *
+   * 只還原**那一個欄位**，不是整份草稿的快照 —— 家長採用三項之後想收回
+   * 中間那一項時，另外兩項不該跟著消失，他自己在 editor 改過的東西也是。
+   *
+   * `canUndoItem` 在家長於採用後又動過同一欄位時回 false：那時候復原會
+   * 蓋掉他剛打的字。寧可少一個按鈕。
+   */
+  const handleAiUndo = useCallback(
+    (item: TaskAiSuggestionItem) => {
+      if (!draft || !canUndoItem(item) || !item.record) return;
+      const next = undoTaskAiSuggestion({ draft, record: item.record });
+      setDraft(next);
+      setAiApplyError(undefined);
+      setAiState(current =>
+        current.kind === 'suggestions'
+          ? { ...current, items: markItemUndone(current.items, item.suggestion.id) }
+          : current,
+      );
+    },
+    [draft],
+  );
 
   // dirty 由 initial snapshot 與 current 深度比較得出，不用手動旗標
   // （手動旗標改回原值也不會歸零，會誤觸放棄確認）。
@@ -633,13 +950,16 @@ export function TaskCreationDrawer({
 
   const handleClose = useCallback(() => {
     if (submitLockRef.current) return;
+    // 這裡就 abort，不等 reset —— reset 要等關閉動畫播完（260ms），
+    // 那段時間裡請求還活著，而家長已經走了。
+    abortAiRequest();
     // 成功畫面的 X 等同「完成」：任務已經建立，這時不該再問「要放棄嗎」。
     if (created) {
       handleFinishSuccess();
       return;
     }
     requestAction({ kind: 'close' });
-  }, [created, handleFinishSuccess, requestAction]);
+  }, [abortAiRequest, created, handleFinishSuccess, requestAction]);
 
   // web 平板：ESC 關閉。RN 沒有鍵盤事件，只在 web 掛 document listener。
   useEffect(() => {
@@ -721,6 +1041,11 @@ export function TaskCreationDrawer({
   const enterPath = useCallback(
     (next: TaskCreationPath) => {
       const effect = pathSwitchEffect(path, next);
+      // 換入口一定丟掉草稿，那批建議因此不再對應任何東西。
+      abortAiRequest();
+      setAiState({ kind: 'idle' });
+      setAiApplyError(undefined);
+      setAiRewardRecalculated(false);
       if (effect.resetDraft) {
         setDraft(null);
         setInitialDraft(null);
@@ -734,7 +1059,7 @@ export function TaskCreationDrawer({
       setPath(next);
       setRoute(next === 'preset' ? { kind: 'preset_catalog' } : { kind: 'custom_basics_title' });
     },
-    [path],
+    [abortAiRequest, path],
   );
 
   // ── 自訂基本設定 ────────────────────────────────────────────────────────
@@ -850,6 +1175,8 @@ export function TaskCreationDrawer({
    */
   const handleBack = useCallback(() => {
     if (submitLockRef.current) return;
+    // 離開預覽就停掉請求。已經拿到的建議留著 —— 家長改完回來還用得上。
+    abortAiRequest();
     if (route.kind === 'review') {
       setSubmission({ status: 'idle' });
       setRoute({ kind: 'editor', editorKind: draft?.editorKind ?? 'one_time' });
@@ -859,7 +1186,7 @@ export function TaskCreationDrawer({
     if (!back) return;
     if (back.kind === 'entry') setEntrySelection(path);
     setRoute(back);
-  }, [draft, path, route]);
+  }, [abortAiRequest, draft, path, route]);
 
   /** preset：選好家族與版本後進 editor。家族/版本沒換就沿用既有草稿。 */
   const handlePresetNext = useCallback(() => {
@@ -1217,6 +1544,25 @@ export function TaskCreationDrawer({
                   {...(activeVariant ? { variant: activeVariant } : null)}
                   draft={draft}
                   decision={previewDecision}
+                  ruleFindings={ruleFindings}
+                  {...(taskAiClient
+                    ? {
+                        ai: {
+                          state: aiState,
+                          eligible: aiEligible,
+                          draftChanged: aiDraftChanged,
+                          ...(aiApplyError !== undefined ? { applyError: aiApplyError } : null),
+                          rewardRecalculated: aiRewardRecalculated,
+                          ...(taskAiDeveloperNote !== undefined
+                            ? { developerNote: taskAiDeveloperNote }
+                            : null),
+                          onRequest: () => void handleAiRequest(),
+                          onApply: handleAiApply,
+                          onKeep: handleAiKeep,
+                          onUndo: handleAiUndo,
+                        },
+                      }
+                    : null)}
                 />
               ) : null}
 

@@ -321,3 +321,29 @@ Gemini 付費方案（免費層每 model 每天 20 次），以及一個 B2A 發
 `responseSchema` 的 `suggestedValue` 用 `anyOf`（實測 API 接受，
 三種契約型別都正確回傳），以及 `maxOutputTokens` 2048 → 4096
 （2048 會截斷 3 則以上的中文建議，截斷的 JSON 會被算成 `INVALID_RESPONSE`）。
+
+---
+
+## 第八階段 B2B：契約已接上畫面
+
+App 這一側新增了一層 **client 契約**，包在既有的 service 契約外面：
+
+```ts
+type TaskAiClientOutcome =
+  | { kind: 'result'; result: TaskAiRecommendationResult }
+  | { kind: 'rate_limited'; retryAfterSeconds? }
+  | { kind: 'auth_required' }
+  | { kind: 'request_invalid' }
+  | { kind: 'server_unavailable' }
+  | { kind: 'aborted' };
+```
+
+`TaskAiRecommendationResult` 只回得出「AI 說了什麼」，而 429、401、
+「家長自己離開了」不是 AI 說的話。全部壓成 `unavailable` 的話，
+登入過期會顯示成「目前無法取得建議」，家長重試一百次都不會成功。
+
+**既有的型別、validator 與 apply switch 一個字都沒有改。**
+`buildTaskAiInput` 只有一處：`variant` 改成 optional，自訂任務的
+`completionPolicy` 由 `editorKind` 推導（與 `mapTaskDraftToCommand` 同一支函式）。
+
+接線細節、狀態機、過期建議與 abort 見 `TASK_AI_DRAWER_INTEGRATION.md`。

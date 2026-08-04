@@ -450,3 +450,26 @@ any          → 0
 新 dependency → 0（連 jsr:@std/assert 都沒用，自己寫了四個斷言函式）
 真實 Gemini 呼叫 → 0
 ```
+
+---
+
+## 第八階段 B2B：App 端接上了
+
+**這一輪沒有改 Edge Function 的任何一個檔案。** 改的全部在 App。
+
+App 端的 adapter（`taskAi/liveTaskAiRecommendationClient.ts`）對這支 Function
+的依賴只有兩件事，兩件都是本文件已經定好的契約：
+
+1. 函式名稱 `task-ai-recommendation`
+2. 互斥的 envelope：`200 → { requestId, result }`、
+   `4xx/5xx → { requestId, error: { code, retryAfterSeconds? } }`
+
+那個「成功與失敗用不同的鍵」的設計在 App 端的價值現在具體了：
+`resultFromEnvelope` 只讀 `result`，而錯誤路徑根本走不到它 ——
+一個 401 沒有辦法被誤讀成「AI 說沒有建議」。
+
+App **不 cast**：200 的 `result` 一律再走一次 client validator。
+server 驗過了，但中間可能有代理、快取，或一個部署到一半的舊版 Function。
+
+`Retry-After` header 與 body 裡的 `retryAfterSeconds` 兩者都有用到：
+App 先讀 body，沒有才退到 header，兩個都沒有就不顯示秒數。

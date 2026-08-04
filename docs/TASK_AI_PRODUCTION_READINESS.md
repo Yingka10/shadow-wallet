@@ -220,3 +220,34 @@ deno run --allow-env --allow-net --allow-read --allow-write \
 
 `scripts/liveCheck.ts` 有**跨次數累計的每日預算**（`TASK_AI_MAX_LIVE_TEST_CALLS`），
 重跑不會從零開始。它也在送出任何請求前比對 project ref，對到 production 直接結束。
+
+---
+
+## 第八階段 B2B：App 端的上線開關
+
+新增 `EXPO_PUBLIC_TASK_AI_MODE`（`off` / `fake` / `live`）。
+
+**production 的預設是 `off`，而且不接受 `fake`。**
+
+| 環境 | 允許的值 | 沒設定 |
+|---|---|---|
+| development / staging | off / fake / live | off |
+| production | off / **live**（要明確設定） | off |
+| test | off（不看環境變數） | off |
+
+`fake` 在 production 被拒絕的理由：對真實家庭顯示一批寫死在 repo 裡的建議，
+比完全沒有這個功能糟糕得多 —— 家長會照著那些字調整孩子的任務。
+而它在畫面上看起來是成功的。
+
+**live 失敗不會退回 fake。** 降級只能降到「目前無法取得建議」。
+
+### 上 production 之前仍然缺的
+
+- Function **尚未部署到 production**（本輪沒有部署任何東西）
+- production 的 `GEMINI_API_KEY` 與限流參數尚未設定
+- 付費配額仍未解決（免費額度只夠功能開發）
+- 本輪**沒有跑真實 staging smoke test** —— 缺憑證，見
+  `TASK_AI_DRAWER_INTEGRATION.md` §十四
+
+在上面四項全部解決之前，production 的 `EXPO_PUBLIC_TASK_AI_MODE`
+**必須保持未設定或明確 off**。

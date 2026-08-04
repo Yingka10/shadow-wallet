@@ -375,3 +375,24 @@ Claude 無法實際操作 Expo，以下**沒有一項被驗證過**。
 - 週報／到期提醒仍未讀 `reward_support_*`
 - `reward_support_intent` 的 UI：目前唯一會用到它的組合（B ＋ 成長幣）
   在幣值政策補上之前選不到，所以這一輪沒有做支持意圖的選擇畫面
+
+---
+
+## 十三、第八階段 B2B 更新：AI 已接上
+
+§八 說「DraftReview 的 AI 區塊本輪保持現狀：抽屜沒有傳 `ai` prop」——
+**那句話已經不成立**。抽屜現在會傳，而且是真的服務（依環境模式）。
+
+對自訂流程的影響只有兩處：
+
+1. `buildTaskAiInput` 的 `variant` 改成 optional —— 自訂任務沒有版本，
+   `completionPolicy` 由 `editorKind` 推導。**沒有捏假的 preset variant**，
+   否則 preset 的選項組、安全提示與 catalog 版本會一起送進模型。
+2. C／D 的自訂任務與 preset 走**同一支 service、同一套 apply／undo**。
+   A／B 兩種來源都不呼叫，但都照常建得出任務。
+
+§十二 的「AI 尚未串接」與 §十六 的「AI：沒有接 task-ai-recommendation」
+兩條到此為止。細節見 `TASK_AI_DRAWER_INTEGRATION.md`。
+
+**Step 2 的任務目的仍然是純人工選擇** —— 沒有 AI 預選、不呼叫
+`classifyTask`、不呼叫 `ai-proxy`。那一條沒有變，而且有測試釘著。

@@ -46,6 +46,8 @@ import {
 } from './taskDrawer/TaskCreationDrawer';
 import type { CreatedTaskTab } from './taskDrawer/taskPersistence';
 import { SupabaseParentTaskCreationService } from '../../../lib/parentTaskCreationService';
+import { taskAiClientSetup } from '../../../lib/taskAiRecommendationClient';
+import { taskAiServiceModeLabel } from './taskDrawer/taskAi';
 import {
   BellIcon,
   CheckSquareIcon,
@@ -572,6 +574,15 @@ export default function ParentTaskManagementTablet() {
    * 每次 render 產生一個新實例會讓抽屜的 useCallback 依賴每次都變。
    */
   const taskCreationService = useMemo(() => new SupabaseParentTaskCreationService(), []);
+  /*
+    AI 建議 client 在模組載入時就決定好（見 lib/taskAiRecommendationClient）。
+    null = 這個環境不提供 —— 抽屜會整個不顯示 AI 區塊，而不是給一顆
+    按了永遠不會成功的按鈕。
+  */
+  const taskAiDeveloperNote = useMemo(
+    () => taskAiServiceModeLabel(taskAiClientSetup.resolution),
+    [],
+  );
 
   /**
    * 建立成功後的列表更新。
@@ -868,6 +879,8 @@ export default function ParentTaskManagementTablet() {
         child={drawerChild}
         childLoading={taskLoading}
         taskCreationService={taskCreationService}
+        taskAiClient={taskAiClientSetup.client}
+        taskAiDeveloperNote={taskAiDeveloperNote}
         onRefreshTaskList={handleRefreshAfterCreate}
         onSwitchTab={handleSwitchTabAfterCreate}
       />

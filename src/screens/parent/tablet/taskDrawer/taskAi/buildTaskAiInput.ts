@@ -24,11 +24,22 @@ import {
   type TaskDraft,
 } from '../taskDraft';
 import type { TaskPresetVariant } from '../taskCatalog';
+// 只取一支純函式（editorKind → completionPolicy）。刻意不從 customTask/index
+// 進來 —— 那會連帶拉進畫面元件，而這一層不需要認識 React。
+import { completionPolicyForEditor } from '../customTask/customTaskRouting';
 import { IMMUTABLE_FIELDS, type TaskAiRecommendationInput } from './types';
 
 export type BuildTaskAiInputArgs = {
   draft: TaskDraft;
-  variant: TaskPresetVariant;
+  /**
+   * preset 的版本。**自訂任務沒有版本，這裡是 undefined。**
+   *
+   * 它只被用來取 completionPolicy；自訂任務改由 editorKind 推導，
+   * 與 mapTaskDraftToCommand 走同一支函式。
+   * 為了補這一個欄位而捏一個假的 variant 出來，等於把 preset 的
+   * 選項組、安全提示與 catalog 版本一起送進模型 —— 那些都不該出去。
+   */
+  variant?: TaskPresetVariant;
   /** 分級字串，例如 `6-9`。**不要傳生日。** */
   ageGroup: string;
   /**
@@ -66,7 +77,7 @@ export function buildTaskAiInput({
       durationType: draft.durationType,
       source: draft.source,
       rewardPolicy: draft.rewardPolicy,
-      completionPolicy: variant.completionPolicy,
+      completionPolicy: variant?.completionPolicy ?? completionPolicyForEditor(draft.editorKind),
     },
 
     parentIntent: {

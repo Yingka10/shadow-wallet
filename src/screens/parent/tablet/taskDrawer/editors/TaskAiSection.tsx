@@ -5,9 +5,13 @@
 //   規則檢查   系統說了算。blocking 的那幾條會擋住建立，沒有「保留原設定」
 //              這個選項 —— 因為那不是建議。
 //
-//   AI 建議    逐項採用。沒有「全部採用」按鈕，這是刻意的：
+//   AI 建議    逐項採用。**沒有「全部採用」按鈕**，這是刻意的：
 //              一鍵套用四項等於沒有人讀過那四項，
 //              而這個功能的整個價值就在家長讀過並且做了決定。
+//
+// 這一支只負責畫。「現在是什麼狀態」由 TaskAiReviewState 決定，
+// 「這一項還套不套得上去」由 refreshItemStates 算 —— 兩者都是純函式，
+// 在這裡再判斷一次就會有兩份答案。
 
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -20,11 +24,14 @@ import {
   ParentSpacing,
 } from '../../../../../constants/parentTheme';
 import { useShowsImplementationNotes } from '../displayMode';
-import type {
-  AiSuggestionDecision,
-  TaskAiRecommendationResult,
-  TaskAiSuggestion,
-  TaskRuleFinding,
+import {
+  canApplyItem,
+  canUndoItem,
+  retryAfterText,
+  TASK_AI_COPY,
+  type TaskAiReviewState,
+  type TaskAiSuggestionItem,
+  type TaskRuleFinding,
 } from '../taskAi';
 
 // ---------------------------------------------------------------------------
@@ -57,16 +64,7 @@ export function RuleFindingsSection({ findings }: { findings: readonly TaskRuleF
 // AI 建議
 // ---------------------------------------------------------------------------
 
-const BENEFIT_LABEL: Record<TaskAiSuggestion['expectedBenefit'], string> = {
-  clearer_expectation: '期待更清楚',
-  more_age_appropriate: '更符合這個年紀',
-  more_achievable: '更做得到',
-  more_autonomy: '孩子有更多決定權',
-  easier_to_review: '之後更好一起回顧',
-  safer: '更安全',
-};
-
-const KIND_LABEL: Record<TaskAiSuggestion['kind'], string> = {
+const KIND_LABEL: Record<TaskAiSuggestionItem['suggestion']['kind'], string> = {
   clarify_title: '把任務名稱寫清楚',
   clarify_completion: '把完成標準寫清楚',
   reduce_scope: '縮小範圍',
@@ -88,118 +86,298 @@ function valueText(value: string | number | string[] | null): string {
 }
 
 export type TaskAiSectionProps = {
-  /** null = 還沒按過「取得調整建議」。 */
-  result: TaskAiRecommendationResult | null;
-  loading: boolean;
-  decisions: Record<string, AiSuggestionDecision>;
+  state: TaskAiReviewState;
+  /**
+   * 這則任務目前可不可以取得建議。
+   *
+   * false = A／B 類或服務關閉。**不顯示按鈕**，只留一句不影響建立的說明 ——
+   * 一顆按了永遠不會成功的按鈕比沒有按鈕糟糕得多。
+   */
+  eligible: boolean;
+  /** 家長在拿到建議之後又改過草稿。 */
+  draftChanged: boolean;
+  /** 上一次套用被擋下來的原因。 */
+  applyError?: string;
+  /** 有建議被採用而且動到了幣值的輸入。 */
+  rewardRecalculated: boolean;
+  /** development 才顯示的一行（服務模式）。**不含任何設定值。** */
+  developerNote?: string;
   onRequest: () => void;
-  onApply: (suggestion: TaskAiSuggestion) => void;
-  onReject: (suggestion: TaskAiSuggestion) => void;
-  onUndo: (suggestion: TaskAiSuggestion) => void;
+  onApply: (item: TaskAiSuggestionItem) => void;
+  onKeep: (item: TaskAiSuggestionItem) => void;
+  onUndo: (item: TaskAiSuggestionItem) => void;
 };
 
 export function TaskAiSection({
-  result,
-  loading,
-  decisions,
+  state,
+  eligible,
+  draftChanged,
+  applyError,
+  rewardRecalculated,
+  developerNote,
   onRequest,
   onApply,
-  onReject,
+  onKeep,
   onUndo,
 }: TaskAiSectionProps) {
   const showsImplementationNotes = useShowsImplementationNotes();
 
   return (
     <View style={s.block}>
-      <Text style={s.blockTitle}>一起調整這項任務</Text>
+      <Text style={s.blockTitle}>{TASK_AI_COPY.title}</Text>
 
-      {loading ? (
-        <Text style={s.aiBody}>正在整理建議…</Text>
-      ) : result === null ? (
+      {showsImplementationNotes && developerNote ? (
+        <Text style={s.aiStatus}>{developerNote}</Text>
+      ) : null}
+
+      {!eligible ? (
+        // 這一段刻意平淡：這不是警告，也不代表任務有問題。
+        // 「不影響建立」和它寫在同一句 —— 那是家長此刻唯一在意的事。
+        <Text style={s.aiBody}>{TASK_AI_COPY.notOffered}</Text>
+      ) : (
+        <AiBody
+          state={state}
+          draftChanged={draftChanged}
+          {...(applyError !== undefined ? { applyError } : null)}
+          rewardRecalculated={rewardRecalculated}
+          showsImplementationNotes={showsImplementationNotes}
+          onRequest={onRequest}
+          onApply={onApply}
+          onKeep={onKeep}
+          onUndo={onUndo}
+        />
+      )}
+    </View>
+  );
+}
+
+function AiBody({
+  state,
+  draftChanged,
+  applyError,
+  rewardRecalculated,
+  showsImplementationNotes,
+  onRequest,
+  onApply,
+  onKeep,
+  onUndo,
+}: {
+  state: TaskAiReviewState;
+  draftChanged: boolean;
+  applyError?: string;
+  rewardRecalculated: boolean;
+  showsImplementationNotes: boolean;
+  onRequest: () => void;
+  onApply: (item: TaskAiSuggestionItem) => void;
+  onKeep: (item: TaskAiSuggestionItem) => void;
+  onUndo: (item: TaskAiSuggestionItem) => void;
+}) {
+  switch (state.kind) {
+    case 'idle':
+      return (
+        <>
+          <Text style={s.aiBody}>{TASK_AI_COPY.intro}</Text>
+          <RequestButton label={TASK_AI_COPY.requestButton} onPress={onRequest} />
+        </>
+      );
+
+    case 'loading':
+      return (
+        <>
+          <Text style={s.aiBody}>{TASK_AI_COPY.loading}</Text>
+          {/*
+            按鈕仍然在，但按不下去 —— 直接把它拿掉的話，畫面會在等待期間
+            少一塊，回來時又長回來，家長會以為自己按錯了什麼。
+          */}
+          <RequestButton label={TASK_AI_COPY.requestButton} disabled onPress={onRequest} />
+        </>
+      );
+
+    case 'auth_required':
+      return (
+        <Text style={s.aiBody} accessibilityRole="alert">
+          {TASK_AI_COPY.authRequired}
+        </Text>
+      );
+
+    case 'rate_limited': {
+      const retry = retryAfterText(state.retryAfterSeconds);
+      return (
+        <>
+          <Text style={s.aiBody} accessibilityRole="alert">
+            {TASK_AI_COPY.rateLimited}
+          </Text>
+          {/* 有數字才顯示，而且只到分鐘 —— 秒數會讓家長守著畫面數秒。 */}
+          {retry ? <Text style={s.aiBody}>{retry}</Text> : null}
+        </>
+      );
+    }
+
+    case 'unavailable':
+      return (
         <>
           <Text style={s.aiBody}>
-            AI 可以協助檢查範圍、時間與完成方式，是否採用仍由你決定。
+            {state.reason === 'not_offered' ? TASK_AI_COPY.notOffered : TASK_AI_COPY.unavailable}
           </Text>
-          <Pressable
-            style={s.aiButton}
-            onPress={onRequest}
-            accessibilityRole="button"
-            accessibilityLabel="取得調整建議"
-          >
-            <Text style={s.aiButtonText}>取得調整建議</Text>
-          </Pressable>
-        </>
-      ) : result.status === 'no_change' ? (
-        <Text style={s.aiBody}>目前設定已經清楚，可以直接建立。</Text>
-      ) : result.status === 'unavailable' ? (
-        <>
-          <Text style={s.aiBody}>目前無法取得建議，不影響任務建立。</Text>
+          {/* not_offered 再試一百次都一樣，不給重試按鈕。 */}
+          {state.reason === 'temporary' ? (
+            <RequestButton label={TASK_AI_COPY.retryButton} onPress={onRequest} />
+          ) : null}
           {/*
-            development 只顯示狀態碼，不顯示原始回傳、prompt、model 名稱或
-            token 用量 —— 那些對家長沒有意義，而且是最容易在截圖裡外流的東西。
+            development 只顯示固定代號，不顯示原始回傳、prompt、model 名稱
+            或 token 用量 —— 那些對家長沒有意義，而且是最容易在截圖裡外流的東西。
           */}
-          {showsImplementationNotes ? (
-            <Text style={s.aiStatus}>服務狀態：{result.reason}</Text>
+          {showsImplementationNotes && state.developerCode ? (
+            <Text style={s.aiStatus}>服務狀態：{state.developerCode}</Text>
           ) : null}
         </>
-      ) : (
+      );
+
+    case 'no_change':
+      return (
         <>
-          <Text style={s.aiBody}>{result.summary}</Text>
-          {result.suggestions.map(suggestion => {
-            const decision = decisions[suggestion.id] ?? 'pending';
-            return (
-              <View key={suggestion.id} style={s.card}>
-                <Text style={s.cardKind}>{KIND_LABEL[suggestion.kind]}</Text>
-
-                <Text style={s.cardLabel}>目前設定</Text>
-                <Text style={s.cardValue}>{valueText(suggestion.currentValue)}</Text>
-
-                <Text style={s.cardLabel}>建議調整</Text>
-                <Text style={s.cardValue}>{valueText(suggestion.suggestedValue)}</Text>
-
-                <Text style={s.cardLabel}>原因</Text>
-                <Text style={s.cardBody}>{suggestion.rationale}</Text>
-
-                <Text style={s.cardBenefit}>{BENEFIT_LABEL[suggestion.expectedBenefit]}</Text>
-
-                {decision === 'applied' ? (
-                  <View style={s.cardActions}>
-                    <Text style={s.appliedMark}>已套用</Text>
-                    <Pressable
-                      style={s.secondaryAction}
-                      onPress={() => onUndo(suggestion)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`復原：${KIND_LABEL[suggestion.kind]}`}
-                    >
-                      <Text style={s.secondaryActionText}>復原</Text>
-                    </Pressable>
-                  </View>
-                ) : decision === 'rejected' ? (
-                  <Text style={s.rejectedMark}>已保留原設定</Text>
-                ) : (
-                  <View style={s.cardActions}>
-                    <Pressable
-                      style={s.primaryAction}
-                      onPress={() => onApply(suggestion)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`採用這項：${KIND_LABEL[suggestion.kind]}`}
-                    >
-                      <Text style={s.primaryActionText}>採用這項</Text>
-                    </Pressable>
-                    <Pressable
-                      style={s.secondaryAction}
-                      onPress={() => onReject(suggestion)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`保留原設定：${KIND_LABEL[suggestion.kind]}`}
-                    >
-                      <Text style={s.secondaryActionText}>保留原設定</Text>
-                    </Pressable>
-                  </View>
-                )}
-              </View>
-            );
-          })}
+          <Text style={s.aiBody}>{TASK_AI_COPY.noChange}</Text>
+          {/* summary 已經過 client validator 的長度與安全檢查。 */}
+          <Text style={s.aiBody}>{state.summary}</Text>
         </>
+      );
+
+    case 'suggestions':
+      return (
+        <>
+          <Text style={s.aiBody}>{state.summary}</Text>
+          {draftChanged ? <Text style={s.aiNotice}>{TASK_AI_COPY.draftChanged}</Text> : null}
+          {rewardRecalculated ? (
+            // 主詞是「系統」不是「AI」——幣值一直都是規則引擎算的。
+            <Text style={s.aiNotice}>{TASK_AI_COPY.rewardRecalculated}</Text>
+          ) : null}
+          {applyError ? (
+            <Text style={s.aiError} accessibilityRole="alert">
+              {applyError}
+            </Text>
+          ) : null}
+          {state.items.map(item => (
+            <SuggestionCard
+              key={item.suggestion.id}
+              item={item}
+              showsImplementationNotes={showsImplementationNotes}
+              onApply={onApply}
+              onKeep={onKeep}
+              onUndo={onUndo}
+            />
+          ))}
+        </>
+      );
+  }
+}
+
+function RequestButton({
+  label,
+  disabled,
+  onPress,
+}: {
+  label: string;
+  disabled?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      style={[s.aiButton, disabled && s.aiButtonDisabled]}
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled, busy: !!disabled }}
+    >
+      <Text style={[s.aiButtonText, disabled && s.aiButtonTextDisabled]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function SuggestionCard({
+  item,
+  showsImplementationNotes,
+  onApply,
+  onKeep,
+  onUndo,
+}: {
+  item: TaskAiSuggestionItem;
+  showsImplementationNotes: boolean;
+  onApply: (item: TaskAiSuggestionItem) => void;
+  onKeep: (item: TaskAiSuggestionItem) => void;
+  onUndo: (item: TaskAiSuggestionItem) => void;
+}) {
+  const { suggestion, state } = item;
+  const label = KIND_LABEL[suggestion.kind];
+
+  return (
+    <View style={s.card}>
+      <Text style={s.cardKind}>{label}</Text>
+
+      <Text style={s.cardLabel}>{TASK_AI_COPY.cardCurrentLabel}</Text>
+      <Text style={s.cardValue}>{valueText(suggestion.currentValue)}</Text>
+
+      <Text style={s.cardLabel}>{TASK_AI_COPY.cardSuggestedLabel}</Text>
+      <Text style={s.cardValue}>{valueText(suggestion.suggestedValue)}</Text>
+
+      <Text style={s.cardLabel}>{TASK_AI_COPY.cardReasonLabel}</Text>
+      <Text style={s.cardBody}>{suggestion.rationale}</Text>
+
+      {/*
+        confidence、expectedBenefit、fieldPath、suggestion kind code、
+        schemaVersion 都不上正式畫面。「信心 85%」會讓家長把它當成準確率，
+        而它不是 —— 那是模型對自己的感覺。
+      */}
+      {showsImplementationNotes ? (
+        <Text style={s.aiStatus}>
+          {suggestion.kind}｜{state}
+        </Text>
+      ) : null}
+
+      {state === 'stale' ? (
+        <Text style={s.cardStale}>{TASK_AI_COPY.staleItem}</Text>
+      ) : state === 'applied_edited' ? (
+        <>
+          <Text style={s.appliedMark}>{TASK_AI_COPY.appliedMark}</Text>
+          <Text style={s.cardStale}>{TASK_AI_COPY.undoUnsafe}</Text>
+        </>
+      ) : state === 'applied' ? (
+        <View style={s.cardActions}>
+          <Text style={s.appliedMark}>{TASK_AI_COPY.appliedMark}</Text>
+          {canUndoItem(item) ? (
+            <Pressable
+              style={s.secondaryAction}
+              onPress={() => onUndo(item)}
+              accessibilityRole="button"
+              accessibilityLabel={`${TASK_AI_COPY.undoButton}：${label}`}
+            >
+              <Text style={s.secondaryActionText}>{TASK_AI_COPY.undoButton}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : state === 'kept' ? (
+        <Text style={s.rejectedMark}>{TASK_AI_COPY.keptMark}</Text>
+      ) : (
+        <View style={s.cardActions}>
+          <Pressable
+            style={s.primaryAction}
+            onPress={() => onApply(item)}
+            disabled={!canApplyItem(item)}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canApplyItem(item) }}
+            accessibilityLabel={`${TASK_AI_COPY.applyButton}：${label}`}
+          >
+            <Text style={s.primaryActionText}>{TASK_AI_COPY.applyButton}</Text>
+          </Pressable>
+          <Pressable
+            style={s.secondaryAction}
+            onPress={() => onKeep(item)}
+            accessibilityRole="button"
+            accessibilityLabel={`${TASK_AI_COPY.keepButton}：${label}`}
+          >
+            <Text style={s.secondaryActionText}>{TASK_AI_COPY.keepButton}</Text>
+          </Pressable>
+        </View>
       )}
     </View>
   );
@@ -238,6 +416,8 @@ const s = StyleSheet.create({
   },
 
   aiBody: { fontSize: ParentFontSizes.pMeta, color: ParentColors.fgSecondary },
+  aiNotice: { fontSize: ParentFontSizes.eyebrow, color: ParentColors.fgMuted },
+  aiError: { fontSize: ParentFontSizes.pMeta, color: ParentColors.dangerSoft },
   aiStatus: { fontSize: ParentFontSizes.eyebrow, color: ParentColors.fgMuted },
   aiButton: {
     alignSelf: 'flex-start',
@@ -247,11 +427,13 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: ParentColors.accent,
   },
+  aiButtonDisabled: { borderColor: ParentColors.borderSoft },
   aiButtonText: {
     fontSize: ParentFontSizes.pMeta,
     fontWeight: ParentFontWeights.semi,
     color: ParentColors.accent,
   },
+  aiButtonTextDisabled: { color: ParentColors.fgMuted },
 
   card: {
     borderRadius: ParentRadii.md,
@@ -273,10 +455,10 @@ const s = StyleSheet.create({
     color: ParentColors.fgPrimary,
   },
   cardBody: { fontSize: ParentFontSizes.pMeta, color: ParentColors.fgSecondary },
-  cardBenefit: {
-    fontSize: ParentFontSizes.eyebrow,
-    color: ParentColors.accent,
-    paddingTop: ParentSpacing[1],
+  cardStale: {
+    fontSize: ParentFontSizes.pMeta,
+    color: ParentColors.fgMuted,
+    paddingTop: ParentSpacing[2],
   },
   cardActions: {
     flexDirection: 'row',

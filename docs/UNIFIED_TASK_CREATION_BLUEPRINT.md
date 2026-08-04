@@ -218,3 +218,27 @@ preset selection 的寫入那一段。
 **仍然沒有做：** AI 尚未接上自訂流程（DraftReview 的 AI 區塊保持現狀）、
 `ParentHomeTablet` 的兩條舊 AI 幣值路徑（第七節的 B3 淘汰計畫第 2 步）、
 B 類幣值數字。
+
+---
+
+## 十一、第八階段 B2B：AI 建議接上兩個入口
+
+第八節說「C／D 自訂任務 → 可取得 AI 建議」是**設計意圖**；現在它是實作。
+
+preset 與 parent_custom 走同一支 `TaskAiRecommendationClient`、
+同一份 input builder、同一套逐項採用／保留／復原。**沒有第二支 Edge Function，
+也沒有 custom 專用的建議 UI。**
+
+第四節那張「共用生命週期」的表因此多一列：
+
+| 階段 | preset | parent_custom | 共用？ |
+|---|---|---|---|
+| AI 建議 | 真實 Edge Function（C／D） | 同左 | ✅ 同一支 client |
+
+第八節那段「未來可能的新工作流：從一句話協助產生草稿」仍然**只是記錄**。
+另外，統一建立中心的 Step 2（任務目的）也仍然是人工選擇 ——
+它未來若要有 AI 建議，那是第三支工作流，安全模型與前兩者都不同
+（見 `TASK_AI_DRAWER_INTEGRATION.md` §十三）。
+
+第七節的 B3 淘汰計畫**尚未開始**：`ParentHomeTablet` 的
+`AssignTaskPanel` / `NewTaskPanel` 兩條舊 AI 幣值路徑仍然活著。
