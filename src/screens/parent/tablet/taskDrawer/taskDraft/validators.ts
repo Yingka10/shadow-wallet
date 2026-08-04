@@ -25,6 +25,23 @@ import type {
 /** 家庭參與在任何形式下都不得走成長幣或時間儲蓄。 */
 const COIN_LIKE_POLICIES = ['coin_eligible', 'time_saving_eligible'];
 
+/**
+ * 沒有 preset variant 時的回饋方式候選集合。
+ *
+ * 自訂任務沒有 catalog 的 allowedRewardPolicies —— 那份清單是
+ * 「這個預設版本提供哪幾種」，而自訂任務不屬於任何版本。
+ * 所以這裡放全部，交給下面的 capability 檢查去篩：
+ * 篩掉的理由會是「算不出幣值」或「時間儲蓄未啟用」，
+ * 那是**真的做不到**，而不是「這張卡片沒有提供」。
+ */
+const ALL_REWARD_POLICIES: RewardPolicy[] = [
+  'record_only',
+  'family_contribution',
+  'progress_only',
+  'coin_eligible',
+  'time_saving_eligible',
+];
+
 /** 學校作業是本來就該完成的事，只能留下紀錄或以進度肯定，不得成為固定幣源。 */
 const SCHOOL_ASSIGNMENT_FAMILY_ID = 'learn-school-assignment';
 const SCHOOL_ASSIGNMENT_POLICIES: RewardPolicy[] = ['record_only', 'progress_only'];
@@ -84,12 +101,12 @@ export function validateRequiredOptionGroups(
 
 export function validateGrowthPlanDraft(
   draft: GrowthPlanDraft,
-  variant: TaskPresetVariant,
+  variant: TaskPresetVariant | undefined,
 ): TaskDraftValidationErrors {
   const errors: TaskDraftValidationErrors = {};
 
   validateCommon(draft, errors);
-  validateRequiredOptionGroups(variant.optionGroups, draft, errors);
+  validateRequiredOptionGroups(variant?.optionGroups ?? [], draft, errors);
   validateDurationDays(draft.durationDays, errors);
 
   if (draft.recurrenceDays.length === 0) {
@@ -117,12 +134,12 @@ export function validateGrowthPlanDraft(
 
 export function validateShortSupportDraft(
   draft: ShortSupportDraft,
-  variant: TaskPresetVariant,
+  variant: TaskPresetVariant | undefined,
 ): TaskDraftValidationErrors {
   const errors: TaskDraftValidationErrors = {};
 
   validateCommon(draft, errors);
-  validateRequiredOptionGroups(variant.optionGroups, draft, errors);
+  validateRequiredOptionGroups(variant?.optionGroups ?? [], draft, errors);
   validateDurationDays(draft.durationDays, errors);
 
   if (draft.recurrenceDays.length === 0) {
@@ -136,9 +153,12 @@ export function validateShortSupportDraft(
     預覽會被永久擋住，而畫面上沒有任何可以修的東西。
     所以焦點與支援步驟只在真的有選項可選時才是必填；沒有選項時改由家長自己新增步驟。
   */
+  // 自訂任務沒有 familyId，也就沒有 preset 的焦點清單可查。
+  // 那不是「查不到」，是這種來源本來就沒有 —— 所以直接視為沒有預設焦點，
+  // 由家長自己新增支援步驟。
   const hasFocusChoices =
-    variant.optionGroups.length > 0
-    || shortSupportCopy(draft.familyId).focusChoices.length > 0;
+    (variant?.optionGroups.length ?? 0) > 0
+    || (draft.familyId !== undefined && shortSupportCopy(draft.familyId).focusChoices.length > 0);
 
   if (hasFocusChoices && draft.focusOptionIds.length === 0) {
     errors.focusOptionIds = '請至少選一個焦點';
@@ -185,12 +205,12 @@ function validateFamilyParticipationReward(
 
 export function validateRecurringTaskDraft(
   draft: RecurringTaskDraft,
-  variant: TaskPresetVariant,
+  variant: TaskPresetVariant | undefined,
 ): TaskDraftValidationErrors {
   const errors: TaskDraftValidationErrors = {};
 
   validateCommon(draft, errors);
-  validateRequiredOptionGroups(variant.optionGroups, draft, errors);
+  validateRequiredOptionGroups(variant?.optionGroups ?? [], draft, errors);
   validateFamilyParticipationReward(draft, errors);
 
   if (draft.scheduleMode === 'fixed_days') {
@@ -230,7 +250,7 @@ export function validateRecurringTaskDraft(
 
 export function validateFamilyRoleDraft(
   draft: FamilyRoleDraft,
-  variant: TaskPresetVariant,
+  variant: TaskPresetVariant | undefined,
 ): TaskDraftValidationErrors {
   const errors: TaskDraftValidationErrors = {};
 
@@ -243,9 +263,9 @@ export function validateFamilyRoleDraft(
     交給下面那段驗。掃其餘群組是為了「五種 draft 都覆蓋到」這件事對未來也成立 ——
     catalog 之後替家庭角色加第二組選項時，不會安靜地漏掉。
   */
-  const roleGroupId = variant.optionGroups[0]?.id;
+  const roleGroupId = variant?.optionGroups[0]?.id;
   validateRequiredOptionGroups(
-    variant.optionGroups.filter(group => group.id !== roleGroupId),
+    (variant?.optionGroups ?? []).filter(group => group.id !== roleGroupId),
     draft,
     errors,
   );
@@ -265,7 +285,7 @@ export function validateFamilyRoleDraft(
   }
 
   validateDurationDays(draft.durationDays, errors);
-  const choices = variant.defaultDraft.durationDayChoices;
+  const choices = variant?.defaultDraft.durationDayChoices;
   if (!errors.durationDays && choices && choices.length > 0
     && !choices.includes(draft.durationDays)) {
     errors.durationDays = `請從 ${choices.join('、')} 天中選擇`;
@@ -324,12 +344,12 @@ function validateMinutes(
 
 export function validateOneTimeDraft(
   draft: OneTimeTaskDraft,
-  variant: TaskPresetVariant,
+  variant: TaskPresetVariant | undefined,
 ): TaskDraftValidationErrors {
   const errors: TaskDraftValidationErrors = {};
 
   if (isBlank(draft.title)) errors.title = '請填寫名稱';
-  validateRequiredOptionGroups(variant.optionGroups, draft, errors);
+  validateRequiredOptionGroups(variant?.optionGroups ?? [], draft, errors);
   validateFamilyParticipationReward(draft, errors);
 
   if (isBlank(draft.taskDetails)) {
@@ -362,7 +382,9 @@ export function validateOneTimeDraft(
   }
 
   // 回饋方式必須在這個版本允許的範圍內（家庭參與的更嚴格規則已在上面擋過）。
-  if (!errors.rewardPolicy && !variant.allowedRewardPolicies.includes(draft.rewardPolicy)) {
+  if (variant !== undefined
+    && !errors.rewardPolicy
+    && !variant.allowedRewardPolicies.includes(draft.rewardPolicy)) {
     errors.rewardPolicy = '這個版本不提供這種回饋方式';
   }
 
@@ -375,7 +397,7 @@ export function validateOneTimeDraft(
     errors.rewardPolicy = '學校作業只能留下紀錄或以進度與肯定回饋';
   }
 
-  if (variant.completionPolicy !== 'complete_once') {
+  if (variant !== undefined && variant.completionPolicy !== 'complete_once') {
     errors.completionPolicy = '單次任務的結束方式必須是完成一次即結束';
   }
 
@@ -388,7 +410,7 @@ export function validateOneTimeDraft(
  */
 export function validateTaskDraft(
   draft: TaskDraft,
-  variant: TaskPresetVariant,
+  variant: TaskPresetVariant | undefined,
   ageGroup?: string,
 ): TaskDraftValidationErrors {
   const errors = ((): TaskDraftValidationErrors => {
@@ -425,7 +447,7 @@ export function validateTaskDraft(
  */
 export function validateRewardAvailability(
   draft: TaskDraft,
-  variant: TaskPresetVariant,
+  variant: TaskPresetVariant | undefined,
   ageGroup: string,
   errors: TaskDraftValidationErrors,
 ): void {
@@ -437,7 +459,7 @@ export function validateRewardAvailability(
   });
 
   const options = selectAvailableRewardPolicies({
-    allowedRewardPolicies: variant.allowedRewardPolicies,
+    allowedRewardPolicies: variant?.allowedRewardPolicies ?? ALL_REWARD_POLICIES,
     displayMode: 'demo',
     capabilities,
   });
