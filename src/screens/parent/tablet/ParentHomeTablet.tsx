@@ -2881,14 +2881,7 @@ export default function ParentHomeTablet() {
 
   const handleLogoutPress = useCallback(() => {
     setAccountMenuOpen(false);
-    Alert.alert(
-      '登出帳號？',
-      '登出後需要重新登入才能回來',
-      [
-        { text: '取消', style: 'cancel' },
-        { text: '登出', style: 'destructive', onPress: () => { void handleLogout(); } },
-      ],
-    );
+    void handleLogout();
   }, [handleLogout]);
 
   const handleTaskPack = useCallback(() => {
