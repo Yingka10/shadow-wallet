@@ -38,6 +38,8 @@ import {
   resolveTaskRewardCapabilities,
   selectAvailableRewardPolicies,
 } from '../taskReward';
+import { evaluateCustomTaskRewardOptions } from '../customTask/customTaskRewardOptions';
+import { CustomTaskRewardSection } from '../customTask/CustomTaskRewardSection';
 
 // ---------------------------------------------------------------------------
 // 文字
@@ -319,7 +321,11 @@ export function RewardPolicyChips({
   error,
   onChange,
 }: {
-  variant: TaskPresetVariant;
+  /**
+   * preset 的版本。**自訂任務沒有版本，這裡是 undefined** ——
+   * 那時候可選的回饋方式由 evaluateCustomTaskRewardOptions 決定，見下。
+   */
+  variant?: TaskPresetVariant;
   draft: TaskDraft;
   /** 與 lib/onboarding 的 AgeGroup 對齊；沒有孩子資料時為 undefined。 */
   ageGroup?: string;
@@ -327,6 +333,35 @@ export function RewardPolicyChips({
   onChange: (policy: RewardPolicy) => void;
 }) {
   const displayMode = useDisplayMode();
+
+  /*
+    自訂任務走另一支選單。
+
+    差別不只是「沒有 allowedRewardPolicies 可以篩」：修訂後的家庭參與政策
+    （建議家庭貢獻、可選紀錄與進度、成長幣需要明確意圖）只存在於
+    evaluateCustomTaskRewardOptions。在這裡用 chip 再擺一次的話，
+    那份政策就有兩個實作，而 UI 這一份會先過期。
+
+    ⚠️ 這一段刻意放在所有 hook 之後 —— 提早 return 會讓 hook 數量隨 variant
+    改變，那是 React 最難查的一種錯誤。
+  */
+  if (variant === undefined) {
+    return (
+      <CustomTaskRewardSection
+        options={evaluateCustomTaskRewardOptions({
+          ageGroup: ageGroup ?? '',
+          purposeCategory: draft.purposeCategory,
+          editorKind: draft.editorKind,
+          ...(draftEstimatedMinutes(draft) !== undefined
+            ? { estimatedMinutes: draftEstimatedMinutes(draft) }
+            : null),
+        })}
+        selected={draft.rewardPolicy}
+        {...(error !== undefined ? { error } : null)}
+        onChange={onChange}
+      />
+    );
+  }
 
   const capabilities = resolveTaskRewardCapabilities({
     // 年齡段不明時一律當作算不出幣值：寧可少給一個選項，也不要給一個發不出來的。
@@ -923,7 +958,14 @@ export function ResponsibilityListEditor({
   onChange: (next: ResponsibilityRow[]) => void;
 }) {
   const customCount = items.filter(item => item.isCustom).length;
-  const canAdd = customCount < 1 && items.length < maxItems;
+  /*
+    preset 的清單是「模板項目 ＋ 最多一項自訂」——「補一項」是它的用途。
+    自訂任務沒有模板，整份清單都是自訂的，那時候上限只剩 maxItems ——
+    否則家長只能寫一項負責內容，而規則建議的是 2–4 項。
+  */
+  const allCustom = items.length > 0 && items.every(item => item.isCustom);
+  const canAdd =
+    items.length < maxItems && (customCount < 1 || allCustom || items.length === 0);
 
   const patchAt = (index: number, partial: Partial<ResponsibilityRow>) => {
     const next = [...items];

@@ -29,8 +29,15 @@ export function TaskDraftEditor({
   onChange,
   onRequestRoleChange,
 }: {
-  family: TaskPresetFamily;
-  variant: TaskPresetVariant;
+  /**
+   * preset 的家族與版本。**自訂任務兩者都是 undefined。**
+   *
+   * 五支 editor 因此全部改成 optional —— 而不是為自訂任務捏一組假的
+   * family / variant 傳進來。假資料會一路帶到草稿、命令與資料庫，
+   * 而「這筆任務從哪來」在那之後就永遠答錯了。
+   */
+  family?: TaskPresetFamily;
+  variant?: TaskPresetVariant;
   draft: TaskDraft;
   childName: string;
   /**

@@ -39,7 +39,7 @@ import type {
   TaskEditorKind,
 } from './types';
 
-/** 抽屜傳進來的孩子資料（與 PresetTaskDrawer 的 props 同形）。 */
+/** 抽屜傳進來的孩子資料（與 TaskCreationDrawer 的 props 同形）。 */
 export type DraftChildContext = {
   nickname: string;
   birthDate: string;
@@ -200,18 +200,20 @@ function emptyCustomValues(groups: OptionGroup[]): Record<string, string> {
 
 /** 短期支援的焦點選項：catalog 有 optionGroups 就用 catalog，否則用 draftLabels 的 family 專屬清單。 */
 export function focusChoicesFor(
-  family: TaskPresetFamily,
-  variant: TaskPresetVariant,
+  family: TaskPresetFamily | undefined,
+  variant: TaskPresetVariant | undefined,
 ): Array<{ id: string; label: string; step: string }> {
-  const group = variant.optionGroups[0];
+  const group = variant?.optionGroups[0];
   if (group) {
     return group.options.map(option => ({
       id: option.id,
       label: option.label,
-      step: stepTextForCatalogOption(family.id, option.id) ?? option.label,
+      step: stepTextForCatalogOption(family?.id, option.id) ?? option.label,
     }));
   }
-  return shortSupportCopy(family.id).focusChoices;
+  // 自訂任務兩者都是 undefined —— 通用文案的焦點清單是空的，
+  // 家長改為自己新增支援步驟（validator 對「沒有焦點可選」已有對應分支）。
+  return shortSupportCopy(family?.id).focusChoices;
 }
 
 /**

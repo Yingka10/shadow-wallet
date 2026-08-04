@@ -1,6 +1,18 @@
-// Shadow Wallet · Parent Tablet — 預設任務抽屜
+// Shadow Wallet · Parent Tablet — 統一建立任務抽屜
 //
 // 定位：ParentTaskManagementTablet 上方的 overlay，不是新 route（不動導航結構）。
+//
+// 這一支原本叫 PresetTaskDrawer，只有一個入口。第九階段 C 加上「自己建立任務」
+// 之後，它的職責變成**兩個入口共用一套建立流程**：
+//
+//   起點 ─┬─ 從常用任務開始 → 選家族／版本 ─┐
+//         │                                  ├→ 五種 editor → 預覽 → 建立 → 完成
+//         └─ 自己建立任務 → 想做什麼         │
+//                        → 為了什麼          │
+//                        → 怎麼進行 ─────────┘
+//
+// **分岔只在最前面。** 之後的 editor、驗證、規則檢查、回饋決策、建立命令與
+// RPC 全部是同一套 —— 沒有第六種 editor，也沒有第二支 RPC。
 //
 // 為什麼是 Modal + 自幹動畫：
 //   RN Modal 的 animationType 只有 slide(由下) / fade / none，沒有右滑，
@@ -8,15 +20,13 @@
 //   （專案已用於 HomeScreen；moti 未被 jest transformIgnorePatterns 放行，會讓測試套件掛掉）。
 //   為了讓「滑出」也看得到，關閉時先播動畫、動畫結束才真的卸載 Modal（見 mounted / shown）。
 //
-// 四個畫面：
-//   pick    選任務家族
-//   edit    選執行版本 + 調整草稿（實際表單在 editors/，不寫在這支）
-//   review  唯讀預覽 + 真正會送出的回饋決策
-//   success 建立完成摘要（不瞬間關掉抽屜，見 CreatedTaskSummary 的說明）
+// 畫面由 taskCreationRoute 的 discriminated union 決定，不是模糊的數字 step ——
+// 「上一步是哪裡」在兩個入口下的答案不同，用數字表達不了。
 //
-// 這支只負責：Drawer 狀態、family/variant 狀態、draft 狀態、step 切換、
+// 這支只負責：Drawer 狀態、路由、preset 選擇、自訂基本設定、草稿狀態、
 // close / discard 流程、提交狀態機，以及把資料交給 TaskDraftEditor。
-// 表單邏輯與建立邏輯都不寫在這裡：前者在 editors/，後者在 submitTaskDraft。
+// 表單邏輯在 editors/，建立邏輯在 submitTaskDraft，路由與 dirty 規則在
+// taskCreationRoute / taskCreationState —— 這裡不重寫任何一份。
 //
 // 建立 service 由**上層注入**（見 ParentTaskManagementTablet）。
 // 抽屜自己 new 一個的話，測試就得連真的 Supabase，而 Supabase client 在
@@ -100,16 +110,50 @@ import {
   InfoIcon,
   SearchIcon,
 } from './drawerIcons';
+import {
+  backRouteFor,
+  ENTRY_ROUTE,
+  type TaskCreationDrawerRoute,
+  type TaskCreationPath,
+} from './taskCreationRoute';
+import {
+  customBasicsSignature,
+  customTitleError,
+  EMPTY_CUSTOM_INTAKE,
+  isCustomIntakeDirty,
+  pathSwitchEffect,
+  type CustomIntakeState,
+} from './taskCreationState';
+import {
+  confirmCustomTaskEditor,
+  createCustomTaskDraft,
+  purposeCategoryOf,
+  resolveCustomTaskEditor,
+  CustomTaskBasicsDuration,
+  CustomTaskBasicsPurpose,
+  CustomTaskBasicsTitle,
+  CustomTaskStart,
+  CustomTaskSummaryCard,
+  CUSTOM_EDITOR_STAGE_LABEL,
+  CUSTOM_HEADER_TITLE,
+  DURATION_OPTIONS,
+  ENTRY_COPY,
+  PURPOSE_DISPLAY_LABEL,
+  STEP1_COPY,
+  STEP2_COPY,
+  STEP3_COPY,
+  customSuccessSubtitle,
+  type CustomTaskDurationChoice,
+  type CustomTaskPurposeChoice,
+} from './customTask';
 
 const ANIM_MS = 260;
-
-type DrawerStep = 'pick' | 'edit' | 'review' | 'success';
 
 /**
  * 提交狀態機。
  *
  * 只有三個狀態，而且 success 刻意**不在這裡** —— 建立成功之後畫面整個換了
- * （step 變成 'success'），把它當成第四個提交狀態會讓「按鈕該長什麼樣」
+ * （route 變成 success），把它當成第四個提交狀態會讓「按鈕該長什麼樣」
  * 與「畫面該顯示什麼」兩件事纏在一起。
  */
 type SubmissionState =
@@ -165,7 +209,7 @@ type PendingAction =
   /** 換家庭角色會重建責任項目 —— 已改過就要先確認，不可無聲覆蓋。 */
   | { kind: 'selectRole'; roleOptionId: string };
 
-export type PresetTaskDrawerChild = {
+export type TaskCreationDrawerChild = {
   /** children.id。建立命令一定要帶它，不可以由抽屜自己去查。 */
   id: string;
   nickname: string;
@@ -199,7 +243,12 @@ function minuteSeedOf(draft: TaskDraft): string {
   return '';
 }
 
-export function PresetTaskDrawer({
+/** 執行安排的生活化名稱，用於摘要卡。畫面上不出現 durationChoice 的內部值。 */
+function durationLabelOf(choice: CustomTaskDurationChoice | null): string | undefined {
+  return DURATION_OPTIONS.find(option => option.choice === choice)?.label;
+}
+
+export function TaskCreationDrawer({
   visible,
   onClose,
   child,
@@ -212,7 +261,7 @@ export function PresetTaskDrawer({
   visible: boolean;
   onClose: () => void;
   /** 來自 useParentTaskList 的 child；尚未載入時為 null。 */
-  child: PresetTaskDrawerChild | null;
+  child: TaskCreationDrawerChild | null;
   childLoading: boolean;
   /** demo（預設）＝乾淨畫面；development ＝顯示尚未串接的實作狀態。 */
   displayMode?: PresetTaskDrawerDisplayMode;
@@ -237,11 +286,28 @@ export function PresetTaskDrawer({
   const [mounted, setMounted] = useState(visible);
   const [shown, setShown] = useState(false);
 
-  const [step, setStep] = useState<DrawerStep>('pick');
+  const [route, setRoute] = useState<TaskCreationDrawerRoute>(ENTRY_ROUTE);
+  /** 家長這一次走的是哪個入口。null = 還在起點頁。 */
+  const [path, setPath] = useState<TaskCreationPath | null>(null);
+  /** 起點頁上選中的卡片（還沒按下一步）。 */
+  const [entrySelection, setEntrySelection] = useState<TaskCreationPath | null>(null);
+
+  // ── preset 入口的狀態 ────────────────────────────────────────────────
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<BrowseFilter>('recommended');
   const [selectedFamily, setSelectedFamily] = useState<TaskPresetFamily | null>(null);
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
+
+  // ── 自訂入口的狀態 ──────────────────────────────────────────────────
+  const [intake, setIntake] = useState<CustomIntakeState>(EMPTY_CUSTOM_INTAKE);
+  const [showBasicsErrors, setShowBasicsErrors] = useState(false);
+  /**
+   * 目前這份自訂草稿是照哪一份基本設定建的。
+   *
+   * 用途只有一個：家長從 editor 返回 Step 3、什麼都沒改又按下一步時**不重建草稿**。
+   * 重建會清掉他在 editor 填的所有東西，而且換掉 clientRequestId。
+   */
+  const [customDraftSignature, setCustomDraftSignature] = useState<string | null>(null);
 
   const [draft, setDraft] = useState<TaskDraft | null>(null);
   const [initialDraft, setInitialDraft] = useState<TaskDraft | null>(null);
@@ -287,11 +353,16 @@ export function PresetTaskDrawer({
    * 家長按了建立，卻拿到上次那個任務。
    */
   const reset = useCallback(() => {
-    setStep('pick');
+    setRoute(ENTRY_ROUTE);
+    setPath(null);
+    setEntrySelection(null);
     setQuery('');
     setFilter('recommended');
     setSelectedFamily(null);
     setSelectedVariantId(null);
+    setIntake(EMPTY_CUSTOM_INTAKE);
+    setShowBasicsErrors(false);
+    setCustomDraftSignature(null);
     setDraft(null);
     setInitialDraft(null);
     setMinuteCustomText('');
@@ -315,7 +386,7 @@ export function PresetTaskDrawer({
     setShown(false);
     const t = setTimeout(() => {
       setMounted(false);
-      reset(); // 關閉後重置搜尋、分類、家族、版本、草稿與 step
+      reset(); // 關閉後重置路由、入口、選擇與草稿
     }, ANIM_MS);
     return () => clearTimeout(t);
   }, [visible, reset]);
@@ -343,12 +414,22 @@ export function PresetTaskDrawer({
     );
   }, [selectedFamily, selectedVariantId]);
 
+  /**
+   * 目前這份草稿的 preset 來源。
+   *
+   * **自訂入口一律是 null。** 這一組是「要不要把 family / variant 傳下去」
+   * 的唯一判準 —— 用 selectedFamily 有沒有值去判斷的話，家長先看過 preset
+   * 再切到自訂時，那份殘留的選擇會被當成這份自訂任務的來源。
+   */
+  const activeFamily = path === 'preset' ? selectedFamily : null;
+  const activeVariant = path === 'preset' ? selectedVariant : null;
+
   const errors = useMemo(() => {
-    if (!draft || !selectedVariant) return {};
-    const local = validateTaskDraft(draft, selectedVariant, ageGroup ?? undefined);
+    if (!draft) return {};
+    const local = validateTaskDraft(draft, activeVariant ?? undefined, ageGroup ?? undefined);
     // 本地驗證在前、RPC 回來的在後：後者是我們沒能在前端擋下的，更晚也更權威。
     return serverFieldErrors ? { ...local, ...serverFieldErrors } : local;
-  }, [draft, selectedVariant, ageGroup, serverFieldErrors]);
+  }, [draft, activeVariant, ageGroup, serverFieldErrors]);
 
   const submitting = submission.status === 'submitting';
 
@@ -365,26 +446,30 @@ export function PresetTaskDrawer({
    * 就是等一下真的會寫進資料庫的那個。各算一份才是兩邊說法不同的來源。
    */
   const previewDecision = useMemo(() => {
-    if (!draft || !selectedFamily || !selectedVariant || !commandChild || !clientRequestId) {
-      return null;
-    }
+    if (!draft || !commandChild || !clientRequestId) return null;
     return previewTaskRewardDecision({
       draft,
-      family: selectedFamily,
-      variant: selectedVariant,
+      ...(activeFamily ? { family: activeFamily } : null),
+      ...(activeVariant ? { variant: activeVariant } : null),
       child: commandChild,
       taskPolicyVersion: TASK_POLICY_VERSION,
       clientRequestId,
     });
-  }, [draft, selectedFamily, selectedVariant, commandChild, clientRequestId]);
+  }, [draft, activeFamily, activeVariant, commandChild, clientRequestId]);
 
   // dirty 由 initial snapshot 與 current 深度比較得出，不用手動旗標
   // （手動旗標改回原值也不會歸零，會誤觸放棄確認）。
-  const dirty = isDraftDirty(initialDraft, draft);
+  //
+  // 自訂入口多算一件事：三個基本設定步驟填過的內容也是家長輸入的東西，
+  // 那時候還沒有草稿，但關掉一樣會全部消失。
+  const dirty =
+    isDraftDirty(initialDraft, draft)
+    || (path === 'parent_custom' && isCustomIntakeDirty(intake));
 
+  /** 建立 preset 草稿並回傳它 —— 呼叫端常常需要它的 editorKind 來決定路由。 */
   const buildDraft = useCallback(
-    (family: TaskPresetFamily, variant: TaskPresetVariant) => {
-      if (!child) return;
+    (family: TaskPresetFamily, variant: TaskPresetVariant): TaskDraft | null => {
+      if (!child) return null;
       const next = createTaskDraft(family, variant, child, ageGroup ?? undefined);
       setDraft(next);
       setInitialDraft(next);
@@ -395,6 +480,8 @@ export function PresetTaskDrawer({
       setClientRequestId(newClientRequestId());
       setSubmission({ status: 'idle' });
       setServerFieldErrors(null);
+      setCustomDraftSignature(null);
+      return next;
     },
     [child, ageGroup],
   );
@@ -428,7 +515,14 @@ export function PresetTaskDrawer({
       const variant = selectedFamily.variants.find(v => v.id === action.variantId);
       if (!variant) return;
       setSelectedVariantId(variant.id);
-      buildDraft(selectedFamily, variant);
+      const next = buildDraft(selectedFamily, variant);
+      // 換版本可能換掉 editor（同一家族的「固定練習」與「成長計畫」不同支），
+      // 路由要跟著更新，否則 review 的返回會指向上一支 editor。
+      if (next) {
+        setRoute(current =>
+          current.kind === 'editor' ? { kind: 'editor', editorKind: next.editorKind } : current,
+        );
+      }
     },
     [buildDraft, onClose, selectedFamily, selectedVariant],
   );
@@ -467,7 +561,7 @@ export function PresetTaskDrawer({
   }, [onRefreshTaskList]);
 
   const handleConfirmCreate = useCallback(async () => {
-    if (!draft || !selectedFamily || !selectedVariant || !commandChild || !clientRequestId) return;
+    if (!draft || !commandChild || !clientRequestId) return;
     // 同步鎖，擋住同一個 tick 內的第二次點擊。
     if (submitLockRef.current) return;
     submitLockRef.current = true;
@@ -477,8 +571,10 @@ export function PresetTaskDrawer({
     try {
       const outcome = await submitTaskDraft({
         draft,
-        family: selectedFamily,
-        variant: selectedVariant,
+        // 自訂任務兩者都不傳。傳了會被 mapTaskDraftToCommand 直接擋下 ——
+        // 那是刻意的，來源記錯的任務在資料庫裡看起來完全正常。
+        ...(activeFamily ? { family: activeFamily } : null),
+        ...(activeVariant ? { variant: activeVariant } : null),
         child: commandChild,
         taskPolicyVersion: TASK_POLICY_VERSION,
         // 重試沿用同一個識別碼 —— 這是整套 idempotency 的重點。
@@ -496,7 +592,7 @@ export function PresetTaskDrawer({
         });
         setSubmission({ status: 'idle' });
         setRefreshStatus('pending');
-        setStep('success');
+        setRoute({ kind: 'success' });
         await runRefresh();
         return;
       }
@@ -508,14 +604,14 @@ export function PresetTaskDrawer({
       if (outcome.code === 'VALIDATION_FAILED') {
         if (outcome.fieldErrors) setServerFieldErrors(outcome.fieldErrors);
         setShowErrors(true);
-        setStep('edit');
+        setRoute({ kind: 'editor', editorKind: draft.editorKind });
       }
     } finally {
       submitLockRef.current = false;
     }
   }, [
-    clientRequestId, commandChild, draft, runRefresh,
-    selectedFamily, selectedVariant, taskCreationService,
+    activeFamily, activeVariant, clientRequestId, commandChild, draft,
+    runRefresh, taskCreationService,
   ]);
 
   /** 成功之後才會用到：確保列表至少刷新過一次，但不重複刷。 */
@@ -573,7 +669,7 @@ export function PresetTaskDrawer({
     listRef.current?.scrollTo({ y: 0, animated: false });
   }, []);
 
-  /** Step 1 選家族：同一個家族不需確認（草稿保留），換家族且 dirty 才問。 */
+  /** 選家族：同一個家族不需確認（草稿保留），換家族且 dirty 才問。 */
   const handleSelectFamily = useCallback(
     (family: TaskPresetFamily) => {
       if (selectedFamily?.id === family.id) return;
@@ -582,7 +678,7 @@ export function PresetTaskDrawer({
     [requestAction, selectedFamily],
   );
 
-  /** Step 2 換執行版本：dirty 時要確認，因為換版本等於重建草稿。 */
+  /** 換執行版本：dirty 時要確認，因為換版本等於重建草稿。 */
   const handleSelectVariant = useCallback(
     (variantId: string) => {
       if (selectedVariantId === variantId) return;
@@ -613,32 +709,176 @@ export function PresetTaskDrawer({
     [draft, initialDraft, runAction],
   );
 
-  /** Step 1 →Step 2：家族/版本沒換就沿用既有草稿，換了才重建。 */
-  const handleNext = useCallback(() => {
+  // ── 起點頁 ──────────────────────────────────────────────────────────────
+
+  /**
+   * 進入某一個入口。
+   *
+   * 換入口時哪些東西留著由 pathSwitchEffect 決定，不是在這裡臨機判斷：
+   * 兩份草稿共用同一個 clientRequestId 是最糟的組合（重送會回放另一份），
+   * 而選擇與輸入則相反，兩邊都留著。
+   */
+  const enterPath = useCallback(
+    (next: TaskCreationPath) => {
+      const effect = pathSwitchEffect(path, next);
+      if (effect.resetDraft) {
+        setDraft(null);
+        setInitialDraft(null);
+        setMinuteCustomText('');
+        setShowErrors(false);
+        setClientRequestId(null);
+        setSubmission({ status: 'idle' });
+        setServerFieldErrors(null);
+        setCustomDraftSignature(null);
+      }
+      setPath(next);
+      setRoute(next === 'preset' ? { kind: 'preset_catalog' } : { kind: 'custom_basics_title' });
+    },
+    [path],
+  );
+
+  // ── 自訂基本設定 ────────────────────────────────────────────────────────
+
+  const titleError = customTitleError(intake);
+
+  /**
+   * 目前這組「目的 × 期間」的路由結果。
+   * 兩者都選好才算得出來，所以 null 代表家長還沒填完，不是「沒有對應」。
+   */
+  const customResolution = useMemo(() => {
+    if (!intake.purposeChoice || !intake.durationChoice) return null;
+    return resolveCustomTaskEditor({
+      purposeCategory: purposeCategoryOf(intake.purposeChoice),
+      durationChoice: intake.durationChoice,
+    });
+  }, [intake.purposeChoice, intake.durationChoice]);
+
+  const needsRoutingConfirmation =
+    customResolution?.status === 'needs_confirmation' && intake.confirmedEditorKind === null;
+
+  const handleSelectPurpose = useCallback((choice: CustomTaskPurposeChoice) => {
+    // 換了目的，先前對確認的回答就不再對應任何東西 —— 一併清掉。
+    setIntake(current => ({ ...current, purposeChoice: choice, confirmedEditorKind: null }));
+  }, []);
+
+  const handleSelectDuration = useCallback((choice: CustomTaskDurationChoice) => {
+    setIntake(current => ({ ...current, durationChoice: choice, confirmedEditorKind: null }));
+  }, []);
+
+  /** 採納建議：期間換成建議值，路由自然收斂，不需要再記一個覆寫。 */
+  const handleAcceptRoutingSuggestion = useCallback(() => {
+    setIntake(current => {
+      if (!current.purposeChoice || !current.durationChoice) return current;
+      const confirmed = confirmCustomTaskEditor(
+        {
+          purposeCategory: purposeCategoryOf(current.purposeChoice),
+          durationChoice: current.durationChoice,
+        },
+        'accept_suggestion',
+      );
+      return {
+        ...current,
+        durationChoice: confirmed.durationChoice,
+        confirmedEditorKind: null,
+      };
+    });
+  }, []);
+
+  /** 維持原本的期間：把家長決定的 editor 記下來，不在 handler 裡硬寫 editorKind。 */
+  const handleKeepRoutingChoice = useCallback(() => {
+    setIntake(current => {
+      if (!current.purposeChoice || !current.durationChoice) return current;
+      const confirmed = confirmCustomTaskEditor(
+        {
+          purposeCategory: purposeCategoryOf(current.purposeChoice),
+          durationChoice: current.durationChoice,
+        },
+        'keep_choice',
+      );
+      return { ...current, confirmedEditorKind: confirmed.editorKind };
+    });
+  }, []);
+
+  /** Step 3 →五種既有 editor。路由只有一個來源：resolveCustomTaskEditor。 */
+  const enterCustomEditor = useCallback(() => {
+    if (!child || !intake.purposeChoice || !intake.durationChoice) return;
+
+    const signature = customBasicsSignature(intake);
+    // 基本設定一個字都沒改 → 沿用同一份草稿與同一個 clientRequestId。
+    if (draft && customDraftSignature === signature) {
+      setRoute({ kind: 'editor', editorKind: draft.editorKind });
+      return;
+    }
+
+    const result = createCustomTaskDraft({
+      intake: {
+        title: intake.title,
+        originalExpectation: intake.originalExpectation,
+        purposeChoice: intake.purposeChoice,
+        durationChoice: intake.durationChoice,
+      },
+      child,
+      ...(ageGroup ? { ageGroup } : null),
+      ...(intake.confirmedEditorKind
+        ? { confirmedEditorKind: intake.confirmedEditorKind }
+        : null),
+    });
+
+    // needs_confirmation 在畫面上已經先處理掉了（下一步會是 disabled），
+    // unsupported 目前沒有任何組合會發生 —— 兩者都不該再往前走。
+    if (result.status !== 'created') return;
+
+    setDraft(result.draft);
+    setInitialDraft(result.draft);
+    setShowErrors(false);
+    setMinuteCustomText(minuteSeedOf(result.draft));
+    setClientRequestId(newClientRequestId());
+    setSubmission({ status: 'idle' });
+    setServerFieldErrors(null);
+    setCustomDraftSignature(signature);
+    setRoute({ kind: 'editor', editorKind: result.draft.editorKind });
+  }, [ageGroup, child, customDraftSignature, draft, intake]);
+
+  // ── 導覽 ────────────────────────────────────────────────────────────────
+
+  /**
+   * 上一步。
+   *
+   * **一律保留內容。** 返回不是放棄 —— 家長按上一步是為了改一個欄位，
+   * 不是為了把剛剛填的十分鐘丟掉。所以這裡不清草稿、不換 clientRequestId、
+   * 也不重新呼叫任何服務。
+   */
+  const handleBack = useCallback(() => {
+    if (submitLockRef.current) return;
+    if (route.kind === 'review') {
+      setSubmission({ status: 'idle' });
+      setRoute({ kind: 'editor', editorKind: draft?.editorKind ?? 'one_time' });
+      return;
+    }
+    const back = backRouteFor(route, path);
+    if (!back) return;
+    if (back.kind === 'entry') setEntrySelection(path);
+    setRoute(back);
+  }, [draft, path, route]);
+
+  /** preset：選好家族與版本後進 editor。家族/版本沒換就沿用既有草稿。 */
+  const handlePresetNext = useCallback(() => {
     if (!selectedFamily || !selectedVariant || !child) return;
     const stale =
       !draft
       || draft.familyId !== selectedFamily.id
       || draft.variantId !== selectedVariant.id;
-    if (stale) buildDraft(selectedFamily, selectedVariant);
-    setStep('edit');
+    if (stale) {
+      const next = buildDraft(selectedFamily, selectedVariant);
+      if (next) setRoute({ kind: 'editor', editorKind: next.editorKind });
+      return;
+    }
+    setRoute({ kind: 'editor', editorKind: draft.editorKind });
   }, [buildDraft, child, draft, selectedFamily, selectedVariant]);
 
-  /** Step 2 → Step 1：不清草稿、不需確認（家長只是回去看看）。 */
-  const handleBackToPick = useCallback(() => {
-    setStep('pick');
-  }, []);
-
-  /** 預覽 → 編輯。順手清掉上一次的失敗說明：家長正要去改，那句話已經過期了。 */
-  const handleBackToEdit = useCallback(() => {
-    if (submitLockRef.current) return;
-    setSubmission({ status: 'idle' });
-    setStep('edit');
-  }, []);
-
   const handlePreview = useCallback(() => {
-    if (!draft || !selectedVariant) return;
-    const result = validateTaskDraft(draft, selectedVariant, ageGroup ?? undefined);
+    if (!draft) return;
+    const result = validateTaskDraft(draft, activeVariant ?? undefined, ageGroup ?? undefined);
     if (hasErrors(result)) {
       setShowErrors(true);
       return;
@@ -646,8 +886,43 @@ export function PresetTaskDrawer({
     setShowErrors(false);
     setSubmission({ status: 'idle' });
     setServerFieldErrors(null);
-    setStep('review');
-  }, [draft, selectedVariant, ageGroup]);
+    setRoute({ kind: 'review' });
+  }, [activeVariant, ageGroup, draft]);
+
+  /** 主要動作（footer 右側）。每個畫面各一個，集中在這裡不散在 JSX 裡。 */
+  const handlePrimary = useCallback(() => {
+    switch (route.kind) {
+      case 'entry':
+        if (entrySelection) enterPath(entrySelection);
+        return;
+      case 'preset_catalog':
+        handlePresetNext();
+        return;
+      case 'custom_basics_title':
+        if (titleError) {
+          setShowBasicsErrors(true);
+          return;
+        }
+        setShowBasicsErrors(false);
+        setRoute({ kind: 'custom_basics_purpose' });
+        return;
+      case 'custom_basics_purpose':
+        if (!intake.purposeChoice) return;
+        setRoute({ kind: 'custom_basics_duration' });
+        return;
+      case 'custom_basics_duration':
+        enterCustomEditor();
+        return;
+      case 'editor':
+        handlePreview();
+        return;
+      default:
+        return;
+    }
+  }, [
+    enterCustomEditor, enterPath, entrySelection, handlePresetNext, handlePreview,
+    intake.purposeChoice, route.kind, titleError,
+  ]);
 
   if (!mounted) return null;
 
@@ -656,6 +931,7 @@ export function PresetTaskDrawer({
   const previewBlocked = !draft || hasErrors(errors);
   /** 家長已經按過一次、而且確實還有錯 —— 這時才在 footer 說明為什麼沒往下走。 */
   const blockedByErrors = showErrors && previewBlocked;
+  const isCustom = path === 'parent_custom';
 
   /**
    * blocked 的回饋決策不可以建立。
@@ -667,10 +943,14 @@ export function PresetTaskDrawer({
   const canConfirmCreate =
     !!draft && !!previewDecision && !rewardBlocked && !!clientRequestId && !submitting;
 
-  const stepTitle = (() => {
-    if (step === 'pick') return ready ? `為 ${child.nickname} 建立新任務` : '建立新任務';
-    if (step === 'success') return '任務已建立';
-    if (step === 'review') return '預覽最終版本';
+  const headerTitle = (() => {
+    if (route.kind === 'entry') return ENTRY_COPY.title;
+    if (route.kind === 'preset_catalog') {
+      return ready ? `為 ${child.nickname} 建立新任務` : '建立新任務';
+    }
+    if (route.kind === 'success') return '任務已建立';
+    if (route.kind === 'review') return '預覽最終版本';
+    if (isCustom) return CUSTOM_HEADER_TITLE;
     if (draft?.editorKind === 'short_support' && selectedFamily) {
       return shortSupportCopy(selectedFamily.id).headerTitle;
     }
@@ -681,12 +961,43 @@ export function PresetTaskDrawer({
     return '調整任務內容';
   })();
 
-  const stepHint = (() => {
-    if (step === 'pick') return '先選一個適合的起點，內容仍可再調整';
-    if (step === 'success') return `已加入 ${child?.nickname ?? '孩子'}的任務清單`;
-    if (step === 'review') {
+  /** 第二行：preset catalog 顯示年齡；自訂三步顯示副標；其餘不顯示。 */
+  const headerSub = (() => {
+    if (route.kind === 'preset_catalog') {
+      return ready
+        ? `${age !== null ? `${age} 歲｜` : ''}${
+            ageGroup ? `${AGE_GROUP_LABEL[ageGroup]} 建議` : '依年齡建議'
+          }`
+        : '正在載入孩子資料…';
+    }
+    if (route.kind === 'custom_basics_title') return STEP1_COPY.subtitle;
+    if (route.kind === 'custom_basics_purpose') return STEP2_COPY.subtitle;
+    if (route.kind === 'custom_basics_duration') return STEP3_COPY.subtitle;
+    return null;
+  })();
+
+  /**
+   * 第三行：進度或說明。
+   *
+   * 自訂的三個基本設定步驟用「基本設定 n／3」，進 editor 之後改成
+   * 「詳細設定」—— 刻意**不接續成「步驟 4／7」**：五種 editor 的欄位數量
+   * 不一樣，一個假的總步數只會讓家長以為自己還有六頁要填。
+   */
+  const headerHint = (() => {
+    if (route.kind === 'entry') return ENTRY_COPY.subtitle;
+    if (route.kind === 'preset_catalog') return '先選一個適合的起點，內容仍可再調整';
+    if (route.kind === 'custom_basics_title') return STEP1_COPY.progress;
+    if (route.kind === 'custom_basics_purpose') return STEP2_COPY.progress;
+    if (route.kind === 'custom_basics_duration') return STEP3_COPY.progress;
+    if (route.kind === 'success') {
+      return isCustom && child
+        ? customSuccessSubtitle(child.nickname)
+        : `已加入 ${child?.nickname ?? '孩子'}的任務清單`;
+    }
+    if (route.kind === 'review') {
       return submitting ? SUBMITTING_BLOCK_NOTE : '確認以下內容，還可以回去修改';
     }
+    if (isCustom) return CUSTOM_EDITOR_STAGE_LABEL;
     if (draft?.editorKind === 'short_support') return '一次先處理一個具體卡點，穩定後就可以結束';
     if (draft?.editorKind === 'growth_plan') return '先看適齡起點，再改成適合你們家的版本';
     if (draft?.editorKind === 'recurring') {
@@ -698,6 +1009,38 @@ export function PresetTaskDrawer({
     }
     return '選擇這件事要怎麼進行';
   })();
+
+  /** 主要按鈕現在能不能按。 */
+  const primaryDisabled = (() => {
+    switch (route.kind) {
+      case 'entry':
+        return entrySelection === null;
+      case 'preset_catalog':
+        return !selectedFamily;
+      case 'custom_basics_purpose':
+        return intake.purposeChoice === null;
+      case 'custom_basics_duration':
+        // 還沒選期間，或路由有意見而家長還沒回答 —— 兩種都不該往前走。
+        return intake.durationChoice === null || needsRoutingConfirmation;
+      default:
+        return false;
+    }
+  })();
+
+  const primaryHint = (() => {
+    if (route.kind === 'entry' && primaryDisabled) return '請先選一個開始方式';
+    if (route.kind === 'preset_catalog' && primaryDisabled) return '請先選一個任務起點';
+    if (route.kind === 'custom_basics_purpose' && primaryDisabled) {
+      return STEP2_COPY.unselectedHint;
+    }
+    if (route.kind === 'custom_basics_duration' && primaryDisabled) {
+      return STEP3_COPY.unselectedHint;
+    }
+    return undefined;
+  })();
+
+  const backLabel = route.kind === 'editor' && !isCustom ? '返回選擇' : '上一步';
+  const showsBack = backRouteFor(route, path) !== null;
 
   return (
     <Modal visible transparent animationType="none" onRequestClose={handleClose}>
@@ -729,16 +1072,8 @@ export function PresetTaskDrawer({
           <View style={s.header}>
             <View style={s.headerTop}>
               <View style={s.headerText}>
-                <Text style={s.headerTitle}>{stepTitle}</Text>
-                {step === 'pick' ? (
-                  <Text style={s.headerSub}>
-                    {ready
-                      ? `${age !== null ? `${age} 歲｜` : ''}${
-                          ageGroup ? `${AGE_GROUP_LABEL[ageGroup]} 建議` : '依年齡建議'
-                        }`
-                      : '正在載入孩子資料…'}
-                  </Text>
-                ) : null}
+                <Text style={s.headerTitle}>{headerTitle}</Text>
+                {headerSub ? <Text style={s.headerSub}>{headerSub}</Text> : null}
               </View>
               <TouchableOpacity
                 style={[s.closeButton, submitting && s.closeButtonDisabled]}
@@ -753,12 +1088,14 @@ export function PresetTaskDrawer({
                 <CloseIcon />
               </TouchableOpacity>
             </View>
-            <Text style={s.headerHint}>{stepHint}</Text>
+            <Text style={s.headerHint}>{headerHint}</Text>
           </View>
 
-          {/* ── 內容（可滾動） ─────────────────────────────────────────── */}
-          {step === 'pick' ? (
-            <PickStep
+          {/* ── 內容（獨立滾動；header 與 footer 不跟著走） ───────────── */}
+          {route.kind === 'entry' ? (
+            <CustomTaskStart selected={entrySelection} onSelect={setEntrySelection} />
+          ) : route.kind === 'preset_catalog' ? (
+            <PresetCatalogStep
               ready={ready}
               childName={ready ? child.nickname : ''}
               listRef={listRef}
@@ -770,6 +1107,34 @@ export function PresetTaskDrawer({
               selectedFamily={selectedFamily}
               onSelect={handleSelectFamily}
             />
+          ) : route.kind === 'custom_basics_title' ? (
+            <CustomTaskBasicsTitle
+              title={intake.title}
+              expectation={intake.originalExpectation}
+              {...(titleError ? { titleError } : null)}
+              showErrors={showBasicsErrors}
+              onChangeTitle={value => setIntake(current => ({ ...current, title: value }))}
+              onChangeExpectation={value =>
+                setIntake(current => ({ ...current, originalExpectation: value }))
+              }
+            />
+          ) : route.kind === 'custom_basics_purpose' ? (
+            <CustomTaskBasicsPurpose
+              title={intake.title}
+              expectation={intake.originalExpectation}
+              selected={intake.purposeChoice}
+              onSelect={handleSelectPurpose}
+            />
+          ) : route.kind === 'custom_basics_duration' && intake.purposeChoice ? (
+            <CustomTaskBasicsDuration
+              title={intake.title}
+              purposeChoice={intake.purposeChoice}
+              durationChoice={intake.durationChoice}
+              confirmationAnswered={intake.confirmedEditorKind !== null}
+              onSelectDuration={handleSelectDuration}
+              onAcceptSuggestion={handleAcceptRoutingSuggestion}
+              onKeepChoice={handleKeepRoutingChoice}
+            />
           ) : (
             <ScrollView
               style={s.scroll}
@@ -777,14 +1142,30 @@ export function PresetTaskDrawer({
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              {step === 'edit' && selectedFamily && selectedVariant && draft && child ? (
+              {route.kind === 'editor' && draft && child ? (
                 <>
-                  {selectedFamily.variants.length > 1 ? (
+                  {/*
+                    自訂任務用摘要卡取代版本切換列：它沒有版本可以切，
+                    但家長仍然需要看到「我剛才選的是什麼」。
+                  */}
+                  {isCustom ? (
+                    <CustomTaskSummaryCard
+                      title={draft.title}
+                      expectation={draft.originalExpectation}
+                      purposeCategory={draft.purposeCategory}
+                      purposeLabel={PURPOSE_DISPLAY_LABEL[draft.purposeCategory]}
+                      {...(durationLabelOf(intake.durationChoice)
+                        ? { arrangementLabel: durationLabelOf(intake.durationChoice) }
+                        : null)}
+                    />
+                  ) : null}
+
+                  {activeFamily && activeVariant && activeFamily.variants.length > 1 ? (
                     <View style={s.variantSwitch}>
                       <Text style={s.variantSwitchLabel}>執行方式</Text>
                       <View style={s.variantSwitchRow}>
-                        {selectedFamily.variants.map(item => {
-                          const active = item.id === selectedVariant.id;
+                        {activeFamily.variants.map(item => {
+                          const active = item.id === activeVariant.id;
                           return (
                             <Pressable
                               key={item.id}
@@ -815,8 +1196,8 @@ export function PresetTaskDrawer({
                   ) : null}
 
                   <TaskDraftEditor
-                    family={selectedFamily}
-                    variant={selectedVariant}
+                    {...(activeFamily ? { family: activeFamily } : null)}
+                    {...(activeVariant ? { variant: activeVariant } : null)}
                     draft={draft}
                     childName={child.nickname}
                     ageGroup={ageGroup ?? undefined}
@@ -830,19 +1211,19 @@ export function PresetTaskDrawer({
                 </>
               ) : null}
 
-              {step === 'review' && selectedFamily && selectedVariant && draft ? (
+              {route.kind === 'review' && draft ? (
                 <DraftReview
-                  family={selectedFamily}
-                  variant={selectedVariant}
+                  {...(activeFamily ? { family: activeFamily } : null)}
+                  {...(activeVariant ? { variant: activeVariant } : null)}
                   draft={draft}
                   decision={previewDecision}
                 />
               ) : null}
 
-              {step === 'success' && selectedFamily && selectedVariant && created ? (
+              {route.kind === 'success' && created ? (
                 <CreatedTaskSummary
-                  family={selectedFamily}
-                  variant={selectedVariant}
+                  {...(activeFamily ? { family: activeFamily } : null)}
+                  {...(activeVariant ? { variant: activeVariant } : null)}
                   command={created.command}
                 />
               ) : null}
@@ -851,82 +1232,14 @@ export function PresetTaskDrawer({
 
           {/* ── Footer（固定） ─────────────────────────────────────────── */}
           <View style={s.footer}>
-            {step === 'pick' ? (
-              <>
-                <TouchableOpacity
-                  style={s.ghostButton}
-                  onPress={handleClose}
-                  activeOpacity={0.7}
-                  accessibilityRole="button"
-                >
-                  <Text style={s.ghostButtonText}>取消</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[s.primaryButton, !selectedFamily && s.primaryButtonDisabled]}
-                  onPress={handleNext}
-                  disabled={!selectedFamily}
-                  activeOpacity={0.85}
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: !selectedFamily }}
-                  accessibilityHint={selectedFamily ? undefined : '請先選一個任務起點'}
-                >
-                  <Text
-                    style={[
-                      s.primaryButtonText,
-                      !selectedFamily && s.primaryButtonTextDisabled,
-                    ]}
-                  >
-                    下一步
-                  </Text>
-                </TouchableOpacity>
-              </>
-            ) : step === 'edit' ? (
-              /*
-                預覽鈕刻意保持可按。永遠 disabled 的按鈕不會告訴家長少了什麼，
-                只會讓人反覆點一顆沒有反應的東西；按下去才把錯誤標出來。
-                真正的閘門在 handlePreview —— 有錯就只設 showErrors，不切 step。
-              */
-              <View style={s.editFooter}>
-                {blockedByErrors ? (
-                  <Text style={s.editFooterNote}>{PREVIEW_BLOCKED_NOTE}</Text>
-                ) : null}
-                <View style={s.editFooterRow}>
-                  <TouchableOpacity
-                    style={s.ghostButton}
-                    onPress={handleBackToPick}
-                    activeOpacity={0.7}
-                    accessibilityRole="button"
-                  >
-                    <ChevronLeftIcon />
-                    <Text style={s.ghostButtonText}>返回選擇</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={s.primaryButton}
-                    onPress={handlePreview}
-                    activeOpacity={0.85}
-                    accessibilityRole="button"
-                    accessibilityLabel="檢查並預覽"
-                    accessibilityHint={
-                      previewBlocked ? '還有必填欄位沒完成，按下會標出位置' : undefined
-                    }
-                  >
-                    {/*
-                      文案固定，不隨 errors 在兩句之間跳動 ——
-                      按鈕寬度與語意每次驗證後都變一次，比看不懂更難用。
-                      「檢查並預覽」同時說明了兩種結果：有錯就標出來，沒錯就往下走。
-                    */}
-                    <Text style={s.primaryButtonText}>檢查並預覽</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : step === 'success' ? (
+            {route.kind === 'success' ? (
               <SuccessFooter
                 refreshStatus={refreshStatus}
                 onRetryRefresh={() => void runRefresh()}
                 onViewTask={handleViewCreatedTask}
                 onFinish={handleFinishSuccess}
               />
-            ) : (
+            ) : route.kind === 'review' ? (
               <View style={s.reviewFooter}>
                 {submission.status === 'failed' ? (
                   <View
@@ -954,7 +1267,7 @@ export function PresetTaskDrawer({
                 <View style={s.reviewFooterRow}>
                   <TouchableOpacity
                     style={[s.ghostButton, submitting && s.ghostButtonDisabled]}
-                    onPress={handleBackToEdit}
+                    onPress={handleBack}
                     disabled={submitting}
                     activeOpacity={0.7}
                     accessibilityRole="button"
@@ -996,6 +1309,71 @@ export function PresetTaskDrawer({
                         確認建立
                       </Text>
                     )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              /*
+                其餘五個畫面共用同一組 footer：左邊上一步（起點頁是取消）、
+                右邊主要動作。編輯畫面的預覽鈕刻意保持可按 ——
+                永遠 disabled 的按鈕不會告訴家長少了什麼，只會讓人反覆點一顆
+                沒有反應的東西；按下去才把錯誤標出來（閘門在 handlePreview）。
+              */
+              <View style={s.editFooter}>
+                {route.kind === 'editor' && blockedByErrors ? (
+                  <Text style={s.editFooterNote}>{PREVIEW_BLOCKED_NOTE}</Text>
+                ) : null}
+                {route.kind !== 'editor' && primaryHint ? (
+                  <Text style={s.editFooterHint}>{primaryHint}</Text>
+                ) : null}
+                <View style={s.editFooterRow}>
+                  {showsBack ? (
+                    <TouchableOpacity
+                      style={s.ghostButton}
+                      onPress={handleBack}
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                    >
+                      <ChevronLeftIcon />
+                      <Text style={s.ghostButtonText}>{backLabel}</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={s.ghostButton}
+                      onPress={handleClose}
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                    >
+                      <Text style={s.ghostButtonText}>取消</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity
+                    style={[s.primaryButton, primaryDisabled && s.primaryButtonDisabled]}
+                    onPress={handlePrimary}
+                    disabled={primaryDisabled}
+                    activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: primaryDisabled }}
+                    accessibilityLabel={route.kind === 'editor' ? '檢查並預覽' : '下一步'}
+                    accessibilityHint={
+                      route.kind === 'editor'
+                        ? (previewBlocked ? '還有必填欄位沒完成，按下會標出位置' : undefined)
+                        : primaryHint
+                    }
+                  >
+                    {/*
+                      編輯畫面的文案固定，不隨 errors 在兩句之間跳動 ——
+                      按鈕寬度與語意每次驗證後都變一次，比看不懂更難用。
+                      「檢查並預覽」同時說明了兩種結果：有錯就標出來，沒錯就往下走。
+                    */}
+                    <Text
+                      style={[
+                        s.primaryButtonText,
+                        primaryDisabled && s.primaryButtonTextDisabled,
+                      ]}
+                    >
+                      {route.kind === 'editor' ? '檢查並預覽' : '下一步'}
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -1119,10 +1497,10 @@ function SuccessFooter({
 }
 
 // ---------------------------------------------------------------------------
-// Step 1 — 選擇任務起點（家族）
+// preset 入口 — 選擇任務起點（家族）
 // ---------------------------------------------------------------------------
 
-function PickStep({
+function PresetCatalogStep({
   ready,
   childName,
   listRef,
@@ -1429,7 +1807,7 @@ const s = StyleSheet.create({
     color: ParentColors.fgMuted,
   },
 
-  // Step 2 的版本切換
+  // 編輯畫面的版本切換
   variantSwitch: {
     gap: ParentSpacing[2],
   },
@@ -1556,7 +1934,7 @@ const s = StyleSheet.create({
   primaryButtonTextDisabled: {
     color: ParentColors.fgMuted,
   },
-  /** 編輯步驟的 footer：錯誤說明一行 + 按鈕列。沒有錯誤時和原本的單列一樣高。 */
+  /** 共用 footer：說明一行 + 按鈕列。沒有說明時和原本的單列一樣高。 */
   editFooter: {
     flex: 1,
     minWidth: 0,
@@ -1567,6 +1945,13 @@ const s = StyleSheet.create({
     fontSize: ParentFontSizes.xs,
     lineHeight: 19,
     color: ParentColors.error,
+  },
+  /** 「還沒選」不是錯誤，用一般說明色，不用紅字。 */
+  editFooterHint: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    lineHeight: 19,
+    color: ParentColors.fgMuted,
   },
   editFooterRow: {
     flexDirection: 'row',

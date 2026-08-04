@@ -41,9 +41,9 @@ import {
 import { ParentSidebar, type ManageSection } from './ParentSidebar';
 import { ManageTabBar } from './ManageTabBar';
 import {
-  PresetTaskDrawer,
-  type PresetTaskDrawerChild,
-} from './taskDrawer/PresetTaskDrawer';
+  TaskCreationDrawer,
+  type TaskCreationDrawerChild,
+} from './taskDrawer/TaskCreationDrawer';
 import type { CreatedTaskTab } from './taskDrawer/taskPersistence';
 import { SupabaseParentTaskCreationService } from '../../../lib/parentTaskCreationService';
 import {
@@ -557,7 +557,7 @@ export default function ParentTaskManagementTablet() {
   }, []);
 
   // 抽屜只吃它需要的四個欄位，年齡由 birth_date 即時算（不改 SelectedChildContext、不另查 DB）。
-  const drawerChild: PresetTaskDrawerChild | null = useMemo(() => {
+  const drawerChild: TaskCreationDrawerChild | null = useMemo(() => {
     if (!child) return null;
     return {
       id: child.id,
@@ -862,7 +862,7 @@ export default function ParentTaskManagementTablet() {
         </View>
       </View>
 
-      <PresetTaskDrawer
+      <TaskCreationDrawer
         visible={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         child={drawerChild}

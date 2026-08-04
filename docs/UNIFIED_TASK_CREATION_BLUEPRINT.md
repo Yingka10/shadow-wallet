@@ -1,7 +1,8 @@
 # 統一建立任務中心｜藍圖
 
-> 第九階段 A。**藍圖與 domain，不是實作進度。**
-> 第一版兩個入口裡，`parent_custom` 的畫面尚未開始（第九階段 B）。
+> 第九階段 A 起草，A／B／C 三輪的進度記在文末。
+> **兩個入口現在都真的可以建立任務**（第九階段 C）。
+> UI 細節見 `CUSTOM_TASK_UI_FLOW.md`。
 
 ---
 
@@ -185,3 +186,35 @@ RPC 的 INSERT 與稽核事件都寫死了 preset。
 
 **仍然沒有做：** 兩個入口的畫面。第一層 Drawer 現在只有 preset 入口，
 `parent_custom` 目前只能由程式建構命令 —— 那是第九階段 C。
+
+---
+
+## 十、第九階段 C 進度
+
+第九節最後那句話**已經不成立**：兩個入口的畫面都做好了。
+
+抽屜的外層改名為 `TaskCreationDrawer`（原 `PresetTaskDrawer`），
+由它負責起點、preset 流程、自訂三步、close／back／dirty、預覽與成功。
+畫面由 discriminated union `TaskCreationDrawerRoute` 決定，**不是數字 step**。
+
+第三節那張表對應到的實作：
+
+| Step | 畫面 | 元件 |
+|---|---|---|
+| — | 起點：兩個入口 | `CustomTaskStart` |
+| 1 | 想做什麼 | `CustomTaskBasicsTitle` |
+| 2 | 這件事主要是為了什麼 | `CustomTaskBasicsPurpose` |
+| 3 | 預計怎麼進行 | `CustomTaskBasicsDuration`（含唯一的 needs_confirmation） |
+| 4 | 希望怎麼支持孩子 | **不是獨立步驟** —— 放在 editor 內（`CustomTaskRewardSection`） |
+| 5 | 路由 | `resolveCustomTaskEditor`，UI 沒有第二張表 |
+
+Step 4 從獨立步驟改成 editor 內的一區：回饋屬於這份任務的內容，
+不是流程的一站。拆出去會讓家長在還沒看到完整安排之前先決定要不要發幣。
+
+第四節那張表現在整條都是 ✅ —— 唯一的分岔仍然是初始草稿
+（`createTaskDraft` vs `createCustomTaskDraft`），以及 RPC 裡
+preset selection 的寫入那一段。
+
+**仍然沒有做：** AI 尚未接上自訂流程（DraftReview 的 AI 區塊保持現狀）、
+`ParentHomeTablet` 的兩條舊 AI 幣值路徑（第七節的 B3 淘汰計畫第 2 步）、
+B 類幣值數字。

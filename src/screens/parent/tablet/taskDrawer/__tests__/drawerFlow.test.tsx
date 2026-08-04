@@ -8,15 +8,17 @@ import { render, fireEvent } from '@testing-library/react-native';
 
 jest.mock('../../../../../lib/onboarding', () => ({ calcAgeGroup: () => '6-9' }));
 
-import { PresetTaskDrawer } from '../PresetTaskDrawer';
+import { TaskCreationDrawer } from '../TaskCreationDrawer';
 import { LOCAL_ONLY_REMINDER, LOCAL_ONLY_CREATE } from '../taskDraft';
 import { FakeParentTaskCreationService } from '../../../../../testing/fakeParentTaskCreationService';
+import { enterPresetCatalog } from '../../../../../testing/taskCreationDrawerFlow';
 
 const CHILD = { id: 'child-1', nickname: '承恩', birthDate: '2018-03-05', familyId: 'family-1' };
 
 function open(mode?: 'demo' | 'development') {
-  return render(
-    <PresetTaskDrawer
+  // 起點頁是新增的第一頁；preset 的行為從「從常用任務開始」之後才開始算。
+  return enterPresetCatalog(render(
+    <TaskCreationDrawer
       visible
       onClose={() => {}}
       child={CHILD}
@@ -24,7 +26,7 @@ function open(mode?: 'demo' | 'development') {
       taskCreationService={new FakeParentTaskCreationService()}
       {...(mode ? { displayMode: mode } : null)}
     />,
-  );
+  ));
 }
 
 /** 走到「閱讀與共讀」的預設版本（固定閱讀練習）編輯畫面。 */
@@ -145,10 +147,10 @@ describe('放棄修改確認', () => {
 
   it('放棄並離開才真的執行原本被攔下的動作', () => {
     const onClose = jest.fn();
-    const r = render(
-      <PresetTaskDrawer visible onClose={onClose} child={CHILD} childLoading={false}
+    const r = enterPresetCatalog(render(
+      <TaskCreationDrawer visible onClose={onClose} child={CHILD} childLoading={false}
       taskCreationService={new FakeParentTaskCreationService()} />,
-    );
+    ));
     fireEvent.press(r.getAllByText('閱讀與共讀')[0]);
     fireEvent.press(r.getByText('下一步'));
     fireEvent.changeText(r.getByLabelText('任務名稱'), '承恩的新閱讀安排');

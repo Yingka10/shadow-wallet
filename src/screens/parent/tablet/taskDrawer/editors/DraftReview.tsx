@@ -1,6 +1,6 @@
 // Shadow Wallet · Parent Tablet — 草稿唯讀預覽
 //
-// 把 draft 攤開來讓家長確認，沒有任何寫入。「確認建立」在 PresetTaskDrawer 的 footer。
+// 把 draft 攤開來讓家長確認，沒有任何寫入。「確認建立」在 TaskCreationDrawer 的 footer。
 //
 // 這裡多做一件事：顯示**真正會送出的那份回饋決策**。
 // 「回饋方式：可獲得成長幣」只說了政策名稱，沒說會拿到幾枚 ——
@@ -57,6 +57,8 @@ import type {
   TaskRewardCalculationBasis,
   TaskRewardDecision,
 } from '../taskReward/types';
+import { CUSTOM_TASK_BADGE, CUSTOM_TASK_ICON_KEY } from '../customTask/customTaskCopy';
+import { completionPolicyForEditor, editorFormLabel } from '../customTask/customTaskRouting';
 import { LocalOnlyNotice, PolicyNotice, ReadOnlyOutcomeList } from './EditorControls';
 import { RuleFindingsSection, TaskAiSection, type TaskAiSectionProps } from './TaskAiSection';
 import type { TaskRuleFinding } from '../taskAi';
@@ -71,9 +73,10 @@ function weekdayText(days: number[]): string {
 
 function optionText(
   draft: TaskDraft,
-  variant: TaskPresetVariant,
+  variant: TaskPresetVariant | undefined,
 ): Array<{ label: string; value: string }> {
-  return variant.optionGroups.map(group => {
+  // 自訂任務沒有選項組。空陣列不是「還沒載入」，是這種來源本來就沒有。
+  return (variant?.optionGroups ?? []).map(group => {
     const selected = draft.selectedOptions[group.id] ?? [];
     const labels = group.options
       .filter(option => selected.includes(option.id))
@@ -260,8 +263,15 @@ export function DraftReview({
   ruleFindings = [],
   ai,
 }: {
-  family: TaskPresetFamily;
-  variant: TaskPresetVariant;
+  /**
+   * preset 的家族與版本。**自訂任務兩者都是 undefined。**
+   *
+   * 少了它們，預覽會少掉三種東西：家族圖示、版本標籤、catalog 的安全提示。
+   * 那三樣**不需要用假資料補上** —— 自訂任務本來就沒有版本，
+   * 顯示一個空白的「執行版本」區塊只會讓家長以為漏填了什麼。
+   */
+  family?: TaskPresetFamily;
+  variant?: TaskPresetVariant;
   draft: TaskDraft;
   /**
    * 等一下真的會送出的那份決策。
@@ -316,17 +326,17 @@ export function DraftReview({
    * 家庭角色的安全政策已在上方整段列出，同一句就不要在下面再出現一次；
    * policyFlags 與 safetyNotes 若寫了同一句，也只顯示一次。
    */
-  const safetyNotes = Array.from(new Set(variant.safetyNotes ?? [])).filter(
+  const safetyNotes = Array.from(new Set(variant?.safetyNotes ?? [])).filter(
     note => !(role && FAMILY_ROLE_SAFETY_POLICY.includes(note)),
   );
-  const policyFlags = Array.from(new Set(variant.policyFlags ?? [])).filter(
+  const policyFlags = Array.from(new Set(variant?.policyFlags ?? [])).filter(
     flag => !safetyNotes.includes(flag),
   );
 
   const roleLabel = (() => {
     if (!role) return '';
     if (role.roleOptionId === 'other') return role.customRoleValue || '自訂角色';
-    const group = variant.optionGroups[0];
+    const group = variant?.optionGroups[0];
     // 角色是必填，validator 會擋在預覽之前；找不到就留空、不寫「尚未選擇」。
     return group?.options.find(o => o.id === role.roleOptionId)?.label ?? '';
   })();
@@ -334,13 +344,20 @@ export function DraftReview({
   return (
     <View style={s.stack}>
       <View style={s.head}>
-        <PresetGlyph kind={family.iconKey} category={draft.purposeCategory} size={54} />
+        <PresetGlyph
+          kind={family?.iconKey ?? CUSTOM_TASK_ICON_KEY[draft.purposeCategory]}
+          category={draft.purposeCategory}
+          size={54}
+        />
         <View style={s.headText}>
           <Text style={s.eyebrow}>預覽（尚未建立）</Text>
           <Text style={s.title}>{draft.title}</Text>
           <Text style={s.subtitle}>
-            {PURPOSE_LABEL[draft.purposeCategory]}｜{variantFormLabel(variant)}
+            {PURPOSE_LABEL[draft.purposeCategory]}｜
+            {variant ? variantFormLabel(variant) : editorFormLabel(draft.editorKind)}
           </Text>
+          {/* 自訂任務標明來源。preset 不標 —— 它的來源已經寫在家族名稱上。 */}
+          {variant ? null : <Text style={s.eyebrow}>{CUSTOM_TASK_BADGE}</Text>}
         </View>
       </View>
 
@@ -454,7 +471,14 @@ export function DraftReview({
           label="回饋方式"
           value={REWARD_POLICY_SHORT_LABEL[draft.rewardPolicy] ?? draft.rewardPolicy}
         />
-        <Row label="怎麼算結束" value={COMPLETION_LABEL[variant.completionPolicy]} />
+        <Row
+          label="怎麼算結束"
+          value={COMPLETION_LABEL[
+            // preset 的結束方式來自 catalog；自訂任務由 editorKind 推導。
+            // 用的是與 mapTaskDraftToCommand 同一支純函式，兩邊不會各說各話。
+            variant?.completionPolicy ?? completionPolicyForEditor(draft.editorKind)
+          ]}
+        />
         {growth ? <Row label="怎樣算完成" value={growth.completionDescription} /> : null}
         {support ? <Row label="怎樣算逐漸穩定" value={support.successDescription} /> : null}
         {recurring ? <Row label="怎樣算完成" value={recurring.completionDescription} /> : null}
@@ -520,7 +544,7 @@ export function DraftReview({
         </PolicyNotice>
       ) : null}
 
-      {variant.feedbackHint ? <PolicyNotice>{variant.feedbackHint}</PolicyNotice> : null}
+      {variant?.feedbackHint ? <PolicyNotice>{variant.feedbackHint}</PolicyNotice> : null}
 
       {safetyNotes.map(note => <PolicyNotice key={note}>{note}</PolicyNotice>)}
       {policyFlags.map(flag => (

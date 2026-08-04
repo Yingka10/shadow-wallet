@@ -185,9 +185,21 @@ export function validateShortSupportDraft(
 
 /**
  * 家庭參與的發幣防線（第二層）。
+ *
  * 第一層是 catalog 的 allowedRewardPolicies 不含 coin_eligible；
  * 這一層擋的是「catalog 寫錯」或未來有人改壞資料的情況 —— 規格明確要求即使
  * catalog 錯誤包含 coin_eligible，validator 也必須擋下。
+ *
+ * ⚠️ 只擋成長幣與時間儲蓄。
+ *
+ * 舊版還多擋一件事：家庭參與**只能**是 `family_contribution`，
+ * 連「只留下紀錄」與「進度與肯定」都不行。第九階段 B 已經把資料庫那一條
+ * 對應的 guard 改掉了（B ＋ record_only／progress_only 可以建立），
+ * 這一層跟著對齊 —— 兩邊說法不一致的話，家長會遇到
+ * 「App 說不行、資料庫其實可以」這種沒有人能解釋的狀態。
+ *
+ * 家庭貢獻仍然是**建議**做法（見 evaluateCustomTaskRewardOptions 的
+ * recommended），只是不再是唯一合法的選擇。
  */
 function validateFamilyParticipationReward(
   draft: TaskDraft,
@@ -196,10 +208,6 @@ function validateFamilyParticipationReward(
   if (draft.purposeCategory !== 'family_participation') return;
   if (COIN_LIKE_POLICIES.includes(draft.rewardPolicy)) {
     errors.rewardPolicy = '家庭參與不發成長幣，也不記時間儲蓄';
-    return;
-  }
-  if (draft.rewardPolicy !== 'family_contribution') {
-    errors.rewardPolicy = '家庭參與的回饋方式應為家庭貢獻';
   }
 }
 
@@ -272,6 +280,16 @@ export function validateFamilyRoleDraft(
 
   if (draft.purposeCategory !== 'family_participation') {
     errors.purposeCategory = '家庭角色必須屬於家庭參與';
+  }
+
+  /*
+    家庭角色仍然固定 family_contribution。
+    上面的 validateFamilyParticipationReward 放寬之後，這一條要單獨留著 ——
+    create_parent_task_v1 的 guard 對家庭角色沒有跟著放寬，
+    少了這一行的話，一個「只留下紀錄」的家庭角色會一路走到 RPC 才被拒絕。
+  */
+  if (!errors.rewardPolicy && draft.rewardPolicy !== 'family_contribution') {
+    errors.rewardPolicy = '家庭角色固定以家庭貢獻記錄';
   }
 
   if (isBlank(draft.roleOptionId)) {

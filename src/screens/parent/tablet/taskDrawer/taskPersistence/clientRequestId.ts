@@ -85,7 +85,7 @@ function pseudoRandomBytes(): Uint8Array {
  * 產生一個新的建立請求識別碼（UUID v4 字串）。
  *
  * 同一份草稿只呼叫一次 —— 重試要沿用，不是重新產生。呼叫端見
- * PresetTaskDrawer 的 buildDraft。
+ * TaskCreationDrawer 的 buildDraft。
  */
 export function newClientRequestId(): string {
   const source = cryptoLike();

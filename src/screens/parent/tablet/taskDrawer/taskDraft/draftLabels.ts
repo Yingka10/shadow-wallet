@@ -341,8 +341,9 @@ export const GROWTH_PLAN_COPY: Record<string, GrowthPlanCopy> = {
   },
 };
 
-export function growthPlanCopy(familyId: string): GrowthPlanCopy {
-  return GROWTH_PLAN_COPY[familyId] ?? GENERIC_GROWTH_COPY;
+export function growthPlanCopy(familyId: string | undefined): GrowthPlanCopy {
+  // undefined = 自訂任務（沒有 preset 家族）。走通用文案，與「查不到這個 id」同一條路。
+  return (familyId ? GROWTH_PLAN_COPY[familyId] : undefined) ?? GENERIC_GROWTH_COPY;
 }
 
 // ---------------------------------------------------------------------------
@@ -439,12 +440,15 @@ export const SHORT_SUPPORT_COPY: Record<string, ShortSupportCopy> = {
   },
 };
 
-export function shortSupportCopy(familyId: string): ShortSupportCopy {
-  return SHORT_SUPPORT_COPY[familyId] ?? GENERIC_SHORT_SUPPORT_COPY;
+export function shortSupportCopy(familyId: string | undefined): ShortSupportCopy {
+  return (familyId ? SHORT_SUPPORT_COPY[familyId] : undefined) ?? GENERIC_SHORT_SUPPORT_COPY;
 }
 
 /** catalog 的 option id → 支援步驟文字（目前只有功課管理需要）。 */
-export function stepTextForCatalogOption(familyId: string, optionId: string): string | null {
+export function stepTextForCatalogOption(
+  familyId: string | undefined,
+  optionId: string,
+): string | null {
   if (familyId === 'learn-homework-method') return HOMEWORK_STEPS[optionId] ?? null;
   return null;
 }
@@ -563,9 +567,12 @@ export const RECURRING_COPY: Record<string, RecurringCopy> = {
   },
 };
 
-export function recurringCopy(familyId: string, isFamilyParticipation: boolean): RecurringCopy {
+export function recurringCopy(
+  familyId: string | undefined,
+  isFamilyParticipation: boolean,
+): RecurringCopy {
   return (
-    RECURRING_COPY[familyId]
+    (familyId ? RECURRING_COPY[familyId] : undefined)
     ?? (isFamilyParticipation
       ? GENERIC_FAMILY_RECURRING_COPY
       : GENERIC_LEARNING_RECURRING_COPY)
@@ -617,8 +624,8 @@ export const FAMILY_ROLE_COPY: Record<string, FamilyRoleCopy> = {
   },
 };
 
-export function familyRoleCopy(familyId: string): FamilyRoleCopy {
-  return FAMILY_ROLE_COPY[familyId] ?? GENERIC_FAMILY_ROLE_COPY;
+export function familyRoleCopy(familyId: string | undefined): FamilyRoleCopy {
+  return (familyId ? FAMILY_ROLE_COPY[familyId] : undefined) ?? GENERIC_FAMILY_ROLE_COPY;
 }
 
 export const FAMILY_ROLE_EXCEPTION_DEFAULT =
@@ -847,8 +854,8 @@ export const ONE_TIME_COPY: Record<string, OneTimeCopy> = {
   },
 };
 
-export function oneTimeCopy(familyId: string): OneTimeCopy {
-  return ONE_TIME_COPY[familyId] ?? GENERIC_ONE_TIME_COPY;
+export function oneTimeCopy(familyId: string | undefined): OneTimeCopy {
+  return (familyId ? ONE_TIME_COPY[familyId] : undefined) ?? GENERIC_ONE_TIME_COPY;
 }
 
 /** 「這次安排的期待」的欄位標題，依任務目的換說法。 */

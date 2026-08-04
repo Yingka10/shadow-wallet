@@ -248,3 +248,46 @@ preset 草稿缺 family/variant、或自訂草稿帶了 family/variant，都會*
 而不是安靜地選一邊 —— 兩種錯法都會產生一筆來源記錯的任務。
 
 **仍然沒有做：** 自訂入口的畫面（第九階段 C）。
+
+---
+
+## 九、第九階段 C 更新
+
+第八節最後那句話**已經不成立**：自訂入口的畫面做好了
+（`docs/CUSTOM_TASK_UI_FLOW.md`）。
+
+domain 這一層本輪只有三處**加法**，沒有任何規則被改寫：
+
+| 新增 | 在哪 | 為什麼 |
+|---|---|---|
+| `suggestedDurationChoice` | `CustomTaskEditorResolution` 的 needs_confirmation | 少了它，UI 得自己知道「改成一段時間」是指哪一個內部值 —— 那等於把路由的一半搬進 event handler |
+| `confirmCustomTaskEditor()` | `customTaskRouting.ts` | 「仍使用固定重複」不是「什麼都不做」：系統原本要給 `short_support`，家長推翻之後要得到 `recurring`。那個對應關係是路由的一部分，不是按鈕的副作用 |
+| `editorFormLabel()` | `customTaskRouting.ts` | preset 走 `variantFormLabel(variant)`，自訂沒有 variant。兩邊必須說同一組字（有測試比對集合） |
+
+`customTaskCopy.ts` 是新的一支，但它**只有字串與對照表**，沒有邏輯。
+畫面上永遠不出現 A／B／C／D、`purposeCategory`、`editorKind`、
+`durationChoice` 或任何 reason code —— 有一支專門的測試掃過所有文案。
+
+### initializer 的一處修正
+
+自訂家庭角色的 `roleOptionId` 從 `''` 改成 `'other'`。
+
+`''`（尚未選）在有清單的畫面上是合理的初始狀態，但自訂任務**永遠不會有清單** ——
+讓它停在「尚未選」等於要求家長從一個不存在的選單裡挑一項，
+而 `validateFamilyRoleDraft` 會永遠擋著預覽。
+
+### 第七節的檔案表（更新）
+
+| 檔案 | 內容 |
+|---|---|
+| `customTaskCopy.ts` | 正式 UI 文案、圖示對照、期間選項 |
+| `CustomTaskStart.tsx` | 起點頁（兩個入口） |
+| `CustomTaskBasicsTitle/Purpose/Duration.tsx` | 三個基本設定步驟 |
+| `CustomTaskSummaryCard.tsx` | 「這次想安排的內容」摘要 |
+| `CustomTaskRewardSection.tsx` | 「怎麼被看見」——**只畫，不判斷** |
+| `CustomChoiceCard.tsx` | 三頁共用的大型選擇卡 |
+| `../taskCreationRoute.ts` | 畫面路由 union ＋ 上一步 |
+| `../taskCreationState.ts` | intake 狀態、dirty、指紋、換入口 |
+| `__tests__/` | 8 支 |
+
+**仍然沒有做：** AI 未接上自訂流程、B 類幣值數字、支持意圖的選擇畫面。

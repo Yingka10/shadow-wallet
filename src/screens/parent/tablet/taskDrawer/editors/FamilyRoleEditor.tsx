@@ -54,6 +54,13 @@ import {
   ValidationMessage,
   WeekdayPicker,
 } from './EditorControls';
+import {
+  CUSTOM_DURATION_DAY_CHOICES,
+  CUSTOM_ROLE_EMPTY_RESPONSIBILITIES_HELPER,
+  CUSTOM_ROLE_NAME_LABEL,
+  CUSTOM_ROLE_NAME_PLACEHOLDER,
+  CUSTOM_TASK_BADGE,
+} from '../customTask/customTaskCopy';
 
 export function FamilyRoleEditor({
   family,
@@ -65,8 +72,9 @@ export function FamilyRoleEditor({
   onChange,
   onRequestRoleChange,
 }: {
-  family: TaskPresetFamily;
-  variant: TaskPresetVariant;
+  /** preset 的家族與版本。**自訂任務兩者都是 undefined。** */
+  family?: TaskPresetFamily;
+  variant?: TaskPresetVariant;
   draft: FamilyRoleDraft;
   childName: string;
   errors: TaskDraftValidationErrors;
@@ -78,27 +86,27 @@ export function FamilyRoleEditor({
    */
   onRequestRoleChange: (roleOptionId: string) => void;
 }) {
-  const copy = familyRoleCopy(family.id);
+  const copy = familyRoleCopy(family?.id);
   const err = (key: string) =>
     showErrors ? (errors as Record<string, string | undefined>)[key] : undefined;
 
   const patch = (partial: Partial<FamilyRoleDraft>) => onChange({ ...draft, ...partial });
 
-  const roleGroup = variant.optionGroups[0];
+  const roleGroup = variant?.optionGroups[0];
   const reviewDate = dateStringPlusDays(draft.startDate, draft.firstReviewAfterDays);
   const enabledCount = draft.responsibilityItems.filter(item => item.enabled).length;
   const overSoftLimit = enabledCount > DRAFT_FALLBACKS.responsibilitySoftLimit;
 
   // 同一句安全提醒不要在政策段與 variant 段各出現一次。
-  const extraSafetyNotes = (variant.safetyNotes ?? []).filter(
+  const extraSafetyNotes = (variant?.safetyNotes ?? []).filter(
     note => !FAMILY_ROLE_SAFETY_POLICY.includes(note),
   );
 
   return (
     <View style={s.stack}>
       <EditorHeader
-        title={family.title}
-        meta={`${variant.label}｜家庭角色｜試行 ${draft.durationDays} 天`}
+        title={family?.title ?? draft.title}
+        meta={`${variant?.label ?? CUSTOM_TASK_BADGE}｜家庭角色｜試行 ${draft.durationDays} 天`}
       />
 
       {/* ── A. 選擇角色 ──────────────────────────────────────────────── */}
@@ -154,15 +162,41 @@ export function FamilyRoleEditor({
               </>
             ) : null}
           </EditorField>
-        ) : null}
+        ) : (
+          /*
+            自訂任務沒有角色清單可選 —— 那不是「清單還沒載入」，
+            是這種來源本來就沒有。所以直接給一個輸入框，
+            而不是把家長留在一個空的選單前面。
+          */
+          <EditorField>
+            <FieldLabel required>{CUSTOM_ROLE_NAME_LABEL}</FieldLabel>
+            <DraftTextInput
+              value={draft.customRoleValue ?? ''}
+              onChangeText={v => patch({ customRoleValue: v })}
+              placeholder={CUSTOM_ROLE_NAME_PLACEHOLDER}
+              errorText={err('customRoleValue')}
+              accessibilityLabel={CUSTOM_ROLE_NAME_LABEL}
+            />
+            <ValidationMessage>{err('customRoleValue')}</ValidationMessage>
+          </EditorField>
+        )}
       </EditorSection>
 
       {/* ── B. 說清楚負責範圍 ────────────────────────────────────────── */}
       <EditorSection variant="plain" title="說清楚負責範圍" helper="範圍越具體，孩子越知道自己做到哪裡就算完成。">
         <EditorField>
           <FieldLabel required>負責的具體內容</FieldLabel>
-          <HelperText>可以改文字或關掉，建議留 2–4 項，最多 5 項。</HelperText>
-          {draft.responsibilityItems.length === 0 ? (
+          <HelperText>
+            {roleGroup
+              ? '可以改文字或關掉，建議留 2–4 項，最多 5 項。'
+              : CUSTOM_ROLE_EMPTY_RESPONSIBILITIES_HELPER}
+          </HelperText>
+          {/*
+            preset：還沒選角色時給一句說明（選了就會帶出建議項目）。
+            自訂：永遠不會有建議項目，所以直接開放新增 ——
+            顯示「先選一個角色」等於指向一個不存在的選單。
+          */}
+          {roleGroup && draft.responsibilityItems.length === 0 ? (
             <View style={s.emptyBox}>
               <Text style={s.emptyText}>先選一個角色，就會帶出建議的負責內容。</Text>
             </View>
@@ -230,7 +264,10 @@ export function FamilyRoleEditor({
           <FieldLabel required>試行期間</FieldLabel>
           <DurationPicker
             value={draft.durationDays}
-            choices={variant.defaultDraft.durationDayChoices ?? []}
+            choices={
+              variant?.defaultDraft.durationDayChoices
+              ?? CUSTOM_DURATION_DAY_CHOICES.family_role
+            }
             onChange={days => patch({ durationDays: days })}
           />
           <ValidationMessage>{err('durationDays')}</ValidationMessage>

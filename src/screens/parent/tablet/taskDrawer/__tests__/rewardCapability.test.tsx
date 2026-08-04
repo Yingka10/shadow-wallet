@@ -11,9 +11,10 @@ import { render, fireEvent, type RenderResult } from '@testing-library/react-nat
 
 jest.mock('../../../../../lib/onboarding', () => ({ calcAgeGroup: () => '6-9' }));
 
-import { PresetTaskDrawer } from '../PresetTaskDrawer';
+import { TaskCreationDrawer } from '../TaskCreationDrawer';
 import { ALL_FAMILIES } from '../taskCatalog';
 import { FakeParentTaskCreationService } from '../../../../../testing/fakeParentTaskCreationService';
+import { enterPresetCatalog } from '../../../../../testing/taskCreationDrawerFlow';
 
 const CHILD = { id: 'child-1', nickname: '承恩', birthDate: '2018-03-05', familyId: 'family-1' };
 
@@ -24,8 +25,8 @@ function openEditor(
   title: string,
   options?: { query?: string; mode?: 'demo' | 'development' },
 ): RenderResult {
-  const r = render(
-    <PresetTaskDrawer
+  const r = enterPresetCatalog(render(
+    <TaskCreationDrawer
       visible
       onClose={() => {}}
       child={CHILD}
@@ -33,7 +34,7 @@ function openEditor(
       taskCreationService={new FakeParentTaskCreationService()}
       {...(options?.mode ? { displayMode: options.mode } : null)}
     />,
-  );
+  ));
   if (options?.query) {
     fireEvent.changeText(r.getByPlaceholderText('搜尋閱讀、運動、家庭參與……'), options.query);
   }
@@ -153,7 +154,7 @@ describe('17. 只有一個地方決定選單', () => {
 // ---------------------------------------------------------------------------
 
 describe('建立 service 由上層注入', () => {
-  const drawer = fs.readFileSync(path.resolve(__dirname, '..', 'PresetTaskDrawer.tsx'), 'utf8');
+  const drawer = fs.readFileSync(path.resolve(__dirname, '..', 'TaskCreationDrawer.tsx'), 'utf8');
 
   it('抽屜不 import Supabase adapter，也不 import supabase client', () => {
     // 抽屜只認 ParentTaskCreationService 這個介面。真正的實作是誰、

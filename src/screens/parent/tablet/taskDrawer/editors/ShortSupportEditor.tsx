@@ -48,6 +48,8 @@ import {
   WeekdayPicker,
   shouldUseCompactGrid,
 } from './EditorControls';
+import { CUSTOM_DURATION_DAY_CHOICES, CUSTOM_TASK_BADGE } from '../customTask/customTaskCopy';
+import { completionPolicyForEditor } from '../customTask/customTaskRouting';
 
 export function ShortSupportEditor({
   family,
@@ -57,8 +59,9 @@ export function ShortSupportEditor({
   showErrors,
   onChange,
 }: {
-  family: TaskPresetFamily;
-  variant: TaskPresetVariant;
+  /** preset 的家族與版本。**自訂任務兩者都是 undefined。** */
+  family?: TaskPresetFamily;
+  variant?: TaskPresetVariant;
   draft: ShortSupportDraft;
   errors: TaskDraftValidationErrors;
   showErrors: boolean;
@@ -76,7 +79,7 @@ export function ShortSupportEditor({
     所以 required 的選項組錯誤要跟焦點錯誤顯示在同一個地方 ——
     否則 validator 擋下了預覽，畫面上卻找不到任何紅字。
   */
-  const focusGroupId = variant.optionGroups[0]?.id;
+  const focusGroupId = variant?.optionGroups[0]?.id;
   const focusError =
     err('focusOptionIds') ?? (focusGroupId ? err(`option:${focusGroupId}`) : undefined);
   const overFocusLimit = draft.focusOptionIds.length > DRAFT_FALLBACKS.focusSoftLimit;
@@ -90,7 +93,7 @@ export function ShortSupportEditor({
     const nextSteps = syncSupportSteps(draft.supportSteps, next, choices);
 
     // catalog 有 optionGroups 時，焦點同時就是選項答案，一併寫回 selectedOptions。
-    const group = variant.optionGroups[0];
+    const group = variant?.optionGroups[0];
     patch({
       focusOptionIds: next,
       supportSteps: nextSteps,
@@ -111,9 +114,9 @@ export function ShortSupportEditor({
   return (
     <View style={s.stack}>
       <EditorHeader
-        title={family.title}
-        meta={`${variant.label}｜短期小計畫｜建議 ${
-          variant.defaultDraft.durationDays ?? draft.durationDays
+        title={family?.title ?? draft.title}
+        meta={`${variant?.label ?? CUSTOM_TASK_BADGE}｜短期小計畫｜建議 ${
+          variant?.defaultDraft.durationDays ?? draft.durationDays
         } 天`}
       />
 
@@ -285,7 +288,10 @@ export function ShortSupportEditor({
           <FieldLabel required>計畫期間</FieldLabel>
           <DurationPicker
             value={draft.durationDays}
-            choices={variant.defaultDraft.durationDayChoices ?? []}
+            choices={
+              variant?.defaultDraft.durationDayChoices
+              ?? CUSTOM_DURATION_DAY_CHOICES.short_support
+            }
             onChange={days => patch({ durationDays: days })}
           />
           <ValidationMessage>{err('durationDays')}</ValidationMessage>
@@ -363,13 +369,15 @@ export function ShortSupportEditor({
             <Text style={s.fixedPolicyNote}>短期支援固定不發成長幣</Text>
           </View>
           <Text style={s.completionText}>
-            結束方式　{COMPLETION_LABEL[variant.completionPolicy]}
+            結束方式　{COMPLETION_LABEL[
+              variant?.completionPolicy ?? completionPolicyForEditor('short_support')
+            ]}
           </Text>
         </EditorField>
 
         <PolicyNotice>{SHORT_SUPPORT_POLICY_NOTE}</PolicyNotice>
 
-        {variant.safetyNotes?.map(note => (
+        {variant?.safetyNotes?.map(note => (
           <PolicyNotice key={note}>{note}</PolicyNotice>
         ))}
       </EditorSection>

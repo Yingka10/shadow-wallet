@@ -43,6 +43,13 @@ export type CustomTaskEditorResolution =
   | {
       status: 'needs_confirmation';
       suggestedEditorKind: TaskEditorKind;
+      /**
+       * 採納建議時，期間選擇要換成哪一個。
+       *
+       * 沒有這個欄位的話，UI 得自己知道「改成一段時間」是指 `for_a_while` ——
+       * 那就等於把路由的一半搬進 React event handler。
+       */
+      suggestedDurationChoice: CustomTaskDurationChoice;
       rationaleCode: RoutingRationaleCode;
     }
   | {
@@ -91,6 +98,7 @@ export function resolveCustomTaskEditor(
         return {
           status: 'needs_confirmation',
           suggestedEditorKind: 'short_support',
+          suggestedDurationChoice: 'for_a_while',
           rationaleCode: 'ROUTINE_SHOULD_NOT_BE_PERMANENT',
         };
       }
@@ -137,6 +145,106 @@ export function resolveCustomTaskEditor(
         editorKind: 'growth_plan',
         rationaleCode: 'SUSTAINED_EFFORT_IS_GROWTH_PLAN',
       };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 家長對 needs_confirmation 的回答
+// ---------------------------------------------------------------------------
+//
+// 為什麼這是一支純函式，而不是在 Step 3 的 onPress 裡寫兩行：
+//
+//   「仍使用固定重複」不是「什麼都不做」。系統原本要給的是 short_support，
+//   家長推翻之後要得到的是 recurring —— 那個對應關係是**路由的一部分**，
+//   不是按鈕的副作用。寫在 handler 裡的話，下一個 needs_confirmation 出現時
+//   會有人在另一個 handler 裡再寫一次，而兩份遲早不一樣。
+
+export type RoutingConfirmationChoice =
+  /** 採納建議（例如生活常規改成一段時間的小計畫）。 */
+  | 'accept_suggestion'
+  /** 維持家長原本選的期間。 */
+  | 'keep_choice';
+
+export type ConfirmedCustomTaskRouting = {
+  editorKind: TaskEditorKind;
+  /** 確認後實際採用的期間選擇。採納建議會換成建議值。 */
+  durationChoice: CustomTaskDurationChoice;
+  /** 家長是否推翻了系統建議。用於文案與稽核，不改變政策。 */
+  overridesSuggestion: boolean;
+};
+
+/**
+ * 維持原本期間選擇時對應哪一支 editor。
+ *
+ * 只列真的會走到 needs_confirmation 的期間。`for_a_while` 目前沒有任何組合
+ * 需要確認，所以刻意不給它一個猜出來的對應 —— 見下面的 fallback。
+ */
+const KEPT_EDITOR_KIND: Partial<Record<CustomTaskDurationChoice, TaskEditorKind>> = {
+  once: 'one_time',
+  repeating: 'recurring',
+};
+
+/** 家長回答完確認之後，實際要開哪一支 editor。 */
+export function confirmCustomTaskEditor(
+  input: ResolveCustomTaskEditorInput,
+  choice: RoutingConfirmationChoice,
+): ConfirmedCustomTaskRouting {
+  const resolution = resolveCustomTaskEditor(input);
+
+  if (resolution.status === 'unsupported') {
+    throw new Error(`這個組合沒有對應的編輯器：${resolution.reasonCode}`);
+  }
+
+  // 沒有要確認的事，兩種回答的結果相同。呼叫端不必先判斷 status。
+  if (resolution.status === 'resolved') {
+    return {
+      editorKind: resolution.editorKind,
+      durationChoice: input.durationChoice,
+      overridesSuggestion: false,
+    };
+  }
+
+  if (choice === 'accept_suggestion') {
+    const accepted = resolveCustomTaskEditor({
+      ...input,
+      durationChoice: resolution.suggestedDurationChoice,
+    });
+    // 建議值一定要落在 resolved —— 否則就是把家長從一個確認丟進另一個確認。
+    if (accepted.status !== 'resolved') {
+      throw new Error('採納建議後仍未收斂到單一編輯器');
+    }
+    return {
+      editorKind: accepted.editorKind,
+      durationChoice: resolution.suggestedDurationChoice,
+      overridesSuggestion: false,
+    };
+  }
+
+  return {
+    editorKind: KEPT_EDITOR_KIND[input.durationChoice] ?? resolution.suggestedEditorKind,
+    durationChoice: input.durationChoice,
+    overridesSuggestion: true,
+  };
+}
+
+/**
+ * editorKind → 家長看得懂的形式名稱。
+ *
+ * preset 走 `variantFormLabel(variant)`，自訂任務沒有 variant。
+ * 兩邊必須說同一組字，所以這裡的值刻意與 variantFormLabel 逐字相同。
+ */
+export function editorFormLabel(editorKind: TaskEditorKind): string {
+  switch (editorKind) {
+    case 'one_time':
+      return '單次';
+    case 'recurring':
+      return '固定重複';
+    case 'family_role':
+      return '家庭角色';
+    case 'short_support':
+      return '短期小計畫';
+    case 'growth_plan':
+      return '成長計畫';
   }
 }
 

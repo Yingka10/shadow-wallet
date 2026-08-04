@@ -60,6 +60,8 @@ import {
   SupportLevelPicker,
   ValidationMessage,
 } from './EditorControls';
+import { CUSTOM_TASK_BADGE } from '../customTask/customTaskCopy';
+import { completionPolicyForEditor } from '../customTask/customTaskRouting';
 
 const SCHOOL_ASSIGNMENT_FAMILY_ID = 'learn-school-assignment';
 
@@ -75,8 +77,9 @@ export function OneTimeTaskEditor({
   onMinuteCustomTextChange,
   onChange,
 }: {
-  family: TaskPresetFamily;
-  variant: TaskPresetVariant;
+  /** preset 的家族與版本。**自訂任務兩者都是 undefined。** */
+  family?: TaskPresetFamily;
+  variant?: TaskPresetVariant;
   draft: OneTimeTaskDraft;
   childName: string;
   /** 決定政策算不算得出幣值；沒有孩子資料時為 undefined。 */
@@ -87,9 +90,9 @@ export function OneTimeTaskEditor({
   onMinuteCustomTextChange: (v: string) => void;
   onChange: (next: OneTimeTaskDraft) => void;
 }) {
-  const copy = oneTimeCopy(family.id);
+  const copy = oneTimeCopy(family?.id);
   const isFamily = draft.purposeCategory === 'family_participation';
-  const isSchoolAssignment = family.id === SCHOOL_ASSIGNMENT_FAMILY_ID;
+  const isSchoolAssignment = family?.id === SCHOOL_ASSIGNMENT_FAMILY_ID;
 
   const err = (key: string) =>
     showErrors ? (errors as Record<string, string | undefined>)[key] : undefined;
@@ -111,13 +114,16 @@ export function OneTimeTaskEditor({
     ONE_TIME_EXPECTATION_LABEL[draft.purposeCategory] ?? '希望孩子這次完成的內容';
 
   // 已經被政策 panel 說過的 flag 不再重複列一次。
-  const policyFlags = (variant.policyFlags ?? []).filter(
+  const policyFlags = (variant?.policyFlags ?? []).filter(
     flag => !(isSchoolAssignment && flag.includes('賺幣來源')),
   );
 
   return (
     <View style={s.stack}>
-      <EditorHeader title={family.title} meta={`${variant.label}｜單次`} />
+      <EditorHeader
+        title={family?.title ?? draft.title}
+        meta={`${variant?.label ?? CUSTOM_TASK_BADGE}｜單次`}
+      />
 
       {/* ── A. 這次安排的期待 ────────────────────────────────────────── */}
       <EditorSection title="這次安排的期待" helper={ONE_TIME_EXPECTATION_HINT}>
@@ -145,7 +151,7 @@ export function OneTimeTaskEditor({
           <ValidationMessage>{err('title')}</ValidationMessage>
         </EditorField>
 
-        {variant.optionGroups.map(group => (
+        {(variant?.optionGroups ?? []).map(group => (
           <OptionGroupField
             key={group.id}
             group={group}
@@ -266,7 +272,9 @@ export function OneTimeTaskEditor({
       {/* ── D. 回饋與完成標準 ────────────────────────────────────────── */}
       <EditorSection variant="plain" title="回饋與完成標準" helper="這次怎麼被記錄，以及做到哪裡算完成。">
         <EditorField>
-          <FieldLabel>回饋方式</FieldLabel>
+          {/* 自訂任務的區塊標題由 CustomTaskRewardSection 自己畫（「怎麼被看見」），
+              這裡再加一行「回饋方式」會變成兩個標題疊在一起。 */}
+          {variant ? <FieldLabel>回饋方式</FieldLabel> : null}
           {isFamily ? (
             <>
               <View style={s.fixedPolicyRow}>
@@ -329,14 +337,16 @@ export function OneTimeTaskEditor({
           <FieldLabel>結束方式</FieldLabel>
           <View style={s.fixedPolicyRow}>
             <Text style={s.fixedPolicyText}>
-              {COMPLETION_LABEL[variant.completionPolicy]}
+              {COMPLETION_LABEL[
+                variant?.completionPolicy ?? completionPolicyForEditor('one_time')
+              ]}
             </Text>
           </View>
           <HelperText>{ONE_TIME_ENDING_NOTE}</HelperText>
           <ValidationMessage>{err('completionPolicy')}</ValidationMessage>
         </EditorField>
 
-        {variant.safetyNotes?.map(note => (
+        {variant?.safetyNotes?.map(note => (
           <PolicyNotice key={note} tone="warn">{note}</PolicyNotice>
         ))}
         {/*

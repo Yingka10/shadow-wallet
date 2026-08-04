@@ -22,6 +22,12 @@ import {
 import { variantFormLabel, type TaskPresetFamily, type TaskPresetVariant } from '../taskCatalog';
 import { WEEKDAYS } from '../taskDraft';
 import type { CreateParentTaskCommand } from '../taskPersistence/types';
+import {
+  CUSTOM_TASK_BADGE,
+  CUSTOM_TASK_ICON_KEY,
+  PURPOSE_DISPLAY_LABEL,
+} from '../customTask/customTaskCopy';
+import { editorFormLabel } from '../customTask/customTaskRouting';
 import { PresetGlyph } from '../drawerIcons';
 
 function weekdayText(days: number[] | undefined): string | undefined {
@@ -84,8 +90,15 @@ export function CreatedTaskSummary({
   variant,
   command,
 }: {
-  family: TaskPresetFamily;
-  variant: TaskPresetVariant;
+  /**
+   * preset 的家族與版本。**自訂任務兩者都是 undefined。**
+   *
+   * 摘要上因此不會出現任何 preset 字樣，也不會出現 parent_custom、
+   * creation_source、created_parent_custom 或政策版本 ——
+   * 家長剛建立了一個任務，這一頁要回答的是「我建了什麼」，不是稽核紀錄。
+   */
+  family?: TaskPresetFamily;
+  variant?: TaskPresetVariant;
   command: CreateParentTaskCommand;
 }) {
   const isLongTerm = command.task.durationType === 'long_term';
@@ -102,18 +115,32 @@ export function CreatedTaskSummary({
     <View style={s.stack}>
       <View style={s.head}>
         <PresetGlyph
-          kind={family.iconKey}
+          kind={family?.iconKey ?? CUSTOM_TASK_ICON_KEY[command.task.purposeCategory]}
           category={command.task.purposeCategory}
           size={54}
         />
         <View style={s.headText}>
           <Text style={s.eyebrow}>已建立</Text>
           <Text style={s.title}>{command.task.title}</Text>
-          <Text style={s.subtitle}>{variantFormLabel(variant)}</Text>
+          <Text style={s.subtitle}>
+            {variant
+              ? variantFormLabel(variant)
+              : `${CUSTOM_TASK_BADGE}｜${editorFormLabel(command.metadata.editorKind)}`}
+          </Text>
         </View>
       </View>
 
       <View style={s.block}>
+        {/*
+          preset 的方向已經寫在家族名稱裡（「閱讀與共讀」就是學習與技能），
+          自訂任務沒有那個線索，所以只有它多這一列。
+        */}
+        {variant ? null : (
+          <Row
+            label="主要方向"
+            value={PURPOSE_DISPLAY_LABEL[command.task.purposeCategory]}
+          />
+        )}
         <Row label="執行安排" value={scheduleText(command)} />
         {/* 家庭角色講「試行」，其餘長期形式講「計畫」——兩者的心理預期不同。 */}
         {isLongTerm ? <Row label={isRole ? '試行期間' : '計畫期間'} value={periodText} /> : null}

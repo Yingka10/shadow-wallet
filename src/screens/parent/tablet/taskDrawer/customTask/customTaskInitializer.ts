@@ -186,11 +186,16 @@ export function createCustomTaskDraft(
       const draft: FamilyRoleDraft = {
         ...base,
         editorKind: 'family_role',
-        durationDays: DRAFT_FALLBACKS.growthPlanDurationDays,
+        durationDays: DRAFT_FALLBACKS.familyRoleDurationDays,
         recurrenceDays,
         // 角色來自 preset 的 optionGroup，自訂任務沒有清單可選 ——
         // 家長會直接填自訂角色名稱。
-        roleOptionId: '',
+        //
+        // 用 'other' 而不是 ''：''（尚未選）在有清單的畫面上是合理的初始狀態，
+        // 但自訂任務**永遠不會有清單**，讓它停在「尚未選」等於要求家長
+        // 從一個不存在的選單裡挑一項，而 validator 會永遠擋著預覽。
+        roleOptionId: 'other',
+        customRoleValue: '',
         responsibilityItems: [],
         scopeDescription: '',
         supportLevel: 'together_first',

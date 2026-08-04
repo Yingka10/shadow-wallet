@@ -216,3 +216,71 @@ App 端的 `validateFamilyParticipationReward` 與
 第九階段 A 的報告把 RPC 的「guard A」讀成「A 類的 guard」。
 它的**列表編號是 A，內容講的是 category B**。
 盤點後確認：RPC 裡沒有任何 A 類專屬 guard。
+
+---
+
+## 九、第九階段 C：規則進到畫面上
+
+修訂後的政策第一次真的被家長看得到。
+
+### 家長看到的四個選項
+
+| 家長看到 | 內部值 | 家庭參與時的狀態 |
+|---|---|---|
+| 家庭參與 | `family_contribution` | **建議** |
+| 進度與肯定 | `progress_only` | 可選 |
+| 一般紀錄 | `record_only` | 可選 |
+| 成長幣回饋 | `coin_eligible` | 一般模式不顯示；development 顯示 disabled |
+
+區塊標題是「怎麼被看見」而不是「回饋方式」——
+後者問的是設定，前者問的是家長真正在決定的事。
+
+### 第六節那張表的最後一筆更新
+
+| 層 | 第九階段 A | 第九階段 B | 現在 |
+|---|---|---|---|
+| catalog | 硬擋 B ＋ coin | 未變 | 未變 |
+| 草稿驗證 | B 只能 family_contribution | 未變 | **已對齊**：只擋 coin 與時間儲蓄 |
+| 規則檢查 | 只擋 B ＋ coin | 未變 | 未變（本來就只擋 coin） |
+| RPC guard | B 只能 family_contribution | 已修 | 未變 |
+| 完成端 | category 覆蓋 reward_policy | 已修 | 未變 |
+| 幣值政策 | 沒有 B 類數字 | **仍是 blocker** | **仍是 blocker** |
+
+第八節說「App 端的 `validateFamilyParticipationReward` 與
+`FAMILY_PARTICIPATION_NOT_COIN_ELIGIBLE` 仍然擋 B ＋ coin，訊息還停在舊說法」。
+
+盤點後發現前者擋得比 RPC 更多 —— 它連 `record_only` 與 `progress_only` 都擋，
+而那兩項在第九階段 B 之後資料庫是允許的。所以這一輪改的是**那個多出來的部分**：
+
+```diff
+  if (COIN_LIKE_POLICIES.includes(draft.rewardPolicy)) {
+    errors.rewardPolicy = '家庭參與不發成長幣，也不記時間儲蓄';
+-   return;
+  }
+- if (draft.rewardPolicy !== 'family_contribution') {
+-   errors.rewardPolicy = '家庭參與的回饋方式應為家庭貢獻';
+- }
+```
+
+`FAMILY_PARTICIPATION_NOT_COIN_ELIGIBLE`（`ruleFindings.ts`）**沒有動** ——
+它本來就只在 `rewardPolicy === 'coin_eligible'` 時觸發，與 RPC 一致。
+
+家庭角色仍然固定 `family_contribution`（RPC 對它沒有放寬），
+那一條移到 `validateFamilyRoleDraft` 單獨守著。
+
+### 5.1 仍然是 blocker
+
+**本輪一樣沒有新增任何 B 類幣值數字，也沒有借用 C／D 的表。**
+
+家長在一般使用模式下根本看不到那個選項；development 模式看得到但按不下去，
+理由寫成「這類任務目前尚未有適用的成長幣規則。」——
+是「尚未有」不是「不可以」，因為那就是事實。
+
+### 支持意圖的 UI 尚未做
+
+`RewardSupportIntent` 的三種語意已經在 domain、命令與資料庫欄位裡，
+但**沒有選擇畫面**：唯一會用到它的組合是家庭參與 ＋ 成長幣，
+而它在 B 類幣值政策補上之前選不到。
+
+`CustomTaskRewardSection` 已經實作了「需要確認的選項不可靜默套用」的分支，
+並有測試覆蓋 —— 政策落地的那一天，缺的只有意圖三選一那一小塊。

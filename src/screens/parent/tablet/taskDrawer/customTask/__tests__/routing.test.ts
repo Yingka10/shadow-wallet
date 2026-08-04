@@ -44,6 +44,9 @@ describe('1-6. 路由決策表', () => {
     expect(result).toEqual({
       status: 'needs_confirmation',
       suggestedEditorKind: 'short_support',
+      // 建議連帶換掉期間選擇。少了這一欄，UI 就得自己知道
+      // 「改成一段時間」是指哪一個內部值 —— 那等於把路由搬進 event handler。
+      suggestedDurationChoice: 'for_a_while',
       rationaleCode: 'ROUTINE_SHOULD_NOT_BE_PERMANENT',
     });
     // 不直接建立永久 recurring 生活常規。

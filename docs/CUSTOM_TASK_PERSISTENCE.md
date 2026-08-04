@@ -226,3 +226,44 @@ GoTrue → PostgREST → RLS → RPC，不用 `set_config` 模擬登入。
 - `ParentHomeTablet` 的舊 AI 幣值路徑（B3）
 - B 類幣值數字（需產品拍板）
 - 週報／到期提醒尚未讀 `reward_support_*`
+
+---
+
+## 十一、第九階段 C：命令由畫面產生
+
+第十節的第一項「自訂入口的 UI 與 Step 表單」**已完成**（見 `CUSTOM_TASK_UI_FLOW.md`）。
+
+這一輪**沒有動任何持久化契約**：沒有 migration、沒有改 `create_parent_task_v1`、
+沒有改 `complete_task`、沒有 db push。變的只有「誰來組出那個命令」——
+以前只能由程式建構，現在家長按幾下就會產生同一份命令。
+
+有測試釘住送出的內容：
+
+```
+creationSource            === 'parent_custom'
+preset                    === undefined
+metadata.createdFromPreset === false
+metadata.presetCatalogVersion === undefined
+命令的 JSON 裡沒有任何 preset id 前綴（learn- / life- / fam- / auto-）
+```
+
+### 一項連帶修正（App 端）
+
+`validateFamilyParticipationReward` 原本要求家庭參與**只能**是
+`family_contribution`。第八節記過這件事：「App 端仍然擋 B ＋ coin，
+只是訊息還停在舊說法。」
+
+實際盤點後發現它擋的比 RPC 更多 —— 連 `record_only` 與 `progress_only` 都擋，
+而第九階段 B 已經把 RPC 那一條放寬了。這一輪讓 App 對齊：只擋成長幣與時間儲蓄。
+
+**成長幣仍然擋著**（B 類幣值數字仍是 blocker），所以 §四那張矩陣沒有變。
+家庭角色固定 `family_contribution` 的規則移到 `validateFamilyRoleDraft` 單獨守著 ——
+RPC 對家庭角色沒有放寬。
+
+### 尚未做（更新）
+
+- `reward_support_intent` / `reward_support_review_after_days` 仍然沒有 UI ——
+  唯一會寫入它們的組合（B ＋ 成長幣）在幣值政策補上之前選不到
+- production 未部署
+- 週報／到期提醒仍未讀 `reward_support_*`
+- B 類幣值數字（需產品拍板）

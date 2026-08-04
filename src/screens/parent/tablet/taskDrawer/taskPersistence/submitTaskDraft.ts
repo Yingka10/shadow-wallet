@@ -36,8 +36,14 @@ import type {
 
 export type SubmitTaskDraftArgs = {
   draft: TaskDraft;
-  family: TaskPresetFamily;
-  variant: TaskPresetVariant;
+  /**
+   * preset 的家族與版本。**自訂任務兩者都不傳。**
+   *
+   * 一致性由 mapTaskDraftToCommand 檢查：來源是 parent_custom 卻帶了
+   * family／variant（或反過來）會直接丟例外，不會安靜地選一邊。
+   */
+  family?: TaskPresetFamily;
+  variant?: TaskPresetVariant;
   child: CommandChildContext;
   taskPolicyVersion: string;
   /** 整份草稿共用同一個，重試不變。 */

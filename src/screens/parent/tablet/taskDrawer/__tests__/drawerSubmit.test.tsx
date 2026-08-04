@@ -19,8 +19,9 @@ import { act, render, fireEvent, waitFor } from '@testing-library/react-native';
 
 jest.mock('../../../../../lib/onboarding', () => ({ calcAgeGroup: () => '6-9' }));
 
-import { PresetTaskDrawer } from '../PresetTaskDrawer';
+import { TaskCreationDrawer } from '../TaskCreationDrawer';
 import { FakeParentTaskCreationService } from '../../../../../testing/fakeParentTaskCreationService';
+import { enterPresetCatalog } from '../../../../../testing/taskCreationDrawerFlow';
 
 const CHILD = { id: 'child-1', nickname: '承恩', birthDate: '2018-03-05', familyId: 'family-1' };
 
@@ -35,8 +36,8 @@ type Options = {
 function open(options: Options = {}) {
   const service = options.service ?? new FakeParentTaskCreationService();
   const onClose = options.onClose ?? jest.fn();
-  const r = render(
-    <PresetTaskDrawer
+  const r = enterPresetCatalog(render(
+    <TaskCreationDrawer
       visible
       onClose={onClose}
       child={CHILD}
@@ -46,7 +47,7 @@ function open(options: Options = {}) {
       {...(options.onSwitchTab ? { onSwitchTab: options.onSwitchTab } : null)}
       {...(options.displayMode ? { displayMode: options.displayMode } : null)}
     />,
-  );
+  ));
   return { r, service, onClose };
 }
 
@@ -247,7 +248,7 @@ describe('提交中鎖住離開', () => {
     // ESC listener 只在 web 掛上（RN 沒有鍵盤事件），這裡測不到行為，
     // 所以直接確認它讀的是同一個同步鎖 —— 三條路徑分開判斷遲早會有一條漏掉。
     const source = fs.readFileSync(
-      path.resolve(__dirname, '..', 'PresetTaskDrawer.tsx'), 'utf8',
+      path.resolve(__dirname, '..', 'TaskCreationDrawer.tsx'), 'utf8',
     );
     const escBlock = source.slice(
       source.indexOf("if (event.key !== 'Escape') return;"),
@@ -477,7 +478,7 @@ describe('草稿保留與清除', () => {
 
   it('測試替身沒有被 production 程式碼 import', () => {
     const drawer = fs.readFileSync(
-      path.resolve(__dirname, '..', 'PresetTaskDrawer.tsx'), 'utf8',
+      path.resolve(__dirname, '..', 'TaskCreationDrawer.tsx'), 'utf8',
     );
     expect(drawer).not.toContain('fakeParentTaskCreationService');
   });

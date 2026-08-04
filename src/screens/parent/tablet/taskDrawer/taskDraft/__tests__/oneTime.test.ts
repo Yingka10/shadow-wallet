@@ -355,15 +355,29 @@ describe('單次家庭參與不發幣', () => {
     expect(errors.rewardPolicy).toBeDefined();
   });
 
-  it('連「一般留下紀錄」都不算合格的家庭參與回饋', () => {
+  /*
+    這一條在第九階段 C 反過來了。
+
+    舊規則：家庭參與只能是 family_contribution，連「只留下紀錄」都擋。
+    新規則：只擋成長幣與時間儲蓄。
+
+    改的理由不是放寬比較好，是**資料庫已經先改了**：第九階段 B 把
+    create_parent_task_v1 的 guard 從「B 只能 family_contribution」改成
+    只擋成長幣。App 這一層還停在舊說法的話，家長會遇到
+    「App 說不行、資料庫其實可以」——而那種不一致沒有人解釋得了。
+
+    家庭貢獻仍然是**建議**做法（evaluateCustomTaskRewardOptions 的 recommended），
+    只是不再是唯一合法的選擇。
+  */
+  it('家庭參與可以只留下紀錄 —— 與資料庫的 guard 一致', () => {
     const draft = completedDraft('fam-restock', 'fam-restock-once');
     const restockVariant = variantById(familyById('fam-restock'), 'fam-restock-once');
-    const corrupted: TaskPresetVariant = {
+    const relaxed: TaskPresetVariant = {
       ...restockVariant,
       allowedRewardPolicies: ['family_contribution', 'record_only'],
     };
-    const errors = validateOneTimeDraft({ ...draft, rewardPolicy: 'record_only' }, corrupted);
-    expect(errors.rewardPolicy).toBeDefined();
+    const errors = validateOneTimeDraft({ ...draft, rewardPolicy: 'record_only' }, relaxed);
+    expect(errors.rewardPolicy).toBeUndefined();
   });
 });
 
