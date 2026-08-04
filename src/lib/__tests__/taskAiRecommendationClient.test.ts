@@ -48,7 +48,37 @@ jest.mock('../environment', () => ({
 }));
 
 import { createTaskAiClientSetup } from '../taskAiRecommendationClient';
-import { LiveTaskAiRecommendationClient } from '../../screens/parent/tablet/taskDrawer/taskAi';
+import {
+  LiveTaskAiRecommendationClient,
+  TASK_AI_FUNCTION_NAME,
+  type TaskAiRecommendationInput,
+} from '../../screens/parent/tablet/taskDrawer/taskAi';
+
+/** 一份形狀正確的 input。內容不重要 —— 這幾條測的是**外層**。 */
+const INPUT: TaskAiRecommendationInput = {
+  schemaVersion: 1,
+  childContext: { ageGroup: '6-9' },
+  taskContext: {
+    editorKind: 'growth_plan',
+    purposeCategory: 'autonomous_challenge',
+    durationType: 'long_term',
+    source: 'child',
+    rewardPolicy: 'progress_only',
+    completionPolicy: 'plan_complete',
+  },
+  parentIntent: { originalExpectation: '希望孩子能持續投入這件事。' },
+  currentDraft: {
+    title: '孩子的成長計畫',
+    completionDescription: '能依約定的節奏持續投入。',
+    scheduleSummary: '30 天期間內，固定在週一、週三、週五',
+    selectedOptions: {},
+  },
+  immutablePolicies: {
+    purposeCategory: 'autonomous_challenge',
+    rewardPolicy: 'progress_only',
+    blockedFields: ['purposeCategory', 'rewardPolicy'],
+  },
+};
 
 beforeEach(() => {
   mockInvoke.mockReset();
@@ -127,5 +157,79 @@ describe('6. test 環境', () => {
       expect(createTaskAiClientSetup(raw).client).toBeNull();
     }
     expect(mockInvoke).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. HTTP envelope（回歸測試）
+// ---------------------------------------------------------------------------
+//
+// 這一組測的是**最後一段接縫**：live adapter → 真正的
+// `supabase.functions.invoke`。以前沒有任何測試走到這裡。
+//
+// 為什麼會漏：
+//   App 端的測試注入一支假的 `InvokeTaskAiFunction`，那支假 invoker
+//   直接收下 domain 的 input，從來不看 HTTP body 長什麼樣。
+//   Function 端的 Deno 測試則自己組 `{ input: … }` 餵給 handler，
+//   永遠符合 server 的期待。
+//   兩邊各自都綠，中間那一段沒有人測 —— 於是真實 App 打真實 Function
+//   時每一次都回 400，畫面上只說「目前無法取得建議」。
+//
+// handler.ts 讀的是 `body.input`。下面這幾條就是釘住這件事。
+
+describe('7. 送出去的 HTTP body 必須是 { input: … }', () => {
+  function liveClient() {
+    const setup = createTaskAiClientSetup('live');
+    if (setup.client === null) throw new Error('live 應該要有 client');
+    return setup.client;
+  }
+
+  beforeEach(() => {
+    // outcome 不是這一組的重點，只要別讓 adapter 丟例外。
+    mockInvoke.mockResolvedValue({ data: null, error: null });
+  });
+
+  it('body 是 { input }，而不是裸的 input', async () => {
+    await liveClient().recommend(INPUT, undefined);
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      TASK_AI_FUNCTION_NAME,
+      expect.objectContaining({ body: { input: INPUT } }),
+    );
+  });
+
+  it('body 最外層不得直接出現 input 的欄位', async () => {
+    await liveClient().recommend(INPUT, undefined);
+
+    const [, options] = mockInvoke.mock.calls[0] as [string, { body: Record<string, unknown> }];
+    // 這一條就是那個 bug 的形狀：schemaVersion 跑到最外層 = 忘了包 envelope。
+    expect(options.body).not.toHaveProperty('schemaVersion');
+    expect(options.body).not.toHaveProperty('currentDraft');
+    expect(options.body).not.toHaveProperty('taskContext');
+    expect(Object.keys(options.body)).toEqual(['input']);
+  });
+
+  it('有 signal 時照樣傳進去（abort 才停得下來）', async () => {
+    const controller = new AbortController();
+    await liveClient().recommend(INPUT, controller.signal);
+
+    const [, options] = mockInvoke.mock.calls[0] as [string, Record<string, unknown>];
+    expect(options.signal).toBe(controller.signal);
+    expect(options.body).toEqual({ input: INPUT });
+  });
+
+  it('沒有 signal 時不會多送一個 signal 鍵', async () => {
+    await liveClient().recommend(INPUT, undefined);
+
+    const [, options] = mockInvoke.mock.calls[0] as [string, Record<string, unknown>];
+    expect(options).not.toHaveProperty('signal');
+    expect(options.body).toEqual({ input: INPUT });
+  });
+
+  it('打的是 task-ai-recommendation，只呼叫一次', async () => {
+    await liveClient().recommend(INPUT, undefined);
+
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
+    expect(mockInvoke.mock.calls[0]?.[0]).toBe(TASK_AI_FUNCTION_NAME);
   });
 });

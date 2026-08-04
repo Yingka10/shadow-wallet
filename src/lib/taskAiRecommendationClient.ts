@@ -29,6 +29,7 @@ import {
   TASK_AI_FUNCTION_NAME,
   type InvokeTaskAiFunction,
   type TaskAiRecommendationClient,
+  type TaskAiRecommendationInput,
   type TaskAiServiceModeResolution,
 } from '../screens/parent/tablet/taskDrawer/taskAi';
 
@@ -39,16 +40,35 @@ export type TaskAiClientSetup = {
 };
 
 /**
+ * Edge Function 的 HTTP envelope。
+ *
+ * handler 讀的是 `body.input`，不是裸的 input（見 handler.ts 的「輸入驗證」）。
+ * 這個外層**只屬於 transport**，所以它只出現在這個檔案裡 ——
+ * `InvokeTaskAiFunction` 的契約仍然是 domain 的 input，fake client、
+ * recommendation service、UI 與 domain 測試都不需要認識 `{ input }`。
+ *
+ * 這一層曾經漏掉外層，送出裸的 input。兩邊的測試都沒抓到：App 端注入的
+ * 假 invoker 直接收下 domain 物件，Function 端的測試自己組 `{input:…}`。
+ * 結果是真實 App 打真實 Function 時每一次都回 400，而畫面上只會說
+ * 「目前無法取得建議」—— 一個看起來像服務暫時不穩的靜默失效。
+ */
+type TaskAiRecommendationRequestEnvelope = {
+  input: TaskAiRecommendationInput;
+};
+
+/**
  * supabase-js 的 invoke 包成一支函式。
  *
  * adapter 因此不必認識 SupabaseClient，也就能在 jest 裡完整測試 ——
  * 不需要 URL、不需要金鑰，更不會有人不小心讓測試連上網。
  */
-const invokeTaskAiFunction: InvokeTaskAiFunction = async (body, signal) =>
-  supabase.functions.invoke(TASK_AI_FUNCTION_NAME, {
+const invokeTaskAiFunction: InvokeTaskAiFunction = async (input, signal) => {
+  const body: TaskAiRecommendationRequestEnvelope = { input };
+  return supabase.functions.invoke(TASK_AI_FUNCTION_NAME, {
     body,
     ...(signal ? { signal } : null),
   });
+};
 
 export function createTaskAiClientSetup(
   rawMode: string | undefined | null,
