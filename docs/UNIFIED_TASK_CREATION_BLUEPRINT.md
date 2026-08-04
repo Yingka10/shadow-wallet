@@ -164,3 +164,24 @@ RPC 的 INSERT 與稽核事件都寫死了 preset。
 > 前者的失敗模式是產生一個家長沒想過的任務，後者是建議一句更清楚的文案。
 > 兩者的安全模型完全不同，不可共用同一支 Edge Function。
 > **本輪只記錄，不實作。**
+
+
+---
+
+## 九、第九階段 B 進度
+
+第六節的「目前的阻擋」**已解除**：自訂任務現在可以一路走到
+`create_parent_task_v1` 並真的建立成功（staging 已驗證）。
+
+第四節那張表的最後兩列更新：
+
+| 階段 | preset | parent_custom | 共用？ |
+|---|---|---|---|
+| 建立命令 | `CreateParentTaskCommand` | 同左（`creationSource` 區分） | ✅ |
+| RPC | `create_parent_task_v1` | 同左，**沒有第二支 RPC** | ✅ |
+
+分岔仍然只有一處：初始草稿（`createTaskDraft` vs `createCustomTaskDraft`），
+以及 RPC 裡的 preset selection 寫入那一段。
+
+**仍然沒有做：** 兩個入口的畫面。第一層 Drawer 現在只有 preset 入口，
+`parent_custom` 目前只能由程式建構命令 —— 那是第九階段 C。

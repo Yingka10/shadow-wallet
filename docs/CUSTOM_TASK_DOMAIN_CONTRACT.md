@@ -228,3 +228,23 @@ AI **不負責**：自動分類 purpose、自動選 editor、自動選 reward、
 
 **沒有做：** 沒有畫面、沒有 Step 表單、沒有 Drawer 整合、
 沒有 migration、沒有部署、沒有呼叫 Gemini。
+
+
+---
+
+## 八、第九階段 B 更新
+
+第六節列的四項命令／RPC 阻擋 **已全部補上**，見
+`docs/CUSTOM_TASK_PERSISTENCE.md`。摘要：
+
+- `command.creationSource` 為必填，`command.preset` 改為 optional
+- `metadata.createdFromPreset` 放寬成 boolean，且**由 RPC 依來源推導**
+- `tasks.creation_source` 成為 source of truth（`created_from_preset` 保留為相容欄位）
+- 自訂任務的稽核事件是 `created_parent_custom`
+- `rewardSupport.{intent,reviewAfterDays}` 進入命令與 `tasks` 正式欄位
+
+`mapTaskDraftToCommand` 現在依 `draft.origin` 決定來源；
+preset 草稿缺 family/variant、或自訂草稿帶了 family/variant，都會**直接丟例外**
+而不是安靜地選一邊 —— 兩種錯法都會產生一筆來源記錯的任務。
+
+**仍然沒有做：** 自訂入口的畫面（第九階段 C）。

@@ -147,12 +147,12 @@ describe('共通欄位', () => {
     expect(command.familyId).toBe('family-of-child-9');
     expect(command.childId).toBe('child-9');
     // preset.familyId 是 catalog 的家族，不是家庭 —— 兩者不可互相污染。
-    expect(command.preset.familyId).toBe('learn-reading');
+    expect(command.preset!.familyId).toBe('learn-reading');
   });
 
   it('preset 溯源保留家族與版本', () => {
     const { command } = commandFor('learn-reading', 'learn-reading-plan');
-    expect(command.preset).toEqual({
+    expect(command.preset!).toEqual({
       familyId: 'learn-reading',
       variantId: 'learn-reading-plan',
     });
@@ -452,7 +452,7 @@ describe('36 個 variant 都映射得出完整命令', () => {
         .toEqual({ variant: variant.id, title: true });
       expect({ variant: variant.id, family: command.familyId })
         .toEqual({ variant: variant.id, family: 'family-1' });
-      expect({ variant: variant.id, preset: command.preset.variantId })
+      expect({ variant: variant.id, preset: command.preset!.variantId })
         .toEqual({ variant: variant.id, preset: variant.id });
       expect({ variant: variant.id, kind: command.metadata.editorKind })
         .toEqual({ variant: variant.id, kind: draft.editorKind });

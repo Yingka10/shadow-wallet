@@ -271,29 +271,29 @@ export type CustomTaskIntake = {
 // ---------------------------------------------------------------------------
 
 /**
- * `CreateParentTaskCommand` 目前**還不能表達 parent_custom**。
+ * 第九階段 A 記錄的命令缺口 —— **第九階段 B 已經補上**。
  *
- * 具體是三件事，都在 taskPersistence 與 RPC 那一側：
+ * 當時卡住的四件事：
+ *   1. command.preset 必填                        → 改為 optional
+ *   2. metadata.createdFromPreset 的型別是字面量 true → 放寬成 boolean
+ *   3. create_parent_task_v1 寫死 created_from_preset  → 由 creationSource 推導
+ *   4. 稽核事件的 event_type 寫死                    → 依來源選 event_type
  *
- *   1. `command.preset` 是必填的 `{ familyId, variantId }`
- *   2. `command.metadata.createdFromPreset` 的型別是字面量 `true`
- *   3. `create_parent_task_v1` 的 INSERT 把 `created_from_preset` 寫死成 `true`，
- *      稽核事件的 `event_type` 也寫死成 `'created_from_preset'`
+ * 保留這個常數而不是刪掉：它是「這件事已經處理過」的落點。
+ * 下一個看到 A 階段文件的人會來這裡確認現況，
+ * 而一個空無一物的檔案回答不了「後來呢」。
  *
- * 這一輪**沒有**改它們，也沒有繞過去。繞過去的唯一辦法是給自訂任務
- * 一組假的 preset id，而那會讓「這筆任務是從哪來的」這個問題
- * 在資料庫裡永遠答錯 —— 一個錯誤的答案比沒有答案更難發現。
- *
- * 需要的變更寫在 docs/CUSTOM_TASK_DOMAIN_CONTRACT.md，
- * 它需要一支 migration，因此不屬於這一輪。
+ * ⚠️ 補上的是**持久化**，不是 UI。自訂入口的畫面仍然沒有做（第九階段 C）。
  */
 export const CUSTOM_TASK_COMMAND_GAP = {
-  blocked: true,
-  requiresMigration: true,
-  reasons: [
-    'CreateParentTaskCommandBase.preset 目前必填',
-    'metadata.createdFromPreset 的型別是字面量 true',
-    'create_parent_task_v1 寫死 created_from_preset = true',
-    "task_change_events.event_type 寫死 'created_from_preset'",
+  blocked: false,
+  resolvedIn: '20260804000000_parent_custom_task_persistence',
+  resolved: [
+    'CreateParentTaskCommandBase.preset 改為 optional',
+    'metadata.createdFromPreset 放寬成 boolean，且由 RPC 依來源推導',
+    'create_parent_task_v1 寫入 creation_source 並推導 created_from_preset',
+    "自訂任務的稽核事件使用 created_parent_custom",
   ],
+  /** 仍然沒有做的事。 */
+  remaining: ['自訂入口的 UI 與 Step 表單（第九階段 C）'],
 } as const;

@@ -252,50 +252,61 @@ describe('23-24. 既有流程不變', () => {
   });
 });
 
-describe('25-27. 命令與 RPC 的相容性缺口', () => {
-  it('25. CreateParentTaskCommand 目前還不能表達 parent_custom', () => {
-    // 這條測試釘住的是一個**已知且刻意未修**的缺口。
-    // 它存在的意義是：下一輪有人以為可以直接送出時，會先看到這裡。
-    expect(CUSTOM_TASK_COMMAND_GAP.blocked).toBe(true);
-    expect(CUSTOM_TASK_COMMAND_GAP.requiresMigration).toBe(true);
-    expect(CUSTOM_TASK_COMMAND_GAP.reasons.length).toBeGreaterThanOrEqual(4);
+describe('25-27. 命令與 RPC 的相容性（第九階段 B 已補上）', () => {
+  it('25. 命令缺口已經關閉，而且記下是哪一支 migration 關的', () => {
+    expect(CUSTOM_TASK_COMMAND_GAP.blocked).toBe(false);
+    expect(CUSTOM_TASK_COMMAND_GAP.resolvedIn).toContain('parent_custom_task_persistence');
+    // 補上的是持久化，不是 UI —— 這一條防止下一輪誤以為畫面也做完了。
+    expect(CUSTOM_TASK_COMMAND_GAP.remaining.length).toBeGreaterThan(0);
   });
 
-  it('25b. command 的 preset 欄位確實是必填 —— 缺口不是想像的', () => {
+  it('25b. command 的 preset 已改為 optional，createdFromPreset 已放寬', () => {
     const source = jest.requireActual('fs').readFileSync(
       require.resolve('../../taskPersistence/types.ts'),
       'utf8',
     ) as string;
 
-    // 不是 `preset?:`，是 `preset:`。
-    expect(source).toMatch(/\n {2}preset: \{/);
-    expect(source).toMatch(/createdFromPreset: true/);
+    expect(source).toContain('  preset?: {');
+    expect(source).toMatch(/creationSource: TaskCreationSource/);
+    expect(source).toMatch(/createdFromPreset: boolean/);
+    // 舊的字面量型別不可以還留著。
+    expect(source).not.toMatch(/createdFromPreset: true;/);
   });
 
-  it('26. RPC 接受空的 preset selection —— 這一項不是阻礙', () => {
-    // create_parent_task_v1 的選項寫入是對 selectedOptions 逐鍵迴圈，
-    // 空物件就是零列，沒有 NOT NULL、沒有必填檢查。
-    // 自訂任務沒有 optionGroups，所以這件事必須成立。
+  it('26. RPC 接受空的 preset selection，且自訂任務不寫任何一列', () => {
     const sql = jest.requireActual('fs').readFileSync(
-      require.resolve('../../../../../../../supabase/migrations/20260728000000_task_drawer_persistence_v1.sql'),
+      require.resolve('../../../../../../../supabase/migrations/20260804000000_parent_custom_task_persistence.sql'),
       'utf8',
     ) as string;
 
-    expect(sql).toMatch(/FOR v_group IN SELECT k FROM jsonb_object_keys\(v_selections\)/);
-    // 沒有「至少要有一個 selection」這種檢查。
-    expect(sql).not.toMatch(/jsonb_object_keys\(v_selections\)[\s\S]{0,200}= 0[\s\S]{0,80}VALIDATION_FAILED/);
+    // 選項寫入被限制在 preset 來源。
+    expect(sql).toMatch(/WHERE v_creation_source = 'preset'/);
+    // 自訂任務帶 selectedOptions 會被拒。
+    expect(sql).toContain('自訂任務沒有預設選項，不可帶 selectedOptions');
   });
 
-  it('27. audit snapshot 目前分不出 custom —— event_type 是寫死的', () => {
+  it('27. audit event 分得出來源，且 snapshot 記下 creationSource', () => {
     const sql = jest.requireActual('fs').readFileSync(
-      require.resolve('../../../../../../../supabase/migrations/20260728000000_task_drawer_persistence_v1.sql'),
+      require.resolve('../../../../../../../supabase/migrations/20260804000000_parent_custom_task_persistence.sql'),
       'utf8',
     ) as string;
 
-    // 寫死成 created_from_preset，而且 CHECK 只允許三個值。
-    expect(sql).toMatch(/v_task_id, 'created_from_preset', auth\.uid\(\)/);
-    expect(sql).toMatch(/event_type IN \('created_from_preset', 'updated_from_preset', 'archived'\)/);
-    // created_from_preset 欄位也是寫死 true。
-    expect(sql).toMatch(/v_schema_version, true/);
+    expect(sql).toMatch(/'created_parent_custom'/);
+    expect(sql).toMatch(/'creationSource', v_creation_source/);
+    // CHECK 要放行新的事件型別，否則 INSERT 會被擋。
+    expect(sql).toMatch(/event_type IN \([\s\S]*created_parent_custom/);
+    // created_from_preset 不再寫死 true。
+    expect(sql).toMatch(/\(v_creation_source = 'preset'\), v_request_id/);
+  });
+
+  it('27b. 兩個欄位不一致的資料列被 CHECK 擋住', () => {
+    const sql = jest.requireActual('fs').readFileSync(
+      require.resolve('../../../../../../../supabase/migrations/20260804000000_parent_custom_task_persistence.sql'),
+      'utf8',
+    ) as string;
+
+    expect(sql).toContain('tasks_creation_source_preset_consistency');
+    // 自訂任務不可以有 preset id —— 這是「不使用假 id」在 DB 層的落實。
+    expect(sql).toContain('tasks_creation_source_preset_ids');
   });
 });

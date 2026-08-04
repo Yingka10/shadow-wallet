@@ -177,3 +177,42 @@ IF v_category = 'B' AND v_reward <> 'family_contribution' THEN
 也就是說，新舊兩層目前的**結論一致**（都建不出來），
 只是理由不同：舊層說「不准」，新層說「可以，但還沒有金額」。
 等 B 類幣值政策拍板後，只有新層會改變答案。
+
+
+---
+
+## 八、第九階段 B：規則已落到資料庫
+
+第五節的兩個技術缺口，處置如下。
+
+### 5.2「完成端會給 0 幣」已修正
+
+`complete_task` 不再讓 category 覆蓋 reward_policy。金額 ≤ 0 時回
+`coin_amount_not_configured`，不安靜發 0。舊任務（`reward_policy IS NULL`）
+行為一個字沒改。
+
+### 5.1「沒有 B 類幣值政策」仍然是 blocker
+
+**本輪沒有新增任何數字，也沒有借用 C／D 的表。**
+RPC 的拒絕理由是 `B_COIN_POLICY_NOT_CONFIGURED` —— 是「尚未設定」，
+不是「永遠禁止」。
+
+### 第六節那張表的更新
+
+| 層 | 第九階段 A | 現在 |
+|---|---|---|
+| RPC guard A | B 只能 family_contribution | **已修**：B ＋ record_only／progress_only 可建立 |
+| 完成端 | category 覆蓋 reward_policy | **已修**：只看 reward_policy |
+| 幣值政策 | 沒有 B 類數字 | **未變，仍是 blocker** |
+| catalog / validators / ruleFindings | 硬擋 B ＋ coin | **未變**（分類 A／C，等 B coin policy 落地後一起改） |
+
+App 端的 `validateFamilyParticipationReward` 與
+`FAMILY_PARTICIPATION_NOT_COIN_ELIGIBLE` 仍然擋 B ＋ coin。
+那與 RPC 的結論一致（都建不出來），只是訊息還停在舊說法。
+**B 類幣值政策拍板時要一起改**，否則會出現「資料庫允許但 App 說不行」。
+
+### 一項更正
+
+第九階段 A 的報告把 RPC 的「guard A」讀成「A 類的 guard」。
+它的**列表編號是 A，內容講的是 category B**。
+盤點後確認：RPC 裡沒有任何 A 類專屬 guard。
