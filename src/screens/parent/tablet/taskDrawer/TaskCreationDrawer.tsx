@@ -122,6 +122,8 @@ import {
   EMPTY_CUSTOM_INTAKE,
   isCustomIntakeDirty,
   pathSwitchEffect,
+  seededCustomIntake,
+  type CustomIntakeSeed,
   type CustomIntakeState,
 } from './taskCreationState';
 import {
@@ -274,6 +276,7 @@ export function TaskCreationDrawer({
   onClose,
   child,
   childLoading,
+  initialCustomIntake = null,
   displayMode = DEFAULT_DISPLAY_MODE,
   taskCreationService,
   taskAiClient = null,
@@ -286,6 +289,16 @@ export function TaskCreationDrawer({
   /** 來自 useParentTaskList 的 child；尚未載入時為 null。 */
   child: TaskCreationDrawerChild | null;
   childLoading: boolean;
+  /**
+   * 開啟時要預填的自訂任務名稱。**只有名稱**（見 CustomIntakeSeed）。
+   *
+   * 有值 = 直接從自訂流程的第一步開始，名稱已經填好；家長仍然要自己走完
+   * 三個基本設定步驟。null（預設）= 一如往常停在起點頁讓家長選建立方式。
+   *
+   * 只在抽屜開啟的那一刻讀一次。開著的時候換值不會把家長拉回第一步 ——
+   * 那會清掉他已經填的東西。
+   */
+  initialCustomIntake?: CustomIntakeSeed | null;
   /** demo（預設）＝乾淨畫面；development ＝顯示尚未串接的實作狀態。 */
   displayMode?: PresetTaskDrawerDisplayMode;
   /**
@@ -457,6 +470,40 @@ export function TaskCreationDrawer({
     }, ANIM_MS);
     return () => clearTimeout(t);
   }, [visible, reset]);
+
+  /**
+   * 開啟時套用外部預填。
+   *
+   * 只在 visible 由 false 變 true 的那一刻做一次（seededForOpenRef）。
+   * 每次 render 都做的話，家長走到第三步時上層一次無關的 re-render
+   * 就會把他拉回第一步 —— 而且他填的目的與安排都不見了。
+   *
+   * 沒有預填就什麼都不做：路由留在起點頁，家長照舊自己選建立方式。
+   */
+  const seededForOpenRef = useRef(false);
+  useEffect(() => {
+    if (!visible) {
+      seededForOpenRef.current = false;
+      return;
+    }
+    if (seededForOpenRef.current) return;
+    const seeded = seededCustomIntake(initialCustomIntake);
+    if (seeded === EMPTY_CUSTOM_INTAKE) return;
+    seededForOpenRef.current = true;
+    /*
+      先歸零再套預填。
+
+      關閉後的 reset 是排在 ANIM_MS 之後的，而快速關掉再開會把那個計時器
+      清掉 —— 上一次的草稿與 clientRequestId 就留了下來。少了這一行，
+      家長會在一份看起來全新的第一步畫面背後帶著上一筆的請求識別碼，
+      送出時 RPC 會認為那是重送並回放上一個任務。
+    */
+    reset();
+    setIntake(seeded);
+    setPath('parent_custom');
+    setEntrySelection('parent_custom');
+    setRoute({ kind: 'custom_basics_title' });
+  }, [visible, initialCustomIntake, reset]);
 
   useEffect(() => {
     progress.value = withTiming(shown ? 1 : 0, {

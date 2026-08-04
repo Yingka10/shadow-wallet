@@ -45,6 +45,39 @@ export const EMPTY_CUSTOM_INTAKE: CustomIntakeState = {
 };
 
 /**
+ * 從抽屜外面帶進來的預填。
+ *
+ * **只有名稱。** 首頁的「最近指派過的」快選是這個型別存在的唯一理由：
+ * 家長點一個他上週指派過的任務名稱，不必再打一次字。
+ *
+ * 刻意不能帶別的：舊任務的 category、幣值、回饋方式、難度、日期，
+ * 全部是**舊政策下**算出來的值。把它們帶進新流程等於讓一筆新任務
+ * 繼承一組沒有人重新檢查過的設定，而畫面上看起來像是家長自己選的。
+ * 名稱不一樣 —— 那是家長自己打的字，沒有政策含意。
+ *
+ * 名稱進來之後仍然要走完三個基本設定步驟，一步都不跳：預填的是
+ * **起點**，不是答案。
+ */
+export type CustomIntakeSeed = {
+  title: string;
+};
+
+/**
+ * 把外部預填轉成一份自訂流程的初始狀態。
+ *
+ * 只有空白的名稱 = 沒有預填，回一份全新的空白 intake（而不是一份
+ * `title: '   '` 的髒狀態 —— 那會讓 `isCustomIntakeDirty` 以外的地方
+ * 開始需要各自 trim）。
+ */
+export function seededCustomIntake(
+  seed: CustomIntakeSeed | null | undefined,
+): CustomIntakeState {
+  const title = seed?.title.trim() ?? '';
+  if (title.length === 0) return EMPTY_CUSTOM_INTAKE;
+  return { ...EMPTY_CUSTOM_INTAKE, title };
+}
+
+/**
  * 家長在自訂流程裡動過任何東西了嗎。
  *
  * 起點頁不算 dirty —— 那時候還沒有任何內容會被丟掉，
