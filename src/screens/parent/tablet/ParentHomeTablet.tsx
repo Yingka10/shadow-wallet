@@ -3,7 +3,7 @@
 //   │ 石色右欄(AI 教養顧問 + 週報連結)。申請審核用 useParentRedemption 過濾到目前選中的孩子。
 // Data: useParentDashboard + useParentRedemption + useSelectedChild。
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -30,6 +30,15 @@ import {
   useLongTermTasks,
   type LongTermTaskItem,
 } from '../../../hooks/useLongTermTasks';
+import { useChildDetails } from '../../../hooks/useChildDetails';
+import {
+  TaskCreationDrawer,
+  type TaskCreationDrawerChild,
+} from './taskDrawer/TaskCreationDrawer';
+import type { CustomIntakeSeed } from './taskDrawer/taskCreationState';
+import { SupabaseParentTaskCreationService } from '../../../lib/parentTaskCreationService';
+import { taskAiClientSetup } from '../../../lib/taskAiRecommendationClient';
+import { taskAiServiceModeLabel } from './taskDrawer/taskAi';
 import {
   useParentRedemption,
   type ChildWishItem,
@@ -614,47 +623,63 @@ function DoneTaskRow({
 // Right column — assign task panel (指派任務 兩步驟表單)
 // ─────────────────────────────────────────────────────────────────────────────
 
-type RecentTaskEntry = { name: string; coin_override: number };
+// ─────────────────────────────────────────────────────────────────────────────
+// 第九階段 B3 — 這一區從「兩步驟表單」縮成三件事：選孩子、快選名稱、開抽屜。
+//
+// 幣值、類別、難度、日期與 AI 建議全部不在這裡了。它們現在由建立任務抽屜
+// 依現行政策決定，並由 create_parent_task_v1 把關 —— 這一頁不再有第二套
+// 建立路徑，也不再有第二套幣值規則。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 快選用的舊任務。**只有名稱** —— 見 onStartTask 的說明。 */
+type RecentTaskEntry = { name: string };
 
 function AssignTaskPanel({
   allChildren,
-  currentChildId,
+  targetChildId,
+  onChangeTargetChild,
   familyId,
+  onStartTask,
   onDone,
 }: {
   allChildren: ChildOption[];
-  currentChildId: string;
+  /** 這一次要指派給誰。**本地狀態，不是全域選中的孩子。** */
+  targetChildId: string;
+  onChangeTargetChild: (childId: string) => void;
   familyId: string | null;
+  /**
+   * 開建立任務抽屜。
+   *
+   * `seedTitle` 是從「最近指派過的」快選帶進去的名稱，**而且只有名稱**。
+   * 舊任務的幣值、類別、難度與日期一律不帶：那些是舊政策下算出來的值，
+   * 帶進新流程等於讓一筆新任務繼承一組沒有人重新檢查過的設定。
+   */
+  onStartTask: (seedTitle?: string) => void;
   onDone: () => void;
 }) {
-  const [step, setStep] = useState<1 | 2>(1);
-  const [taskName, setTaskName] = useState('');
-  const [coins, setCoins] = useState(8);
-  const [targetChildId, setTargetChildId] = useState(currentChildId);
   const [childPickerOpen, setChildPickerOpen] = useState(false);
   const [recentTasks, setRecentTasks] = useState<RecentTaskEntry[]>([]);
-  const [suggestedRange, setSuggestedRange] = useState<[number, number] | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [doneMsg, setDoneMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!familyId) return;
     async function loadRecent() {
+      // 只取名稱。以前這裡還篩 coin_override 不為 null —— 那是為了把舊幣值
+      // 一起帶進表單。現在不帶幣值了，那道篩選只會讓「沒有 coin_override 的
+      // 任務」平白從快選裡消失。
       const { data } = await supabase
         .from('tasks')
-        .select('name, coin_override')
+        .select('name')
         .eq('family_id', familyId!)
         .eq('is_system_default', false)
-        .not('coin_override', 'is', null)
         .order('created_at', { ascending: false })
         .limit(30);
       if (!data) return;
       const seen = new Set<string>();
       const unique: RecentTaskEntry[] = [];
       for (const t of data) {
-        if (t.coin_override != null && !seen.has(t.name)) {
+        if (!seen.has(t.name)) {
           seen.add(t.name);
-          unique.push({ name: t.name, coin_override: t.coin_override as number });
+          unique.push({ name: t.name });
         }
         if (unique.length >= 6) break;
       }
@@ -663,84 +688,7 @@ function AssignTaskPanel({
     void loadRecent();
   }, [familyId]);
 
-  function handleNext() {
-    const trimmed = taskName.trim();
-    if (!trimmed) return;
-    const match = recentTasks.find(t => t.name === trimmed);
-    setCoins(match?.coin_override ?? 8);
-    setSuggestedRange(null);
-    setStep(2);
-    if (!match && familyId) {
-      void supabase.functions.invoke('ai-proxy', {
-        body: { type: 'suggestTaskCoin', payload: { taskName: trimmed } },
-      }).then(({ data: aiData }) => {
-        const suggested = (aiData as { coins?: number } | null)?.coins;
-        if (typeof suggested === 'number' && Number.isFinite(suggested)) {
-          setSuggestedRange([Math.max(1, suggested - 2), suggested + 3]);
-        }
-      }).catch(() => undefined);
-    }
-  }
-
-  async function handleSubmit() {
-    const trimmed = taskName.trim();
-    if (submitting || !trimmed || !familyId) return;
-    setSubmitting(true);
-    try {
-      const today = dayjs().format('YYYY-MM-DD');
-      const { data: task, error: taskErr } = await supabase
-        .from('tasks')
-        .insert({
-          family_id: familyId,
-          name: trimmed,
-          category: 'C' as const,
-          day_type: 'both' as const,
-          long_term_type: null,
-          is_long_term: false,
-          base_time_min: 15,
-          difficulty: 1,
-          coin_override: coins,
-          is_system_default: false,
-          allow_repeat: false,
-          min_age: 0,
-          max_age: 18,
-          is_active: true,
-          time_saving_min: 0,
-          recurrence_days: null,
-          due_date: today,
-        })
-        .select('id')
-        .single();
-      if (taskErr || !task) throw taskErr ?? new Error('建立任務失敗');
-      const { error: ctErr } = await supabase.from('child_tasks').insert({
-        child_id: targetChildId,
-        task_id: task.id,
-        is_active: true,
-      });
-      if (ctErr) {
-        await supabase.from('tasks').delete().eq('id', task.id);
-        throw ctErr;
-      }
-      const childName = allChildren.find(c => c.id === targetChildId)?.nickname ?? '孩子';
-      setDoneMsg(`已指派給${childName}·「${trimmed}」· 完成可得 ${coins} 幣`);
-      setTimeout(() => onDone(), 2200);
-    } catch (err) {
-      console.error('[AssignTaskPanel] submit error:', err);
-      setSubmitting(false);
-    }
-  }
-
   const targetChild = allChildren.find(c => c.id === targetChildId);
-
-  if (doneMsg) {
-    return (
-      <View style={styles.assignPanel}>
-        <View style={styles.assignDoneCard}>
-          <Text style={styles.assignDoneText}>✓ {doneMsg}</Text>
-        </View>
-      </View>
-    );
-  }
 
   return (
     <View style={styles.assignPanel}>
@@ -752,135 +700,76 @@ function AssignTaskPanel({
         <Text style={styles.assignPanelTitle}>指派任務</Text>
       </View>
 
-      {step === 1 ? (
+      {/*
+        指派給誰。
+
+        這是**這一次**的目標，不是全域選中的孩子 —— 換成切換
+        SelectedChildContext 的話，家長只是想指派給老二，整頁的今日任務、
+        錢包與週摘要都會跟著換過去，而他按取消也回不來。
+      */}
+      <Text style={styles.assignFieldLabel}>指派給</Text>
+      <TouchableOpacity
+        style={styles.assignTargetBtn}
+        onPress={allChildren.length > 1 ? () => setChildPickerOpen(o => !o) : undefined}
+        activeOpacity={allChildren.length > 1 ? 0.7 : 1}
+        accessibilityRole="button"
+        accessibilityLabel="選擇要指派給誰"
+      >
+        <Text style={styles.assignTargetName}>{targetChild?.nickname ?? '孩子'}</Text>
+        {allChildren.length > 1 && (
+          <Text style={styles.assignTargetChevron}>{childPickerOpen ? '▲' : '▼'}</Text>
+        )}
+      </TouchableOpacity>
+      {childPickerOpen && (
+        <View style={styles.assignChildPicker}>
+          {allChildren.map(c => (
+            <TouchableOpacity
+              key={c.id}
+              style={[styles.assignChildOption, c.id === targetChildId && styles.assignChildOptionActive]}
+              onPress={() => { onChangeTargetChild(c.id); setChildPickerOpen(false); }}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`指派給 ${c.nickname}`}
+              accessibilityState={{ selected: c.id === targetChildId }}
+            >
+              <Text style={[styles.assignChildOptionText, c.id === targetChildId && styles.assignChildOptionTextActive]}>
+                {c.nickname}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {/* 最近指派過的 —— 點一下**只**把名稱帶進抽屜，其餘一律重新決定。 */}
+      {recentTasks.length > 0 ? (
         <>
-          <Text style={styles.assignFieldLabel}>要請孩子做什麼？</Text>
-          <TextInput
-            style={styles.assignInput}
-            value={taskName}
-            onChangeText={setTaskName}
-            placeholder="例如：洗碗、整理書桌、倒垃圾"
-            placeholderTextColor={ParentColors.fgMuted}
-            returnKeyType="next"
-            onSubmitEditing={handleNext}
-            autoFocus
-          />
-
-          {recentTasks.length > 0 ? (
-            <>
-              <Text style={styles.assignChipLabel}>最近指派過的</Text>
-              <View style={styles.assignChipRow}>
-                {recentTasks.map(t => (
-                  <TouchableOpacity
-                    key={t.name}
-                    style={styles.assignChip}
-                    onPress={() => setTaskName(t.name)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.assignChipText}>{t.name}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </>
-          ) : (
-            <Text style={styles.assignChipEmpty}>
-              之後你指派過的任務會出現在這裡，方便重複指派
-            </Text>
-          )}
-
-          <TouchableOpacity
-            style={[styles.assignPrimaryBtn, !taskName.trim() && styles.assignPrimaryBtnDisabled]}
-            onPress={handleNext}
-            disabled={!taskName.trim()}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.assignPrimaryBtnText}>下一步</Text>
-          </TouchableOpacity>
+          <Text style={styles.assignChipLabel}>最近指派過的</Text>
+          <View style={styles.assignChipRow}>
+            {recentTasks.map(t => (
+              <TouchableOpacity
+                key={t.name}
+                style={styles.assignChip}
+                onPress={() => onStartTask(t.name)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.assignChipText}>{t.name}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </>
       ) : (
-        <>
-          {/* Task name row */}
-          <View style={styles.assignStep2Row}>
-            <Text style={styles.assignStep2Label}>任務</Text>
-            <Text style={styles.assignStep2Name} numberOfLines={1}>{taskName}</Text>
-            <TouchableOpacity
-              onPress={() => { setStep(1); setSuggestedRange(null); }}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Text style={styles.assignEditLink}>修改</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Target child */}
-          <Text style={styles.assignFieldLabel}>指派給</Text>
-          <TouchableOpacity
-            style={styles.assignTargetBtn}
-            onPress={allChildren.length > 1 ? () => setChildPickerOpen(o => !o) : undefined}
-            activeOpacity={allChildren.length > 1 ? 0.7 : 1}
-          >
-            <Text style={styles.assignTargetName}>{targetChild?.nickname ?? '孩子'}</Text>
-            {allChildren.length > 1 && (
-              <Text style={styles.assignTargetChevron}>{childPickerOpen ? '▲' : '▼'}</Text>
-            )}
-          </TouchableOpacity>
-          {childPickerOpen && (
-            <View style={styles.assignChildPicker}>
-              {allChildren.map(c => (
-                <TouchableOpacity
-                  key={c.id}
-                  style={[styles.assignChildOption, c.id === targetChildId && styles.assignChildOptionActive]}
-                  onPress={() => { setTargetChildId(c.id); setChildPickerOpen(false); }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.assignChildOptionText, c.id === targetChildId && styles.assignChildOptionTextActive]}>
-                    {c.nickname}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-
-          {/* Coin amount */}
-          <Text style={styles.assignFieldLabel}>孩子完成後可以得到</Text>
-          <View style={styles.assignCoinRow}>
-            <TouchableOpacity
-              style={styles.assignCoinStepBtn}
-              onPress={() => setCoins(c => Math.max(1, c - 1))}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.assignCoinStepText}>－</Text>
-            </TouchableOpacity>
-            <View style={styles.assignCoinDisplay}>
-              <CoinSmIcon size={20} color="#A87800" />
-              <Text style={styles.assignCoinNum}>{coins}</Text>
-              <Text style={styles.assignCoinUnit}>幣</Text>
-            </View>
-            <TouchableOpacity
-              style={styles.assignCoinStepBtn}
-              onPress={() => setCoins(c => Math.min(100, c + 1))}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.assignCoinStepText}>＋</Text>
-            </TouchableOpacity>
-          </View>
-          {suggestedRange != null && (
-            <Text style={styles.assignRangeHint}>建議 {suggestedRange[0]}–{suggestedRange[1]} 個</Text>
-          )}
-
-          <TouchableOpacity
-            style={[styles.assignPrimaryBtn, submitting && styles.assignPrimaryBtnDisabled]}
-            onPress={() => void handleSubmit()}
-            disabled={submitting}
-            activeOpacity={0.8}
-          >
-            {submitting ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={styles.assignPrimaryBtnText}>指派給孩子</Text>
-            )}
-          </TouchableOpacity>
-        </>
+        <Text style={styles.assignChipEmpty}>
+          之後你指派過的任務會出現在這裡，方便重複指派
+        </Text>
       )}
+
+      <TouchableOpacity
+        style={styles.assignPrimaryBtn}
+        onPress={() => onStartTask()}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.assignPrimaryBtnText}>建立新任務</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -889,31 +778,37 @@ function AssignTaskPanel({
 // Right column — build new task panel
 // ─────────────────────────────────────────────────────────────────────────────
 
+/*
+  第九階段 B3 —— 一般任務不在這裡建立了。
+
+  「一般任務」那張卡改成開建立任務抽屜，這一支只留長期任務的三條路
+  （habit／skill／family）。它們的流程一步都沒改。
+
+  拿掉的是：AI 分類（classifyTask）、猜出來的幣值與 base_time、
+  以及直接寫 tasks + child_tasks 的雙 INSERT。一般任務現在統一走
+  create_parent_task_v1，政策 guard 因此對這條路徑也生效了。
+*/
 function NewTaskPanel({
   currentChildId,
   familyId,
+  onStartGeneralTask,
   onSuccess,
   onDone,
 }: {
   currentChildId: string;
   familyId: string | null;
+  /** 「一般任務」改由抽屜承接。 */
+  onStartGeneralTask: () => void;
   onSuccess: () => void;
   onDone: () => void;
 }) {
   const [step, setStep] = useState<0 | 1 | 2 | 3 | 4>(0);
-  const [taskKind, setTaskKind] = useState<'general' | 'longTerm' | null>(null);
+  /** 只剩 longTerm —— 一般任務已經改由抽屜承接，不會走進這支元件的步驟。 */
+  const [taskKind, setTaskKind] = useState<'longTerm' | null>(null);
   const [longTermType, setLongTermType] = useState<LongTermType | null>(null);
+  /** 建立完成畫面上顯示的名稱。三條長期任務各自把自己的名稱放進來。 */
   const [taskName, setTaskName] = useState('');
-  const [rewardMode, setRewardMode] = useState<'coin' | 'time'>('coin');
-  const [coins, setCoins] = useState(5);
-  const [aiBaseTime, setAiBaseTime] = useState<number | null>(null);
-  const [aiCoinRange, setAiCoinRange] = useState<[number, number] | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [selectedDays, setSelectedDays] = useState<number[]>([1, 2, 3, 4, 5]);
-  const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
-  const isMounted = useRef(true);
-  useEffect(() => () => { isMounted.current = false; }, []);
 
   // ── Habit task state ──────────────────────────────────────────────────────
   const [habitName, setHabitName] = useState('');
@@ -1007,64 +902,6 @@ function NewTaskPanel({
     });
   }
 
-  function handleNext() {
-    const trimmed = taskName.trim();
-    if (!trimmed) return;
-    setStep(2);
-    setAiLoading(true);
-    void supabase.functions
-      .invoke('ai-proxy', {
-        body: { type: 'classifyTask', payload: { taskName: trimmed } },
-      })
-      .then(({ data }) => {
-        if (!isMounted.current) return;
-        const ai = data as { base_time_min?: number; difficulty?: number } | null;
-        if (ai?.base_time_min != null && ai?.difficulty != null) {
-          const suggested = Math.max(
-            1,
-            Math.min(15, Math.round((ai.base_time_min as number) * (ai.difficulty as number))),
-          );
-          setAiBaseTime(ai.base_time_min as number);
-          setAiCoinRange([Math.max(1, suggested - 2), suggested + 3]);
-          setCoins(suggested);
-        }
-        setAiLoading(false);
-      })
-      .catch(() => { if (isMounted.current) setAiLoading(false); });
-  }
-
-  function toggleDay(d: number) {
-    setSelectedDays(prev => {
-      if (prev.includes(d)) {
-        if (prev.length === 1) return prev;
-        return prev.filter(x => x !== d);
-      }
-      return [...prev, d];
-    });
-  }
-
-  function deriveDayInfo(): {
-    day_type: 'weekday' | 'weekend' | 'both' | 'custom';
-    recurrence_days: number[] | null;
-  } {
-    const sorted = [...selectedDays].sort((a, b) => a - b);
-    if (sorted.length === 5 && JSON.stringify(sorted) === JSON.stringify([1, 2, 3, 4, 5]))
-      return { day_type: 'weekday', recurrence_days: null };
-    if (sorted.length === 2 && sorted[0] === 0 && sorted[1] === 6)
-      return { day_type: 'weekend', recurrence_days: null };
-    if (sorted.length === 7) return { day_type: 'both', recurrence_days: null };
-    return { day_type: 'custom', recurrence_days: sorted };
-  }
-
-  function formatPeriod(): string {
-    const sorted = [...selectedDays].sort((a, b) => a - b);
-    if (JSON.stringify(sorted) === JSON.stringify([1, 2, 3, 4, 5])) return '每週平日（一至五）';
-    if (sorted.length === 2 && sorted[0] === 0 && sorted[1] === 6) return '每週六、日';
-    if (sorted.length === 7) return '每天';
-    const MAP: Record<number, string> = { 0: '日', 1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六' };
-    return '每週' + sorted.map(d => MAP[d]).join('、');
-  }
-
   function calcCheckpointDays(total: number): [number, number, number] {
     return [
       Math.round(total / 3),
@@ -1108,57 +945,6 @@ function NewTaskPanel({
     if (JSON.stringify(sorted) === JSON.stringify([1,2,3,4,5])) return '週一至週五';
     if (JSON.stringify(sorted) === JSON.stringify([0,6])) return '週六、日';
     return '每週' + sorted.map(d => MAP[d]).join('、');
-  }
-
-  async function handleSubmit() {
-    const trimmed = taskName.trim();
-    if (submitting || !trimmed || !familyId) return;
-    setSubmitting(true);
-    const { day_type, recurrence_days } = deriveDayInfo();
-    const baseTime = aiBaseTime ?? 5;
-    try {
-      const { data: task, error: taskErr } = await supabase
-        .from('tasks')
-        .insert({
-          family_id: familyId,
-          name: trimmed,
-          category: rewardMode === 'coin' ? ('C' as const) : ('B' as const),
-          day_type,
-          recurrence_days,
-          long_term_type: null,
-          is_long_term: false,
-          base_time_min: baseTime,
-          difficulty: 1,
-          coin_override: rewardMode === 'coin' ? coins : null,
-          time_saving_min: rewardMode === 'time' ? baseTime : 0,
-          is_system_default: false,
-          allow_repeat: true,
-          min_age: 0,
-          max_age: 18,
-          is_active: true,
-          due_date: null,
-        })
-        .select('id')
-        .single();
-      if (taskErr || !task) throw taskErr ?? new Error('建立任務失敗');
-      const { error: ctErr } = await supabase.from('child_tasks').insert({
-        child_id: currentChildId,
-        task_id: task.id,
-        is_active: true,
-      });
-      if (ctErr) {
-        const { error: delErr } = await supabase.from('tasks').delete().eq('id', task.id);
-        if (delErr) console.error('[NewTaskPanel] rollback failed:', delErr);
-        throw ctErr;
-      }
-      setSubmitting(false);
-      setDone(true);
-      onSuccess();
-    } catch (err) {
-      console.error('[NewTaskPanel] submit error:', err);
-      Alert.alert('建立失敗', err instanceof Error ? err.message : '請稍後再試');
-      setSubmitting(false);
-    }
   }
 
   async function handleHabitSubmit() {
@@ -1258,16 +1044,7 @@ function NewTaskPanel({
     return `${effectiveCommitWeeks} 週（共 ${targetCompletions} 次）`;
   }
 
-  const DAY_LABELS: { value: number; label: string }[] = [
-    { value: 1, label: '一' },
-    { value: 2, label: '二' },
-    { value: 3, label: '三' },
-    { value: 4, label: '四' },
-    { value: 5, label: '五' },
-    { value: 6, label: '六' },
-    { value: 0, label: '日' },
-  ];
-
+  // 三條長期任務共用的完成畫面。一般任務的完成畫面在抽屜裡，不在這裡。
   if (done) {
     return (
       <View style={styles.newTaskPanel}>
@@ -1275,7 +1052,7 @@ function NewTaskPanel({
           <TouchableOpacity onPress={onDone} style={styles.newTaskBackBtn} activeOpacity={0.7}>
             <Text style={styles.newTaskBackText}>← 返回</Text>
           </TouchableOpacity>
-          <Text style={styles.newTaskPanelTitle}>建立新任務</Text>
+          <Text style={styles.newTaskPanelTitle}>建立長期任務</Text>
         </View>
         <View style={styles.newTaskDoneCard}>
           <Text style={styles.newTaskDoneIcon}>✓</Text>
@@ -1299,9 +1076,8 @@ function NewTaskPanel({
               if (taskKind === 'longTerm') setTaskKind(null); // 0b → 0a
               else onDone();                                   // 0a → exit
             } else if (step === 1) {
+              // 長期任務：停在 step=0 + taskKind='longTerm' → 顯示 0b
               setStep(0);
-              if (taskKind === 'general') setTaskKind(null);  // back to 0a
-              // habit: stays step=0 + taskKind='longTerm' → shows 0b
             } else {
               setStep(s => (s - 1) as 1 | 2 | 3 | 4);
             }
@@ -1323,9 +1099,16 @@ function NewTaskPanel({
         <>
           <Text style={styles.newTaskFieldLabel}>要建立哪種任務？</Text>
           <View style={styles.habitTypeGrid}>
+            {/*
+              一般任務 → 建立任務抽屜。
+
+              這一頁不再自己建立一般任務：抽屜會走完目的、安排與回饋方式，
+              再交給 create_parent_task_v1。以前這裡是猜一個幣值就直接
+              INSERT，政策 guard 完全繞過去了。
+            */}
             <TouchableOpacity
               style={styles.habitTypeCard}
-              onPress={() => { setTaskKind('general'); setStep(1); }}
+              onPress={onStartGeneralTask}
               activeOpacity={0.8}
             >
               <Text style={styles.habitTypeIcon}>⚡</Text>
@@ -1378,146 +1161,6 @@ function NewTaskPanel({
               <Text style={styles.habitTypeSub}>{'職位託付\n時間存摺'}</Text>
             </TouchableOpacity>
           </View>
-        </>
-      )}
-
-      {step === 1 && taskKind === 'general' && (
-        <>
-          <Text style={styles.newTaskFieldLabel}>要孩子做什麼？</Text>
-          <TextInput
-            style={styles.newTaskInput}
-            value={taskName}
-            onChangeText={setTaskName}
-            placeholder="例如：倒垃圾、整理書桌、幫忙澆花"
-            placeholderTextColor={ParentColors.fgMuted}
-            returnKeyType="next"
-            onSubmitEditing={handleNext}
-            autoFocus
-          />
-          <TouchableOpacity
-            style={[styles.newTaskPrimaryBtn, !taskName.trim() && styles.newTaskPrimaryBtnDisabled]}
-            onPress={handleNext}
-            disabled={!taskName.trim()}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.newTaskPrimaryBtnText}>下一步</Text>
-          </TouchableOpacity>
-        </>
-      )}
-
-      {step === 2 && taskKind === 'general' && (
-        <>
-          <Text style={styles.newTaskFieldLabel}>怎麼回饋？</Text>
-
-          {/* Card A — 給影子幣 */}
-          <TouchableOpacity
-            style={[styles.newTaskRewardCard, rewardMode === 'coin' && styles.newTaskRewardCardActive]}
-            onPress={() => setRewardMode('coin')}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.newTaskRewardTitle}>給影子幣</Text>
-            {aiLoading ? (
-              <Text style={styles.newTaskAiHintLoading}>AI 計算中…</Text>
-            ) : aiCoinRange != null ? (
-              <Text style={styles.newTaskAiHint}>
-                AI 建議：約 {aiBaseTime} 分鐘，可給 {aiCoinRange[0]}–{aiCoinRange[1]} 幣
-              </Text>
-            ) : null}
-            {rewardMode === 'coin' && (
-              <View style={styles.newTaskCoinRow}>
-                <TouchableOpacity
-                  style={styles.newTaskCoinStepBtn}
-                  onPress={() => setCoins(c => Math.max(1, c - 1))}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.newTaskCoinStepText}>－</Text>
-                </TouchableOpacity>
-                <View style={styles.newTaskCoinDisplay}>
-                  <CoinSmIcon size={18} color="#A87800" />
-                  <Text style={styles.newTaskCoinNum}>{coins}</Text>
-                  <Text style={styles.newTaskCoinUnit}>幣</Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.newTaskCoinStepBtn}
-                  onPress={() => setCoins(c => Math.min(20, c + 1))}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.newTaskCoinStepText}>＋</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </TouchableOpacity>
-
-          {/* Card B — 只記錄時間 */}
-          <TouchableOpacity
-            style={[styles.newTaskRewardCard, rewardMode === 'time' && styles.newTaskRewardCardActive]}
-            onPress={() => setRewardMode('time')}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.newTaskRewardTitle}>只記錄時間</Text>
-            <Text style={styles.newTaskRewardSub}>完成後計入時間存摺</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.newTaskPrimaryBtn}
-            onPress={() => setStep(3)}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.newTaskPrimaryBtnText}>下一步</Text>
-          </TouchableOpacity>
-        </>
-      )}
-
-      {step === 3 && taskKind === 'general' && (
-        <>
-          <Text style={styles.newTaskFieldLabel}>哪幾天做？</Text>
-          <View style={styles.newTaskDayRow}>
-            {DAY_LABELS.map(({ value, label }) => {
-              const active = selectedDays.includes(value);
-              return (
-                <TouchableOpacity
-                  key={value}
-                  style={[styles.newTaskDayBtn, active && styles.newTaskDayBtnActive]}
-                  onPress={() => toggleDay(value)}
-                  activeOpacity={0.75}
-                >
-                  <Text style={[styles.newTaskDayBtnText, active && styles.newTaskDayBtnTextActive]}>
-                    {label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          <View style={styles.newTaskSummaryCard}>
-            <View style={styles.newTaskSummaryRow}>
-              <Text style={styles.newTaskSummaryLabel}>任務</Text>
-              <Text style={styles.newTaskSummaryValue} numberOfLines={1}>{taskName}</Text>
-            </View>
-            <View style={styles.newTaskSummaryRow}>
-              <Text style={styles.newTaskSummaryLabel}>回饋</Text>
-              <Text style={styles.newTaskSummaryValue} numberOfLines={1}>
-                {rewardMode === 'coin' ? `${coins} 幣 / 次` : '計入時間存摺'}
-              </Text>
-            </View>
-            <View style={styles.newTaskSummaryRow}>
-              <Text style={styles.newTaskSummaryLabel}>週期</Text>
-              <Text style={styles.newTaskSummaryValue} numberOfLines={1}>{formatPeriod()}</Text>
-            </View>
-          </View>
-
-          <TouchableOpacity
-            style={[styles.newTaskPrimaryBtn, (submitting || !familyId) && styles.newTaskPrimaryBtnDisabled]}
-            onPress={() => void handleSubmit()}
-            disabled={submitting || !familyId}
-            activeOpacity={0.8}
-          >
-            {submitting ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={styles.newTaskPrimaryBtnText}>建立任務</Text>
-            )}
-          </TouchableOpacity>
         </>
       )}
 
@@ -2688,12 +2331,39 @@ export default function ParentHomeTablet() {
   const avatarRef = useRef<View>(null);
   const { width: windowWidth } = useWindowDimensions();
 
+  /**
+   * 指派任務這一次的目標孩子。
+   *
+   * **本地狀態，不是 SelectedChildContext。** 家長想把一件事指派給老二時，
+   * 整頁的今日任務、錢包與週摘要都不該跟著換過去 —— 那不是他要求的，
+   * 而且他按取消也回不來。
+   */
+  const [assignTargetChildId, setAssignTargetChildId] = useState(childId);
+  /** 抽屜要建立給誰。null = 抽屜關著。 */
+  const [drawerTargetChildId, setDrawerTargetChildId] = useState<string | null>(null);
+  /** 從「最近指派過的」快選帶進抽屜的名稱。**只有名稱。** */
+  const [drawerSeed, setDrawerSeed] = useState<CustomIntakeSeed | null>(null);
+
   // Reset right panel when selected child changes to prevent cross-child confusion
   useEffect(() => {
     setRightMode('pending');
     setAdvisorOpen(false);
     setAccountMenuOpen(false);
+    setAssignTargetChildId(childId);
+    // 換孩子時抽屜一定要收掉：留著的話那份草稿指向的是上一個孩子。
+    setDrawerTargetChildId(null);
+    setDrawerSeed(null);
   }, [childId]);
+
+  const openTaskDrawer = useCallback((targetChildId: string, seedTitle?: string) => {
+    setDrawerSeed(seedTitle ? { title: seedTitle } : null);
+    setDrawerTargetChildId(targetChildId);
+  }, []);
+
+  const closeTaskDrawer = useCallback(() => {
+    setDrawerTargetChildId(null);
+    setDrawerSeed(null);
+  }, []);
 
   const handleToggleAccountMenu = useCallback(() => {
     if (accountMenuOpen) {
@@ -2758,6 +2428,44 @@ export default function ParentHomeTablet() {
       void refreshRedemption();
     }, [refresh, ltRefresh, refreshRedemption]),
   );
+
+  // ── 建立任務抽屜的資料 ────────────────────────────────────────────────────
+  /*
+    抽屜要 birthDate（年齡決定可選任務與獎勵政策）。
+
+    目標就是目前選中的孩子時，直接用儀表板已經查回來的那一列 —— 不要為了
+    同一個孩子再打一次 DB，也不要讓抽屜先閃一次 loading。只有「指派給另一個
+    孩子」才需要 useChildDetails，因為側欄的 ChildOption 只有 { id, nickname }。
+  */
+  const drawerTargetIsSelected = drawerTargetChildId !== null && drawerTargetChildId === child?.id;
+  const { child: fetchedDrawerChild, loading: fetchedDrawerChildLoading } = useChildDetails(
+    drawerTargetIsSelected ? null : drawerTargetChildId,
+  );
+  const drawerChildRow = drawerTargetIsSelected ? child : fetchedDrawerChild;
+  const drawerChildLoading = drawerTargetIsSelected ? loading : fetchedDrawerChildLoading;
+
+  const drawerChild: TaskCreationDrawerChild | null = useMemo(() => {
+    if (!drawerChildRow) return null;
+    return {
+      id: drawerChildRow.id,
+      nickname: drawerChildRow.nickname,
+      birthDate: drawerChildRow.birth_date,
+      familyId: drawerChildRow.family_id,
+    };
+  }, [drawerChildRow]);
+
+  /** 整頁一份。在 render 裡 new 會讓抽屜的 useCallback 依賴每次都變。 */
+  const taskCreationService = useMemo(() => new SupabaseParentTaskCreationService(), []);
+  const taskAiDeveloperNote = useMemo(
+    () => taskAiServiceModeLabel(taskAiClientSetup.resolution),
+    [],
+  );
+
+  /** 建立成功後把首頁的今日任務與長期任務都更新一次。 */
+  const handleRefreshAfterCreate = useCallback(async () => {
+    refresh();
+    ltRefresh();
+  }, [refresh, ltRefresh]);
 
   const handleViewAllLongTerm = useCallback(() => {
     // ParentHomeTablet renders inside the bottom-tab navigator, so navigating
@@ -3010,14 +2718,17 @@ export default function ParentHomeTablet() {
             <NewTaskPanel
               currentChildId={childId}
               familyId={familyId}
+              onStartGeneralTask={() => openTaskDrawer(childId)}
               onSuccess={() => refresh()}
               onDone={() => setRightMode('pending')}
             />
           ) : rightMode === 'assign' ? (
             <AssignTaskPanel
               allChildren={allChildren}
-              currentChildId={childId}
+              targetChildId={assignTargetChildId}
+              onChangeTargetChild={setAssignTargetChildId}
               familyId={familyId}
+              onStartTask={seedTitle => openTaskDrawer(assignTargetChildId, seedTitle)}
               onDone={() => { setRightMode('pending'); refresh(); }}
             />
           ) : (
@@ -3061,6 +2772,24 @@ export default function ParentHomeTablet() {
           onLogout={handleLogoutPress}
         />
       )}
+
+      {/*
+        整頁**只有這一個**建立任務抽屜。
+
+        兩個入口（指派任務、建立新任務的「一般任務」）共用它。各自掛一個的話
+        會有兩份獨立的草稿與兩個 clientRequestId，而畫面上看起來是同一個抽屜。
+      */}
+      <TaskCreationDrawer
+        visible={drawerTargetChildId !== null}
+        onClose={closeTaskDrawer}
+        child={drawerChild}
+        childLoading={drawerChildLoading}
+        initialCustomIntake={drawerSeed}
+        taskCreationService={taskCreationService}
+        taskAiClient={taskAiClientSetup.client}
+        taskAiDeveloperNote={taskAiDeveloperNote}
+        onRefreshTaskList={handleRefreshAfterCreate}
+      />
     </View>
     </View>
   );
@@ -4369,17 +4098,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     marginTop: 4,
   },
-  assignInput: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.sm,
-    color: ParentColors.fgPrimary,
-    borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
-    borderRadius: ParentRadii.md,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
-  },
   assignChipLabel: {
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.xs,
@@ -4419,44 +4137,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  assignPrimaryBtnDisabled: {
-    opacity: 0.4,
-  },
   assignPrimaryBtnText: {
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.sm,
     fontWeight: ParentFontWeights.bold,
     color: '#fff',
-  },
-  assignStep2Row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: ParentColors.ivory200,
-    borderRadius: ParentRadii.md,
-    borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
-  },
-  assignStep2Label: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgMuted,
-    flexShrink: 0,
-  },
-  assignStep2Name: {
-    flex: 1,
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.sm,
-    fontWeight: ParentFontWeights.semi,
-    color: ParentColors.fgPrimary,
-  },
-  assignEditLink: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.accent,
-    flexShrink: 0,
   },
   assignTargetBtn: {
     flexDirection: 'row',
@@ -4505,69 +4190,6 @@ const styles = StyleSheet.create({
     fontWeight: ParentFontWeights.semi,
     color: ParentColors.clay500,
   },
-  assignCoinRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 20,
-    paddingVertical: 8,
-  },
-  assignCoinStepBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#fff',
-  },
-  assignCoinStepText: {
-    fontFamily: ParentFonts.body,
-    fontSize: 18,
-    color: ParentColors.fgPrimary,
-    lineHeight: 22,
-  },
-  assignCoinDisplay: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 5,
-  },
-  assignCoinNum: {
-    fontFamily: ParentFonts.mono,
-    fontSize: 36,
-    fontWeight: ParentFontWeights.bold,
-    color: ParentColors.fgPrimary,
-    lineHeight: 42,
-  },
-  assignCoinUnit: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.pMeta,
-    color: ParentColors.fgMuted,
-  },
-  assignRangeHint: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgMuted,
-    textAlign: 'center',
-    marginTop: -6,
-  },
-  assignDoneCard: {
-    padding: 20,
-    backgroundColor: '#E8F2E6',
-    borderWidth: 1,
-    borderColor: '#C9DDD0',
-    borderRadius: ParentRadii.lg,
-    alignItems: 'center',
-  },
-  assignDoneText: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.sm,
-    fontWeight: ParentFontWeights.semi,
-    color: ParentColors.success,
-    textAlign: 'center',
-    lineHeight: 22,
-  },
 
   // ── New task panel ──
   newTaskPanel: {
@@ -4613,80 +4235,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     backgroundColor: '#fff',
-  },
-  newTaskRewardCard: {
-    padding: 14,
-    borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
-    borderRadius: ParentRadii.md,
-    backgroundColor: '#fff',
-    gap: 8,
-  },
-  newTaskRewardCardActive: {
-    borderColor: ParentColors.pine500,
-    borderWidth: 2,
-  },
-  newTaskRewardTitle: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.sm,
-    fontWeight: ParentFontWeights.semi,
-    color: ParentColors.fgPrimary,
-  },
-  newTaskRewardSub: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgMuted,
-  },
-  newTaskAiHint: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.pine500,
-  },
-  newTaskAiHintLoading: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    color: ParentColors.fgMuted,
-    fontStyle: 'italic',
-  },
-  newTaskCoinRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
-    paddingTop: 4,
-  },
-  newTaskCoinStepBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#fff',
-  },
-  newTaskCoinStepText: {
-    fontFamily: ParentFonts.body,
-    fontSize: 16,
-    color: ParentColors.fgPrimary,
-    lineHeight: 20,
-  },
-  newTaskCoinDisplay: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 4,
-  },
-  newTaskCoinNum: {
-    fontFamily: ParentFonts.mono,
-    fontSize: 28,
-    fontWeight: ParentFontWeights.bold,
-    color: ParentColors.fgPrimary,
-    lineHeight: 34,
-  },
-  newTaskCoinUnit: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.pMeta,
-    color: ParentColors.fgMuted,
   },
   newTaskDayRow: {
     flexDirection: 'row',
