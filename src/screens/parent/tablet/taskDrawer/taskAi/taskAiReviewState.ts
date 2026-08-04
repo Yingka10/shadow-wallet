@@ -40,6 +40,21 @@ export type TaskAiItemState =
 
 export type TaskAiSuggestionItem = {
   suggestion: TaskAiSuggestion;
+  /**
+   * 送出請求**當下**這個欄位在本機草稿裡的真實值。
+   *
+   * ⚠️ 這是「目前設定」的唯一來源 —— **不要改用 `suggestion.currentValue`。**
+   *
+   * 模型收到的是遮蔽過孩子名字的草稿（`buildTaskAiInput` 的資料最小化），
+   * 所以它回的 `currentValue` 是遮蔽後的字串：本機是「承恩的成長計畫」，
+   * 模型回的是「孩子的成長計畫」。拿它去比對本機草稿永遠不相等，
+   * 結果是**每一則指向含名字欄位的建議一產生就是 stale、永遠按不下採用**，
+   * 而畫面上還會顯示一個家長從沒設定過的值。
+   *
+   * `suggestion.currentValue` 因此只屬於 transport／安全契約（由 server
+   * validator 驗），**不進 UI、不參與 stale 判斷**。
+   */
+  baselineValue: AiFieldValue;
   state: TaskAiItemState;
   /** 只有 applied / applied_edited 才有。復原時要用。 */
   record?: AppliedSuggestionRecord;
@@ -130,8 +145,14 @@ export function refreshItemStates(
       return { ...item, state: untouched ? 'applied' : 'applied_edited' };
     }
 
-    // pending / stale：建議說的「目前設定」還對得上嗎。
-    const matches = aiFieldValuesEqual(current, item.suggestion.currentValue);
+    /*
+      pending / stale：**家長在送出請求之後，自己動過這個欄位嗎。**
+
+      比對的是本機 baseline，不是 `suggestion.currentValue` —— 後者是模型
+      收到的遮蔽版本（見 baselineValue 的說明）。用它比對的話，只要欄位裡
+      有孩子的名字，這一項就會在家長什麼都還沒做的時候被標成 stale。
+    */
+    const matches = aiFieldValuesEqual(current, item.baselineValue);
     return { ...item, state: matches ? 'pending' : 'stale' };
   });
 }
@@ -185,18 +206,34 @@ export function markItemUndone(
   suggestionId: string,
 ): TaskAiSuggestionItem[] {
   return patchItem(items, suggestionId, item => {
-    const next: TaskAiSuggestionItem = { suggestion: item.suggestion, state: 'pending' };
+    // baseline 要留著：復原之後這一項回到 pending，還要能再比一次。
+    const next: TaskAiSuggestionItem = {
+      suggestion: item.suggestion,
+      baselineValue: item.baselineValue,
+      state: 'pending',
+    };
     return next;
   });
 }
 
-/** 剛拿到一批建議時的初始狀態。 */
+/**
+ * 剛拿到一批建議時的初始狀態。
+ *
+ * `requestedDraft` 必須是**送出請求當下**那一份草稿（`handleAiRequest` 在
+ * 呼叫服務之前就把它抓下來了），不是回應到達時的最新草稿：每一項的
+ * baseline 就從這裡取。等待期間家長若改過欄位，緊接著的 `refreshItemStates`
+ * 會用最新草稿把那一項標成 stale —— 那才是真正的「設定已變更」。
+ */
 export function initialItems(
   suggestions: readonly TaskAiSuggestion[],
-  draft: TaskDraft,
+  requestedDraft: TaskDraft,
 ): TaskAiSuggestionItem[] {
   return refreshItemStates(
-    suggestions.map(suggestion => ({ suggestion, state: 'pending' as const })),
-    draft,
+    suggestions.map(suggestion => ({
+      suggestion,
+      baselineValue: readAiField(requestedDraft, suggestion.fieldPath),
+      state: 'pending' as const,
+    })),
+    requestedDraft,
   );
 }

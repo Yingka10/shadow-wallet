@@ -506,12 +506,20 @@ describe('40-50. 逐項處置', () => {
     const { r } = withSuggestions([COMPLETION_SUGGESTION, second]);
     await press(r, '取得調整建議');
 
-    // 只採用第一項。第二項的 currentValue 對不上（title 已有值），
-    // 所以它會是 stale —— 重點是「採用第一項不會改變第二項的狀態」。
-    const before = r.queryAllByText('採用這項').length;
-    await press(r, '採用這項');
+    /*
+      兩項都指向家長沒動過的欄位，所以兩項都是 pending —— 即使第二項的
+      `currentValue` 是 null。stale 只看**家長有沒有在送出請求之後改過那個
+      欄位**，不看模型回了什麼（模型收到的是遮蔽版本，見 baselineValue）。
+    */
+    expect(r.queryAllByText('採用這項').length).toBe(2);
+
+    // 只採用第一項；重點是第二項不受影響，仍然可以採用。
+    await act(async () => {
+      fireEvent.press(r.getAllByText('採用這項')[0]);
+    });
+
     expect(r.getByText('已採用')).toBeTruthy();
-    expect(r.queryAllByText('採用這項').length).toBe(Math.max(0, before - 1));
+    expect(r.queryAllByText('採用這項').length).toBe(1);
   });
 
   it('47. AI 不能改回饋方式或幣值 —— 那些路徑整批被擋下來', async () => {

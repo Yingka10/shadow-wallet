@@ -179,8 +179,9 @@ function item(
   suggestion: TaskAiSuggestion,
   state: TaskAiItemState,
   record?: AppliedSuggestionRecord,
+  baselineValue: TaskAiSuggestionItem['baselineValue'] = suggestion.currentValue,
 ): TaskAiSuggestionItem {
-  return { suggestion, state, ...(record ? { record } : null) };
+  return { suggestion, baselineValue, state, ...(record ? { record } : null) };
 }
 
 function suggestionsState(items: TaskAiSuggestionItem[]): TaskAiReviewState {
@@ -210,6 +211,53 @@ function renderSection(
       </DisplayModeProvider>,
     ),
   };
+}
+
+describe('卡片的「目前設定」', () => {
+  /*
+    模型收到的草稿已經把孩子的名字遮蔽掉，所以它回的 currentValue 是
+    「孩子的成長計畫」。卡片必須顯示**本機**的「承恩的成長計畫」——
+    顯示模型回的字串等於對家長秀一個他從沒設定過的值。
+  */
+  const REDACTED = '孩子的成長計畫';
+  const LOCAL = '承恩的成長計畫';
+
+  const titleSuggestion: TaskAiSuggestion = {
+    ...SUGGESTION,
+    id: 'sug-title',
+    kind: 'clarify_title',
+    fieldPath: 'title',
+    currentValue: REDACTED,
+    suggestedValue: '我的閱讀挑戰計畫',
+  };
+
+  it('顯示本機 baseline，不顯示模型回的遮蔽字串', () => {
+    const { queryByText } = renderSection({
+      state: suggestionsState([item(titleSuggestion, 'pending', undefined, LOCAL)]),
+    });
+
+    expect(queryByText(LOCAL)).toBeTruthy();
+    expect(queryByText(REDACTED)).toBeNull();
+  });
+
+  it('pending 時給得出「採用這項」—— 名字遮蔽不該讓它變成不可採用', () => {
+    const { getByText } = renderSection({
+      state: suggestionsState([item(titleSuggestion, 'pending', undefined, LOCAL)]),
+    });
+
+    expect(getByText('採用這項')).toBeTruthy();
+    expect(queryByTextSafe(getByText, '設定已變更，請重新確認')).toBe(false);
+  });
+});
+
+/** getByText 找不到會丟，這裡只想知道「在不在」。 */
+function queryByTextSafe(getByText: (t: string) => unknown, text: string): boolean {
+  try {
+    getByText(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 describe('AI 區塊', () => {

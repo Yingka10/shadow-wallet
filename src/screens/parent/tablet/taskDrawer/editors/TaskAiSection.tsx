@@ -315,7 +315,12 @@ function SuggestionCard({
       <Text style={s.cardKind}>{label}</Text>
 
       <Text style={s.cardLabel}>{TASK_AI_COPY.cardCurrentLabel}</Text>
-      <Text style={s.cardValue}>{valueText(suggestion.currentValue)}</Text>
+      {/*
+        「目前設定」顯示的是**本機 baseline**，不是 suggestion.currentValue。
+        後者是模型收到的遮蔽版本（孩子名字被換成「孩子」），顯示它等於
+        對家長秀一個他從沒設定過的字串。
+      */}
+      <Text style={s.cardValue}>{valueText(item.baselineValue)}</Text>
 
       <Text style={s.cardLabel}>{TASK_AI_COPY.cardSuggestedLabel}</Text>
       <Text style={s.cardValue}>{valueText(suggestion.suggestedValue)}</Text>

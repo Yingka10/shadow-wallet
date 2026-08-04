@@ -26,6 +26,7 @@ import {
   type TaskAiSuggestionItem,
 } from '../index';
 import { applyTaskAiSuggestion, readAiField, undoTaskAiSuggestion } from '../applyTaskAiSuggestion';
+import { buildTaskAiInput } from '../buildTaskAiInput';
 import { createTaskDraft, resolveEditorKind, type DraftChildContext, type TaskDraft } from '../../taskDraft';
 import { ALL_FAMILIES } from '../../taskCatalog';
 
@@ -105,11 +106,26 @@ describe('44-46. 逐項處置', () => {
     expect(items.every(canApplyItem)).toBe(true);
   });
 
-  it('46. currentValue 對不上的一開始就是 stale', () => {
+  /*
+    46. 這一條的語意在「本機 baseline」之後**反過來**了，是刻意的。
+
+    舊版拿 `suggestion.currentValue` 去比對草稿，所以模型回一個對不上的
+    currentValue 就會讓那一項一開始就 stale。那個規則在真實環境下是錯的：
+    `buildTaskAiInput` 會把孩子的名字遮蔽掉再送出，模型因此**永遠**回一個
+    與本機草稿不同的字串（本機「承恩的成長計畫」→ 模型「孩子的成長計畫」），
+    於是每一則 title 建議一產生就是 stale、永遠按不下採用。
+
+    現在的規則：stale 只代表「家長在送出請求之後自己改過那個欄位」。
+    模型回什麼 currentValue 都不影響 —— 它只屬於 transport／安全契約。
+  */
+  it('46. 模型回的 currentValue 對不上，不會讓它變成 stale', () => {
     const wrong = suggestion('sug-wrong', 'title', '完全不是這個標題', 'x');
     const items = initialItems([wrong], BASE);
-    expect(items[0].state).toBe('stale');
-    expect(canApplyItem(items[0])).toBe(false);
+
+    expect(items[0].state).toBe('pending');
+    expect(canApplyItem(items[0])).toBe(true);
+    // 「目前設定」來自本機草稿，不是模型回的字串。
+    expect(items[0].baselineValue).toBe(BASE.title);
   });
 
   it('44. 採用一項之後，指向其他欄位的那一項仍然可用', () => {
@@ -160,6 +176,99 @@ describe('45. 家長手動修改之後', () => {
     const gone = refreshItemStates(items, { ...BASE, title: '手滑' });
     expect(gone[0].state).toBe('stale');
     expect(refreshItemStates(gone, BASE)[0].state).toBe('pending');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 名字遮蔽 × baseline（真實 staging smoke test 抓到的 P1）
+// ---------------------------------------------------------------------------
+//
+// 送出去的草稿會把孩子的名字換成「孩子」（buildTaskAiInput 的資料最小化）。
+// 模型因此回一個與本機草稿**必然不同**的 currentValue。
+//
+// 舊版拿那個值來判斷 stale，結果是：preset 的預設標題就是「承恩的成長計畫」，
+// 所以每一則 title 建議一產生就是 stale、永遠按不下「採用這項」，
+// 而且卡片上顯示的「目前設定」是家長從沒設定過的「孩子的成長計畫」。
+//
+// 現在改用**送出請求當下的本機 baseline**。這一組就是釘住這件事。
+
+describe('名字遮蔽不得讓建議變成 stale', () => {
+  /** 模型看到的是遮蔽後的標題，所以它回的 currentValue 也是遮蔽後的。 */
+  const redactedTitle = BASE.title.split(CHILD.nickname).join('孩子');
+  const titleSugFromModel = suggestion('sug-title', 'title', redactedTitle, '我的閱讀挑戰計畫');
+  const minutesSugForRedaction = suggestion('sug-min-r', 'sessionMinutes', CURRENT_MINUTES, 30);
+
+  it('前提：本機標題含孩子名字，遮蔽後不同', () => {
+    expect(BASE.title).toContain(CHILD.nickname);
+    expect(redactedTitle).not.toBe(BASE.title);
+    expect(redactedTitle).not.toContain(CHILD.nickname);
+  });
+
+  it('1. 家長什麼都沒做 → pending，不是 stale', () => {
+    const items = initialItems([titleSugFromModel], BASE);
+
+    expect(items[0].state).toBe('pending');
+    expect(canApplyItem(items[0])).toBe(true);
+  });
+
+  it('1. 「目前設定」是本機真實標題，不是模型回的遮蔽字串', () => {
+    const items = initialItems([titleSugFromModel], BASE);
+
+    expect(items[0].baselineValue).toBe(BASE.title);
+    expect(items[0].baselineValue).not.toBe(titleSugFromModel.currentValue);
+  });
+
+  it('1. 收到建議不會動到草稿', () => {
+    const before = BASE.title;
+    initialItems([titleSugFromModel], BASE);
+    expect(BASE.title).toBe(before);
+  });
+
+  it('2. 按採用之後標題才變；復原回到真實的本機標題（不是遮蔽版）', () => {
+    let items = initialItems([titleSugFromModel], BASE);
+
+    const applied = applyTaskAiSuggestion({ draft: BASE, suggestion: titleSugFromModel });
+    if (!applied.applied) throw new Error('預期套用成功');
+    expect(applied.draft.title).toBe('我的閱讀挑戰計畫');
+
+    items = refreshItemStates(markItemApplied(items, titleSugFromModel.id, applied.record), applied.draft);
+    expect(items[0].state).toBe('applied');
+    expect(canUndoItem(items[0])).toBe(true);
+
+    const undone = undoTaskAiSuggestion({ draft: applied.draft, record: applied.record });
+    // 關鍵：復原拿回來的是「承恩的成長計畫」，不是「孩子的成長計畫」。
+    expect(undone?.title).toBe(BASE.title);
+    expect(undone?.title).toContain(CHILD.nickname);
+  });
+
+  it('3. 家長在請求之後真的改了標題 → 這時才 stale，而且不可採用', () => {
+    const items = initialItems([titleSugFromModel, minutesSugForRedaction], BASE);
+    const edited: TaskDraft = { ...BASE, title: '家長自己重寫的標題' };
+
+    const after = refreshItemStates(items, edited);
+    expect(after[0].state).toBe('stale');
+    expect(canApplyItem(after[0])).toBe(false);
+    // 沒被改到的欄位不受牽連。
+    expect(after[1].state).toBe('pending');
+  });
+
+  it('3. 改回去就恢復可用', () => {
+    const items = initialItems([titleSugFromModel], BASE);
+    const gone = refreshItemStates(items, { ...BASE, title: '手滑' });
+    expect(gone[0].state).toBe('stale');
+    expect(refreshItemStates(gone, BASE)[0].state).toBe('pending');
+  });
+
+  it('4. 去識別化仍然存在 —— 這次修正沒有把名字送回模型', () => {
+    const input = buildTaskAiInput({ draft: BASE, ageGroup: '6-9', childNickname: CHILD.nickname });
+
+    expect(input.currentDraft.title).not.toContain(CHILD.nickname);
+    expect(input.currentDraft.title).toBe(redactedTitle);
+    expect(input.parentIntent.originalExpectation).not.toContain(CHILD.nickname);
+    // 整包序列化之後也不該出現名字。
+    expect(JSON.stringify(input)).not.toContain(CHILD.nickname);
+    // 而本機草稿仍然保有真名 —— 遮蔽只發生在送出去的那一份。
+    expect(BASE.title).toContain(CHILD.nickname);
   });
 });
 
