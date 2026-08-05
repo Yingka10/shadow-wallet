@@ -710,7 +710,7 @@ export async function createFamilyGoal(input: CreateFamilyGoalInput): Promise<vo
       day_type: 'custom',
       recurrence_days: [...input.activeDays].sort((a, b) => a - b),
       is_long_term: true,
-      long_term_type: 'family',
+      long_term_type: 'responsibility',
       base_time_min: timeMin,
       difficulty: 1,
       coin_override: null,
@@ -744,7 +744,7 @@ export async function createFamilyGoal(input: CreateFamilyGoalInput): Promise<vo
   const { error: goalError } = await supabase.from('long_term_goals').insert({
     child_id: input.childId,
     task_id: task.id,
-    goal_type: 'family',
+    goal_type: 'responsibility',
     status: 'active',
     current_day: 0,
     total_days: totalDays,

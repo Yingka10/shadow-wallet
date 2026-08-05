@@ -19,6 +19,7 @@ import type { TaskPresetFamily, TaskPresetVariant } from '../taskCatalog';
 import {
   assertNever,
   dateStringPlusDays,
+  taskDraftOrigin,
   type FamilyRoleDraft,
   type GrowthPlanDraft,
   type OneTimeTaskDraft,
@@ -26,22 +27,41 @@ import {
   type ShortSupportDraft,
   type TaskDraft,
 } from '../taskDraft';
+// 只取一支純函式（editorKind → completionPolicy）。
+// 刻意不從 customTask/index 進來 —— 那會連帶拉進 initializer 與 reward options，
+// 而持久化層不需要認識它們。
+import { completionPolicyForEditor } from '../customTask/customTaskRouting';
 import {
   TASK_COMMAND_SCHEMA_VERSION,
   type CommandChildContext,
   type CreateParentTaskCommandBase,
   type TaskMilestoneCommand,
   type TaskResponsibilityCommand,
+  type TaskCreationSource,
   type TaskScheduleCommand,
   type TaskSupportStepCommand,
 } from './types';
 
 export type MapTaskDraftArgs = {
   draft: TaskDraft;
-  family: TaskPresetFamily;
-  variant: TaskPresetVariant;
+  /**
+   * preset 的家族與版本。
+   *
+   * **自訂任務不傳** —— 來源由 `draft.origin` 決定，不是由這兩個參數
+   * 有沒有值決定。傳了但 draft 是 parent_custom 的話，下面會直接丟例外：
+   * 那種組合代表呼叫端搞錯了，安靜地選一邊會產生一筆來源錯誤的任務。
+   */
+  family?: TaskPresetFamily;
+  variant?: TaskPresetVariant;
   child: CommandChildContext;
   taskPolicyVersion: string;
+  /**
+   * 這份草稿的建立請求識別碼。
+   *
+   * 刻意是必填參數而不是在這裡現產：映射會被呼叫很多次（每次提交前都重跑一遍），
+   * 每次產生新 id 等於完全沒有 idempotency。它的生命週期屬於草稿，不屬於映射。
+   */
+  clientRequestId: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -203,23 +223,48 @@ export function mapTaskDraftToCommand({
   variant,
   child,
   taskPolicyVersion,
+  clientRequestId,
 }: MapTaskDraftArgs): CreateParentTaskCommandBase {
+  const origin = taskDraftOrigin(draft);
+  const creationSource: TaskCreationSource =
+    origin.kind === 'preset' ? 'preset' : 'parent_custom';
+
+  // 來源與參數對不上時直接丟例外，不要安靜地選一邊。
+  //
+  // 兩種錯法都會產生一筆**來源記錯**的任務，而那種錯誤在資料庫裡
+  // 看起來完全正常 —— 沒有人會去查一個看起來正常的欄位。
+  if (origin.kind === 'preset' && (family === undefined || variant === undefined)) {
+    throw new Error('preset 草稿必須提供 family 與 variant');
+  }
+  if (origin.kind === 'parent_custom' && (family !== undefined || variant !== undefined)) {
+    throw new Error('自訂草稿不可提供 family 或 variant');
+  }
+
   const shared = {
     schemaVersion: TASK_COMMAND_SCHEMA_VERSION,
     childId: child.id,
     // family_id 一律來自這個孩子；不可用「查到的第一筆家庭」。
     familyId: child.familyId,
-    preset: { familyId: family.id, variantId: variant.id },
+    creationSource,
+    ...(origin.kind === 'preset'
+      ? { preset: { familyId: origin.familyId, variantId: origin.variantId } }
+      : null),
     content: {
       selectedOptions: { ...draft.selectedOptions },
       customOptionValues: { ...draft.customOptionValues },
     },
     metadata: {
       ageGroup: child.ageGroup,
-      createdFromPreset: true as const,
+      // 相容欄位。RPC 會依 creationSource 重新推導後才寫入 ——
+      // 這裡送什麼都不影響資料庫，送對只是為了讓命令自己讀起來一致。
+      createdFromPreset: origin.kind === 'preset',
       taskPolicyVersion,
-      presetCatalogVersion: PRESET_CATALOG_VERSION,
+      // 自訂任務不屬於任何 catalog 版本。帶著它會被 RPC 拒絕。
+      ...(origin.kind === 'preset'
+        ? { presetCatalogVersion: PRESET_CATALOG_VERSION }
+        : null),
       editorKind: draft.editorKind,
+      clientRequestId,
     },
   };
 
@@ -230,8 +275,16 @@ export function mapTaskDraftToCommand({
     ...(draft.planMode ? { planMode: draft.planMode } : null),
     source: draft.source,
     rewardPolicy: draft.rewardPolicy,
-    // 結束方式的唯一來源是 catalog，不是草稿 —— 家長改不了它。
-    completionPolicy: variant.completionPolicy,
+    // 結束方式不是草稿欄位 —— 家長改不了它。
+    //
+    // preset 的來源是 catalog 的 variant；自訂任務沒有 variant，
+    // 改由 editorKind 推導。兩者必須一致，否則同一種 editor 會因為
+    // 來源不同而有不同的結束方式，而 RPC 的 guard 只認一種
+    // （家庭角色必須 review_and_continue、短期支援必須 stabilize_and_exit）。
+    //
+    // 直接 import 那支純函式而不是在這裡抄一份 switch：抄一份就等於
+    // 兩份會各自演化，而不一致的那一天只會在 RPC 被拒絕時才發現。
+    completionPolicy: variant?.completionPolicy ?? completionPolicyForEditor(draft.editorKind),
     originalExpectation: draft.originalExpectation.trim(),
   };
 

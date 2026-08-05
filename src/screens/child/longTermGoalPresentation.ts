@@ -581,7 +581,8 @@ export function buildGoalPresentation(
 ): GoalPresentation {
   const isReadingPlan = task.name.includes('閱讀');
   const isSkill = goal.goal_type === 'skill';
-  const isFamily = goal.goal_type === 'family';
+  // DB 的值是 'responsibility'；孩子端對外仍叫「家庭」（見 goalKind）。
+  const isFamily = goal.goal_type === 'responsibility';
   const isChallenge = goal.goal_type === 'challenge';
   const isReadingHabit = isReadingPlan && !isSkill && !isFamily && !isChallenge;
   const goalKind: GoalKind = isReadingHabit
@@ -642,7 +643,7 @@ export function buildGoalPresentation(
   const hasUnplannedCycle =
     planEnd === null
     && activeDays.length === 0
-    && (goal.goal_type === 'habit' || goal.goal_type === 'family');
+    && (goal.goal_type === 'habit' || goal.goal_type === 'responsibility');
   const fallbackTotalWeeks = (isSkill || isChallenge) && goal.total_days
     ? Math.max(Math.ceil(goal.total_days / 7), 1)
     : hasUnplannedCycle
@@ -678,7 +679,7 @@ export function buildGoalPresentation(
   const isExpired = planEnd !== null && today.isAfter(planEnd, 'day');
   const hasEmptyDailySchedule =
     activeDays.length === 0
-    && (goal.goal_type === 'habit' || goal.goal_type === 'family');
+    && (goal.goal_type === 'habit' || goal.goal_type === 'responsibility');
   const planState: GoalPlanState =
     goal.status === 'paused'
       ? 'paused'
@@ -693,7 +694,7 @@ export function buildGoalPresentation(
               : 'active';
   const canCompleteToday =
     planState === 'active'
-    && (goal.goal_type === 'habit' || goal.goal_type === 'family')
+    && (goal.goal_type === 'habit' || goal.goal_type === 'responsibility')
     && todayIsActive;
   let todayTitle = '今天的小步驟';
   let todayStatusText: string | null = null;
@@ -724,7 +725,7 @@ export function buildGoalPresentation(
     todayStatusText = '今天不用記錄，照自己的節奏休息';
   }
   const scheduledCapacity =
-    planEnd !== null && (goal.goal_type === 'habit' || goal.goal_type === 'family')
+    planEnd !== null && (goal.goal_type === 'habit' || goal.goal_type === 'responsibility')
       ? countScheduledDates(planStart, planEnd, activeDays)
       : null;
   const planNotice =

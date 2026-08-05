@@ -1,10 +1,13 @@
 // Shadow Wallet · Parent Tablet — 草稿唯讀預覽
 //
-// 只是把 draft 攤開來讓家長確認，沒有任何寫入。
-// 「確認建立」在 PresetTaskDrawer 的 footer，本輪一律 disabled。
+// 把 draft 攤開來讓家長確認，沒有任何寫入。「確認建立」在 TaskCreationDrawer 的 footer。
+//
+// 這裡多做一件事：顯示**真正會送出的那份回饋決策**。
+// 「回饋方式：可獲得成長幣」只說了政策名稱，沒說會拿到幾枚 ——
+// 家長在按下建立之前看不到金額，等於在確認一份自己沒看過的內容。
 
-import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   ParentColors,
   ParentFonts,
@@ -39,6 +42,7 @@ import {
   SUPPORT_TIME_OPTIONS,
   WEEKDAYS,
   dateStringPlusDays,
+  reviewCycleText,
   isFamilyRoleDraft,
   isGrowthPlanDraft,
   isOneTimeDraft,
@@ -47,7 +51,17 @@ import {
   type TaskDraft,
 } from '../taskDraft';
 import { PresetGlyph } from '../drawerIcons';
+import { useShowsImplementationNotes } from '../displayMode';
+import { AGE_GROUP_LABEL, BROWSE_LABEL } from '../taskCatalog';
+import type {
+  TaskRewardCalculationBasis,
+  TaskRewardDecision,
+} from '../taskReward/types';
+import { CUSTOM_TASK_BADGE, CUSTOM_TASK_ICON_KEY } from '../customTask/customTaskCopy';
+import { completionPolicyForEditor, editorFormLabel } from '../customTask/customTaskRouting';
 import { LocalOnlyNotice, PolicyNotice, ReadOnlyOutcomeList } from './EditorControls';
+import { RuleFindingsSection, TaskAiSection, type TaskAiSectionProps } from './TaskAiSection';
+import type { TaskRuleFinding } from '../taskAi';
 
 function weekdayText(days: number[]): string {
   if (days.length === 0) return '尚未選擇';
@@ -59,9 +73,10 @@ function weekdayText(days: number[]): string {
 
 function optionText(
   draft: TaskDraft,
-  variant: TaskPresetVariant,
+  variant: TaskPresetVariant | undefined,
 ): Array<{ label: string; value: string }> {
-  return variant.optionGroups.map(group => {
+  // 自訂任務沒有選項組。空陣列不是「還沒載入」，是這種來源本來就沒有。
+  return (variant?.optionGroups ?? []).map(group => {
     const selected = draft.selectedOptions[group.id] ?? [];
     const labels = group.options
       .filter(option => selected.includes(option.id))
@@ -96,14 +111,178 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
+// ---------------------------------------------------------------------------
+// 回饋決策
+// ---------------------------------------------------------------------------
+
+/**
+ * 不發幣的三種政策各自的說法。
+ *
+ * 刻意不共用一句「不發成長幣」：三者不發幣的**理由**不同，
+ * 而家長要能從這一句話判斷自己是不是選錯了。
+ */
+const NON_COIN_COPY: Record<
+  'record_only' | 'family_contribution' | 'progress_only',
+  { title: string; body: string }
+> = {
+  family_contribution: {
+    title: REWARD_POLICY_SHORT_LABEL.family_contribution,
+    body: '這項任務會記錄孩子對共同生活的投入，不發成長幣。',
+  },
+  record_only: {
+    title: REWARD_POLICY_SHORT_LABEL.record_only,
+    body: '完成後保留紀錄，不發成長幣。',
+  },
+  progress_only: {
+    title: REWARD_POLICY_SHORT_LABEL.progress_only,
+    body: '回饋投入、持續與進步，不直接發成長幣。',
+  },
+};
+
+/**
+ * demo 模式下，幣值那一句話。
+ *
+ * 舊版直接印 decision.explanation，那句是政策引擎寫給自己看的
+ * 「6-9 歲段、D 類、每次約 20 分鐘」——「D 類」是內部分類代號，
+ * 家長讀到只會想「什麼是 D 類、我是不是選錯了」。
+ *
+ * 這裡只講家長自己剛才做過的三個選擇：孩子幾歲、這是什麼任務、每次花多久。
+ */
+function demoExplanation(basis: TaskRewardCalculationBasis): string {
+  return basis.estimatedMinutes
+    ? `依孩子的年齡、任務類型與每次 ${basis.estimatedMinutes} 分鐘的投入估算。`
+    : '依孩子的年齡與任務類型估算。';
+}
+
+const DIFFICULTY_LABEL: Record<string, string> = {
+  easy: '較輕鬆',
+  standard: '一般',
+  hard: '較挑戰',
+};
+
+/**
+ * development 模式下可展開的估算依據。
+ *
+ * demo 看不到這一段：時間分級、難度、可調整範圍、政策版本都是實作細節，
+ * 而且在沒有家長幣值調整 UI 之前，「可調整範圍 5–25」只會讓家長找一個
+ * 不存在的滑桿。這些欄位對開發與驗收有用，所以留在 development。
+ *
+ * 一律用中文標籤逐列呈現，不印整包 JSON，也不出現 difficultyDelta /
+ * base_time_min 這類政策與資料庫的內部名稱。
+ */
+function CalculationBasis({ decision }: { decision: TaskRewardDecision }) {
+  const [open, setOpen] = useState(false);
+  if (decision.eligibility !== 'allowed' || decision.coin === null) return null;
+
+  const basis = decision.coin.calculationBasis;
+  const { minAllowed, maxAllowed } = decision.coin;
+
+  return (
+    <View style={s.basis}>
+      <Pressable
+        onPress={() => setOpen(current => !current)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={open ? '收合估算依據' : '展開估算依據'}
+      >
+        <Text style={s.basisToggle}>{open ? '收合估算依據' : '查看估算依據'}</Text>
+      </Pressable>
+      {open ? (
+        <View style={s.basisBody}>
+          <Row label="年齡段" value={AGE_GROUP_LABEL[basis.ageGroup] ?? basis.ageGroup} />
+          <Row label="任務類型" value={BROWSE_LABEL[basis.purposeCategory]} />
+          <Row
+            label="每次時間"
+            value={basis.estimatedMinutes ? `${basis.estimatedMinutes} 分鐘` : undefined}
+          />
+          <Row
+            label="難度"
+            value={basis.difficulty ? DIFFICULTY_LABEL[basis.difficulty] : '未指定'}
+          />
+          <Row label="可調整範圍" value={`${minAllowed}–${maxAllowed} 枚`} />
+          <Row label="幣值政策版本" value={decision.rewardPolicyVersion} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+export function RewardDecisionBlock({ decision }: { decision: TaskRewardDecision }) {
+  const showsImplementationNotes = useShowsImplementationNotes();
+
+  // 正常流程走不到這裡（能力閘門讓家長根本選不到用不了的政策）。
+  // 走到的情況是：預覽開著的時候草稿被改到讓能力失效。柔和說明 + 擋住建立，
+  // 不是紅色錯誤 —— 家長沒有做錯任何事。
+  if (decision.eligibility === 'blocked') {
+    return (
+      <View style={s.rewardBlocked}>
+        <Text style={s.rewardBlockedTitle}>這個回饋方式目前不能使用</Text>
+        <Text style={s.rewardBlockedBody}>{decision.explanation}</Text>
+        <Text style={s.rewardBlockedHint}>請返回修改，換一種回饋方式或補上需要的設定。</Text>
+      </View>
+    );
+  }
+
+  if (decision.rewardPolicy === 'coin_eligible') {
+    return (
+      <View style={s.rewardCard}>
+        <Text style={s.rewardTitle}>{REWARD_POLICY_SHORT_LABEL.coin_eligible}</Text>
+        <View style={s.rewardAmountRow}>
+          <Text style={s.rewardAmount}>{decision.coin.finalAmount}</Text>
+          <Text style={s.rewardAmountUnit}>枚</Text>
+        </View>
+        {/*
+          demo 只有這一句。可調整範圍、時間分級、難度、政策版本都收進
+          development 的「查看估算依據」——在沒有幣值調整 UI 之前，
+          把範圍寫在正式畫面上，家長會去找一個不存在的滑桿。
+        */}
+        <Text style={s.rewardBody}>{demoExplanation(decision.coin.calculationBasis)}</Text>
+        {showsImplementationNotes ? <CalculationBasis decision={decision} /> : null}
+      </View>
+    );
+  }
+
+  const copy = NON_COIN_COPY[decision.rewardPolicy];
+  return (
+    <View style={s.rewardCard}>
+      <Text style={s.rewardTitle}>{copy.title}</Text>
+      {/* 不發幣的政策不顯示任何數字。「0 枚」看起來像賺到 0，不像「這件事不用幣衡量」。 */}
+      <Text style={s.rewardBody}>{copy.body}</Text>
+      {showsImplementationNotes ? (
+        <Text style={s.rewardVersion}>回饋政策版本 {decision.rewardPolicyVersion}</Text>
+      ) : null}
+    </View>
+  );
+}
+
 export function DraftReview({
   family,
   variant,
   draft,
+  decision,
+  ruleFindings = [],
+  ai,
 }: {
-  family: TaskPresetFamily;
-  variant: TaskPresetVariant;
+  /**
+   * preset 的家族與版本。**自訂任務兩者都是 undefined。**
+   *
+   * 少了它們，預覽會少掉三種東西：家族圖示、版本標籤、catalog 的安全提示。
+   * 那三樣**不需要用假資料補上** —— 自訂任務本來就沒有版本，
+   * 顯示一個空白的「執行版本」區塊只會讓家長以為漏填了什麼。
+   */
+  family?: TaskPresetFamily;
+  variant?: TaskPresetVariant;
   draft: TaskDraft;
+  /**
+   * 等一下真的會送出的那份決策。
+   * null = 草稿目前算不出決策（有欄位錯誤），這時不顯示回饋摘要 ——
+   * 顯示一份「還沒定案」的金額比不顯示更糟。
+   */
+  decision: TaskRewardDecision | null;
+  /** deterministic 規則引擎的結果。**AI 不得產生這些。** */
+  ruleFindings?: readonly TaskRuleFinding[];
+  /** 省略 = 不顯示 AI 區塊（例如尚未注入服務）。 */
+  ai?: TaskAiSectionProps;
 }) {
   const growth = isGrowthPlanDraft(draft) ? draft : null;
   const support = isShortSupportDraft(draft) ? draft : null;
@@ -147,17 +326,17 @@ export function DraftReview({
    * 家庭角色的安全政策已在上方整段列出，同一句就不要在下面再出現一次；
    * policyFlags 與 safetyNotes 若寫了同一句，也只顯示一次。
    */
-  const safetyNotes = Array.from(new Set(variant.safetyNotes ?? [])).filter(
+  const safetyNotes = Array.from(new Set(variant?.safetyNotes ?? [])).filter(
     note => !(role && FAMILY_ROLE_SAFETY_POLICY.includes(note)),
   );
-  const policyFlags = Array.from(new Set(variant.policyFlags ?? [])).filter(
+  const policyFlags = Array.from(new Set(variant?.policyFlags ?? [])).filter(
     flag => !safetyNotes.includes(flag),
   );
 
   const roleLabel = (() => {
     if (!role) return '';
     if (role.roleOptionId === 'other') return role.customRoleValue || '自訂角色';
-    const group = variant.optionGroups[0];
+    const group = variant?.optionGroups[0];
     // 角色是必填，validator 會擋在預覽之前；找不到就留空、不寫「尚未選擇」。
     return group?.options.find(o => o.id === role.roleOptionId)?.label ?? '';
   })();
@@ -165,13 +344,20 @@ export function DraftReview({
   return (
     <View style={s.stack}>
       <View style={s.head}>
-        <PresetGlyph kind={family.iconKey} category={draft.purposeCategory} size={54} />
+        <PresetGlyph
+          kind={family?.iconKey ?? CUSTOM_TASK_ICON_KEY[draft.purposeCategory]}
+          category={draft.purposeCategory}
+          size={54}
+        />
         <View style={s.headText}>
           <Text style={s.eyebrow}>預覽（尚未建立）</Text>
           <Text style={s.title}>{draft.title}</Text>
           <Text style={s.subtitle}>
-            {PURPOSE_LABEL[draft.purposeCategory]}｜{variantFormLabel(variant)}
+            {PURPOSE_LABEL[draft.purposeCategory]}｜
+            {variant ? variantFormLabel(variant) : editorFormLabel(draft.editorKind)}
           </Text>
+          {/* 自訂任務標明來源。preset 不標 —— 它的來源已經寫在家族名稱上。 */}
+          {variant ? null : <Text style={s.eyebrow}>{CUSTOM_TASK_BADGE}</Text>}
         </View>
       </View>
 
@@ -232,7 +418,7 @@ export function DraftReview({
             label="定期回顧"
             value={
               recurring.reviewEnabled && recurring.reviewAfterDays
-                ? `${recurring.reviewAfterDays} 天後一起看看`
+                ? reviewCycleText(recurring.reviewAfterDays)
                 : '不設定'
             }
           />
@@ -270,12 +456,29 @@ export function DraftReview({
       ) : null}
       {once ? <LocalOnlyNotice>{LOCAL_ONLY_SCHEDULED_DATE}</LocalOnlyNotice> : null}
 
+      {/*
+        順序是刻意的：規則檢查在 AI 建議之前。
+        家長先看到「這件事不能這樣做」，再看到「這件事可以怎麼更好」——
+        反過來的話，會出現「採用了三項建議，結果還是不能建立」。
+      */}
+      <RuleFindingsSection findings={ruleFindings} />
+      {ai ? <TaskAiSection {...ai} /> : null}
+
+      {decision ? <RewardDecisionBlock decision={decision} /> : null}
+
       <Block title="回饋與結束">
         <Row
           label="回饋方式"
           value={REWARD_POLICY_SHORT_LABEL[draft.rewardPolicy] ?? draft.rewardPolicy}
         />
-        <Row label="怎麼算結束" value={COMPLETION_LABEL[variant.completionPolicy]} />
+        <Row
+          label="怎麼算結束"
+          value={COMPLETION_LABEL[
+            // preset 的結束方式來自 catalog；自訂任務由 editorKind 推導。
+            // 用的是與 mapTaskDraftToCommand 同一支純函式，兩邊不會各說各話。
+            variant?.completionPolicy ?? completionPolicyForEditor(draft.editorKind)
+          ]}
+        />
         {growth ? <Row label="怎樣算完成" value={growth.completionDescription} /> : null}
         {support ? <Row label="怎樣算逐漸穩定" value={support.successDescription} /> : null}
         {recurring ? <Row label="怎樣算完成" value={recurring.completionDescription} /> : null}
@@ -341,7 +544,7 @@ export function DraftReview({
         </PolicyNotice>
       ) : null}
 
-      {variant.feedbackHint ? <PolicyNotice>{variant.feedbackHint}</PolicyNotice> : null}
+      {variant?.feedbackHint ? <PolicyNotice>{variant.feedbackHint}</PolicyNotice> : null}
 
       {safetyNotes.map(note => <PolicyNotice key={note}>{note}</PolicyNotice>)}
       {policyFlags.map(flag => (
@@ -410,6 +613,97 @@ const s = StyleSheet.create({
   blockBody: {
     gap: ParentSpacing[2],
   },
+  // 回饋決策
+  /**
+   * 用淡松綠底而不是琥珀／金色。
+   * 金色會把「這件事值多少幣」變成畫面上最強的訊號，
+   * 而抽屜的立場是幣值只是回饋方式之一，不是任務的目的。
+   */
+  rewardCard: {
+    paddingHorizontal: ParentSpacing[5],
+    paddingVertical: ParentSpacing[5] - 5,
+    borderRadius: ParentRadii.lg,
+    borderWidth: 1,
+    borderColor: ParentColors.pine300,
+    backgroundColor: ParentColors.tintPine,
+    gap: ParentSpacing[2],
+  },
+  rewardTitle: {
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.base,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.pine500,
+  },
+  rewardAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: ParentSpacing[1],
+  },
+  rewardAmount: {
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.h2,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgPrimary,
+    lineHeight: 34,
+  },
+  rewardAmountUnit: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.pMeta,
+    color: ParentColors.fgSecondary,
+  },
+  rewardBody: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.pMeta,
+    lineHeight: 22,
+    color: ParentColors.fgSecondary,
+  },
+  rewardVersion: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+  },
+  basis: {
+    gap: ParentSpacing[2],
+    paddingTop: ParentSpacing[1],
+  },
+  basisToggle: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.pine500,
+  },
+  basisBody: {
+    gap: ParentSpacing[1],
+  },
+  /** 柔和說明，不是紅色錯誤：家長沒有做錯任何事，是能力在中途失效了。 */
+  rewardBlocked: {
+    paddingHorizontal: ParentSpacing[5],
+    paddingVertical: ParentSpacing[5] - 5,
+    borderRadius: ParentRadii.lg,
+    borderWidth: 1,
+    borderColor: ParentColors.dangerSoftBorder,
+    backgroundColor: ParentColors.dangerSoftBg,
+    gap: ParentSpacing[2],
+  },
+  rewardBlockedTitle: {
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.base,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.dangerSoft,
+  },
+  rewardBlockedBody: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.pMeta,
+    lineHeight: 22,
+    color: ParentColors.fgSecondary,
+  },
+  rewardBlockedHint: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    lineHeight: 20,
+    color: ParentColors.fgMuted,
+  },
+
   row: {
     flexDirection: 'row',
     alignItems: 'flex-start',

@@ -1,11 +1,15 @@
 // Shadow Wallet · Parent Tablet — 持久化契約層對外入口
 //
-// 這一層目前沒有任何畫面在用：抽屜的「確認建立」仍是 disabled 的靜態元素。
-// 它存在的目的是讓下一階段的 migration 與 service 有一份先寫好的輸入契約，
-// 而不是等到要接資料庫時才臨時決定欄位。
+// 契約（types）＋ 純映射（mapTaskDraftToCommand）＋ 政策合成（finalize）
+// ＋ 提交管線（submitTaskDraft）。這一層不 import React，也不 import Supabase：
+// 真正的 Supabase adapter 在 src/lib/parentTaskCreationService.ts，
+// 由畫面上層注入進來（見 ParentTaskManagementTablet）。
 
 export * from './types';
+export * from './clientRequestId';
 export * from './dbMapping';
 export * from './mapTaskDraftToCommand';
 export * from './finalizeCreateParentTaskCommand';
+export * from './submitTaskDraft';
+export * from './tabForCreatedTask';
 export * from './persistenceGaps';

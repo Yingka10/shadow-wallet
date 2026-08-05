@@ -11,6 +11,9 @@ import { mapTaskDraftToCommand } from '../mapTaskDraftToCommand';
 import { finalizeCreateParentTaskCommand } from '../finalizeCreateParentTaskCommand';
 import type { CreateParentTaskCommandBase } from '../types';
 
+/** 固定的建立請求識別碼。映射本身不看它的內容，只要求它存在。 */
+const REQUEST_ID = '6f1c0f7e-2a4b-4c9d-8e12-3b5a7c9d0e11';
+
 const CHILD: DraftChildContext = {
   nickname: '承恩',
   birthDate: '2018-03-05',
@@ -29,7 +32,7 @@ function baseCommand(familyId: string, variantId?: string): CreateParentTaskComm
     family,
     variant,
     child: { id: 'child-1', familyId: 'family-1', ageGroup: '6-9' },
-    taskPolicyVersion: TASK_POLICY_VERSION,
+    taskPolicyVersion: TASK_POLICY_VERSION, clientRequestId: REQUEST_ID,
   });
 }
 

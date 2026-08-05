@@ -96,11 +96,43 @@ export type DraftSupportStep = {
   enabled: boolean;
 };
 
+/**
+ * 這份草稿是從哪裡開始的。
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * **來源不是第六種 editor。** 它描述的是「家長怎麼走到這份草稿」，
+ * 不是「這是什麼型態的任務」。同一種 recurring 任務可以來自預設卡片，
+ * 也可以是家長自己寫的 —— 兩者之後走完全相同的驗證、審閱、回饋與建立流程。
+ *
+ * 用 discriminated union 而不是「一個 source 字串加兩個 optional id」：
+ * 那樣的話「parent_custom 卻帶著 familyId」在型別上是合法的，
+ * 而那正是我們要防的東西 —— **自訂任務不可以有假的 preset id。**
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+export type TaskDraftOrigin =
+  | { kind: 'preset'; familyId: string; variantId: string }
+  | { kind: 'parent_custom' };
+
 export type BaseTaskDraft = {
   editorKind: TaskEditorKind;
 
-  familyId: string;
-  variantId: string;
+  /**
+   * 來源。
+   *
+   * 目前是 optional 只為了讓既有 preset 呼叫端與測試不必一次全改 ——
+   * 缺省時由 `taskDraftOrigin()` 依 familyId / variantId 推回 preset。
+   * 接上自訂入口的那一輪應該改成必填。
+   */
+  origin?: TaskDraftOrigin;
+
+  /**
+   * preset 的家族與版本。
+   *
+   * **自訂任務沒有這兩個值**，所以它們是 optional。
+   * 需要「一定有」的地方請改讀 `origin`，型別會強迫你處理另一種來源。
+   */
+  familyId?: string;
+  variantId?: string;
 
   title: string;
   /** 成長計畫＝家長原始期待；短期支援＝目前想改善的情況。 */
@@ -122,8 +154,31 @@ export type BaseTaskDraft = {
   startDate: string;
   reminderMode: ReminderMode;
 
-  createdFromPreset: true;
+  /**
+   * 從 `true` 放寬成 `boolean`：自訂任務是 false。
+   *
+   * 保留這個欄位而不是直接刪掉，是因為 `tasks.created_from_preset` 這一欄
+   * 已經在 DB 裡。真正的來源請讀 `origin` —— 這個 boolean 表達不了
+   * 未來的 child_proposal / wish_plan，它只分得出「是不是預設卡片」。
+   */
+  createdFromPreset: boolean;
 };
+
+/**
+ * 取得來源，處理 `origin` 尚未填寫的既有草稿。
+ *
+ * 舊草稿一定有 familyId 與 variantId（那時候只有 preset 一種入口），
+ * 所以推回 preset 是安全的。兩者都沒有卻也沒有 origin 的草稿不該存在，
+ * 這裡回 parent_custom 而不是丟例外 —— 讓它安靜地落在最保守的分支，
+ * 不要因為一份怪草稿讓整個抽屜白畫面。
+ */
+export function taskDraftOrigin(draft: BaseTaskDraft): TaskDraftOrigin {
+  if (draft.origin) return draft.origin;
+  if (draft.familyId !== undefined && draft.variantId !== undefined) {
+    return { kind: 'preset', familyId: draft.familyId, variantId: draft.variantId };
+  }
+  return { kind: 'parent_custom' };
+}
 
 export type GrowthPlanDraft = BaseTaskDraft & {
   editorKind: 'growth_plan';

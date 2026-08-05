@@ -55,6 +55,7 @@ import {
   WeekdayPicker,
   WeeklyFrequencyPicker,
 } from './EditorControls';
+import { CUSTOM_TASK_BADGE } from '../customTask/customTaskCopy';
 
 export function RecurringTaskEditor({
   family,
@@ -68,8 +69,9 @@ export function RecurringTaskEditor({
   onMinuteCustomTextChange,
   onChange,
 }: {
-  family: TaskPresetFamily;
-  variant: TaskPresetVariant;
+  /** preset 的家族與版本。**自訂任務兩者都是 undefined。** */
+  family?: TaskPresetFamily;
+  variant?: TaskPresetVariant;
   draft: RecurringTaskDraft;
   childName: string;
   /** 決定政策算不算得出幣值；沒有孩子資料時為 undefined。 */
@@ -81,7 +83,7 @@ export function RecurringTaskEditor({
   onChange: (next: RecurringTaskDraft) => void;
 }) {
   const isFamily = draft.purposeCategory === 'family_participation';
-  const copy = recurringCopy(family.id, isFamily);
+  const copy = recurringCopy(family?.id, isFamily);
   const err = (key: string) =>
     showErrors ? (errors as Record<string, string | undefined>)[key] : undefined;
 
@@ -102,7 +104,10 @@ export function RecurringTaskEditor({
 
   return (
     <View style={s.stack}>
-      <EditorHeader title={family.title} meta={`${variant.label}｜固定重複`} />
+      <EditorHeader
+        title={family?.title ?? draft.title}
+        meta={`${variant?.label ?? CUSTOM_TASK_BADGE}｜固定重複`}
+      />
 
       {/* ── A. 這項安排的期待 ────────────────────────────────────────── */}
       <EditorSection
@@ -133,7 +138,7 @@ export function RecurringTaskEditor({
           <ValidationMessage>{err('title')}</ValidationMessage>
         </EditorField>
 
-        {variant.optionGroups.map(group => (
+        {(variant?.optionGroups ?? []).map(group => (
           <OptionGroupField
             key={group.id}
             group={group}
@@ -272,8 +277,15 @@ export function RecurringTaskEditor({
       {/* ── D. 回饋與定期回顧 ────────────────────────────────────────── */}
       <EditorSection variant="plain" title="回饋與定期回顧" helper="決定這件事怎麼被看見，以及多久檢視一次。">
         <EditorField>
-          <FieldLabel>回饋方式</FieldLabel>
-          {isFamily ? (
+          {/* 自訂任務的區塊標題由 CustomTaskRewardSection 自己畫（「怎麼被看見」），
+              這裡再加一行「回饋方式」會變成兩個標題疊在一起。 */}
+          {variant ? <FieldLabel>回饋方式</FieldLabel> : null}
+          {/*
+            preset 的家庭參與固定顯示「家庭貢獻」，沒有選單 —— 那是 catalog
+            早就決定好的。自訂任務沒有 catalog，回饋方式要由家長選
+            （家庭貢獻仍然是建議值），所以走下面的選單。
+          */}
+          {isFamily && variant ? (
             <>
               <View style={s.fixedPolicyRow}>
                 <Text style={s.fixedPolicyText}>家庭貢獻</Text>
@@ -323,10 +335,10 @@ export function RecurringTaskEditor({
           </View>
         ) : null}
 
-        {variant.safetyNotes?.map(note => (
+        {variant?.safetyNotes?.map(note => (
           <PolicyNotice key={note} tone="warn">{note}</PolicyNotice>
         ))}
-        {variant.policyFlags?.map(flag => (
+        {variant?.policyFlags?.map(flag => (
           <PolicyNotice key={flag} tone="warn">{flag}</PolicyNotice>
         ))}
       </EditorSection>

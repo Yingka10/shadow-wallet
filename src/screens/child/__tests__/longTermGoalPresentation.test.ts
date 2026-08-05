@@ -103,8 +103,8 @@ describe('buildGoalPresentation', () => {
     ],
     [
       'family',
-      makeTask({ name: '一起整理客廳', long_term_type: 'family' }),
-      makeGoal({ goal_type: 'family' }),
+      makeTask({ name: '一起整理客廳', long_term_type: 'responsibility' }),
+      makeGoal({ goal_type: 'responsibility' }),
     ],
   ] as const)(
     'exposes the stable %s goal kind independently from display labels',
@@ -656,13 +656,13 @@ describe('buildGoalPresentation', () => {
       makeTask({
         id: 'task-family',
         name: '一起整理餐桌',
-        long_term_type: 'family',
+        long_term_type: 'responsibility',
         recurrence_days: [6],
       }),
       makeGoal({
         id: 'goal-family',
         task_id: 'task-family',
-        goal_type: 'family',
+        goal_type: 'responsibility',
         total_days: 4,
         active_days: [6],
         target_completions: 4,
@@ -870,12 +870,12 @@ describe('buildGoalPresentation', () => {
       makeTask({
         id: 'task-family-empty',
         name: '一起整理餐桌',
-        long_term_type: 'family',
+        long_term_type: 'responsibility',
       }),
       makeGoal({
         id: 'goal-family-empty',
         task_id: 'task-family-empty',
-        goal_type: 'family',
+        goal_type: 'responsibility',
         target_completions: 20,
       }),
     ],

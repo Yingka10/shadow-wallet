@@ -177,15 +177,61 @@ export type TaskSupportCommand = {
  * 流程固定是：
  *   TaskDraft → mapTaskDraftToCommand → evaluateTaskReward → finalizeCreateParentTaskCommand
  */
+/**
+ * 這筆命令是從哪個入口來的。
+ *
+ * **與 task.source 是兩件事**：`source` 說的是「誰提出的」
+ * （parent / child / co_created / system），這裡說的是「家長從哪個按鈕進來」。
+ * 一筆 parent_custom 的任務，source 完全可以是 co_created。
+ *
+ * DB 端還有第三個值 `legacy`（抽屜上線前的舊資料），
+ * 但**命令不接受它** —— 沒有任何新任務應該被標成 legacy。
+ */
+export type TaskCreationSource = 'preset' | 'parent_custom';
+
+/**
+ * 以成長幣回饋時，為什麼要用成長幣。
+ *
+ * 與 customTask domain 的 `RewardSupportIntent` 是同一組值。
+ * 兩邊各定義一次而不是互相 import：這一層是持久化契約，
+ * 不該依賴 UI 那一側的模組圖（理由與 taskCatalog / contract.ts 相同）。
+ */
+export type CommandRewardSupportIntent =
+  | 'default'
+  | 'temporary_startup_support'
+  | 'family_defined_agreement';
+
 export type CreateParentTaskCommandBase = {
   schemaVersion: typeof TASK_COMMAND_SCHEMA_VERSION;
+
+  /**
+   * 建立來源。
+   *
+   * 決定 `preset` 存不存在，而且 RPC 會再驗一次 ——
+   * 型別擋得住我們自己的程式碼，擋不住直接打 PostgREST 的人。
+   */
+  creationSource: TaskCreationSource;
 
   childId: string;
   familyId: string;
 
-  preset: {
+  /**
+   * preset 的家族與版本。
+   *
+   * `creationSource === 'preset'` 時必填，`parent_custom` 時**必須不存在**。
+   * 不是「填空字串」—— 空字串看起來像有填，查詢時卻對不到任何家族。
+   * RPC 對這兩種情況都會拒絕。
+   */
+  preset?: {
     familyId: string;
     variantId: string;
+  };
+
+  /** 以成長幣回饋時才有。非 coin 的任務帶非 default 意圖會被 RPC 拒絕。 */
+  rewardSupport?: {
+    intent: CommandRewardSupportIntent;
+    /** 只有 temporary_startup_support 需要，而且是必填。 */
+    reviewAfterDays?: number;
   };
 
   task: {
@@ -222,7 +268,15 @@ export type CreateParentTaskCommandBase = {
 
   metadata: {
     ageGroup: string;
-    createdFromPreset: true;
+    /**
+     * 相容欄位。
+     *
+     * **不再由 client 決定** —— RPC 依 `creationSource` 推導後寫入
+     * `tasks.created_from_preset`，而且有 CHECK 擋住兩者不一致的資料列。
+     * 這裡保留它是因為既有查詢與測試還讀得到，型別從字面量 `true`
+     * 放寬成 boolean。新的 source of truth 是 `tasks.creation_source`。
+     */
+    createdFromPreset: boolean;
     /**
      * 任務政策的版本（taskCatalog 的 TASK_POLICY_VERSION）。
      *
@@ -236,9 +290,19 @@ export type CreateParentTaskCommandBase = {
      * preset id 不設外鍵（catalog 是 TypeScript 常數不是 DB master table），
      * 所以改用版本標記來分辨舊任務是依哪一版 family / variant 定義建立的。
      */
-    presetCatalogVersion: string;
+    presetCatalogVersion?: string;
     /** 哪一支 editor 產生的。決定要寫哪些子表，不必再從 durationType 反推。 */
     editorKind: TaskEditorKind;
+    /**
+     * 這一份草稿的建立請求識別碼（UUID v4）。
+     *
+     * 由前端在草稿建立時產生一次，之後**整份草稿的生命週期都不變**：
+     * 預覽、返回修改、RPC 失敗後重試都用同一個。RPC 用它做 idempotency ——
+     * 同一個 id 進來第二次時回傳原本那筆，不會建出第二個任務。
+     *
+     * 產生方式見 clientRequestId.ts；為什麼不能只靠按鈕 loading 也在那裡說明。
+     */
+    clientRequestId: string;
   };
 };
 
@@ -271,6 +335,13 @@ export type CreateParentTaskResult =
       taskId: string;
       /** child_tasks / long_term_goals 等一併建立的資料列 id。 */
       relatedIds: string[];
+      /**
+       * true = 這個 clientRequestId 之前已經建立過，RPC 回傳的是原本那一筆。
+       *
+       * 對家長來說仍然是「成功」：任務確實存在，畫面該顯示成功摘要。
+       * 分辨它的意義在偵錯與稽核 —— 出現 replay 表示上一次的 response 沒回到 client。
+       */
+      idempotentReplay: boolean;
     }
   | {
       ok: false;
@@ -285,11 +356,13 @@ export interface ParentTaskCreationService {
 }
 
 /**
- * 目前唯一存在的實作：一定失敗。
+ * 一定失敗的實作。
+ *
+ * 第七階段 C 起，production 抽屜注入的是 SupabaseParentTaskCreationService
+ * （見 ParentTaskManagementTablet），這支只留給「明知還沒接上」的情境與測試。
  *
  * 刻意不是「回傳假的成功」——那會讓抽屜看起來已經接上，
  * 家長回到任務列表卻找不到剛建立的任務。
- * production UI 本輪根本不呼叫它（確認建立仍是 disabled 的靜態元素）。
  */
 export class UnavailableParentTaskCreationService implements ParentTaskCreationService {
   async create(_command: CreateParentTaskCommand): Promise<CreateParentTaskResult> {

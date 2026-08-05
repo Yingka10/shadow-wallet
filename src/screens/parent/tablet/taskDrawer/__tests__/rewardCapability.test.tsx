@@ -11,27 +11,30 @@ import { render, fireEvent, type RenderResult } from '@testing-library/react-nat
 
 jest.mock('../../../../../lib/onboarding', () => ({ calcAgeGroup: () => '6-9' }));
 
-import { PresetTaskDrawer } from '../PresetTaskDrawer';
+import { TaskCreationDrawer } from '../TaskCreationDrawer';
 import { ALL_FAMILIES } from '../taskCatalog';
+import { FakeParentTaskCreationService } from '../../../../../testing/fakeParentTaskCreationService';
+import { enterPresetCatalog } from '../../../../../testing/taskCreationDrawerFlow';
 
-const CHILD = { nickname: '承恩', birthDate: '2018-03-05', familyId: 'family-1' };
+const CHILD = { id: 'child-1', nickname: '承恩', birthDate: '2018-03-05', familyId: 'family-1' };
 
 const TIME_SAVING_LABEL = '可記錄時間投入';
-const COIN_LABEL = '可建議成長幣';
+const COIN_LABEL = '成長幣回饋';
 
 function openEditor(
   title: string,
   options?: { query?: string; mode?: 'demo' | 'development' },
 ): RenderResult {
-  const r = render(
-    <PresetTaskDrawer
+  const r = enterPresetCatalog(render(
+    <TaskCreationDrawer
       visible
       onClose={() => {}}
       child={CHILD}
       childLoading={false}
+      taskCreationService={new FakeParentTaskCreationService()}
       {...(options?.mode ? { displayMode: options.mode } : null)}
     />,
-  );
+  ));
   if (options?.query) {
     fireEvent.changeText(r.getByPlaceholderText('搜尋閱讀、運動、家庭參與……'), options.query);
   }
@@ -66,7 +69,7 @@ describe('14. 正式畫面不出現時間儲蓄', () => {
 // ---------------------------------------------------------------------------
 
 describe('15. 算不出幣值就不給這個選項', () => {
-  it('閱讀（每次 20 分鐘）算得出來 → 顯示可建議成長幣', () => {
+  it('閱讀（每次 20 分鐘）算得出來 → 顯示成長幣回饋', () => {
     const r = openEditor('閱讀與共讀');
     expect(r.getByText(COIN_LABEL)).toBeTruthy();
   });
@@ -147,13 +150,35 @@ describe('17. 只有一個地方決定選單', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 仍然不接建立
+// 建立 service 的注入方式
 // ---------------------------------------------------------------------------
 
-describe('本輪仍不串建立', () => {
-  it('抽屜沒有 import 建立 service', () => {
-    const drawer = fs.readFileSync(path.resolve(__dirname, '..', 'PresetTaskDrawer.tsx'), 'utf8');
-    expect(drawer).not.toContain('ParentTaskCreationService');
-    expect(drawer).not.toContain('parentTaskCreationService');
+describe('建立 service 由上層注入', () => {
+  const drawer = fs.readFileSync(path.resolve(__dirname, '..', 'TaskCreationDrawer.tsx'), 'utf8');
+
+  it('抽屜不 import Supabase adapter，也不 import supabase client', () => {
+    // 抽屜只認 ParentTaskCreationService 這個介面。真正的實作是誰、
+    // 用 RPC 還是 Edge Function，都不是這一層該知道的事。
+    //
+    // 比對的是 import 敘述而不是整份原始碼：註解裡提到實作的名字沒有關係，
+    // 真正會把 Supabase 拉進 bundle 的是 import。
+    const imports = drawer.match(/^import[\s\S]*?from\s+'[^']*';$/gm) ?? [];
+    expect(imports.length).toBeGreaterThan(0);
+    const offenders = imports.filter(line =>
+      /lib\/(supabase|parentTaskCreationService)/.test(line),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it('抽屜不在自己身上 new 任何 service', () => {
+    expect(drawer).not.toMatch(/new\s+\w*CreationService\s*\(/);
+  });
+
+  it('production 注入的不是那個一定失敗的實作', () => {
+    const screen = fs.readFileSync(
+      path.resolve(__dirname, '..', '..', 'ParentTaskManagementTablet.tsx'), 'utf8',
+    );
+    expect(screen).toContain('SupabaseParentTaskCreationService');
+    expect(screen).not.toContain('UnavailableParentTaskCreationService');
   });
 });

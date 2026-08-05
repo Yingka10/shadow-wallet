@@ -162,17 +162,29 @@ export const WEEKDAYS: Array<{ value: number; label: string }> = [
   { value: 0, label: '日' },
 ];
 
-/** 家長端能看懂的回饋方式標籤（catalog 的 REWARD_LABEL 是說明句，這裡是短標籤）。 */
+/**
+ * 回饋方式的正式名稱。**這是唯一一份**——選項、預覽、成功摘要都讀這裡。
+ *
+ * 先前同一個政策在不同畫面上有不同說法（選項上叫「可建議成長幣」、
+ * 預覽卡叫「可獲得成長幣」、分區叫「成長幣任務」），家長會以為是三件事。
+ *
+ * 「可建議成長幣」另外還有一個問題：它在講系統的動作（系統建議），
+ * 不是在講孩子會得到什麼。家長要判斷的是後者。
+ */
 export const REWARD_POLICY_SHORT_LABEL: Record<string, string> = {
-  record_only: '留下紀錄',
-  family_contribution: '家庭貢獻',
+  record_only: '一般紀錄',
+  family_contribution: '家庭參與',
   progress_only: '進度與肯定',
-  coin_eligible: '可建議成長幣',
+  coin_eligible: '成長幣回饋',
   time_saving_eligible: '可記錄時間投入',
 };
 
 export const REWARD_POLICY_NOTE =
   '回饋的是投入、持續與進步，不以一次成績或作品結果作為條件。';
+
+// 期間與回顧的說法統一在 lib/durationCopy —— 抽屜的預覽與任務列表的長期任務卡
+// 講的是同一件事，先前各寫一次的結果是同一個 28 天有兩種說法。
+export { reviewCycleText } from '../../../../../lib/durationCopy';
 
 // ---------------------------------------------------------------------------
 // 「只存在本地草稿」提示
@@ -184,12 +196,21 @@ export const REWARD_POLICY_NOTE =
 export const LOCAL_ONLY_REMINDER =
   '通知尚未接上，提醒方式目前只保存在這份草稿裡。';
 
+// 以下三句只在 development 模式顯示（見 LocalOnlyNotice）。
+// 規則：哪一個 PR 讓敘述變真，就在同一個 PR 改掉這裡的字。
+
 export const LOCAL_ONLY_WEEKLY_FREQUENCY =
-  '「每週次數」尚待後端欄位映射，目前只存在草稿，不會寫入資料庫。';
+  '「每週次數」會寫進 tasks.weekly_frequency，但孩子端的每日清單尚未依它排程。';
 
 export const LOCAL_ONLY_SCHEDULED_DATE =
-  '安排日期目前只保存在草稿中，建立流程尚未串接資料庫。';
+  '安排日期會寫進 tasks.scheduled_date；它與 due_date 不同，過期不會自動隱藏。';
 
+/**
+ * 第七階段 C 之前掛在「確認建立」旁邊的說明。
+ *
+ * 建立已經串上真的 RPC，所以這句話**不再顯示在任何地方** ——
+ * 留著常數是為了讓 drawerFlow 的測試能守住「它沒有跑回來」。
+ */
 export const LOCAL_ONLY_CREATE =
   '建立流程將於後續階段串接，目前尚未寫入資料庫。';
 
@@ -320,8 +341,9 @@ export const GROWTH_PLAN_COPY: Record<string, GrowthPlanCopy> = {
   },
 };
 
-export function growthPlanCopy(familyId: string): GrowthPlanCopy {
-  return GROWTH_PLAN_COPY[familyId] ?? GENERIC_GROWTH_COPY;
+export function growthPlanCopy(familyId: string | undefined): GrowthPlanCopy {
+  // undefined = 自訂任務（沒有 preset 家族）。走通用文案，與「查不到這個 id」同一條路。
+  return (familyId ? GROWTH_PLAN_COPY[familyId] : undefined) ?? GENERIC_GROWTH_COPY;
 }
 
 // ---------------------------------------------------------------------------
@@ -418,12 +440,15 @@ export const SHORT_SUPPORT_COPY: Record<string, ShortSupportCopy> = {
   },
 };
 
-export function shortSupportCopy(familyId: string): ShortSupportCopy {
-  return SHORT_SUPPORT_COPY[familyId] ?? GENERIC_SHORT_SUPPORT_COPY;
+export function shortSupportCopy(familyId: string | undefined): ShortSupportCopy {
+  return (familyId ? SHORT_SUPPORT_COPY[familyId] : undefined) ?? GENERIC_SHORT_SUPPORT_COPY;
 }
 
 /** catalog 的 option id → 支援步驟文字（目前只有功課管理需要）。 */
-export function stepTextForCatalogOption(familyId: string, optionId: string): string | null {
+export function stepTextForCatalogOption(
+  familyId: string | undefined,
+  optionId: string,
+): string | null {
   if (familyId === 'learn-homework-method') return HOMEWORK_STEPS[optionId] ?? null;
   return null;
 }
@@ -542,9 +567,12 @@ export const RECURRING_COPY: Record<string, RecurringCopy> = {
   },
 };
 
-export function recurringCopy(familyId: string, isFamilyParticipation: boolean): RecurringCopy {
+export function recurringCopy(
+  familyId: string | undefined,
+  isFamilyParticipation: boolean,
+): RecurringCopy {
   return (
-    RECURRING_COPY[familyId]
+    (familyId ? RECURRING_COPY[familyId] : undefined)
     ?? (isFamilyParticipation
       ? GENERIC_FAMILY_RECURRING_COPY
       : GENERIC_LEARNING_RECURRING_COPY)
@@ -596,8 +624,8 @@ export const FAMILY_ROLE_COPY: Record<string, FamilyRoleCopy> = {
   },
 };
 
-export function familyRoleCopy(familyId: string): FamilyRoleCopy {
-  return FAMILY_ROLE_COPY[familyId] ?? GENERIC_FAMILY_ROLE_COPY;
+export function familyRoleCopy(familyId: string | undefined): FamilyRoleCopy {
+  return (familyId ? FAMILY_ROLE_COPY[familyId] : undefined) ?? GENERIC_FAMILY_ROLE_COPY;
 }
 
 export const FAMILY_ROLE_EXCEPTION_DEFAULT =
@@ -826,8 +854,8 @@ export const ONE_TIME_COPY: Record<string, OneTimeCopy> = {
   },
 };
 
-export function oneTimeCopy(familyId: string): OneTimeCopy {
-  return ONE_TIME_COPY[familyId] ?? GENERIC_ONE_TIME_COPY;
+export function oneTimeCopy(familyId: string | undefined): OneTimeCopy {
+  return (familyId ? ONE_TIME_COPY[familyId] : undefined) ?? GENERIC_ONE_TIME_COPY;
 }
 
 /** 「這次安排的期待」的欄位標題，依任務目的換說法。 */

@@ -481,10 +481,19 @@ describe('家庭參與不得發幣', () => {
     expect(errors.rewardPolicy).toBeDefined();
   });
 
-  it('家庭參與改成 record_only 也會被要求改回家庭貢獻', () => {
+  /*
+    第九階段 C 反轉的一條：家庭參與不再被限制成只能 family_contribution。
+
+    第九階段 B 已經把 create_parent_task_v1 的 guard 改成只擋成長幣
+    （B ＋ record_only／progress_only 可以建立）。App 這一層跟著對齊 ——
+    兩邊說法不同的話，家長會遇到「App 說不行、資料庫其實可以」。
+
+    成長幣仍然擋（上一條測試），家庭角色也仍然固定家庭貢獻（見下方 family role 段）。
+  */
+  it('家庭參與可以只留下紀錄 —— 與資料庫的 guard 一致', () => {
     const { draft, variant } = recurringDraft('fam-laundry', 'fam-laundry-recurring');
     const errors = validateRecurringTaskDraft({ ...draft, rewardPolicy: 'record_only' }, variant);
-    expect(errors.rewardPolicy).toBeDefined();
+    expect(errors.rewardPolicy).toBeUndefined();
   });
 
   it('學習類不受此限制', () => {

@@ -10,7 +10,14 @@ export type MotivationLevel = 'amotivation' | 'external' | 'introjected' | 'inte
 export type PersonalityType = 'competitive' | 'relational' | 'curious';
 export type TaskCategory = 'A' | 'B' | 'C' | 'D';
 export type DayType = 'weekday' | 'weekend' | 'both' | 'custom' | 'once';
-export type LongTermType = 'habit' | 'skill' | 'family' | 'challenge';
+/**
+ * long_term_goals.goal_type 與 tasks.long_term_type 的允許值。
+ *
+ * 以 live DB 的 CHECK 為準（habit / skill / responsibility / challenge）。
+ * 這裡原本寫的是 'family' —— 那個值資料庫從來不接受，所有寫入它的路徑
+ * 都會被 check constraint 擋下。修正見 migration 20260731000000。
+ */
+export type LongTermType = 'habit' | 'skill' | 'responsibility' | 'challenge';
 export type AccountType = 'SINGLE' | 'DOUBLE';
 export type ParentRole = 'primary' | 'co';
 export type AiMode = 'conservative' | 'balanced' | 'auto';
@@ -172,6 +179,11 @@ export type Task = {
   preset_variant_id?: string | null;
   /** DB 上是 NOT NULL DEFAULT false —— 這裡標 optional 只是為了不動既有字面量。 */
   created_from_preset?: boolean;
+  /**
+   * 建立這筆任務的 client 請求識別碼（migration 20260730000000）。
+   * 有 unique index，是「網路重送不會建出第二筆」的唯一依據。legacy 任務為 null。
+   */
+  creation_request_id?: string | null;
 };
 
 /** tasks.reward_policy 的允許值（migration 20260728000000 的 CHECK）。 */
@@ -257,6 +269,9 @@ export type LongTermGoal = {
   checkpoint_rewards: CheckpointRewards | null;
   motivation_note: string | null;
   started_at: string;
+  /** 第幾天做第一次回顧。0 或 null = 家長關掉了。抽屜的長期任務會寫它。 */
+  first_review_after_days?: number | null;
+  weekend_review_enabled?: boolean | null;
   next_review_at: string | null;
   completed_at: string | null;
   created_at: string;

@@ -47,6 +47,7 @@ import {
   ValidationMessage,
   WeekdayPicker,
 } from './EditorControls';
+import { CUSTOM_DURATION_DAY_CHOICES, CUSTOM_TASK_BADGE } from '../customTask/customTaskCopy';
 
 export function GrowthPlanEditor({
   family,
@@ -60,8 +61,9 @@ export function GrowthPlanEditor({
   onMinuteCustomTextChange,
   onChange,
 }: {
-  family: TaskPresetFamily;
-  variant: TaskPresetVariant;
+  /** preset 的家族與版本。**自訂任務兩者都是 undefined。** */
+  family?: TaskPresetFamily;
+  variant?: TaskPresetVariant;
   draft: GrowthPlanDraft;
   childName: string;
   /** 決定政策算不算得出幣值；沒有孩子資料時為 undefined。 */
@@ -73,7 +75,7 @@ export function GrowthPlanEditor({
   onMinuteCustomTextChange: (v: string) => void;
   onChange: (next: GrowthPlanDraft) => void;
 }) {
-  const copy = growthPlanCopy(family.id);
+  const copy = growthPlanCopy(family?.id);
   const err = (key: keyof TaskDraftValidationErrors | string) =>
     showErrors ? (errors as Record<string, string | undefined>)[key as string] : undefined;
 
@@ -91,14 +93,17 @@ export function GrowthPlanEditor({
   };
 
   const reviewDate = dateStringPlusDays(draft.startDate, draft.firstReviewAfterDays);
-  const canBeChildChallenge = family.browseCategories.includes('autonomous_challenge');
+  // preset 看家族掛在哪些瀏覽分類；自訂任務沒有家族，直接看它的目的。
+  const canBeChildChallenge = family
+    ? family.browseCategories.includes('autonomous_challenge')
+    : draft.purposeCategory === 'autonomous_challenge';
 
   return (
     <View style={s.stack}>
       <EditorHeader
-        title={family.title}
-        meta={`${variant.label}｜成長計畫｜建議 ${
-          variant.defaultDraft.durationDays ?? draft.durationDays
+        title={family?.title ?? draft.title}
+        meta={`${variant?.label ?? CUSTOM_TASK_BADGE}｜成長計畫｜建議 ${
+          variant?.defaultDraft.durationDays ?? draft.durationDays
         } 天`}
       />
 
@@ -139,13 +144,13 @@ export function GrowthPlanEditor({
           <View style={s.suggestionMetaRow}>
             <View style={s.metaChip}>
               <Text style={s.metaChipText}>
-                {variant.defaultDraft.durationDays ?? draft.durationDays} 天
+                {variant?.defaultDraft.durationDays ?? draft.durationDays} 天
               </Text>
             </View>
             <View style={s.metaChip}>
               <Text style={s.metaChipText}>第一週可調整</Text>
             </View>
-            {variant.requiresChildChoice ? (
+            {variant?.requiresChildChoice ? (
               <View style={s.metaChip}>
                 <Text style={s.metaChipText}>和孩子一起決定</Text>
               </View>
@@ -167,7 +172,7 @@ export function GrowthPlanEditor({
           <ValidationMessage>{err('title')}</ValidationMessage>
         </EditorField>
 
-        {variant.optionGroups.map(group => (
+        {(variant?.optionGroups ?? []).map(group => (
           <OptionGroupField
             key={group.id}
             group={group}
@@ -246,7 +251,10 @@ export function GrowthPlanEditor({
           <FieldLabel required>計畫期間</FieldLabel>
           <DurationPicker
             value={draft.durationDays}
-            choices={variant.defaultDraft.durationDayChoices ?? []}
+            choices={
+              variant?.defaultDraft.durationDayChoices
+              ?? CUSTOM_DURATION_DAY_CHOICES.growth_plan
+            }
             onChange={days => patch({ durationDays: days })}
           />
           <ValidationMessage>{err('durationDays')}</ValidationMessage>
@@ -353,7 +361,9 @@ export function GrowthPlanEditor({
         </EditorField>
 
         <EditorField>
-          <FieldLabel>回饋方式</FieldLabel>
+          {/* 自訂任務的區塊標題由 CustomTaskRewardSection 自己畫（「怎麼被看見」），
+              這裡再加一行「回饋方式」會變成兩個標題疊在一起。 */}
+          {variant ? <FieldLabel>回饋方式</FieldLabel> : null}
           <RewardPolicyChips
             variant={variant}
             draft={draft}
@@ -365,7 +375,7 @@ export function GrowthPlanEditor({
 
         {canBeChildChallenge ? <PolicyNotice>{CHILD_PROPOSAL_HINT}</PolicyNotice> : null}
 
-        {variant.policyFlags?.map(flag => (
+        {variant?.policyFlags?.map(flag => (
           <PolicyNotice key={flag} tone="warn">{flag}</PolicyNotice>
         ))}
       </EditorSection>

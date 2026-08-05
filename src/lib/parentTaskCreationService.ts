@@ -11,8 +11,8 @@
 // （ParentTaskCreateScreen 與 taskActions.ts 現在就是這樣）。
 // 整段搬進 RPC 之後，這一層只剩傳話。
 //
-// 本輪 production Drawer 不呼叫這支 —— DraftReview 的「確認建立」仍是 disabled。
-// 串接留到第七階段 B。
+// idempotency：命令的 metadata.clientRequestId 由 RPC 負責去重，這一層不做任何
+// 重試或快取。它連「上一次送了什麼」都不記得 —— 記在這裡就會有兩份狀態要對齊。
 
 import { supabase } from './supabase';
 import type {
@@ -27,7 +27,13 @@ export const CREATE_PARENT_TASK_RPC = 'create_parent_task_v1';
 
 /** create_parent_task_v1 回傳的 jsonb 形狀。 */
 type CreateParentTaskRpcResponse =
-  | { ok: true; taskId: string; relatedIds: string[] | null }
+  | {
+      ok: true;
+      taskId: string;
+      relatedIds: string[] | null;
+      /** 舊版 RPC（20260729 之前）沒有這個鍵，所以是 optional。 */
+      idempotentReplay?: boolean | null;
+    }
   | { ok: false; code: CreateParentTaskFailureCode; message: string };
 
 const FAILURE_CODES: CreateParentTaskFailureCode[] = [
@@ -111,6 +117,9 @@ export class SupabaseParentTaskCreationService implements ParentTaskCreationServ
         ok: true,
         taskId: payload.taskId,
         relatedIds: Array.isArray(payload.relatedIds) ? payload.relatedIds : [],
+        // 只有明確的 true 才算 replay。缺這個鍵時當作「這次真的建立了」——
+        // 保守的方向是不要把一次正常建立說成重送。
+        idempotentReplay: payload.idempotentReplay === true,
       };
     }
 
