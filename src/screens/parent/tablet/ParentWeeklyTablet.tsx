@@ -213,22 +213,37 @@ const CLAIM_PERIOD_LABEL: Record<ScheduleClaimPeriod, string> = {
   day: '每天', week: '每週', once: '整個任務期間',
 };
 
+// 'once'（整個任務期間、次數上限永不重置）不放進這個編輯器：這個功能只處理
+// 週期性任務的頻率上限調整，混進「一輩子只能做幾次」的單次任務語意會誤導家長。
+const CLAIM_PERIOD_OPTIONS: ScheduleClaimPeriod[] = ['day', 'week'];
+
 function ReviewPromptCard({ item, onAdopt, onDefer }: {
   item: ReviewPrompt;
-  onAdopt: (item: ReviewPrompt) => void;
+  onAdopt: (item: ReviewPrompt, override?: { claimPeriod: ScheduleClaimPeriod; maxClaimsPerPeriod: number }) => Promise<void>;
   onDefer: (item: ReviewPrompt) => void;
 }) {
   const [adopting, setAdopting] = useState(false);
   const [adoptError, setAdoptError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [editClaimPeriod, setEditClaimPeriod] = useState<ScheduleClaimPeriod>(item.suggestedClaimPeriod ?? 'week');
+  const [editMaxClaims, setEditMaxClaims] = useState(item.suggestedMaxClaimsPerPeriod ?? 1);
   const isScheduleSuggestion = item.taskId != null
     && item.suggestedClaimPeriod != null
     && item.suggestedMaxClaimsPerPeriod != null;
 
-  const handleAdopt = async () => {
+  const startEditing = () => {
+    setEditClaimPeriod(item.suggestedClaimPeriod ?? 'week');
+    setEditMaxClaims(item.suggestedMaxClaimsPerPeriod ?? 1);
+    setAdoptError(null);
+    setEditing(true);
+  };
+
+  const handleAdopt = async (override?: { claimPeriod: ScheduleClaimPeriod; maxClaimsPerPeriod: number }) => {
     setAdopting(true);
     setAdoptError(null);
     try {
-      await onAdopt(item);
+      await onAdopt(item, override);
+      setEditing(false);
     } catch (e) {
       console.error('[ReviewPromptCard] adopt error:', e);
       setAdoptError(e instanceof Error ? e.message : '採用失敗，請稍後再試');
@@ -247,7 +262,7 @@ function ReviewPromptCard({ item, onAdopt, onDefer }: {
       <View style={s.reviewPromptBody}>
         <Text style={s.reviewPromptTitle}>{item.title}</Text>
         <Text style={s.reviewPromptText}>{item.prompt}</Text>
-        {isScheduleSuggestion && (
+        {isScheduleSuggestion && !editing && (
           <Text style={s.scheduleDiffText}>
             {item.currentClaimPeriod != null && item.currentMaxClaimsPerPeriod != null
               ? `目前：${CLAIM_PERIOD_LABEL[item.currentClaimPeriod]}最多 ${item.currentMaxClaimsPerPeriod} 次　→　`
@@ -255,6 +270,44 @@ function ReviewPromptCard({ item, onAdopt, onDefer }: {
             建議：{CLAIM_PERIOD_LABEL[item.suggestedClaimPeriod!]}最多 {item.suggestedMaxClaimsPerPeriod} 次
           </Text>
         )}
+
+        {isScheduleSuggestion && editing && (
+          <View style={s.editBox}>
+            <Text style={s.editLabel}>調整為</Text>
+            <View style={s.editPeriodRow}>
+              {CLAIM_PERIOD_OPTIONS.map(p => (
+                <TouchableOpacity
+                  key={p}
+                  style={[s.editPeriodChip, editClaimPeriod === p && s.editPeriodChipActive]}
+                  onPress={() => setEditClaimPeriod(p)}
+                >
+                  <Text style={[s.editPeriodChipText, editClaimPeriod === p && s.editPeriodChipTextActive]}>
+                    {CLAIM_PERIOD_LABEL[p]}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={s.editStepperRow}>
+              <Text style={s.editLabel}>最多完成次數</Text>
+              <View style={s.editStepper}>
+                <TouchableOpacity
+                  style={s.editStepperBtn}
+                  onPress={() => setEditMaxClaims(v => Math.max(1, v - 1))}
+                >
+                  <Text style={s.editStepperBtnText}>－</Text>
+                </TouchableOpacity>
+                <Text style={s.editStepperValue}>{editMaxClaims}</Text>
+                <TouchableOpacity
+                  style={s.editStepperBtn}
+                  onPress={() => setEditMaxClaims(v => v + 1)}
+                >
+                  <Text style={s.editStepperBtnText}>＋</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        )}
+
         {isScheduleSuggestion && (
           <View style={s.reviewPromptActions}>
             {item.adopted ? (
@@ -262,16 +315,34 @@ function ReviewPromptCard({ item, onAdopt, onDefer }: {
                 <CheckSquareIcon size={13} color={ParentColors.teal500} />
                 <Text style={s.adoptedBadgeText}>已套用</Text>
               </View>
+            ) : editing ? (
+              <>
+                <TouchableOpacity
+                  style={s.adoptBtn}
+                  onPress={() => handleAdopt({ claimPeriod: editClaimPeriod, maxClaimsPerPeriod: editMaxClaims })}
+                  disabled={adopting}
+                >
+                  {adopting
+                    ? <ActivityIndicator size="small" color={ParentColors.accent} />
+                    : <Text style={s.adoptBtnText}>確認採用</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={s.deferBtn} onPress={() => setEditing(false)} disabled={adopting}>
+                  <Text style={s.deferBtnText}>取消</Text>
+                </TouchableOpacity>
+              </>
             ) : (
               <>
                 <TouchableOpacity
                   style={s.adoptBtn}
-                  onPress={handleAdopt}
+                  onPress={() => handleAdopt()}
                   disabled={adopting}
                 >
                   {adopting
                     ? <ActivityIndicator size="small" color={ParentColors.accent} />
                     : <Text style={s.adoptBtnText}>採用建議</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={s.deferBtn} onPress={startEditing} disabled={adopting}>
+                  <Text style={s.deferBtnText}>修改建議</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={s.deferBtn} onPress={() => onDefer(item)} disabled={adopting}>
                   <Text style={s.deferBtnText}>再觀察一週</Text>
@@ -941,9 +1012,12 @@ export default function ParentWeeklyTablet() {
                     <ReviewPromptCard
                       key={`${item.title}-${i}`}
                       item={item}
-                      onAdopt={async (i2) => {
-                        if (i2.taskId == null || i2.suggestedClaimPeriod == null || i2.suggestedMaxClaimsPerPeriod == null) return;
-                        await adoptScheduleSuggestion(i2.taskId, i2.suggestedClaimPeriod, i2.suggestedMaxClaimsPerPeriod);
+                      onAdopt={async (i2, override) => {
+                        if (i2.taskId == null) return;
+                        const claimPeriod = override?.claimPeriod ?? i2.suggestedClaimPeriod;
+                        const maxClaimsPerPeriod = override?.maxClaimsPerPeriod ?? i2.suggestedMaxClaimsPerPeriod;
+                        if (claimPeriod == null || maxClaimsPerPeriod == null) return;
+                        await adoptScheduleSuggestion(i2.taskId, claimPeriod, maxClaimsPerPeriod);
                       }}
                       onDefer={(i2) => {
                         if (i2.taskId == null) return;
@@ -1962,6 +2036,76 @@ const s = StyleSheet.create({
     fontWeight: ParentFontWeights.semi,
     color: ParentColors.accent,
     marginTop: 6,
+  },
+  editBox: {
+    marginTop: 8,
+    gap: 8,
+  },
+  editLabel: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgSecondary,
+  },
+  editPeriodRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  editPeriodChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: ParentRadii.pill,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    backgroundColor: ParentColors.bgSurface,
+  },
+  editPeriodChipActive: {
+    borderColor: ParentColors.teal100,
+    backgroundColor: ParentColors.teal50,
+  },
+  editPeriodChipText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    color: ParentColors.fgSecondary,
+  },
+  editPeriodChipTextActive: {
+    color: ParentColors.accent,
+    fontWeight: ParentFontWeights.semi,
+  },
+  editStepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  editStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  editStepperBtn: {
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editStepperBtnText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 15,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.accent,
+  },
+  editStepperValue: {
+    fontFamily: ParentFonts.body,
+    fontSize: 13,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgPrimary,
+    minWidth: 16,
+    textAlign: 'center',
   },
   reviewPromptActions: {
     flexDirection: 'row',

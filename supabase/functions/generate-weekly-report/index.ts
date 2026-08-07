@@ -178,7 +178,7 @@ ${scheduleSection}
   ],
   "schedule_suggestion": ${
     ctx.scheduleCandidates.length > 0
-      ? `{"taskId": "從上面清單挑一個最值得調整的 taskId，原封不動照抄，不要自己編", "body": "給家長的建議，40~60字，白話說明為什麼放寬這個任務的次數上限對孩子好，一定要在句子裡明確寫出「目前每週/每天最多幾次」跟「建議調整成最多幾次」這兩個具體數字，不要只寫「調高一點」「放寬一些」這種模糊講法", "actionLabel": "按鈕文字（5字內）", "suggestedClaimPeriod": "day 或 week 或 once 三選一", "suggestedMaxClaimsPerPeriod": 一個比目前上限更大的整數}`
+      ? `{"taskId": "從上面清單挑一個最值得調整的 taskId，原封不動照抄，不要自己編", "body": "給家長的建議，40~60字，白話說明為什麼放寬這個任務的次數上限對孩子好，一定要在句子裡明確寫出「目前每週/每天最多幾次」跟「建議調整成最多幾次」這兩個具體數字，不要只寫「調高一點」「放寬一些」這種模糊講法", "actionLabel": "按鈕文字（5字內）", "suggestedClaimPeriod": "day 或 week 二選一（直接沿用清單裡那個任務目前的規則，不要換成別的週期）", "suggestedMaxClaimsPerPeriod": 一個比目前上限更大的整數}`
       : 'null（這週沒有任務到達次數上限，不用勉強生一個建議，直接填 null）'
   }
 }
@@ -216,8 +216,6 @@ ${scheduleSection}
   };
 }
 
-const VALID_CLAIM_PERIODS: ScheduleClaimPeriod[] = ['day', 'week', 'once'];
-
 /**
  * Gemini can only be trusted to pick a taskId from the candidate list we gave it —
  * never to invent one. Anything that doesn't match a real candidate, or proposes a
@@ -230,7 +228,7 @@ function validateScheduleSuggestion(
   if (raw == null || typeof raw !== 'object') return null;
   const s = raw as Record<string, unknown>;
   if (typeof s.taskId !== 'string' || typeof s.body !== 'string' || typeof s.actionLabel !== 'string') return null;
-  if (typeof s.suggestedClaimPeriod !== 'string' || !VALID_CLAIM_PERIODS.includes(s.suggestedClaimPeriod as ScheduleClaimPeriod)) return null;
+  if (s.suggestedClaimPeriod !== 'day' && s.suggestedClaimPeriod !== 'week') return null;
   if (typeof s.suggestedMaxClaimsPerPeriod !== 'number' || !Number.isInteger(s.suggestedMaxClaimsPerPeriod) || s.suggestedMaxClaimsPerPeriod <= 0) return null;
 
   const candidate = candidates.find(c => c.taskId === s.taskId);
@@ -427,7 +425,9 @@ async function processChild(
       completedThisWeek: completionCountByTask.get(t.id) ?? 0,
     }))
     .filter((c: ScheduleCandidate) =>
-      VALID_CLAIM_PERIODS.includes(c.claimPeriod)
+      // 'once' 是「整個任務期間只能做幾次」的單次任務語意，跟這裡「這週建議放寬」
+      // 的框架不合，不當候選。
+      (c.claimPeriod === 'day' || c.claimPeriod === 'week')
       && c.maxClaimsPerPeriod > 0
       && c.completedThisWeek >= c.maxClaimsPerPeriod)
     .sort((a: ScheduleCandidate, b: ScheduleCandidate) => b.completedThisWeek - a.completedThisWeek)
