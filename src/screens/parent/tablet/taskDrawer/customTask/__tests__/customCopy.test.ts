@@ -242,11 +242,11 @@ describe('69-70. 這一輪沒有碰的東西', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('70. 沒有新增 migration', () => {
+  it('70. 第九階段 B 沒有新增 migration', () => {
     const dir = path.resolve(repoRoot, 'supabase', 'migrations');
     const migrations = fs.readdirSync(dir).filter(name => name.endsWith('.sql')).sort();
-    // 第九階段 B 的那一支是最後一支。
-    expect(migrations[migrations.length - 1])
-      .toBe('20260804000000_parent_custom_task_persistence.sql');
+    // 第九階段 B 的那一支曾經是最後一支；之後的 migration（例如週報排程建議
+    // 採用功能）不在這個階段的範圍內，只需確認它仍然存在、沒被誤刪。
+    expect(migrations).toContain('20260804000000_parent_custom_task_persistence.sql');
   });
 });

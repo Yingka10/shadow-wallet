@@ -26,6 +26,7 @@ import {
   type WeeklyActivityBar,
   type GrowthMoment,
   type LongTermGoalProgress,
+  type ScheduleClaimPeriod,
 } from '../../../hooks/useParentWeeklyReport';
 import {
   useParentMonthlyReport,
@@ -200,9 +201,42 @@ type ReviewPrompt = {
   title: string;
   prompt: string;
   tone: 'green' | 'orange';
+  taskId?: string;
+  currentClaimPeriod?: ScheduleClaimPeriod;
+  currentMaxClaimsPerPeriod?: number;
+  suggestedClaimPeriod?: ScheduleClaimPeriod;
+  suggestedMaxClaimsPerPeriod?: number;
+  adopted?: boolean;
 };
 
-function ReviewPromptCard({ item }: { item: ReviewPrompt }) {
+const CLAIM_PERIOD_LABEL: Record<ScheduleClaimPeriod, string> = {
+  day: '每天', week: '每週', once: '整個任務期間',
+};
+
+function ReviewPromptCard({ item, onAdopt, onDefer }: {
+  item: ReviewPrompt;
+  onAdopt: (item: ReviewPrompt) => void;
+  onDefer: (item: ReviewPrompt) => void;
+}) {
+  const [adopting, setAdopting] = useState(false);
+  const [adoptError, setAdoptError] = useState<string | null>(null);
+  const isScheduleSuggestion = item.taskId != null
+    && item.suggestedClaimPeriod != null
+    && item.suggestedMaxClaimsPerPeriod != null;
+
+  const handleAdopt = async () => {
+    setAdopting(true);
+    setAdoptError(null);
+    try {
+      await onAdopt(item);
+    } catch (e) {
+      console.error('[ReviewPromptCard] adopt error:', e);
+      setAdoptError(e instanceof Error ? e.message : '採用失敗，請稍後再試');
+    } finally {
+      setAdopting(false);
+    }
+  };
+
   return (
     <View style={s.reviewPromptRow}>
       <View style={[s.reviewPromptDot, item.tone === 'orange' && s.reviewPromptDotOrange]}>
@@ -213,6 +247,40 @@ function ReviewPromptCard({ item }: { item: ReviewPrompt }) {
       <View style={s.reviewPromptBody}>
         <Text style={s.reviewPromptTitle}>{item.title}</Text>
         <Text style={s.reviewPromptText}>{item.prompt}</Text>
+        {isScheduleSuggestion && (
+          <Text style={s.scheduleDiffText}>
+            {item.currentClaimPeriod != null && item.currentMaxClaimsPerPeriod != null
+              ? `目前：${CLAIM_PERIOD_LABEL[item.currentClaimPeriod]}最多 ${item.currentMaxClaimsPerPeriod} 次　→　`
+              : ''}
+            建議：{CLAIM_PERIOD_LABEL[item.suggestedClaimPeriod!]}最多 {item.suggestedMaxClaimsPerPeriod} 次
+          </Text>
+        )}
+        {isScheduleSuggestion && (
+          <View style={s.reviewPromptActions}>
+            {item.adopted ? (
+              <View style={s.adoptedBadge}>
+                <CheckSquareIcon size={13} color={ParentColors.teal500} />
+                <Text style={s.adoptedBadgeText}>已套用</Text>
+              </View>
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={s.adoptBtn}
+                  onPress={handleAdopt}
+                  disabled={adopting}
+                >
+                  {adopting
+                    ? <ActivityIndicator size="small" color={ParentColors.accent} />
+                    : <Text style={s.adoptBtnText}>採用建議</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={s.deferBtn} onPress={() => onDefer(item)} disabled={adopting}>
+                  <Text style={s.deferBtnText}>再觀察一週</Text>
+                </TouchableOpacity>
+              </>
+            )}
+            {adoptError && <Text style={s.adoptErrorText}>{adoptError}</Text>}
+          </View>
+        )}
       </View>
     </View>
   );
@@ -540,6 +608,7 @@ export default function ParentWeeklyTablet() {
   const [view, setView] = useState<ReportView>('weekly');
   const [aiRefreshing, setAiRefreshing] = useState(false);
   const [aiRefreshError, setAiRefreshError] = useState<string | null>(null);
+  const [deferredTaskIds, setDeferredTaskIds] = useState<Set<string>>(new Set());
 
   const handleNavigateHome = useCallback(() => {
     navigation.navigate('Dashboard' as never);
@@ -571,7 +640,7 @@ export default function ParentWeeklyTablet() {
     loading, error,
     canGoBack, canGoForward,
     goBack, goForward,
-    refresh, requestAiRefresh,
+    refresh, requestAiRefresh, adoptScheduleSuggestion,
   } = useParentWeeklyReport(childId);
 
   const [recordTab, setRecordTab] = useState(0);
@@ -644,12 +713,20 @@ export default function ParentWeeklyTablet() {
       }];
   // AI 產生的回顧建議（後端 weekly_reports.ai_suggestions）優先；沒有才落回上面的模板
   const aiReviewPrompts: ReviewPrompt[] = suggestions
+    .filter(sg => sg.taskId == null || !deferredTaskIds.has(sg.taskId))
     .map(sg => ({
       title: sg.taskName?.trim() || sg.actionLabel || '本週建議',
       prompt: sg.body,
       tone: (sg.action === 'adjust_reminder' ? 'orange' : 'green') as ReviewPrompt['tone'],
+      taskId: sg.taskId,
+      currentClaimPeriod: sg.currentClaimPeriod,
+      currentMaxClaimsPerPeriod: sg.currentMaxClaimsPerPeriod,
+      suggestedClaimPeriod: sg.suggestedClaimPeriod,
+      suggestedMaxClaimsPerPeriod: sg.suggestedMaxClaimsPerPeriod,
+      adopted: sg.adopted,
     }))
-    .slice(0, 3);
+    // 可以實際採用的排程建議優先顯示。
+    .sort((a, b) => Number(b.taskId != null) - Number(a.taskId != null));
   const displayReviewPrompts = aiReady && aiReviewPrompts.length > 0
     ? aiReviewPrompts
     : safeReviewPrompts;
@@ -861,7 +938,18 @@ export default function ParentWeeklyTablet() {
                 </View>
                 <View style={s.reviewPromptList}>
                   {displayReviewPrompts.map((item, i) => (
-                    <ReviewPromptCard key={`${item.title}-${i}`} item={item} />
+                    <ReviewPromptCard
+                      key={`${item.title}-${i}`}
+                      item={item}
+                      onAdopt={async (i2) => {
+                        if (i2.taskId == null || i2.suggestedClaimPeriod == null || i2.suggestedMaxClaimsPerPeriod == null) return;
+                        await adoptScheduleSuggestion(i2.taskId, i2.suggestedClaimPeriod, i2.suggestedMaxClaimsPerPeriod);
+                      }}
+                      onDefer={(i2) => {
+                        if (i2.taskId == null) return;
+                        setDeferredTaskIds(prev => new Set(prev).add(i2.taskId!));
+                      }}
+                    />
                   ))}
                 </View>
               </View>
@@ -1867,6 +1955,71 @@ const s = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
     color: ParentColors.fgSecondary,
+  },
+  scheduleDiffText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.accent,
+    marginTop: 6,
+  },
+  reviewPromptActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  adoptBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: ParentRadii.pill,
+    borderWidth: 1,
+    borderColor: ParentColors.teal100,
+    backgroundColor: ParentColors.teal50,
+    minWidth: 76,
+    alignItems: 'center',
+  },
+  adoptBtnText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.accent,
+  },
+  deferBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: ParentRadii.pill,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    backgroundColor: 'transparent',
+  },
+  deferBtnText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgSecondary,
+  },
+  adoptedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: ParentRadii.pill,
+    backgroundColor: ParentColors.teal50,
+  },
+  adoptedBadgeText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.teal500,
+  },
+  adoptErrorText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    color: ParentColors.warn,
+    width: '100%',
   },
   dialogueCard: {
     backgroundColor: ParentColors.bgSurface,
