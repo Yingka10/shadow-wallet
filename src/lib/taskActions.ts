@@ -362,6 +362,43 @@ export async function recordCompletionContext(
   if (error) throw new Error(error.message);
 }
 
+/**
+ * Updates an existing task's claim frequency cap (claim_period + max_claims_per_period),
+ * e.g. adopting a weekly-report AI suggestion to change how often a task can be claimed.
+ * Writes an intervention_log entry for audit/traceability.
+ *
+ * @throws when the caller is not a parent of the task's family, or the values are invalid
+ */
+export async function updateTaskSchedule(
+  taskId: string,
+  claimPeriod: 'day' | 'week' | 'once',
+  maxClaimsPerPeriod: number,
+): Promise<{ taskId: string; claimPeriod: string; maxClaimsPerPeriod: number }> {
+  const { data, error } = await supabase.rpc('update_task_schedule', {
+    p_task_id: taskId,
+    p_claim_period: claimPeriod,
+    p_max_claims_per_period: maxClaimsPerPeriod,
+  });
+
+  if (error) throw new Error(error.message);
+
+  const result = data as {
+    error?: string;
+    taskId?: string;
+    claimPeriod?: string;
+    maxClaimsPerPeriod?: number;
+  };
+
+  if (result.error === 'invalid_claim_period') throw new Error('排程週期設定不合法');
+  if (result.error === 'invalid_max_claims') throw new Error('次數上限設定不合法');
+
+  return {
+    taskId: result.taskId!,
+    claimPeriod: result.claimPeriod!,
+    maxClaimsPerPeriod: result.maxClaimsPerPeriod!,
+  };
+}
+
 /** Returns true when the given day-of-week is a valid check-in day for this habit. */
 export function isActiveDayForHabit(dow: number, activeDays: number[] | null): boolean {
   if (activeDays === null) return true;

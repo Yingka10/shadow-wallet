@@ -31,6 +31,17 @@ const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GE
 
 type TaskCategory = 'A' | 'B' | 'C' | 'D';
 
+type ScheduleClaimPeriod = 'day' | 'week' | 'once';
+
+/** A task that hit its claim-frequency cap this week — a candidate for a schedule-adjustment suggestion. */
+type ScheduleCandidate = {
+  taskId: string;
+  taskName: string;
+  claimPeriod: ScheduleClaimPeriod;
+  maxClaimsPerPeriod: number;
+  completedThisWeek: number;
+};
+
 type WeeklyContext = {
   childId: string;
   familyId: string;
@@ -43,6 +54,7 @@ type WeeklyContext = {
   coinIncomeCount: number;
   coinSpend: number;
   coinSpendCount: number;
+  scheduleCandidates: ScheduleCandidate[];
 };
 
 // 家長教養傾向的中文說明。只當作「給 AI 參考的背景」，用來拿捏建議口吻；
@@ -80,13 +92,28 @@ type GeminiInsightResult = {
   suggestions: Array<{
     body: string;
     actionLabel: string;
-    action: 'adjust_reminder' | 'increase_difficulty' | 'add_contribution';
+    action: 'adjust_reminder' | 'increase_difficulty' | 'add_contribution' | 'adjust_schedule';
+    taskId?: string;
+    taskName?: string;
+    currentClaimPeriod?: ScheduleClaimPeriod;
+    currentMaxClaimsPerPeriod?: number;
+    suggestedClaimPeriod?: ScheduleClaimPeriod;
+    suggestedMaxClaimsPerPeriod?: number;
   }>;
   affirmations: string[];
   task_recommendations: Array<{
     category: string;
     suggestion: string;
   }>;
+  schedule_suggestion: {
+    taskId: string;
+    body: string;
+    actionLabel: string;
+    currentClaimPeriod: ScheduleClaimPeriod;
+    currentMaxClaimsPerPeriod: number;
+    suggestedClaimPeriod: ScheduleClaimPeriod;
+    suggestedMaxClaimsPerPeriod: number;
+  } | null;
 };
 
 async function generateInsight(ctx: WeeklyContext): Promise<GeminiInsightResult> {
@@ -102,6 +129,17 @@ async function generateInsight(ctx: WeeklyContext): Promise<GeminiInsightResult>
     .join('\n');
 
   const styleLabel = BAUMRIND_LABELS[ctx.baumrindType ?? ''] ?? '沒有特別設定';
+
+  const candidateLines = ctx.scheduleCandidates
+    .map((c, i) =>
+      `${i + 1}. taskId="${c.taskId}"，任務名稱「${c.taskName}」，`
+      + `目前規則是${CLAIM_PERIOD_LABEL_ZH[c.claimPeriod]}最多完成 ${c.maxClaimsPerPeriod} 次，`
+      + `這週已經完成 ${c.completedThisWeek} 次（已經到達上限）`)
+    .join('\n');
+  const scheduleSection = ctx.scheduleCandidates.length > 0
+    ? `\n【這週有任務常常一次就做到上限，可能代表孩子想做得更多】\n${candidateLines}\n`
+    : '';
+
   const prompt = `你是一位溫柔、細心的親職陪伴顧問，正在幫一位家長看懂孩子這一週的狀況。
 你的讀者是「家長本人」，不是專業人士，所以說話要像跟一位朋友聊他的孩子一樣自然、有溫度。
 
@@ -112,7 +150,7 @@ async function generateInsight(ctx: WeeklyContext): Promise<GeminiInsightResult>
 - 這週各方面的完成情況：
 ${catLines}
 - 成長幣：這週賺到 ${ctx.coinIncome} 枚（來自 ${ctx.coinIncomeCount} 次），花掉 ${ctx.coinSpend} 枚（${ctx.coinSpendCount} 次兌換）
-
+${scheduleSection}
 【非常重要：說話方式】
 1. 全程用溫暖、鼓勵、體貼的語氣，多看見孩子的努力，少批評。
 2. 用生活化的白話，想像你在跟一位不熟教育理論的家長講話。
@@ -137,12 +175,19 @@ ${catLines}
   ],
   "task_recommendations": [
     {"category": "B", "suggestion": "針對某一方面給家長的調整建議，40~60字，白話、溫柔、可執行"}
-  ]
+  ],
+  "schedule_suggestion": ${
+    ctx.scheduleCandidates.length > 0
+      ? `{"taskId": "從上面清單挑一個最值得調整的 taskId，原封不動照抄，不要自己編", "body": "給家長的建議，40~60字，白話說明為什麼放寬這個任務的次數上限對孩子好，一定要在句子裡明確寫出「目前每週/每天最多幾次」跟「建議調整成最多幾次」這兩個具體數字，不要只寫「調高一點」「放寬一些」這種模糊講法", "actionLabel": "按鈕文字（5字內）", "suggestedClaimPeriod": "day 或 week 或 once 三選一", "suggestedMaxClaimsPerPeriod": 一個比目前上限更大的整數}`
+      : 'null（這週沒有任務到達次數上限，不用勉強生一個建議，直接填 null）'
+  }
 }
 
 補充規則：
 - "action" 這個欄位的值只能是 "adjust_reminder"、"increase_difficulty"、"add_contribution" 其中之一（這是系統用的，家長不會看到，照填即可）。
 - "category" 這個欄位請填 A、B、C、D 其中一個字母（A=自己的事自己做、B=幫忙家事、C=額外付出、D=學習成長），這也是系統用的，家長不會看到。
+- "schedule_suggestion" 只能從【這週有任務常常一次就做到上限】清單裡選一個 taskId，不能自己編一個 id、也不能選清單以外的任務；如果清單是空的，或你覺得沒有哪個任務真的值得調整，就填 null，不要硬湊。
+- "suggestedMaxClaimsPerPeriod" 一定要比清單裡寫的「目前上限」大，不要填一樣或更小的數字。
 - 除了上面兩個系統欄位，其他所有給人看的文字，一律用溫暖白話的繁體中文，不要出現代號或專有名詞。`;
 
   const raw = await callGemini(prompt);
@@ -167,6 +212,39 @@ ${catLines}
     suggestions: parsed.suggestions,
     affirmations: Array.isArray(parsed.affirmations) ? parsed.affirmations : [],
     task_recommendations: Array.isArray(parsed.task_recommendations) ? parsed.task_recommendations : [],
+    schedule_suggestion: validateScheduleSuggestion(parsed.schedule_suggestion, ctx.scheduleCandidates),
+  };
+}
+
+const VALID_CLAIM_PERIODS: ScheduleClaimPeriod[] = ['day', 'week', 'once'];
+
+/**
+ * Gemini can only be trusted to pick a taskId from the candidate list we gave it —
+ * never to invent one. Anything that doesn't match a real candidate, or proposes a
+ * cap that isn't actually larger than today's, is dropped rather than written to DB.
+ */
+function validateScheduleSuggestion(
+  raw: unknown,
+  candidates: ScheduleCandidate[],
+): GeminiInsightResult['schedule_suggestion'] {
+  if (raw == null || typeof raw !== 'object') return null;
+  const s = raw as Record<string, unknown>;
+  if (typeof s.taskId !== 'string' || typeof s.body !== 'string' || typeof s.actionLabel !== 'string') return null;
+  if (typeof s.suggestedClaimPeriod !== 'string' || !VALID_CLAIM_PERIODS.includes(s.suggestedClaimPeriod as ScheduleClaimPeriod)) return null;
+  if (typeof s.suggestedMaxClaimsPerPeriod !== 'number' || !Number.isInteger(s.suggestedMaxClaimsPerPeriod) || s.suggestedMaxClaimsPerPeriod <= 0) return null;
+
+  const candidate = candidates.find(c => c.taskId === s.taskId);
+  if (!candidate) return null;
+  if (s.suggestedMaxClaimsPerPeriod <= candidate.maxClaimsPerPeriod) return null;
+
+  return {
+    taskId: s.taskId,
+    body: s.body,
+    actionLabel: s.actionLabel,
+    currentClaimPeriod: candidate.claimPeriod,
+    currentMaxClaimsPerPeriod: candidate.maxClaimsPerPeriod,
+    suggestedClaimPeriod: s.suggestedClaimPeriod as ScheduleClaimPeriod,
+    suggestedMaxClaimsPerPeriod: s.suggestedMaxClaimsPerPeriod,
   };
 }
 
@@ -223,8 +301,32 @@ function computeFallbackInsight(ctx: WeeklyContext): GeminiInsightResult {
         suggestion: `Task-${weakest} 這週完成率較低，可以和孩子討論是不是任務難度或時間安排需要調整。`,
       },
     ],
+    schedule_suggestion: computeFallbackScheduleSuggestion(ctx.scheduleCandidates),
   };
 }
+
+/** Deterministic version of the schedule suggestion: pick the most-hit candidate, raise its cap by 1. */
+function computeFallbackScheduleSuggestion(
+  candidates: ScheduleCandidate[],
+): GeminiInsightResult['schedule_suggestion'] {
+  if (candidates.length === 0) return null;
+  const top = [...candidates].sort((a, b) => b.completedThisWeek - a.completedThisWeek)[0];
+  const newMax = top.maxClaimsPerPeriod + 1;
+  return {
+    taskId: top.taskId,
+    body: `「${top.taskName}」這週已經達到次數上限，孩子似乎想做得更多，`
+      + `可以考慮從目前${CLAIM_PERIOD_LABEL_ZH[top.claimPeriod]}最多 ${top.maxClaimsPerPeriod} 次，調整為最多 ${newMax} 次。`,
+    actionLabel: '放寬次數',
+    currentClaimPeriod: top.claimPeriod,
+    currentMaxClaimsPerPeriod: top.maxClaimsPerPeriod,
+    suggestedClaimPeriod: top.claimPeriod,
+    suggestedMaxClaimsPerPeriod: newMax,
+  };
+}
+
+const CLAIM_PERIOD_LABEL_ZH: Record<ScheduleClaimPeriod, string> = {
+  day: '每天', week: '每週', once: '整個任務期間',
+};
 
 function getIsoWeekStart(date: Date): string {
   // Get Monday of the ISO week containing `date`
@@ -242,7 +344,9 @@ async function processChild(
   familyId: string,
   weekStart: string,
 ): Promise<void> {
-  const weekStartDate = new Date(weekStart + 'T00:00:00Z');
+  // weekStart 是 Asia/Taipei 在地日期（週一）。用 UTC 午夜去解析會早算 8 小時，
+  // 讓週一台北時間午夜前後的紀錄被排除在這週範圍外 —— 這裡明確用 +08:00。
+  const weekStartDate = new Date(weekStart + 'T00:00:00+08:00');
   const weekEndDate = new Date(weekStartDate.getTime() + 7 * 24 * 60 * 60 * 1000);
   const weekStartISO = weekStartDate.toISOString();
   const weekEndISO = weekEndDate.toISOString();
@@ -267,8 +371,11 @@ async function processChild(
 
   const [tasksRes, txRes, childRes, existingReportRes] = await Promise.all([
     taskIds.length > 0
-      ? supabase.from('tasks').select('id, category').in('id', taskIds).eq('is_active', true)
-      : Promise.resolve({ data: [] as { id: string; category: string }[], error: null }),
+      ? supabase.from('tasks').select('id, name, category, claim_period, max_claims_per_period').in('id', taskIds).eq('is_active', true)
+      : Promise.resolve({
+          data: [] as { id: string; name: string; category: string; claim_period: string; max_claims_per_period: number }[],
+          error: null,
+        }),
     walletId
       ? supabase
           .from('transactions')
@@ -296,11 +403,35 @@ async function processChild(
     D: { done: 0, total: 0 },
   };
   const completedIds = new Set(completions.map(c => c.task_id));
+  const completionCountByTask = new Map<string, number>();
+  for (const c of completions) {
+    completionCountByTask.set(c.task_id, (completionCountByTask.get(c.task_id) ?? 0) + 1);
+  }
   for (const t of tasksRes.data ?? []) {
     const cat = t.category as TaskCategory;
     taskCounts[cat].total += 1;
     if (completedIds.has(t.id)) taskCounts[cat].done += 1;
   }
+
+  // 這週已經達到次數上限的任務 —— 值得問「要不要放寬」的候選。
+  // 只讓 Gemini 從這份清單挑，不讓它自己生 taskId（見 validateScheduleSuggestion）。
+  const taskRows = (tasksRes.data ?? []) as {
+    id: string; name: string; category: string; claim_period: string; max_claims_per_period: number;
+  }[];
+  const scheduleCandidates: ScheduleCandidate[] = taskRows
+    .map((t): ScheduleCandidate => ({
+      taskId: t.id,
+      taskName: t.name,
+      claimPeriod: t.claim_period as ScheduleClaimPeriod,
+      maxClaimsPerPeriod: t.max_claims_per_period,
+      completedThisWeek: completionCountByTask.get(t.id) ?? 0,
+    }))
+    .filter((c: ScheduleCandidate) =>
+      VALID_CLAIM_PERIODS.includes(c.claimPeriod)
+      && c.maxClaimsPerPeriod > 0
+      && c.completedThisWeek >= c.maxClaimsPerPeriod)
+    .sort((a: ScheduleCandidate, b: ScheduleCandidate) => b.completedThisWeek - a.completedThisWeek)
+    .slice(0, 3);
 
   // Build coin flow
   const txData = txRes.data ?? [];
@@ -319,6 +450,7 @@ async function processChild(
     coinIncomeCount: earnTxs.length,
     coinSpend: Math.abs(redeemTxs.reduce((s, t) => s + t.amount, 0)),
     coinSpendCount: redeemTxs.length,
+    scheduleCandidates,
   };
 
   let insight: GeminiInsightResult;
@@ -336,6 +468,20 @@ async function processChild(
   const existingAdjustments =
     (existingReportRes.data?.task_adjustments as Record<string, unknown> | null) ?? {};
 
+  // 把排程建議併進一般建議清單，補上前端要顯示用的任務名稱。
+  const scheduleSuggestionEntry = insight.schedule_suggestion == null ? [] : [{
+    body: insight.schedule_suggestion.body,
+    actionLabel: insight.schedule_suggestion.actionLabel,
+    action: 'adjust_schedule' as const,
+    taskId: insight.schedule_suggestion.taskId,
+    taskName: scheduleCandidates.find(c => c.taskId === insight.schedule_suggestion?.taskId)?.taskName,
+    currentClaimPeriod: insight.schedule_suggestion.currentClaimPeriod,
+    currentMaxClaimsPerPeriod: insight.schedule_suggestion.currentMaxClaimsPerPeriod,
+    suggestedClaimPeriod: insight.schedule_suggestion.suggestedClaimPeriod,
+    suggestedMaxClaimsPerPeriod: insight.schedule_suggestion.suggestedMaxClaimsPerPeriod,
+  }];
+  const allSuggestions = [...insight.suggestions, ...scheduleSuggestionEntry];
+
   // Upsert weekly_reports.
   // The error MUST be checked: a swallowed write failure (missing unique index
   // for onConflict, RLS, bad column) would let processChild "succeed" while
@@ -347,7 +493,7 @@ async function processChild(
       week_start: weekStart,
       motivation_observation: insight.motivation_observation,
       ai_suggestions: {
-        suggestions: insight.suggestions,
+        suggestions: allSuggestions,
         affirmations: insight.affirmations,
         dialogue: insight.dialogue ?? '',
         used_fallback: usedFallback,

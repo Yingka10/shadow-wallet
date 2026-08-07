@@ -4,6 +4,7 @@ import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import isoWeek from 'dayjs/plugin/isoWeek';
 import { supabase } from '../lib/supabase';
+import { updateTaskSchedule } from '../lib/taskActions';
 import type { TaskCategory } from '../types/database';
 
 dayjs.extend(utc);
@@ -32,7 +33,11 @@ export type WeeklyCoinFlow = {
 export type SuggestionAction =
   | 'adjust_reminder'
   | 'increase_difficulty'
-  | 'add_contribution';
+  | 'add_contribution'
+  | 'adjust_schedule';
+
+export type ScheduleClaimPeriod = 'day' | 'week' | 'once';
+const VALID_CLAIM_PERIODS: ScheduleClaimPeriod[] = ['day', 'week', 'once'];
 
 export type WeeklySuggestion = {
   body: string;
@@ -40,7 +45,31 @@ export type WeeklySuggestion = {
   action: SuggestionAction;
   taskId?: string;
   taskName?: string;
+  currentClaimPeriod?: ScheduleClaimPeriod;
+  currentMaxClaimsPerPeriod?: number;
+  suggestedClaimPeriod?: ScheduleClaimPeriod;
+  suggestedMaxClaimsPerPeriod?: number;
+  adopted?: boolean;
 };
+
+/**
+ * Gemini's weekly-report output isn't structured yet, so schedule-suggestion
+ * fields may be missing, malformed, or hand-seeded for testing. Drop them
+ * (keep the plain-text suggestion) unless both fields are present and valid.
+ */
+function sanitizeSuggestions(raw: WeeklySuggestion[]): WeeklySuggestion[] {
+  return raw.map(sg => {
+    const validPeriod = VALID_CLAIM_PERIODS.includes(sg.suggestedClaimPeriod as ScheduleClaimPeriod);
+    const validMax = typeof sg.suggestedMaxClaimsPerPeriod === 'number'
+      && Number.isInteger(sg.suggestedMaxClaimsPerPeriod)
+      && sg.suggestedMaxClaimsPerPeriod > 0;
+    if (!sg.taskId || !validPeriod || !validMax) {
+      const { suggestedClaimPeriod, suggestedMaxClaimsPerPeriod, currentClaimPeriod, currentMaxClaimsPerPeriod, ...rest } = sg;
+      return rest;
+    }
+    return sg;
+  });
+}
 
 export type GrowthMoment = {
   id: string;
@@ -129,6 +158,11 @@ export type ParentWeeklyReportData = {
   addMoment: (title: string, body: string) => Promise<void>;
   refresh: () => void;
   requestAiRefresh: () => Promise<void>;
+  adoptScheduleSuggestion: (
+    taskId: string,
+    claimPeriod: ScheduleClaimPeriod,
+    maxClaimsPerPeriod: number,
+  ) => Promise<void>;
 };
 
 // ---------------------------------------------------------------------------
@@ -437,7 +471,11 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
 
       if (report?.motivation_observation) {
         setAiInsight(report.motivation_observation);
-        setSuggestions(report.ai_suggestions?.suggestions ?? PENDING_SUGGESTIONS);
+        setSuggestions(
+          report.ai_suggestions?.suggestions
+            ? sanitizeSuggestions(report.ai_suggestions.suggestions)
+            : PENDING_SUGGESTIONS,
+        );
         setAffirmations(report.ai_suggestions?.affirmations ?? PENDING_AFFIRMATIONS);
         setDialoguePrompt(report.ai_suggestions?.dialogue ?? '');
         setAiReady(true);
@@ -603,6 +641,40 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     await fetchAll();
   }, [childId, fetchAll]);
 
+  const adoptScheduleSuggestion = useCallback(async (
+    taskId: string,
+    claimPeriod: ScheduleClaimPeriod,
+    maxClaimsPerPeriod: number,
+  ) => {
+    await updateTaskSchedule(taskId, claimPeriod, maxClaimsPerPeriod);
+
+    // 標記已採用（而非移除），讓卡片留在清單裡但按鈕換成「已套用」。
+    const weekStartDate = getWeekBounds(weekOffset).start.format('YYYY-MM-DD');
+    const { data: reportRow, error: fetchErr } = await supabase
+      .from('weekly_reports')
+      .select('id, ai_suggestions')
+      .eq('child_id', childId)
+      .eq('week_start', weekStartDate)
+      .maybeSingle();
+
+    if (!fetchErr && reportRow?.ai_suggestions) {
+      const current = reportRow.ai_suggestions as {
+        suggestions?: WeeklySuggestion[];
+        affirmations?: string[];
+        dialogue?: string;
+      };
+      const updated = (current.suggestions ?? []).map(sg =>
+        sg.taskId === taskId ? { ...sg, adopted: true } : sg,
+      );
+      await supabase
+        .from('weekly_reports')
+        .update({ ai_suggestions: { ...current, suggestions: updated } })
+        .eq('id', reportRow.id);
+    }
+
+    await fetchAll();
+  }, [childId, weekOffset, fetchAll]);
+
   const requestAiRefresh = useCallback(async () => {
     const weekStartDate = getWeekBounds(weekOffset).start.format('YYYY-MM-DD');
     const { error: err } = await supabase.functions.invoke('generate-weekly-report', {
@@ -642,5 +714,6 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     addMoment,
     refresh: fetchAll,
     requestAiRefresh,
+    adoptScheduleSuggestion,
   };
 }

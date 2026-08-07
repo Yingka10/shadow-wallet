@@ -109,8 +109,6 @@ export type Task = {
   coin_override: number | null;
   is_system_default: boolean;
   allow_repeat: boolean;
-  claim_period: 'day' | 'week';
-  max_claims_per_period: number;
   min_age: number;
   max_age: number;
   is_active: boolean;
@@ -1095,6 +1093,14 @@ export interface Database {
           p_coin_cost: number;
         };
         Returns: undefined;
+      };
+      update_task_schedule: {
+        Args: {
+          p_task_id: string;
+          p_claim_period: 'day' | 'week' | 'once';
+          p_max_claims_per_period: number;
+        };
+        Returns: { error?: string; taskId?: string; claimPeriod?: string; maxClaimsPerPeriod?: number };
       };
     };
     Enums: {
