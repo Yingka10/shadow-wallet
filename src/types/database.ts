@@ -1,3 +1,11 @@
+import type {
+  ChildProposal,
+  ChildProposalAdjustmentRequest,
+  ChildProposalPlanVersion,
+  ChildProposalStatusEvent,
+  ChildProposalTrialEvent,
+} from '../lib/childProposal/types';
+
 // ── 通用 enum 型別 ───────────────────────────────────────────
 
 export type AgeGroup = '2-4' | '4-6' | '6-9' | '9-12';
@@ -499,6 +507,32 @@ export type CreateParentTaskRpcResult =
       code: 'VALIDATION_FAILED' | 'POLICY_REJECTED' | 'PERSISTENCE_FAILED' | 'UNKNOWN';
       message: string;
     };
+
+// ── 孩子提案 / 版本契約（P0-1）────────────────────────────────
+//
+// 實際定義在 src/lib/childProposal/types.ts —— 那裡同時放著命令、
+// 狀態機與 RPC 結果型別，一起讀才看得懂欄位的意義。
+// 這裡 re-export 是為了讓「DB row 型別從 types/database 拿」這個
+// 既有慣例維持成立，不必記住哪幾張表是例外。
+
+export type {
+  ChildProposal,
+  ChildProposalPlanVersion,
+  ChildProposalTrialEvent,
+  ChildProposalAdjustmentRequest,
+  ChildProposalStatusEvent,
+  ChildProposalStatus,
+  ChildProposalActorRole,
+  ChildProposalSource,
+  ChildProposalCadenceMode,
+  ChildRewardPreference,
+  ChildProposalRewardPolicy,
+  ChildProposalRewardEligibility,
+  ChildProposalPlanAuthor,
+  ChildProposalTrialOutcome,
+  ChildProposalAdjustmentKind,
+  ChildProposalAdjustmentStatus,
+} from '../lib/childProposal/types';
 
 // ── Database 型別（供 createClient<Database> 使用）────────────
 //
@@ -1023,6 +1057,43 @@ export interface Database {
         Update: never;
         Relationships: [];
       };
+
+      // ── 孩子提案 / 版本契約（P0-1，migration 20260810000000）────────────
+      //
+      // 五張表都只有 SELECT policy —— 寫入一律走 child proposal 的
+      // SECURITY DEFINER RPC（見 src/lib/childProposal）。所以 Insert 與
+      // Update 一律是 never：型別層直接擋掉「順手 supabase.from().insert()」，
+      // 那條路徑會繞過狀態機與所有 actor 檢查。
+      child_proposals: {
+        Row: ChildProposal;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      child_proposal_plan_versions: {
+        Row: ChildProposalPlanVersion;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      child_proposal_trial_events: {
+        Row: ChildProposalTrialEvent;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      child_proposal_adjustment_requests: {
+        Row: ChildProposalAdjustmentRequest;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      child_proposal_status_events: {
+        Row: ChildProposalStatusEvent;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -1080,6 +1151,36 @@ export interface Database {
         // 那是 domain contract，刻意不從 types/database.ts 反向 import。
         Args: { p_command: object };
         Returns: CreateParentTaskRpcResult;
+      };
+      // ── 孩子提案 / 版本契約（P0-1）────────────────────────────────
+      //
+      // 五支都是 jsonb 命令進、jsonb 結果出，與 create_parent_task_v1 同一套慣例。
+      // 結果型別是 unknown：實際形狀在 src/lib/childProposal/types.ts，
+      // 而 childProposalService 會逐鍵驗證再回傳結構化結果 ——
+      // 在這裡宣告成功形狀等於允許呼叫端跳過那層驗證。
+      create_child_proposal_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      add_child_proposal_plan_version_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      transition_child_proposal_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      record_child_proposal_trial_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      create_child_proposal_adjustment_request_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      child_proposal_transition_allowed: {
+        Args: { p_from: string; p_to: string; p_actor_role?: string | null };
+        Returns: boolean;
       };
       mark_task_atomic: {
         Args: {
