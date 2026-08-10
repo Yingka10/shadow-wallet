@@ -21,6 +21,27 @@ import {
 } from '../../../screens/child/longTermGoalPresentation';
 import LongTermGoalDetailView from '../LongTermGoalDetailView';
 
+const TRUSTED_MILESTONES: GoalPresentation['milestones'] = [
+  {
+    id: 'start',
+    title: '完成第 1 次閱讀',
+    detail: null,
+    status: 'completed',
+  },
+  {
+    id: 'checkpoint-5',
+    title: '完成第 5 次閱讀',
+    detail: '成長幣 +10',
+    status: 'next',
+  },
+  {
+    id: 'final-review',
+    title: '四週後一起回顧',
+    detail: '可以繼續、調整閱讀方式，或讓計畫先告一段落。',
+    status: 'upcoming',
+  },
+];
+
 function makePresentation(
   overrides: Partial<GoalPresentation> = {},
 ): GoalPresentation {
@@ -38,7 +59,7 @@ function makePresentation(
     overallLabel: '1 / 20 次',
     overallPercent: 5,
     focusText: '第一週：先找到適合自己的閱讀節奏',
-    nextText: '下一個里程碑：完成第 5 次',
+    nextText: '今天繼續就好，已完成的閱讀都會保留',
     planNotice: null,
     todayTitle: '今天的小步驟',
     todayAction: '自己選一本喜歡的書，閱讀 15 分鐘',
@@ -98,27 +119,8 @@ function makePresentation(
       },
     ],
     weekSummary: '少一天沒有關係，找到適合自己的節奏更重要。',
-    nextReward: { threshold: 5, coin: 10 },
-    milestones: [
-      {
-        id: 'start',
-        title: '完成第 1 次閱讀',
-        detail: null,
-        status: 'completed',
-      },
-      {
-        id: 'checkpoint-5',
-        title: '完成第 5 次閱讀',
-        detail: '成長幣 +10',
-        status: 'next',
-      },
-      {
-        id: 'final-review',
-        title: '四週後一起回顧',
-        detail: '可以繼續、調整閱讀方式，或讓計畫先告一段落。',
-        status: 'upcoming',
-      },
-    ],
+    nextReward: null,
+    milestones: [],
     recentRecords: [
       {
         id: 'completion-today',
@@ -232,7 +234,7 @@ describe('LongTermGoalDetailView', () => {
     expect(screen.getByText('第 1 週／共 4 週')).toBeTruthy();
     expect(screen.getByText('本週完成 1／5 次')).toBeTruthy();
     expect(screen.getByText('第一週：先找到適合自己的閱讀節奏')).toBeTruthy();
-    expect(screen.getByText('下一個里程碑：完成第 5 次')).toBeTruthy();
+    expect(screen.getByText('今天繼續就好，已完成的閱讀都會保留')).toBeTruthy();
     expect(screen.queryByText('5%')).toBeNull();
     expect(screen.queryByText(/下一站/)).toBeNull();
   });
@@ -243,7 +245,6 @@ describe('LongTermGoalDetailView', () => {
     for (const heading of [
       '今天的小步驟',
       '本週安排',
-      '成長里程碑',
       '週末一起回顧',
       '最近紀錄',
       '計畫詳情',
@@ -658,7 +659,11 @@ describe('LongTermGoalDetailView', () => {
   });
 
   it('renders milestones as status-labelled timeline rows', () => {
-    renderView();
+    renderView(makePresentation({
+      goalKind: 'skill',
+      isReadingPlan: false,
+      milestones: TRUSTED_MILESTONES,
+    }));
     const milestones = within(screen.getByTestId('goal-rewards'));
 
     expect(milestones.getByText('完成第 1 次閱讀')).toBeTruthy();
@@ -669,6 +674,32 @@ describe('LongTermGoalDetailView', () => {
     expect(milestones.getByText('尚未到')).toBeTruthy();
     expect(screen.queryByText('之後一起回顧')).toBeNull();
     expect(screen.queryByText('下一站')).toBeNull();
+  });
+
+  it('does not render a milestone or reward section when no trustworthy state exists', () => {
+    renderView(makePresentation({ milestones: [], nextReward: null }));
+
+    expect(screen.queryByTestId('goal-rewards')).toBeNull();
+    expect(screen.queryByText('成長里程碑')).toBeNull();
+  });
+
+  it('labels habit and family checkpoint configuration as a planned node', () => {
+    renderView(makePresentation({
+      goalKind: 'habit',
+      isReadingPlan: false,
+      milestones: [
+        {
+          id: 'checkpoint-5',
+          title: '第 5 次的計畫節點',
+          detail: '成長幣 +10（達成時一起確認）',
+          status: 'planned',
+        },
+      ],
+    }));
+
+    const milestones = within(screen.getByTestId('goal-rewards'));
+    expect(milestones.getByText('計畫節點')).toBeTruthy();
+    expect(milestones.queryByText('已完成')).toBeNull();
   });
 
   it('opens the weekend review and quiet plan-details entry', () => {
@@ -731,7 +762,8 @@ describe('LongTermGoalDetailView', () => {
       todayAction: '練習雙手合奏 15 分鐘',
       preferredTimeWindow: null,
       canCompleteToday: true,
-      isReadingPlan: true,
+      isReadingPlan: false,
+      milestones: TRUSTED_MILESTONES,
       reviewPrompt: '這週哪一段練習最有進步？',
     }));
 

@@ -48,7 +48,7 @@ export type GoalMilestone = {
   id: string;
   title: string;
   detail: string | null;
-  status: 'completed' | 'next' | 'upcoming';
+  status: 'completed' | 'next' | 'upcoming' | 'planned';
 };
 
 export type GoalRecentRecord = {
@@ -114,24 +114,21 @@ function weekStart(now: Dayjs): Dayjs {
   return taipeiNow.startOf('day').subtract((taipeiNow.day() + 6) % 7, 'day');
 }
 
-function completionsThisWeek(
+function validScheduledCompletions(
   completions: GoalCompletionRecord[],
   activeDays: number[],
-  now: Dayjs,
   planStart: Dayjs | null,
   planEnd: Dayjs | null,
 ): GoalCompletionRecord[] {
-  const start = weekStart(now);
-  const end = start.add(7, 'day');
   const completionsByDate = new Map<string, GoalCompletionRecord>();
 
   for (const completion of completions) {
     const completedAt = dayjs(completion.completed_at).tz(TZ);
+    if (!completedAt.isValid()) continue;
+
     const completionDate = completedAt.startOf('day');
     if (
-      completedAt.isBefore(start)
-      || !completedAt.isBefore(end)
-      || !activeDays.includes(completedAt.day())
+      !activeDays.includes(completedAt.day())
       || (planStart !== null && completionDate.isBefore(planStart, 'day'))
       || (planEnd !== null && completionDate.isAfter(planEnd, 'day'))
     ) {
@@ -145,6 +142,19 @@ function completionsThisWeek(
   }
 
   return Array.from(completionsByDate.values());
+}
+
+function completionsThisWeek(
+  completions: GoalCompletionRecord[],
+  now: Dayjs,
+): GoalCompletionRecord[] {
+  const start = weekStart(now);
+  const end = start.add(7, 'day');
+
+  return completions.filter((completion) => {
+    const completedAt = dayjs(completion.completed_at).tz(TZ);
+    return !completedAt.isBefore(start) && completedAt.isBefore(end);
+  });
 }
 
 function buildWeekDays(
@@ -277,48 +287,6 @@ function getNextCheckpoint(
   };
 }
 
-function getNextUnreachedCheckpoint(
-  goal: LongTermGoal,
-  effortCurrent: number,
-  rewardCurrent: number,
-): { threshold: number; coin: number } | null {
-  if (!goal.checkpoint_rewards) return null;
-
-  const threshold = Object.keys(goal.checkpoint_rewards)
-    .map(Number)
-    .filter(
-      (value) =>
-        Number.isFinite(value)
-        && value > effortCurrent
-        && value > rewardCurrent,
-    )
-    .sort((left, right) => left - right)[0];
-
-  if (threshold === undefined) return null;
-  return {
-    threshold,
-    coin: Number(goal.checkpoint_rewards[String(threshold)] ?? 0),
-  };
-}
-
-function getUnconfirmedCheckpoint(
-  goal: LongTermGoal,
-  effortCurrent: number,
-  rewardCurrent: number,
-): number | null {
-  if (!goal.checkpoint_rewards) return null;
-
-  return Object.keys(goal.checkpoint_rewards)
-    .map(Number)
-    .filter(
-      (threshold) =>
-        Number.isFinite(threshold)
-        && threshold > rewardCurrent
-        && threshold <= effortCurrent,
-    )
-    .sort((left, right) => left - right)[0] ?? null;
-}
-
 function getNextSkillReward(
   goal: LongTermGoal,
   current: number,
@@ -342,14 +310,13 @@ function getCurrentSkillStage(goal: LongTermGoal): string {
   return String(levels[index]?.name ?? '下一個練習階段');
 }
 
-function buildMilestones(
+function buildRhythmMilestones(
   goal: LongTermGoal,
-  rewardCurrent: number,
-  effortCurrent: number,
-  target: number,
   totalWeeks: number,
   isReadingHabit: boolean,
 ): GoalMilestone[] {
+  if (isReadingHabit) return [];
+
   const checkpoints = Object.entries(goal.checkpoint_rewards ?? {})
     .map(([threshold, coin]) => ({
       threshold: Number(threshold),
@@ -357,65 +324,14 @@ function buildMilestones(
     }))
     .filter(({ threshold }) => Number.isFinite(threshold) && threshold >= 1)
     .sort((left, right) => left.threshold - right.threshold);
-  const firstCheckpoint = checkpoints.find(({ threshold }) => threshold === 1);
-  const firstRewardRecorded = firstCheckpoint !== undefined && rewardCurrent >= 1;
-  const firstEffortCompleted = effortCurrent >= 1;
-  const milestones: GoalMilestone[] = [
-    firstCheckpoint
-      ? {
-          id: 'start',
-          title: firstRewardRecorded
-            ? '完成第 1 次'
-            : firstEffortCompleted
-              ? '已完成第 1 次'
-              : '完成第 1 次',
-          detail: firstRewardRecorded && firstCheckpoint.coin > 0
-            ? `成長幣 +${firstCheckpoint.coin} 已記下`
-            : firstEffortCompleted
-              ? '里程碑回饋可以和家人一起確認'
-              : firstCheckpoint.coin > 0
-                ? `達成後成長幣 +${firstCheckpoint.coin}`
-                : null,
-          status: firstRewardRecorded ? 'completed' : 'next',
-        }
-      : {
-          id: 'start',
-          title: effortCurrent > 0 ? '完成第 1 次' : '開始計畫',
-          detail: null,
-          status: 'completed',
-        },
-  ];
-
-  const remainingCheckpoints = checkpoints.filter(({ threshold }) => threshold > 1);
-  const nextCheckpoint = checkpoints.find(
-    ({ threshold }) => threshold > rewardCurrent,
-  )?.threshold;
-
-  for (const checkpoint of remainingCheckpoints) {
-    const rewardRecorded = checkpoint.threshold <= rewardCurrent;
-    const effortCompleted = checkpoint.threshold <= effortCurrent;
-    milestones.push({
-      id: `checkpoint-${checkpoint.threshold}`,
-      title: effortCompleted && !rewardRecorded
-        ? `已完成第 ${checkpoint.threshold} 次`
-        : `完成第 ${checkpoint.threshold} 次`,
-      detail: effortCompleted && !rewardRecorded
-        ? '里程碑回饋可以和家人一起確認'
-        : checkpoint.coin > 0
-          ? rewardRecorded
-            ? `成長幣 +${checkpoint.coin} 已記下`
-            : `達成後成長幣 +${checkpoint.coin}`
-          : null,
-      status: rewardRecorded
-        ? 'completed'
-        : checkpoint.threshold === nextCheckpoint
-          ? 'next'
-          : 'upcoming',
-    });
-  }
-
-  const finalIsCompleted = goal.status === 'completed' || effortCurrent >= target;
-  const finalIsNext = !finalIsCompleted && nextCheckpoint === undefined;
+  const milestones: GoalMilestone[] = checkpoints.map((checkpoint) => ({
+    id: `checkpoint-${checkpoint.threshold}`,
+    title: `第 ${checkpoint.threshold} 次的計畫節點`,
+    detail: checkpoint.coin > 0
+      ? `成長幣 +${checkpoint.coin}（達成時一起確認）`
+      : null,
+    status: 'planned',
+  }));
   const chineseWeekCounts: Record<number, string> = {
     1: '一',
     2: '二',
@@ -434,11 +350,9 @@ function buildMilestones(
     id: 'final-review',
     title: totalWeeks === 0
       ? '安排好週期後一起回顧'
-      : isReadingHabit
-        ? `${weekCount}週後一起回顧`
-      : '完成計畫後一起回顧',
+      : `${weekCount}週後一起回顧`,
     detail: '可以繼續、調整，或讓計畫先告一段落。',
-    status: finalIsCompleted ? 'completed' : finalIsNext ? 'next' : 'upcoming',
+    status: 'planned',
   });
 
   return milestones;
@@ -605,26 +519,31 @@ export function buildGoalPresentation(
   const dueDateEnd = task.due_date
     ? getValidDueDate(planStart, task.due_date)
     : null;
+  const goalEnd = goal.end_date
+    ? getValidDueDate(planStart, goal.end_date)
+    : null;
   const challengeEnd =
     isChallenge && goal.total_days && goal.total_days > 0
       ? planStart.add(goal.total_days - 1, 'day')
       : null;
-  const planEnd = dueDateEnd ?? challengeEnd;
-  const weeklyCompletions = completionsThisWeek(
+  const planEnd = goalEnd ?? dueDateEnd ?? challengeEnd;
+  const rhythmCompletions = validScheduledCompletions(
     completions,
     activeDays,
-    now,
     planStart,
     planEnd,
   );
+  const weeklyCompletions = completionsThisWeek(rhythmCompletions, now);
   const weekDays = buildWeekDays(
     activeDays,
-    weeklyCompletions,
+    rhythmCompletions,
     now,
     planStart,
     planEnd,
   );
-  const completionCurrent = completions.length;
+  const completionCurrent = isSkill || isChallenge
+    ? completions.length
+    : rhythmCompletions.length;
   const current = isSkill
     ? Math.max(goal.current_level ?? 0, 0)
     : hasChallengeValues
@@ -665,15 +584,11 @@ export function buildGoalPresentation(
   const todayIsActive = todayIsInsidePlan && activeDays.includes(today.day());
   const currentStage = getCurrentSkillStage(goal);
   const nextSkillLevel = goal.level_definitions?.[current];
-  const checkpointCurrent = Math.max(goal.current_day ?? 0, 0);
   const nextReward = isSkill
     ? getNextSkillReward(goal, current)
     : isChallenge
       ? getNextCheckpoint(goal, current)
-      : getNextUnreachedCheckpoint(goal, completionCurrent, checkpointCurrent);
-  const unconfirmedCheckpoint = !isSkill && !isChallenge
-    ? getUnconfirmedCheckpoint(goal, completionCurrent, checkpointCurrent)
-    : null;
+      : null;
   const hasReachedTarget = current >= target;
   const isFuture = today.isBefore(planStart, 'day');
   const isExpired = planEnd !== null && today.isAfter(planEnd, 'day');
@@ -755,11 +670,8 @@ export function buildGoalPresentation(
     ? buildSkillMilestones(goal, current, target)
     : hasChallengeValues
       ? buildChallengeMilestones(goal, current, target, challengeUnit)
-      : buildMilestones(
+      : buildRhythmMilestones(
           goal,
-          checkpointCurrent,
-          current,
-          target,
           totalWeeks,
           isReadingHabit,
         );
@@ -812,19 +724,24 @@ export function buildGoalPresentation(
           : isFamily
             ? '每一次參與，都讓家裡的節奏更穩一點'
             : '先找到適合自己的生活節奏',
-    nextText: unconfirmedCheckpoint !== null
-      ? `已完成第 ${unconfirmedCheckpoint} 次，里程碑回饋可以和家人一起確認`
+    nextText: isReadingHabit
+      ? todayIsActive
+        ? '今天繼續就好，已完成的閱讀都會保留'
+        : '下一次繼續就好，已完成的閱讀都會保留'
       : isSkill && nextSkillLevel
         ? `下一個里程碑：${String(nextSkillLevel.name ?? `第 ${current + 1} 階段`)}`
         : nextReward
           ? hasChallengeValues
             ? `下一個里程碑：累積 ${nextReward.threshold}${challengeUnit ? ` ${challengeUnit}` : ''}`
             : `下一個里程碑：完成第 ${nextReward.threshold} 次`
-          : '下一個里程碑：一起看看這段時間的成長',
+          : `下一次繼續完成「${task.name}」就好`,
     planNotice,
     todayTitle,
     todayAction: isReadingHabit
-      ? `自己選一本喜歡的書，閱讀 ${Math.max(task.base_time_min, 15)} 分鐘`
+      ? goal.motivation_note?.trim()
+        || (task.base_time_min > 0
+          ? `${task.name} ${task.base_time_min} 分鐘，今天繼續就好`
+          : `${task.name}，今天繼續就好`)
       : isSkill
         ? `這一階段先練習：${currentStage}`
         : isChallenge

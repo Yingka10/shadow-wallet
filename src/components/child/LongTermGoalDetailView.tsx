@@ -737,6 +737,7 @@ function WeekProgressCard({
 function milestoneStatusLabel(milestone: GoalMilestone): string {
   if (milestone.status === 'completed') return '已完成';
   if (milestone.status === 'next') return '下一個里程碑';
+  if (milestone.status === 'planned') return '計畫節點';
   return '尚未到';
 }
 
@@ -1009,7 +1010,9 @@ export default function LongTermGoalDetailView({
         onOpenRecord={onOpenRecord}
       />
       <WeekProgressCard presentation={presentation} />
-      <MilestoneTimeline milestones={presentation.milestones} />
+      {presentation.milestones.length > 0 ? (
+        <MilestoneTimeline milestones={presentation.milestones} />
+      ) : null}
       <ReviewCard
         presentation={presentation}
         onOpenReview={onOpenReview}
