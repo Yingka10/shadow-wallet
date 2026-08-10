@@ -42,6 +42,18 @@ type ScheduleCandidate = {
   completedThisWeek: number;
 };
 
+/**
+ * A fixed-days task where the child completed it on fewer weekdays than it's
+ * scheduled for — a candidate for narrowing recurrence_days. Weekday numbers
+ * follow the project convention: 0=Sunday..6=Saturday.
+ */
+type RecurrenceCandidate = {
+  taskId: string;
+  taskName: string;
+  recurrenceDays: number[];
+  completedWeekdays: number[];
+};
+
 type WeeklyContext = {
   childId: string;
   familyId: string;
@@ -55,6 +67,7 @@ type WeeklyContext = {
   coinSpend: number;
   coinSpendCount: number;
   scheduleCandidates: ScheduleCandidate[];
+  recurrenceCandidates: RecurrenceCandidate[];
 };
 
 // 家長教養傾向的中文說明。只當作「給 AI 參考的背景」，用來拿捏建議口吻；
@@ -92,13 +105,15 @@ type GeminiInsightResult = {
   suggestions: Array<{
     body: string;
     actionLabel: string;
-    action: 'adjust_reminder' | 'increase_difficulty' | 'add_contribution' | 'adjust_schedule';
+    action: 'adjust_reminder' | 'increase_difficulty' | 'add_contribution' | 'adjust_schedule' | 'adjust_recurrence';
     taskId?: string;
     taskName?: string;
     currentClaimPeriod?: ScheduleClaimPeriod;
     currentMaxClaimsPerPeriod?: number;
     suggestedClaimPeriod?: ScheduleClaimPeriod;
     suggestedMaxClaimsPerPeriod?: number;
+    currentRecurrenceDays?: number[];
+    suggestedRecurrenceDays?: number[];
   }>;
   affirmations: string[];
   task_recommendations: Array<{
@@ -113,6 +128,15 @@ type GeminiInsightResult = {
     currentMaxClaimsPerPeriod: number;
     suggestedClaimPeriod: ScheduleClaimPeriod;
     suggestedMaxClaimsPerPeriod: number;
+  } | null;
+  /**
+   * 天數由後端決定性算出（見 RecurrenceCandidate），Gemini 只需要挑 taskId 並寫文案 —
+   * 不採信、也不要求它回傳任何跟星期幾有關的欄位。
+   */
+  recurrence_suggestion: {
+    taskId: string;
+    body: string;
+    actionLabel: string;
   } | null;
 };
 
@@ -140,6 +164,16 @@ async function generateInsight(ctx: WeeklyContext): Promise<GeminiInsightResult>
     ? `\n【這週有任務常常一次就做到上限，可能代表孩子想做得更多】\n${candidateLines}\n`
     : '';
 
+  const recurrenceCandidateLines = ctx.recurrenceCandidates
+    .map((c, i) =>
+      `${i + 1}. taskId="${c.taskId}"，任務名稱「${c.taskName}」，`
+      + `目前排定在${formatWeekdaysZh(c.recurrenceDays)}，`
+      + `這週實際只有在${formatWeekdaysZh(c.completedWeekdays)}完成`)
+    .join('\n');
+  const recurrenceSection = ctx.recurrenceCandidates.length > 0
+    ? `\n【這週有任務排定的天數比實際做到的天數多】\n${recurrenceCandidateLines}\n`
+    : '';
+
   const prompt = `你是一位溫柔、細心的親職陪伴顧問，正在幫一位家長看懂孩子這一週的狀況。
 你的讀者是「家長本人」，不是專業人士，所以說話要像跟一位朋友聊他的孩子一樣自然、有溫度。
 
@@ -150,7 +184,7 @@ async function generateInsight(ctx: WeeklyContext): Promise<GeminiInsightResult>
 - 這週各方面的完成情況：
 ${catLines}
 - 成長幣：這週賺到 ${ctx.coinIncome} 枚（來自 ${ctx.coinIncomeCount} 次），花掉 ${ctx.coinSpend} 枚（${ctx.coinSpendCount} 次兌換）
-${scheduleSection}
+${scheduleSection}${recurrenceSection}
 【非常重要：說話方式】
 1. 全程用溫暖、鼓勵、體貼的語氣，多看見孩子的努力，少批評。
 2. 用生活化的白話，想像你在跟一位不熟教育理論的家長講話。
@@ -178,8 +212,13 @@ ${scheduleSection}
   ],
   "schedule_suggestion": ${
     ctx.scheduleCandidates.length > 0
-      ? `{"taskId": "從上面清單挑一個最值得調整的 taskId，原封不動照抄，不要自己編", "body": "給家長的建議，40~60字，白話說明為什麼放寬這個任務的次數上限對孩子好，一定要在句子裡明確寫出「目前每週/每天最多幾次」跟「建議調整成最多幾次」這兩個具體數字，不要只寫「調高一點」「放寬一些」這種模糊講法", "actionLabel": "按鈕文字（5字內）", "suggestedClaimPeriod": "day 或 week 或 once 三選一", "suggestedMaxClaimsPerPeriod": 一個比目前上限更大的整數}`
+      ? `{"taskId": "從上面清單挑一個最值得調整的 taskId，原封不動照抄，不要自己編", "body": "給家長的建議，40~60字，白話說明為什麼放寬這個任務的次數上限對孩子好，一定要在句子裡明確寫出「目前每週/每天最多幾次」跟「建議調整成最多幾次」這兩個具體數字，不要只寫「調高一點」「放寬一些」這種模糊講法", "actionLabel": "按鈕文字（5字內）", "suggestedClaimPeriod": "day 或 week 二選一（直接沿用清單裡那個任務目前的規則，不要換成別的週期）", "suggestedMaxClaimsPerPeriod": 一個比目前上限更大的整數}`
       : 'null（這週沒有任務到達次數上限，不用勉強生一個建議，直接填 null）'
+  },
+  "recurrence_suggestion": ${
+    ctx.recurrenceCandidates.length > 0
+      ? `{"taskId": "從【這週有任務排定的天數比實際做到的天數多】清單挑一個最值得調整的 taskId，原封不動照抄，不要自己編", "body": "給家長的建議，40~60字，白話說明為什麼把這個任務的排定日縮小到孩子實際做得到的那幾天比較好，不需要在句子裡列出具體是星期幾（系統會自己補上）", "actionLabel": "按鈕文字（5字內）"}`
+      : 'null（這週沒有這種任務，不用勉強生一個建議，直接填 null）'
   }
 }
 
@@ -188,6 +227,7 @@ ${scheduleSection}
 - "category" 這個欄位請填 A、B、C、D 其中一個字母（A=自己的事自己做、B=幫忙家事、C=額外付出、D=學習成長），這也是系統用的，家長不會看到。
 - "schedule_suggestion" 只能從【這週有任務常常一次就做到上限】清單裡選一個 taskId，不能自己編一個 id、也不能選清單以外的任務；如果清單是空的，或你覺得沒有哪個任務真的值得調整，就填 null，不要硬湊。
 - "suggestedMaxClaimsPerPeriod" 一定要比清單裡寫的「目前上限」大，不要填一樣或更小的數字。
+- "recurrence_suggestion" 只能從【這週有任務排定的天數比實際做到的天數多】清單裡選一個 taskId，不能自己編、也不能選清單以外的任務；如果清單是空的就填 null，不要硬湊。這個建議完全不需要你自己判斷是星期幾，具體天數系統會直接從資料算好帶入，你只要負責把 body/actionLabel 寫得溫暖有說服力。
 - 除了上面兩個系統欄位，其他所有給人看的文字，一律用溫暖白話的繁體中文，不要出現代號或專有名詞。`;
 
   const raw = await callGemini(prompt);
@@ -213,10 +253,9 @@ ${scheduleSection}
     affirmations: Array.isArray(parsed.affirmations) ? parsed.affirmations : [],
     task_recommendations: Array.isArray(parsed.task_recommendations) ? parsed.task_recommendations : [],
     schedule_suggestion: validateScheduleSuggestion(parsed.schedule_suggestion, ctx.scheduleCandidates),
+    recurrence_suggestion: validateRecurrenceSuggestion(parsed.recurrence_suggestion, ctx.recurrenceCandidates),
   };
 }
-
-const VALID_CLAIM_PERIODS: ScheduleClaimPeriod[] = ['day', 'week', 'once'];
 
 /**
  * Gemini can only be trusted to pick a taskId from the candidate list we gave it —
@@ -230,7 +269,7 @@ function validateScheduleSuggestion(
   if (raw == null || typeof raw !== 'object') return null;
   const s = raw as Record<string, unknown>;
   if (typeof s.taskId !== 'string' || typeof s.body !== 'string' || typeof s.actionLabel !== 'string') return null;
-  if (typeof s.suggestedClaimPeriod !== 'string' || !VALID_CLAIM_PERIODS.includes(s.suggestedClaimPeriod as ScheduleClaimPeriod)) return null;
+  if (s.suggestedClaimPeriod !== 'day' && s.suggestedClaimPeriod !== 'week') return null;
   if (typeof s.suggestedMaxClaimsPerPeriod !== 'number' || !Number.isInteger(s.suggestedMaxClaimsPerPeriod) || s.suggestedMaxClaimsPerPeriod <= 0) return null;
 
   const candidate = candidates.find(c => c.taskId === s.taskId);
@@ -245,6 +284,30 @@ function validateScheduleSuggestion(
     currentMaxClaimsPerPeriod: candidate.maxClaimsPerPeriod,
     suggestedClaimPeriod: s.suggestedClaimPeriod as ScheduleClaimPeriod,
     suggestedMaxClaimsPerPeriod: s.suggestedMaxClaimsPerPeriod,
+  };
+}
+
+/**
+ * Same trust boundary as validateScheduleSuggestion, but stricter: we don't even
+ * parse day-of-week values out of Gemini's response — the exact days always come
+ * from the matched candidate (computed deterministically from real completion
+ * data), never from the model.
+ */
+function validateRecurrenceSuggestion(
+  raw: unknown,
+  candidates: RecurrenceCandidate[],
+): GeminiInsightResult['recurrence_suggestion'] {
+  if (raw == null || typeof raw !== 'object') return null;
+  const s = raw as Record<string, unknown>;
+  if (typeof s.taskId !== 'string' || typeof s.body !== 'string' || typeof s.actionLabel !== 'string') return null;
+
+  const candidate = candidates.find(c => c.taskId === s.taskId);
+  if (!candidate) return null;
+
+  return {
+    taskId: s.taskId,
+    body: s.body,
+    actionLabel: s.actionLabel,
   };
 }
 
@@ -302,6 +365,7 @@ function computeFallbackInsight(ctx: WeeklyContext): GeminiInsightResult {
       },
     ],
     schedule_suggestion: computeFallbackScheduleSuggestion(ctx.scheduleCandidates),
+    recurrence_suggestion: computeFallbackRecurrenceSuggestion(ctx.recurrenceCandidates),
   };
 }
 
@@ -324,9 +388,32 @@ function computeFallbackScheduleSuggestion(
   };
 }
 
+/** Deterministic version of the recurrence-days suggestion: pick the candidate with the fewest actual days done. */
+function computeFallbackRecurrenceSuggestion(
+  candidates: RecurrenceCandidate[],
+): GeminiInsightResult['recurrence_suggestion'] {
+  if (candidates.length === 0) return null;
+  const top = [...candidates].sort((a, b) => a.completedWeekdays.length - b.completedWeekdays.length)[0];
+  return {
+    taskId: top.taskId,
+    body: `「${top.taskName}」目前排定在${formatWeekdaysZh(top.recurrenceDays)}，`
+      + `但這週實際只有在${formatWeekdaysZh(top.completedWeekdays)}完成，`
+      + `可以考慮把排定日縮小到孩子實際做得到的那幾天，減少沒完成的壓力。`,
+    actionLabel: '調整排定日',
+  };
+}
+
 const CLAIM_PERIOD_LABEL_ZH: Record<ScheduleClaimPeriod, string> = {
   day: '每天', week: '每週', once: '整個任務期間',
 };
+
+// 專案慣例：0=週日..6=週六。顯示時固定週一排到週日。
+const WEEKDAY_ZH: Record<number, string> = { 0: '日', 1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六' };
+const WEEKDAY_DISPLAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+function formatWeekdaysZh(days: number[]): string {
+  const sorted = [...days].sort((a, b) => WEEKDAY_DISPLAY_ORDER.indexOf(a) - WEEKDAY_DISPLAY_ORDER.indexOf(b));
+  return `週${sorted.map(d => WEEKDAY_ZH[d]).join('、')}`;
+}
 
 function getIsoWeekStart(date: Date): string {
   // Get Monday of the ISO week containing `date`
@@ -358,7 +445,7 @@ async function processChild(
     supabase.from('child_tasks').select('task_id').eq('child_id', childId).eq('is_active', true),
     supabase
       .from('task_completions')
-      .select('task_id, coin_earned')
+      .select('task_id, coin_earned, completed_at')
       .eq('child_id', childId)
       .gte('completed_at', weekStartISO)
       .lt('completed_at', weekEndISO),
@@ -371,9 +458,12 @@ async function processChild(
 
   const [tasksRes, txRes, childRes, existingReportRes] = await Promise.all([
     taskIds.length > 0
-      ? supabase.from('tasks').select('id, name, category, claim_period, max_claims_per_period').in('id', taskIds).eq('is_active', true)
+      ? supabase.from('tasks').select('id, name, category, claim_period, max_claims_per_period, day_type, recurrence_days').in('id', taskIds).eq('is_active', true)
       : Promise.resolve({
-          data: [] as { id: string; name: string; category: string; claim_period: string; max_claims_per_period: number }[],
+          data: [] as {
+            id: string; name: string; category: string; claim_period: string; max_claims_per_period: number;
+            day_type: string; recurrence_days: number[] | null;
+          }[],
           error: null,
         }),
     walletId
@@ -417,6 +507,7 @@ async function processChild(
   // 只讓 Gemini 從這份清單挑，不讓它自己生 taskId（見 validateScheduleSuggestion）。
   const taskRows = (tasksRes.data ?? []) as {
     id: string; name: string; category: string; claim_period: string; max_claims_per_period: number;
+    day_type: string; recurrence_days: number[] | null;
   }[];
   const scheduleCandidates: ScheduleCandidate[] = taskRows
     .map((t): ScheduleCandidate => ({
@@ -427,11 +518,38 @@ async function processChild(
       completedThisWeek: completionCountByTask.get(t.id) ?? 0,
     }))
     .filter((c: ScheduleCandidate) =>
-      VALID_CLAIM_PERIODS.includes(c.claimPeriod)
+      // 'once' 是「整個任務期間只能做幾次」的單次任務語意，跟這裡「這週建議放寬」
+      // 的框架不合，不當候選。
+      (c.claimPeriod === 'day' || c.claimPeriod === 'week')
       && c.maxClaimsPerPeriod > 0
       && c.completedThisWeek >= c.maxClaimsPerPeriod)
     .sort((a: ScheduleCandidate, b: ScheduleCandidate) => b.completedThisWeek - a.completedThisWeek)
     .slice(0, 3);
+
+  // 這週排定天數比實際完成天數多的固定星期任務 —— 值得問「要不要縮小排定日」的候選。
+  // 天數完全從資料算出來，不讓 Gemini 自己判斷（見 validateRecurrenceSuggestion）。
+  const completedWeekdaysByTask = new Map<string, Set<number>>();
+  for (const c of completions as { task_id: string; completed_at: string }[]) {
+    // Asia/Taipei = UTC+8，先加 8 小時再取星期幾，才不會在日界附近算錯天。
+    const taipeiMs = new Date(c.completed_at).getTime() + 8 * 60 * 60 * 1000;
+    const weekday = new Date(taipeiMs).getUTCDay(); // 0=週日..6=週六，跟專案慣例一致
+    if (!completedWeekdaysByTask.has(c.task_id)) completedWeekdaysByTask.set(c.task_id, new Set());
+    completedWeekdaysByTask.get(c.task_id)!.add(weekday);
+  }
+  const recurrenceCandidates: RecurrenceCandidate[] = taskRows
+    .filter(t => t.day_type === 'custom' && Array.isArray(t.recurrence_days) && t.recurrence_days.length > 1)
+    .map((t): RecurrenceCandidate => ({
+      taskId: t.id,
+      taskName: t.name,
+      recurrenceDays: t.recurrence_days as number[],
+      completedWeekdays: [...(completedWeekdaysByTask.get(t.id) ?? new Set<number>())].sort((a, b) => a - b),
+    }))
+    .filter(c =>
+      c.completedWeekdays.length > 0
+      && c.completedWeekdays.length < c.recurrenceDays.length
+      && c.completedWeekdays.every(d => c.recurrenceDays.includes(d)))
+    .sort((a, b) => a.completedWeekdays.length - b.completedWeekdays.length)
+    .slice(0, 2);
 
   // Build coin flow
   const txData = txRes.data ?? [];
@@ -451,6 +569,7 @@ async function processChild(
     coinSpend: Math.abs(redeemTxs.reduce((s, t) => s + t.amount, 0)),
     coinSpendCount: redeemTxs.length,
     scheduleCandidates,
+    recurrenceCandidates,
   };
 
   let insight: GeminiInsightResult;
@@ -480,7 +599,21 @@ async function processChild(
     suggestedClaimPeriod: insight.schedule_suggestion.suggestedClaimPeriod,
     suggestedMaxClaimsPerPeriod: insight.schedule_suggestion.suggestedMaxClaimsPerPeriod,
   }];
-  const allSuggestions = [...insight.suggestions, ...scheduleSuggestionEntry];
+
+  // 同樣併進去，但天數一律取候選資料算好的值，不用 insight.recurrence_suggestion 裡的任何天數欄位
+  // （它本來就沒有——見 validateRecurrenceSuggestion 的設計）。
+  const matchedRecurrenceCandidate = recurrenceCandidates.find(c => c.taskId === insight.recurrence_suggestion?.taskId);
+  const recurrenceSuggestionEntry = insight.recurrence_suggestion == null || matchedRecurrenceCandidate == null ? [] : [{
+    body: insight.recurrence_suggestion.body,
+    actionLabel: insight.recurrence_suggestion.actionLabel,
+    action: 'adjust_recurrence' as const,
+    taskId: insight.recurrence_suggestion.taskId,
+    taskName: matchedRecurrenceCandidate.taskName,
+    currentRecurrenceDays: matchedRecurrenceCandidate.recurrenceDays,
+    suggestedRecurrenceDays: matchedRecurrenceCandidate.completedWeekdays,
+  }];
+
+  const allSuggestions = [...insight.suggestions, ...scheduleSuggestionEntry, ...recurrenceSuggestionEntry];
 
   // Upsert weekly_reports.
   // The error MUST be checked: a swallowed write failure (missing unique index

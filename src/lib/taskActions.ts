@@ -399,6 +399,42 @@ export async function updateTaskSchedule(
   };
 }
 
+/**
+ * Updates an existing task's recurrence days (which weekdays it's scheduled on),
+ * e.g. adopting a weekly-report AI suggestion. Only valid for day_type='custom'
+ * (fixed-days) tasks. Writes an intervention_log entry for audit/traceability.
+ *
+ * @param recurrenceDays Weekday numbers, project convention 0=Sunday..6=Saturday
+ * @throws when the caller is not a parent of the task's family, or the values are invalid
+ */
+export async function updateTaskRecurrenceDays(
+  taskId: string,
+  recurrenceDays: number[],
+): Promise<{ taskId: string; recurrenceDays: number[] }> {
+  const { data, error } = await supabase.rpc('update_task_recurrence_days', {
+    p_task_id: taskId,
+    p_recurrence_days: recurrenceDays,
+  });
+
+  if (error) throw new Error(error.message);
+
+  const result = data as {
+    error?: string;
+    taskId?: string;
+    recurrenceDays?: number[];
+  };
+
+  if (result.error === 'empty_days') throw new Error('至少要選一天');
+  if (result.error === 'invalid_day_value') throw new Error('星期幾的值不合法');
+  if (result.error === 'duplicate_day_value') throw new Error('星期幾不能重複');
+  if (result.error === 'not_fixed_days_task') throw new Error('這個任務不是固定星期執行，無法調整星期');
+
+  return {
+    taskId: result.taskId!,
+    recurrenceDays: result.recurrenceDays!,
+  };
+}
+
 /** Returns true when the given day-of-week is a valid check-in day for this habit. */
 export function isActiveDayForHabit(dow: number, activeDays: number[] | null): boolean {
   if (activeDays === null) return true;

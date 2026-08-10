@@ -123,6 +123,12 @@ export function useParentRedemption(familyId: string | null) {
   const [error, setError] = useState<string | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const lastKnownWishIdRef = useRef<string | null>(null);
+  // 這個 hook 同時被好幾個畫面使用（ParentHomeTablet、ParentRewardManagementTablet 等）。
+  // React Navigation 常讓多個畫面同時保持掛載，若兩個 instance 用同一個 familyId 拚出
+  // 一樣的 topic 字串，Supabase realtime client 會重用同一個底層 channel 物件 —— 第二個
+  // instance 呼叫 .on() 時該物件已經 .subscribe() 過，會直接丟錯。用一個每個 instance
+  // 唯一的後綴，讓不同畫面的訂閱永遠不會撞名。
+  const instanceIdRef = useRef(Math.random().toString(36).slice(2));
 
   const fetchAll = useCallback(async () => {
     if (!familyId) return;
@@ -207,7 +213,7 @@ export function useParentRedemption(familyId: string | null) {
       if (!isMounted) return;
 
       const channel = supabase
-        .channel(`reward_items:family_${familyId}`, { config: { broadcast: { self: false } } })
+        .channel(`reward_items:family_${familyId}:${instanceIdRef.current}`, { config: { broadcast: { self: false } } })
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'reward_items', filter: `family_id=eq.${familyId}` },
