@@ -266,6 +266,68 @@ export async function chatWithAdvisor(input: AdvisorChatInput): Promise<AdvisorC
   }
 }
 
+export type WishClarifyHistoryTurn = { question: string; answer: string };
+
+export type WishClarifyResult =
+  | { done: false; question: string; options: string[] }
+  | {
+      done: true;
+      shortTitle: string;
+      wishType: 'item' | 'privilege';
+      reason: string;
+      summary: string;
+      suggestedCoins: number;
+      confirmNeeded: string[];
+    };
+
+/** 去掉「我想要」「我想」這類開頭贅詞，當作 ai-proxy 完全連不上時的保底標題。 */
+function stripWishFillerPrefix(text: string): string {
+  const stripped = text.trim().replace(/^(我想要|我想|我要|想要|我希望|希望)/, '').trim();
+  return (stripped || text.trim()).slice(0, 24);
+}
+
+function wishClarifyFallback(wishText: string): WishClarifyResult {
+  return {
+    done: true,
+    shortTitle: stripWishFillerPrefix(wishText),
+    wishType: 'item',
+    reason: wishText,
+    summary: wishText,
+    suggestedCoins: 40,
+    confirmNeeded: [],
+  };
+}
+
+/**
+ * 許願樹的澄清問答：孩子丟一句話願望，AI 判斷要不要再問一題（選項式，最多兩輪），
+ * 問完後整理成家長要看的結構化資訊。幣值只是建議，不是最終價格。
+ *
+ * 任何錯誤（含格式不對的回應）一律 fallback 成「不追問、直接整理」，
+ * 讓許願流程永遠有路可走，不會把孩子卡在問答裡。
+ */
+export async function clarifyWish(
+  wishText: string,
+  ageGroup: string,
+  history: WishClarifyHistoryTurn[],
+): Promise<WishClarifyResult> {
+  try {
+    const result = await invokeAiProxy<WishClarifyResult>('wishClarify', { wishText, ageGroup, history });
+    if (result.done === false) {
+      if (typeof result.question === 'string' && result.question.trim() && Array.isArray(result.options) && result.options.length >= 2) {
+        return result;
+      }
+      return wishClarifyFallback(wishText);
+    }
+    if (result.done === true && result.summary) {
+      return { ...result, shortTitle: result.shortTitle?.trim() || stripWishFillerPrefix(wishText) };
+    }
+    return wishClarifyFallback(wishText);
+  } catch (err) {
+    console.warn('[aiAgent.clarifyWish] fallback due to error:', err);
+    return wishClarifyFallback(wishText);
+  }
+}
+
 export type WeeklyInsightSummary = {
   completionRate: number;
   totalTimeSavedMin: number;

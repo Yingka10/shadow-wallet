@@ -19,7 +19,7 @@ import BottomNav from '../../components/BottomNav';
 import GradientBackground from '../../components/child/GradientBackground';
 import WishTreeComponent from '../../components/WishTreeComponent';
 import GrassGroundScene from '../../components/child/GrassGroundScene';
-import WishModalComponent from '../../components/WishModalComponent';
+import WishModalComponent, { type WishSubmitPayload } from '../../components/WishModalComponent';
 import ProgressBar from '../../components/child/ProgressBar';
 import { CoinIcon } from '../../components/icons/TaskIcons';
 import { BookIcon, MovieIcon, CardIcon, ComicIcon, BasketIcon, GiftIcon } from '../../components/icons/WishIcons';
@@ -35,6 +35,7 @@ type Nav = StackNavigationProp<RootStackParamList, 'Wish'>;
 type ChildData = {
   familyId: string;
   nickname: string;
+  ageGroup: string;
 };
 
 type WishItem = {
@@ -208,12 +209,12 @@ export default function WishScreen() {
     try {
       const { data, error } = await supabase
         .from('children')
-        .select('family_id, nickname')
+        .select('family_id, nickname, age_group')
         .eq('id', childId)
         .single();
 
       if (error) throw error;
-      if (data) setChild({ familyId: data.family_id, nickname: data.nickname });
+      if (data) setChild({ familyId: data.family_id, nickname: data.nickname, ageGroup: data.age_group ?? '6-9' });
     } catch (err) {
       console.error('[WishScreen] loadChild error:', err);
     }
@@ -298,12 +299,12 @@ export default function WishScreen() {
   }, [child?.familyId, childId, loadWishes, redeemItem, redeeming, refreshWallet]);
 
   const handleWishModalSubmit = useCallback(
-    async (wishText: string) => {
+    async (payload: WishSubmitPayload) => {
       if (!child) {
         Alert.alert('資料還在載入', '請稍後再試');
         return;
       }
-      if (!wishText.trim()) {
+      if (!payload.wishText.trim()) {
         Alert.alert('請說出或輸入願望', '例如：去書店挑一本繪本');
         return;
       }
@@ -313,12 +314,18 @@ export default function WishScreen() {
         const { error } = await supabase.from('reward_items').insert({
           family_id: child.familyId,
           child_id: childId,
-          name: wishText.trim(),
-          reward_type: 'item',
+          // 顯示用的是 AI 濃縮過的短標題，不是孩子的原句——
+          // 「我想要去朋友家玩」在畫面上只會看到「去朋友家玩」。
+          name: payload.shortTitle.trim() || payload.wishText.trim(),
+          reward_type: payload.wishType,
           coin_cost: 0,
           added_by: 'child',
           parent_approved: false,
           is_active: true,
+          child_reason: payload.reason,
+          ai_summary: payload.summary,
+          ai_suggested_coins: payload.suggestedCoins,
+          confirm_needed: payload.confirmNeeded,
         });
 
         if (error) throw error;
@@ -337,7 +344,10 @@ export default function WishScreen() {
   // ── 單張願望卡片 ────────────────────────────────────────────
   function WishCard({ item }: { item: WishItem }) {
     const isReady = item.parent_approved && item.coin_cost > 0 && balance >= item.coin_cost;
-    const isPending = item.added_by === 'child' && !item.parent_approved;
+    // 舊資料裡有些願望是「已核可」但 coin_cost 還停在 0（P0-2 修好之前核可的），
+    // 這種狀態當成「還沒定價」處理——不然下面的 shortfall 會算出負數，
+    // 顯示成「再存 -140」這種看起來像壞掉的畫面。
+    const isPending = (item.added_by === 'child' && !item.parent_approved) || item.coin_cost <= 0;
     const saved = Math.max(0, Math.min(balance, item.coin_cost));
     const pct = item.coin_cost > 0 ? (saved / item.coin_cost) * 100 : 0;
     const shortfall = item.coin_cost - balance;
@@ -570,6 +580,7 @@ export default function WishScreen() {
         onClose={() => setWishModalVisible(false)}
         onSubmit={handleWishModalSubmit}
         childNickname={child?.nickname ?? '小寶貝'}
+        ageGroup={child?.ageGroup ?? '6-9'}
       />
       </SafeAreaView>
     </View>
