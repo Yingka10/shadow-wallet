@@ -4,7 +4,7 @@ import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import isoWeek from 'dayjs/plugin/isoWeek';
 import { supabase } from '../lib/supabase';
-import { updateTaskSchedule } from '../lib/taskActions';
+import { updateTaskSchedule, updateTaskRecurrenceDays } from '../lib/taskActions';
 import type { TaskCategory } from '../types/database';
 
 dayjs.extend(utc);
@@ -34,7 +34,8 @@ export type SuggestionAction =
   | 'adjust_reminder'
   | 'increase_difficulty'
   | 'add_contribution'
-  | 'adjust_schedule';
+  | 'adjust_schedule'
+  | 'adjust_recurrence';
 
 export type ScheduleClaimPeriod = 'day' | 'week' | 'once';
 const VALID_CLAIM_PERIODS: ScheduleClaimPeriod[] = ['day', 'week', 'once'];
@@ -49,25 +50,43 @@ export type WeeklySuggestion = {
   currentMaxClaimsPerPeriod?: number;
   suggestedClaimPeriod?: ScheduleClaimPeriod;
   suggestedMaxClaimsPerPeriod?: number;
+  currentRecurrenceDays?: number[];
+  suggestedRecurrenceDays?: number[];
   adopted?: boolean;
 };
+
+function isValidDayArray(v: unknown): v is number[] {
+  return Array.isArray(v)
+    && v.length > 0
+    && v.every(d => typeof d === 'number' && Number.isInteger(d) && d >= 0 && d <= 6)
+    && new Set(v).size === v.length;
+}
 
 /**
  * Gemini's weekly-report output isn't structured yet, so schedule-suggestion
  * fields may be missing, malformed, or hand-seeded for testing. Drop them
- * (keep the plain-text suggestion) unless both fields are present and valid.
+ * (keep the plain-text suggestion) unless both fields of a kind are present and valid.
  */
 function sanitizeSuggestions(raw: WeeklySuggestion[]): WeeklySuggestion[] {
   return raw.map(sg => {
+    let clean = sg;
+
     const validPeriod = VALID_CLAIM_PERIODS.includes(sg.suggestedClaimPeriod as ScheduleClaimPeriod);
     const validMax = typeof sg.suggestedMaxClaimsPerPeriod === 'number'
       && Number.isInteger(sg.suggestedMaxClaimsPerPeriod)
       && sg.suggestedMaxClaimsPerPeriod > 0;
     if (!sg.taskId || !validPeriod || !validMax) {
-      const { suggestedClaimPeriod, suggestedMaxClaimsPerPeriod, currentClaimPeriod, currentMaxClaimsPerPeriod, ...rest } = sg;
-      return rest;
+      const { suggestedClaimPeriod, suggestedMaxClaimsPerPeriod, currentClaimPeriod, currentMaxClaimsPerPeriod, ...rest } = clean;
+      clean = rest;
     }
-    return sg;
+
+    const validDays = isValidDayArray(sg.suggestedRecurrenceDays);
+    if (!sg.taskId || !validDays) {
+      const { suggestedRecurrenceDays, currentRecurrenceDays, ...rest } = clean;
+      clean = rest;
+    }
+
+    return clean;
   });
 }
 
@@ -163,6 +182,7 @@ export type ParentWeeklyReportData = {
     claimPeriod: ScheduleClaimPeriod,
     maxClaimsPerPeriod: number,
   ) => Promise<void>;
+  adoptRecurrenceSuggestion: (taskId: string, recurrenceDays: number[]) => Promise<void>;
 };
 
 // ---------------------------------------------------------------------------
@@ -641,14 +661,10 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     await fetchAll();
   }, [childId, fetchAll]);
 
-  const adoptScheduleSuggestion = useCallback(async (
-    taskId: string,
-    claimPeriod: ScheduleClaimPeriod,
-    maxClaimsPerPeriod: number,
-  ) => {
-    await updateTaskSchedule(taskId, claimPeriod, maxClaimsPerPeriod);
-
-    // 標記已採用（而非移除），讓卡片留在清單裡但按鈕換成「已套用」。
+  // 標記已採用（而非移除），讓卡片留在清單裡但按鈕換成「已套用」。
+  // 同一個任務可能同時有排程建議跟排定日建議（taskId 相同），一定要連 action 種類
+  // 一起比對，不然採用其中一個會把另一個也標成已套用。
+  const markSuggestionAdopted = useCallback(async (taskId: string, action: SuggestionAction) => {
     const weekStartDate = getWeekBounds(weekOffset).start.format('YYYY-MM-DD');
     const { data: reportRow, error: fetchErr } = await supabase
       .from('weekly_reports')
@@ -664,16 +680,33 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
         dialogue?: string;
       };
       const updated = (current.suggestions ?? []).map(sg =>
-        sg.taskId === taskId ? { ...sg, adopted: true } : sg,
+        sg.taskId === taskId && sg.action === action ? { ...sg, adopted: true } : sg,
       );
       await supabase
         .from('weekly_reports')
         .update({ ai_suggestions: { ...current, suggestions: updated } })
         .eq('id', reportRow.id);
     }
+  }, [childId, weekOffset]);
 
+  const adoptScheduleSuggestion = useCallback(async (
+    taskId: string,
+    claimPeriod: ScheduleClaimPeriod,
+    maxClaimsPerPeriod: number,
+  ) => {
+    await updateTaskSchedule(taskId, claimPeriod, maxClaimsPerPeriod);
+    await markSuggestionAdopted(taskId, 'adjust_schedule');
     await fetchAll();
-  }, [childId, weekOffset, fetchAll]);
+  }, [markSuggestionAdopted, fetchAll]);
+
+  const adoptRecurrenceSuggestion = useCallback(async (
+    taskId: string,
+    recurrenceDays: number[],
+  ) => {
+    await updateTaskRecurrenceDays(taskId, recurrenceDays);
+    await markSuggestionAdopted(taskId, 'adjust_recurrence');
+    await fetchAll();
+  }, [markSuggestionAdopted, fetchAll]);
 
   const requestAiRefresh = useCallback(async () => {
     const weekStartDate = getWeekBounds(weekOffset).start.format('YYYY-MM-DD');
@@ -715,5 +748,6 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     refresh: fetchAll,
     requestAiRefresh,
     adoptScheduleSuggestion,
+    adoptRecurrenceSuggestion,
   };
 }

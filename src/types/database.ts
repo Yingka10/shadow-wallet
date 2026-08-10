@@ -1102,6 +1102,13 @@ export interface Database {
         };
         Returns: { error?: string; taskId?: string; claimPeriod?: string; maxClaimsPerPeriod?: number };
       };
+      update_task_recurrence_days: {
+        Args: {
+          p_task_id: string;
+          p_recurrence_days: number[];
+        };
+        Returns: { error?: string; taskId?: string; recurrenceDays?: number[] };
+      };
     };
     Enums: {
       [_ in never]: never;

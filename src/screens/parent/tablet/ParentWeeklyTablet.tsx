@@ -52,6 +52,8 @@ import {
   ClockIcon,
   BellIcon,
 } from './home/homeIcons';
+import { WeekdayPicker } from './taskDrawer/editors';
+import { WEEKDAYS } from './taskDrawer/taskDraft';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -206,6 +208,8 @@ type ReviewPrompt = {
   currentMaxClaimsPerPeriod?: number;
   suggestedClaimPeriod?: ScheduleClaimPeriod;
   suggestedMaxClaimsPerPeriod?: number;
+  currentRecurrenceDays?: number[];
+  suggestedRecurrenceDays?: number[];
   adopted?: boolean;
 };
 
@@ -213,13 +217,28 @@ const CLAIM_PERIOD_LABEL: Record<ScheduleClaimPeriod, string> = {
   day: '每天', week: '每週', once: '整個任務期間',
 };
 
+const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // 週一 ~ 週日
+const WEEKDAY_LABEL: Record<number, string> = Object.fromEntries(
+  WEEKDAYS.map(d => [d.value, d.label]),
+);
+
+/** 「週二、三、五」這種顯示字串，固定週一排到週日的順序。 */
+function formatDays(days: number[]): string {
+  const sorted = [...days].sort((a, b) => WEEKDAY_ORDER.indexOf(a) - WEEKDAY_ORDER.indexOf(b));
+  return `週${sorted.map(d => WEEKDAY_LABEL[d]).join('、')}`;
+}
+
 // 'once'（整個任務期間、次數上限永不重置）不放進這個編輯器：這個功能只處理
 // 週期性任務的頻率上限調整，混進「一輩子只能做幾次」的單次任務語意會誤導家長。
 const CLAIM_PERIOD_OPTIONS: ScheduleClaimPeriod[] = ['day', 'week'];
 
+type ScheduleAdoptOverride =
+  | { claimPeriod: ScheduleClaimPeriod; maxClaimsPerPeriod: number }
+  | { recurrenceDays: number[] };
+
 function ReviewPromptCard({ item, onAdopt, onDefer }: {
   item: ReviewPrompt;
-  onAdopt: (item: ReviewPrompt, override?: { claimPeriod: ScheduleClaimPeriod; maxClaimsPerPeriod: number }) => Promise<void>;
+  onAdopt: (item: ReviewPrompt, override?: ScheduleAdoptOverride) => Promise<void>;
   onDefer: (item: ReviewPrompt) => void;
 }) {
   const [adopting, setAdopting] = useState(false);
@@ -227,18 +246,23 @@ function ReviewPromptCard({ item, onAdopt, onDefer }: {
   const [editing, setEditing] = useState(false);
   const [editClaimPeriod, setEditClaimPeriod] = useState<ScheduleClaimPeriod>(item.suggestedClaimPeriod ?? 'week');
   const [editMaxClaims, setEditMaxClaims] = useState(item.suggestedMaxClaimsPerPeriod ?? 1);
+  const [editRecurrenceDays, setEditRecurrenceDays] = useState<number[]>(item.suggestedRecurrenceDays ?? []);
   const isScheduleSuggestion = item.taskId != null
     && item.suggestedClaimPeriod != null
     && item.suggestedMaxClaimsPerPeriod != null;
+  const isRecurrenceSuggestion = item.taskId != null
+    && item.suggestedRecurrenceDays != null;
+  const isActionable = isScheduleSuggestion || isRecurrenceSuggestion;
 
   const startEditing = () => {
     setEditClaimPeriod(item.suggestedClaimPeriod ?? 'week');
     setEditMaxClaims(item.suggestedMaxClaimsPerPeriod ?? 1);
+    setEditRecurrenceDays(item.suggestedRecurrenceDays ?? []);
     setAdoptError(null);
     setEditing(true);
   };
 
-  const handleAdopt = async (override?: { claimPeriod: ScheduleClaimPeriod; maxClaimsPerPeriod: number }) => {
+  const handleAdopt = async (override?: ScheduleAdoptOverride) => {
     setAdopting(true);
     setAdoptError(null);
     try {
@@ -268,6 +292,14 @@ function ReviewPromptCard({ item, onAdopt, onDefer }: {
               ? `目前：${CLAIM_PERIOD_LABEL[item.currentClaimPeriod]}最多 ${item.currentMaxClaimsPerPeriod} 次　→　`
               : ''}
             建議：{CLAIM_PERIOD_LABEL[item.suggestedClaimPeriod!]}最多 {item.suggestedMaxClaimsPerPeriod} 次
+          </Text>
+        )}
+        {isRecurrenceSuggestion && !editing && (
+          <Text style={s.scheduleDiffText}>
+            {item.currentRecurrenceDays != null
+              ? `目前：${formatDays(item.currentRecurrenceDays)}　→　`
+              : ''}
+            建議：{formatDays(item.suggestedRecurrenceDays!)}
           </Text>
         )}
 
@@ -307,8 +339,14 @@ function ReviewPromptCard({ item, onAdopt, onDefer }: {
             </View>
           </View>
         )}
+        {isRecurrenceSuggestion && editing && (
+          <View style={s.editBox}>
+            <Text style={s.editLabel}>調整為</Text>
+            <WeekdayPicker value={editRecurrenceDays} onChange={setEditRecurrenceDays} />
+          </View>
+        )}
 
-        {isScheduleSuggestion && (
+        {isActionable && (
           <View style={s.reviewPromptActions}>
             {item.adopted ? (
               <View style={s.adoptedBadge}>
@@ -319,8 +357,12 @@ function ReviewPromptCard({ item, onAdopt, onDefer }: {
               <>
                 <TouchableOpacity
                   style={s.adoptBtn}
-                  onPress={() => handleAdopt({ claimPeriod: editClaimPeriod, maxClaimsPerPeriod: editMaxClaims })}
-                  disabled={adopting}
+                  onPress={() => handleAdopt(
+                    isRecurrenceSuggestion
+                      ? { recurrenceDays: editRecurrenceDays }
+                      : { claimPeriod: editClaimPeriod, maxClaimsPerPeriod: editMaxClaims },
+                  )}
+                  disabled={adopting || (isRecurrenceSuggestion && editRecurrenceDays.length === 0)}
                 >
                   {adopting
                     ? <ActivityIndicator size="small" color={ParentColors.accent} />
@@ -711,7 +753,7 @@ export default function ParentWeeklyTablet() {
     loading, error,
     canGoBack, canGoForward,
     goBack, goForward,
-    refresh, requestAiRefresh, adoptScheduleSuggestion,
+    refresh, requestAiRefresh, adoptScheduleSuggestion, adoptRecurrenceSuggestion,
   } = useParentWeeklyReport(childId);
 
   const [recordTab, setRecordTab] = useState(0);
@@ -794,6 +836,8 @@ export default function ParentWeeklyTablet() {
       currentMaxClaimsPerPeriod: sg.currentMaxClaimsPerPeriod,
       suggestedClaimPeriod: sg.suggestedClaimPeriod,
       suggestedMaxClaimsPerPeriod: sg.suggestedMaxClaimsPerPeriod,
+      currentRecurrenceDays: sg.currentRecurrenceDays,
+      suggestedRecurrenceDays: sg.suggestedRecurrenceDays,
       adopted: sg.adopted,
     }))
     // 可以實際採用的排程建議優先顯示。
@@ -1014,8 +1058,18 @@ export default function ParentWeeklyTablet() {
                       item={item}
                       onAdopt={async (i2, override) => {
                         if (i2.taskId == null) return;
-                        const claimPeriod = override?.claimPeriod ?? i2.suggestedClaimPeriod;
-                        const maxClaimsPerPeriod = override?.maxClaimsPerPeriod ?? i2.suggestedMaxClaimsPerPeriod;
+                        const isRecurrence = (override && 'recurrenceDays' in override)
+                          || (!override && i2.suggestedRecurrenceDays != null);
+                        if (isRecurrence) {
+                          const recurrenceDays = override && 'recurrenceDays' in override
+                            ? override.recurrenceDays
+                            : i2.suggestedRecurrenceDays;
+                          if (recurrenceDays == null) return;
+                          await adoptRecurrenceSuggestion(i2.taskId, recurrenceDays);
+                          return;
+                        }
+                        const claimPeriod = override && 'claimPeriod' in override ? override.claimPeriod : i2.suggestedClaimPeriod;
+                        const maxClaimsPerPeriod = override && 'maxClaimsPerPeriod' in override ? override.maxClaimsPerPeriod : i2.suggestedMaxClaimsPerPeriod;
                         if (claimPeriod == null || maxClaimsPerPeriod == null) return;
                         await adoptScheduleSuggestion(i2.taskId, claimPeriod, maxClaimsPerPeriod);
                       }}
