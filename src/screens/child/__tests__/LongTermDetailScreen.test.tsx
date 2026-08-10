@@ -322,7 +322,8 @@ describe('LongTermDetailScreen', () => {
     expect(screen.queryByText(/自己開始/)).toBeNull();
     expect(screen.queryByText('3 / 20 次')).toBeNull();
     expect(screen.getByTestId('goal-hero')).toBeTruthy();
-    expect(screen.getByTestId('goal-rewards')).toBeTruthy();
+    expect(screen.queryByTestId('goal-rewards')).toBeNull();
+    expect(screen.queryByText('成長里程碑')).toBeNull();
   });
 
   it('keeps existing long-term tasks readable before context columns are migrated', async () => {
@@ -725,7 +726,7 @@ describe('LongTermDetailScreen', () => {
     expect(screen.queryByText('晚餐後記錄')).toBeNull();
   });
 
-  it('updates the local checkpoint progress after a habit milestone succeeds', async () => {
+  it('keeps a returned reading checkpoint out of the child progress UI', async () => {
     mockReadingGoal = {
       ...mockBaseGoal,
       current_day: 4,
@@ -736,13 +737,16 @@ describe('LongTermDetailScreen', () => {
     });
     render(<LongTermDetailScreen />);
 
-    expect(await screen.findByText('達成後成長幣 +10')).toBeTruthy();
+    expect(await screen.findByText('本週完成 3／5 次')).toBeTruthy();
+    expect(screen.queryByTestId('goal-rewards')).toBeNull();
     fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
 
-    expect(await screen.findByText('成長幣 +10 已記下')).toBeTruthy();
+    expect(await screen.findByText('今天已完成 15 分鐘')).toBeTruthy();
+    expect(screen.queryByTestId('goal-rewards')).toBeNull();
+    expect(screen.queryByText(/成長幣 \+10/)).toBeNull();
   });
 
-  it('does not guess checkpoint progress for a habit completion without a milestone', async () => {
+  it('keeps reading progress completion-based when the RPC returns no milestone', async () => {
     mockReadingGoal = {
       ...mockBaseGoal,
       current_day: 4,
@@ -753,12 +757,13 @@ describe('LongTermDetailScreen', () => {
     });
     render(<LongTermDetailScreen />);
 
-    expect(await screen.findByText('達成後成長幣 +10')).toBeTruthy();
+    expect(await screen.findByText('本週完成 3／5 次')).toBeTruthy();
+    expect(screen.queryByTestId('goal-rewards')).toBeNull();
     fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
 
     await screen.findByText('今天已完成 15 分鐘');
-    expect(screen.getByText('達成後成長幣 +10')).toBeTruthy();
-    expect(screen.queryByText('成長幣 +10 已記下')).toBeNull();
+    expect(screen.queryByTestId('goal-rewards')).toBeNull();
+    expect(screen.queryByText(/成長幣 \+10/)).toBeNull();
   });
 
   it('does not apply a returned milestone to family current_day', async () => {
@@ -773,12 +778,12 @@ describe('LongTermDetailScreen', () => {
     });
     render(<LongTermDetailScreen />);
 
-    expect(await screen.findByText('達成後成長幣 +10')).toBeTruthy();
+    expect(await screen.findByText('成長幣 +10（達成時一起確認）')).toBeTruthy();
     fireEvent.press(screen.getByLabelText('記下今天的完成'));
 
     await screen.findByText('今天已完成');
-    expect(screen.getByText('達成後成長幣 +10')).toBeTruthy();
-    expect(screen.queryByText('成長幣 +10 已記下')).toBeNull();
+    expect(screen.getByText('成長幣 +10（達成時一起確認）')).toBeTruthy();
+    expect(screen.queryByText(/已記下/)).toBeNull();
   });
 
   it('corrects the selected real completion and updates the record sheet', async () => {

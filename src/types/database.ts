@@ -275,6 +275,8 @@ export type LongTermGoal = {
   checkpoint_rewards: CheckpointRewards | null;
   motivation_note: string | null;
   started_at: string;
+  /** 計畫最後一天（含）；新長期任務由 long_term_goals 保存。 */
+  end_date?: string | null;
   /** 第幾天做第一次回顧。0 或 null = 家長關掉了。抽屜的長期任務會寫它。 */
   first_review_after_days?: number | null;
   weekend_review_enabled?: boolean | null;

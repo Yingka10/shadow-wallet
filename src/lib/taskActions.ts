@@ -444,7 +444,8 @@ export function isActiveDayForHabit(dow: number, activeDays: number[] | null): b
 /**
  * Checks whether a habit-type goal missed its most recent valid check-in day
  * and decrements current_day by 1 (floor = previous checkpoint day).
- * Called on HomeScreen mount — "soft reset" anti-frustration rule.
+ * @deprecated Legacy reset behavior. Competition runtime must not call this
+ * while loading a screen because reads must not mutate long-term progress.
  *
  * If yesterday was not in activeDays (a rest day), returns immediately with no
  * DB access. activeDays=null means every day is valid (preserves original behaviour).

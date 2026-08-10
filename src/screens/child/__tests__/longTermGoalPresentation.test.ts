@@ -83,6 +83,27 @@ function makeCompletion(
   };
 }
 
+function makeScheduledCompletions(
+  count: number,
+  start = '2026-07-27T19:00:00',
+): GoalCompletionRecord[] {
+  const completions: GoalCompletionRecord[] = [];
+  let date = dayjs.tz(start, 'Asia/Taipei');
+
+  while (completions.length < count) {
+    if ([1, 2, 3, 4, 5].includes(date.day())) {
+      completions.push(makeCompletion(
+        `done-${completions.length + 1}`,
+        date.toISOString(),
+        null,
+      ));
+    }
+    date = date.add(1, 'day');
+  }
+
+  return completions;
+}
+
 describe('buildGoalPresentation', () => {
   it.each([
     ['reading_habit', makeTask(), makeGoal()],
@@ -193,19 +214,13 @@ describe('buildGoalPresentation', () => {
   );
 
   it('treats a reached target as completed before status synchronization', () => {
-    const completions = Array.from({ length: 20 }, (_, index) =>
-      makeCompletion(
-        `done-${index}`,
-        `2026-07-27T${String(index).padStart(2, '0')}:00:00+08:00`,
-        null,
-      ),
-    );
+    const completions = makeScheduledCompletions(20);
 
     const result = buildGoalPresentation(
       makeTask(),
       makeGoal(),
       completions,
-      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+      dayjs.tz('2026-08-21T20:00:00', 'Asia/Taipei'),
     );
 
     expect(result.planState).toBe('completed');
@@ -284,9 +299,9 @@ describe('buildGoalPresentation', () => {
       '這週已閱讀 3 次。少一天沒有關係，找到適合自己的節奏更重要。',
     );
     expect(result.weekSummary).not.toContain('自己開始');
-    expect(result.nextReward).toEqual({ threshold: 5, coin: 10 });
-    expect(result.nextText).toBe('下一個里程碑：完成第 5 次');
-    expect(result.nextText).not.toContain('下一站');
+    expect(result.nextReward).toBeNull();
+    expect(result.milestones).toEqual([]);
+    expect(result.nextText).toBe('今天繼續就好，已完成的閱讀都會保留');
     expect(result.canCompleteToday).toBe(true);
     expect(result.todayStatusText).toBeNull();
     expect(result.planNotice).toBeNull();
@@ -315,7 +330,79 @@ describe('buildGoalPresentation', () => {
     );
   });
 
-  it('derives milestones, recent records, and plan details only from real data', () => {
+  it('shows a real 3/4 weekly rhythm without hard-coded demo progress', () => {
+    const result = buildGoalPresentation(
+      makeTask({ recurrence_days: [1, 2, 4, 5] }),
+      makeGoal({ active_days: [1, 2, 4, 5], total_days: 16 }),
+      [
+        makeCompletion('monday', '2026-08-03T19:00:00+08:00', null),
+        makeCompletion('tuesday', '2026-08-04T19:00:00+08:00', null),
+        makeCompletion('thursday', '2026-08-06T19:00:00+08:00', null),
+      ],
+      dayjs.tz('2026-08-07T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.weekCompleted).toBe(3);
+    expect(result.weekTarget).toBe(4);
+    expect(result.weekProgressLabel).toBe('本週完成 3／4 次');
+    expect(result.overallLabel).toBe('3 / 16 次');
+  });
+
+  it('keeps completed progress when a scheduled day in the middle was missed', () => {
+    const result = buildGoalPresentation(
+      makeTask(),
+      makeGoal(),
+      [
+        makeCompletion('monday', '2026-08-03T19:00:00+08:00', null),
+        makeCompletion('wednesday', '2026-08-05T19:00:00+08:00', null),
+        makeCompletion('thursday', '2026-08-06T19:00:00+08:00', null),
+      ],
+      dayjs.tz('2026-08-07T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.weekDays.find((day) => day.day === 2)?.state).toBe('missed');
+    expect(result.weekCompleted).toBe(3);
+    expect(result.overallLabel).toBe('3 / 20 次');
+    expect(result.weekSummary).toContain('少一天沒有關係');
+    expect(`${result.focusText} ${result.nextText} ${result.weekSummary}`)
+      .not.toMatch(/失敗|歸零|重新開始|streak/i);
+  });
+
+  it('counts only unique scheduled Taipei dates inside inclusive plan boundaries', () => {
+    const result = buildGoalPresentation(
+      makeTask({ due_date: null }),
+      makeGoal({
+        started_at: '2026-07-28',
+        end_date: '2026-07-30',
+        total_days: 3,
+      }),
+      [
+        makeCompletion('before-start', '2026-07-27T19:00:00+08:00', null),
+        makeCompletion('start', '2026-07-28T00:30:00+08:00', null),
+        makeCompletion('start-duplicate', '2026-07-27T17:30:00Z', null),
+        makeCompletion('end', '2026-07-30T23:30:00+08:00', null),
+        makeCompletion('after-end', '2026-07-31T00:30:00+08:00', null),
+        makeCompletion('weekend', '2026-08-01T12:00:00+08:00', null),
+      ],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.overallLabel).toBe('2 / 3 次');
+    expect(result.weekCompleted).toBe(2);
+    expect(result.weekTarget).toBe(3);
+    expect(result.planPeriodLabel).toBe('2026-07-28 ～ 2026-07-30（共 1 週）');
+    expect(result.weekDays.map((day) => day.state)).toEqual([
+      'unscheduled',
+      'completed',
+      'missed',
+      'completed',
+      'unscheduled',
+      'unscheduled',
+      'unscheduled',
+    ]);
+  });
+
+  it('keeps reading milestones hidden while retaining real records and plan details', () => {
     const result = buildGoalPresentation(
       makeTask(),
       makeGoal(),
@@ -328,26 +415,8 @@ describe('buildGoalPresentation', () => {
       dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
     );
 
-    expect(result.milestones).toEqual([
-      {
-        id: 'start',
-        title: '完成第 1 次',
-        detail: null,
-        status: 'completed',
-      },
-      {
-        id: 'checkpoint-5',
-        title: '完成第 5 次',
-        detail: '達成後成長幣 +10',
-        status: 'next',
-      },
-      {
-        id: 'final-review',
-        title: '四週後一起回顧',
-        detail: '可以繼續、調整，或讓計畫先告一段落。',
-        status: 'upcoming',
-      },
-    ]);
+    expect(result.milestones).toEqual([]);
+    expect(result.nextReward).toBeNull();
     expect(result.recentRecords).toEqual([
       {
         id: 'c3',
@@ -374,23 +443,29 @@ describe('buildGoalPresentation', () => {
     expect(JSON.stringify(result.recentRecords)).not.toContain('self_started');
   });
 
-  it('preserves a real first-completion checkpoint reward in the starting milestone', () => {
+  it('does not infer reading checkpoint completion from current_day or completion rows', () => {
     const result = buildGoalPresentation(
       makeTask(),
-      makeGoal({ checkpoint_rewards: { '1': 10, '5': 20 } }),
+      makeGoal({ current_day: 5, checkpoint_rewards: { '1': 10, '5': 20 } }),
       [makeCompletion('c1', '2026-07-27T19:00:00+08:00', null)],
       dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
     );
 
-    expect(result.milestones[0]).toEqual({
-      id: 'start',
-      title: '完成第 1 次',
-      detail: '成長幣 +10 已記下',
-      status: 'completed',
-    });
-    expect(result.milestones.filter((milestone) => milestone.title === '完成第 1 次')).toHaveLength(
-      1,
+    expect(result.milestones).toEqual([]);
+    expect(result.nextReward).toBeNull();
+    expect(result.nextText).not.toMatch(/里程碑|回饋已記下|成長幣/);
+  });
+
+  it('uses an honest reading fallback when no reliable next-step note exists', () => {
+    const result = buildGoalPresentation(
+      makeTask({ name: '親子閱讀時間' }),
+      makeGoal({ motivation_note: '   ' }),
+      [],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
     );
+
+    expect(result.todayAction).toBe('親子閱讀時間 15 分鐘，今天繼續就好');
+    expect(result.todayAction).not.toMatch(/里程碑|第 \d+ 次/);
   });
 
   it('uses the same section structure for a skill goal', () => {
@@ -692,7 +767,7 @@ describe('buildGoalPresentation', () => {
     expect(result.todayStatusText).toBe('今天不用記錄，照自己的節奏休息');
   });
 
-  it('uses the checkpoint counter instead of completion rows for reward status', () => {
+  it('keeps habit checkpoint rewards as planned nodes without inferred completion state', () => {
     const completions = Array.from({ length: 5 }, (_, index) =>
       makeCompletion(
         `completion-${index + 1}`,
@@ -701,13 +776,13 @@ describe('buildGoalPresentation', () => {
       ),
     );
     const beforeReward = buildGoalPresentation(
-      makeTask(),
+      makeTask({ name: '每天整理書包' }),
       makeGoal({ current_day: 3 }),
       completions,
       dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
     );
     const afterReward = buildGoalPresentation(
-      makeTask(),
+      makeTask({ name: '每天整理書包' }),
       makeGoal({ current_day: 5 }),
       completions.slice(0, 3),
       dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
@@ -716,49 +791,61 @@ describe('buildGoalPresentation', () => {
     expect(beforeReward.overallLabel).toBe('5 / 20 次');
     expect(beforeReward.milestones.find((item) => item.id === 'checkpoint-5')).toEqual({
       id: 'checkpoint-5',
-      title: '已完成第 5 次',
-      detail: '里程碑回饋可以和家人一起確認',
-      status: 'next',
+      title: '第 5 次的計畫節點',
+      detail: '成長幣 +10（達成時一起確認）',
+      status: 'planned',
     });
     expect(beforeReward.nextReward).toBeNull();
-    expect(beforeReward.nextText).toBe(
-      '已完成第 5 次，里程碑回饋可以和家人一起確認',
-    );
+    expect(beforeReward.nextText).toBe('下一次繼續完成「每天整理書包」就好');
     expect(afterReward.overallLabel).toBe('3 / 20 次');
     expect(afterReward.milestones.find((item) => item.id === 'checkpoint-5')).toEqual({
       id: 'checkpoint-5',
-      title: '完成第 5 次',
-      detail: '成長幣 +10 已記下',
-      status: 'completed',
+      title: '第 5 次的計畫節點',
+      detail: '成長幣 +10（達成時一起確認）',
+      status: 'planned',
     });
     expect(afterReward.nextReward).toBeNull();
-    expect(afterReward.nextText).toBe('下一個里程碑：一起看看這段時間的成長');
+    expect(afterReward.milestones.some((item) => item.status === 'completed')).toBe(false);
   });
 
-  it('keeps only the first unconfirmed checkpoint as the next milestone', () => {
+  it('keeps family checkpoint rewards visible as plans without using current_day', () => {
     const result = buildGoalPresentation(
-      makeTask(),
+      makeTask({
+        id: 'task-family-checkpoint',
+        name: '一起整理餐桌',
+        long_term_type: 'responsibility',
+        recurrence_days: [1],
+      }),
       makeGoal({
-        current_day: 0,
+        id: 'goal-family-checkpoint',
+        task_id: 'task-family-checkpoint',
+        goal_type: 'responsibility',
+        current_day: 5,
+        active_days: [1],
+        target_completions: 4,
         checkpoint_rewards: { '1': 10, '5': 20 },
       }),
       [makeCompletion('first-effort', '2026-07-27T19:00:00+08:00', null)],
       dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
     );
 
-    expect(result.milestones[0]).toEqual({
-      id: 'start',
-      title: '已完成第 1 次',
-      detail: '里程碑回饋可以和家人一起確認',
-      status: 'next',
-    });
-    expect(result.milestones.find((item) => item.id === 'checkpoint-5')?.status).toBe(
-      'upcoming',
-    );
-    expect(result.nextReward).toEqual({ threshold: 5, coin: 20 });
-    expect(result.nextText).toBe(
-      '已完成第 1 次，里程碑回饋可以和家人一起確認',
-    );
+    expect(result.milestones.filter((item) => item.id.startsWith('checkpoint-')))
+      .toEqual([
+        {
+          id: 'checkpoint-1',
+          title: '第 1 次的計畫節點',
+          detail: '成長幣 +10（達成時一起確認）',
+          status: 'planned',
+        },
+        {
+          id: 'checkpoint-5',
+          title: '第 5 次的計畫節點',
+          detail: '成長幣 +20（達成時一起確認）',
+          status: 'planned',
+        },
+      ]);
+    expect(result.nextReward).toBeNull();
+    expect(result.milestones.some((item) => item.status === 'completed')).toBe(false);
   });
 
   it.each([
@@ -781,14 +868,8 @@ describe('buildGoalPresentation', () => {
     ],
     [
       'target reached',
-      makeGoal({ current_day: 20 }),
-      Array.from({ length: 20 }, (_, index) =>
-        makeCompletion(
-          `done-${index}`,
-          `2026-07-27T${String(index).padStart(2, '0')}:00:00+08:00`,
-          null,
-        ),
-      ),
+      makeGoal({ current_day: 20, started_at: '2026-06-29' }),
+      makeScheduledCompletions(20, '2026-06-29T19:00:00'),
       '這段計畫已完成',
       '這段計畫已完成',
     ],
@@ -896,7 +977,11 @@ describe('buildGoalPresentation', () => {
       expect(result.weekLabel).toBe('尚未安排週期');
       expect(result.planPeriodLabel).toBe('2026-07-27 ～ 尚未安排執行日期');
       expect(result.focusText).toBe('先和家人一起安排適合的執行日期');
-      expect(result.milestones.at(-1)?.title).toBe('安排好週期後一起回顧');
+      if (result.goalKind === 'reading_habit') {
+        expect(result.milestones).toEqual([]);
+      } else {
+        expect(result.milestones.at(-1)?.title).toBe('安排好週期後一起回顧');
+      }
       expect(result.finalRewardText).toBe('安排好週期後，再一起回顧這段計畫');
       expect(result.weekDays.every((day) => day.state === 'unscheduled')).toBe(true);
       expect(result.canCompleteToday).toBe(false);
