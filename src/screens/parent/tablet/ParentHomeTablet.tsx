@@ -55,6 +55,8 @@ import {
   createFamilyGoal,
   MIN_FAMILY_TIME,
   MAX_FAMILY_TIME,
+  updateTaskSchedule,
+  updateTaskRecurrenceDays,
   type MarkOption,
 } from '../../../lib/taskActions';
 import {
@@ -75,12 +77,16 @@ import type { TaskCategory, LongTermType } from '../../../types/database';
   併入建立任務抽屜了：年齡段由抽屜從 child.birthDate 算，幣值與資格由
   create_parent_task_v1 與獎勵政策決定，不再由畫面自己組一次。
 */
-import { chatWithAdvisor } from '../../../lib/aiAgent';
+import {
+  chatWithAdvisor,
+  type AdvisorSuggestedAction,
+  type AdvisorScheduleCandidate,
+  type AdvisorRecurrenceCandidate,
+} from '../../../lib/aiAgent';
 import {
   SunIcon,
   BellIcon,
   ChevronDownIcon,
-  ChartNavIcon,
   RobotIcon,
   StarIcon,
   SlidersIcon,
@@ -1995,15 +2001,6 @@ function InfoDotIcon({ size = 13, color = ParentColors.fgMuted }: { size?: numbe
   );
 }
 
-function BanIcon({ size = 15, color = ParentColors.fgSecondary }: { size?: number; color?: string }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={1.8} />
-      <Path d="M6.5 6.5l11 11" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
-    </Svg>
-  );
-}
-
 /**
  * AI 教養顧問 —— 右欄的主要內容（鎖定樣式＝ .t-ask），取代原本的「本週統計」。
  * 點快捷提問／輸入框會帶著問題文字打開 AdvisorSideSheet 展開對話。
@@ -2057,7 +2054,89 @@ function AdvisorPanel({
   );
 }
 
-type AdvisorChatMessage = { role: 'parent' | 'ai'; text: string; at: string };
+type AdvisorChatMessage = {
+  role: 'parent' | 'ai';
+  text: string;
+  at: string;
+  suggestedAction?: AdvisorSuggestedAction;
+  adopted?: boolean;
+};
+
+const ADVISOR_CLAIM_PERIOD_LABEL: Record<'day' | 'week', string> = { day: '每天', week: '每週' };
+const ADVISOR_WEEKDAY_ZH: Record<number, string> = { 0: '日', 1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六' };
+const ADVISOR_WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+function formatAdvisorDays(days: number[]): string {
+  const sorted = [...days].sort((a, b) => ADVISOR_WEEKDAY_ORDER.indexOf(a) - ADVISOR_WEEKDAY_ORDER.indexOf(b));
+  return `週${sorted.map(d => ADVISOR_WEEKDAY_ZH[d]).join('、')}`;
+}
+
+/**
+ * 顧問聊天裡的建議卡片：比週報的 ReviewPromptCard 精簡——沒有行內編輯，
+ * 只有「套用」跟「不用了」。套用只影響前端這則訊息的 adopted 狀態，不寫回
+ * 週報那份持久化的 ai_suggestions（聊天記錄本來就是暫時的，關掉視窗就清空）。
+ */
+function AdvisorSuggestionCard({
+  action,
+  adopted,
+  onAdopt,
+  onDismiss,
+}: {
+  action: AdvisorSuggestedAction;
+  adopted: boolean;
+  onAdopt: () => Promise<void>;
+  onDismiss: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const diffText = action.kind === 'adjust_schedule'
+    ? `目前：${ADVISOR_CLAIM_PERIOD_LABEL[action.currentClaimPeriod]}最多 ${action.currentMaxClaimsPerPeriod} 次 → 建議：${ADVISOR_CLAIM_PERIOD_LABEL[action.suggestedClaimPeriod]}最多 ${action.suggestedMaxClaimsPerPeriod} 次`
+    : action.kind === 'adjust_recurrence'
+    ? `目前：${formatAdvisorDays(action.currentRecurrenceDays)} → 建議：${formatAdvisorDays(action.suggestedRecurrenceDays)}`
+    : `建議標題：${action.suggestedTitle}`;
+
+  const handleAdopt = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await onAdopt();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '套用失敗，請稍後再試');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (adopted) {
+    return (
+      <View style={styles.advisorSuggestCard}>
+        <Text style={styles.advisorSuggestAdoptedText}>已套用</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.advisorSuggestCard}>
+      {action.kind !== 'create_task' && <Text style={styles.advisorSuggestDiffText}>{diffText}</Text>}
+      {err && <Text style={styles.advisorSuggestErrorText}>{err}</Text>}
+      <View style={styles.advisorSuggestBtnRow}>
+        <TouchableOpacity
+          style={[styles.advisorSuggestAdoptBtn, busy && styles.advisorSuggestAdoptBtnDisabled]}
+          onPress={handleAdopt}
+          disabled={busy}
+          activeOpacity={0.8}
+        >
+          {busy
+            ? <ActivityIndicator size="small" color="#fff" />
+            : <Text style={styles.advisorSuggestAdoptBtnText}>{action.actionLabel || '套用建議'}</Text>}
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.advisorSuggestDismissBtn} onPress={onDismiss} disabled={busy} activeOpacity={0.7}>
+          <Text style={styles.advisorSuggestDismissBtnText}>不用了</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
 
 /**
  * 展開後的 AI 諮詢對話面板：頭像式訊息串＋快捷後續動作＋輸入框。
@@ -2076,6 +2155,7 @@ function AdvisorSideSheet({
   totalToday,
   onClose,
   onOpenWeekly,
+  onOpenTaskDrawer,
 }: {
   childId: string;
   childName: string;
@@ -2087,12 +2167,101 @@ function AdvisorSideSheet({
   totalToday: number;
   onClose: () => void;
   onOpenWeekly: () => void;
+  onOpenTaskDrawer: (childId: string, seedTitle: string) => void;
 }) {
   const [messages, setMessages] = useState<AdvisorChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const askedInitial = useRef(false);
   const [weekHistory, setWeekHistory] = useState<{ dateLabel: string; tasks: string[] }[]>([]);
+  const [scheduleCandidates, setScheduleCandidates] = useState<AdvisorScheduleCandidate[]>([]);
+  const [recurrenceCandidates, setRecurrenceCandidates] = useState<AdvisorRecurrenceCandidate[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCandidates() {
+      try {
+        const todayStart = taipeiDayRange().startIso;
+        const weekAgoStart = taipeiDayRange(dayjs(todayStart).subtract(7, 'day')).startIso;
+
+        const { data: ctRows } = await supabase
+          .from('child_tasks')
+          .select('task_id')
+          .eq('child_id', childId)
+          .eq('is_active', true);
+        if (cancelled) return;
+        const taskIds = [...new Set((ctRows ?? []).map(r => r.task_id))];
+        if (taskIds.length === 0) { setScheduleCandidates([]); setRecurrenceCandidates([]); return; }
+
+        const [{ data: taskRows }, { data: completions }] = await Promise.all([
+          supabase
+            .from('tasks')
+            .select('id, name, claim_period, max_claims_per_period, day_type, recurrence_days')
+            .in('id', taskIds)
+            .eq('is_active', true),
+          supabase
+            .from('task_completions')
+            .select('task_id, completed_at')
+            .eq('child_id', childId)
+            .gte('completed_at', weekAgoStart),
+        ]);
+        if (cancelled) return;
+
+        const completionCountByTask = new Map<string, number>();
+        const completedWeekdaysByTask = new Map<string, Set<number>>();
+        for (const c of completions ?? []) {
+          completionCountByTask.set(c.task_id, (completionCountByTask.get(c.task_id) ?? 0) + 1);
+          // Asia/Taipei = UTC+8，先加 8 小時再取星期幾，才不會在日界附近算錯天。
+          const taipeiMs = new Date(c.completed_at).getTime() + 8 * 60 * 60 * 1000;
+          const weekday = new Date(taipeiMs).getUTCDay();
+          if (!completedWeekdaysByTask.has(c.task_id)) completedWeekdaysByTask.set(c.task_id, new Set());
+          completedWeekdaysByTask.get(c.task_id)!.add(weekday);
+        }
+
+        const rows = (taskRows ?? []) as {
+          id: string; name: string; claim_period: string; max_claims_per_period: number;
+          day_type: string; recurrence_days: number[] | null;
+        }[];
+
+        const schedule: AdvisorScheduleCandidate[] = rows
+          .map(t => ({
+            taskId: t.id,
+            taskName: t.name,
+            claimPeriod: t.claim_period as 'day' | 'week',
+            maxClaimsPerPeriod: t.max_claims_per_period,
+            completedThisWeek: completionCountByTask.get(t.id) ?? 0,
+          }))
+          .filter(c =>
+            (c.claimPeriod === 'day' || c.claimPeriod === 'week')
+            && c.maxClaimsPerPeriod > 0
+            && c.completedThisWeek >= c.maxClaimsPerPeriod)
+          .sort((a, b) => b.completedThisWeek - a.completedThisWeek)
+          .slice(0, 3);
+
+        const recurrence: AdvisorRecurrenceCandidate[] = rows
+          .filter(t => t.day_type === 'custom' && Array.isArray(t.recurrence_days) && t.recurrence_days.length > 1)
+          .map(t => ({
+            taskId: t.id,
+            taskName: t.name,
+            recurrenceDays: t.recurrence_days as number[],
+            completedWeekdays: [...(completedWeekdaysByTask.get(t.id) ?? new Set<number>())].sort((a, b) => a - b),
+          }))
+          .filter(c =>
+            c.completedWeekdays.length > 0
+            && c.completedWeekdays.length < c.recurrenceDays.length
+            && c.completedWeekdays.every(d => c.recurrenceDays.includes(d)))
+          .sort((a, b) => a.completedWeekdays.length - b.completedWeekdays.length)
+          .slice(0, 2);
+
+        setScheduleCandidates(schedule);
+        setRecurrenceCandidates(recurrence);
+      } catch (err) {
+        console.error('[AdvisorSideSheet] loadCandidates error:', err);
+      }
+    }
+    void loadCandidates();
+    return () => { cancelled = true; };
+  }, [childId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2134,7 +2303,7 @@ function AdvisorSideSheet({
   const ask = useCallback(
     async (question: string, historyBefore: AdvisorChatMessage[]) => {
       setSending(true);
-      const reply = await chatWithAdvisor({
+      const { reply, suggestedAction } = await chatWithAdvisor({
         childName,
         question,
         doneToday,
@@ -2147,12 +2316,34 @@ function AdvisorSideSheet({
         weekHistory,
         longTermSummary: ltItems.map(i => ({ name: i.name, progressPct: i.progressPct })),
         history: historyBefore.map(m => ({ role: m.role, text: m.text })),
+        scheduleCandidates,
+        recurrenceCandidates,
       });
-      setMessages(prev => [...prev, { role: 'ai', text: reply, at: dayjs().format('HH:mm') }]);
+      setMessages(prev => [
+        ...prev,
+        { role: 'ai', text: reply, at: dayjs().format('HH:mm'), suggestedAction: suggestedAction ?? undefined },
+      ]);
       setSending(false);
     },
-    [childName, doneToday, totalToday, todayTasks, weekHistory, ltItems],
+    [childName, doneToday, totalToday, todayTasks, weekHistory, ltItems, scheduleCandidates, recurrenceCandidates],
   );
+
+  const handleAdoptSuggestion = useCallback(async (messageIndex: number, action: AdvisorSuggestedAction) => {
+    if (action.kind === 'adjust_schedule') {
+      await updateTaskSchedule(action.taskId, action.suggestedClaimPeriod, action.suggestedMaxClaimsPerPeriod);
+    } else if (action.kind === 'adjust_recurrence') {
+      await updateTaskRecurrenceDays(action.taskId, action.suggestedRecurrenceDays);
+    } else {
+      onOpenTaskDrawer(childId, action.suggestedTitle);
+      onClose();
+      return;
+    }
+    setMessages(prev => prev.map((m, i) => (i === messageIndex ? { ...m, adopted: true } : m)));
+  }, [childId, onOpenTaskDrawer, onClose]);
+
+  const handleDismissSuggestion = useCallback((messageIndex: number) => {
+    setMessages(prev => prev.map((m, i) => (i === messageIndex ? { ...m, suggestedAction: undefined } : m)));
+  }, []);
 
   useEffect(() => {
     if (initialPrompt && !askedInitial.current) {
@@ -2173,8 +2364,6 @@ function AdvisorSideSheet({
       return [...prev, { role: 'parent', text, at: dayjs().format('HH:mm') }];
     });
   };
-
-  const notReady = () => Alert.alert('即將推出', '這個功能還在準備中。');
 
   return (
     <View style={styles.advisorSheetLayer} pointerEvents="box-none">
@@ -2215,8 +2404,18 @@ function AdvisorSideSheet({
                   <View style={styles.chatAiAvatar}>
                     <RobotIcon size={14} color={ParentColors.pine500} />
                   </View>
-                  <View style={styles.chatAiBubble}>
-                    <Text style={styles.chatAiText}>{m.text}</Text>
+                  <View style={styles.chatAiColumn}>
+                    <View style={styles.chatAiBubble}>
+                      <Text style={styles.chatAiText}>{m.text}</Text>
+                    </View>
+                    {m.suggestedAction && (
+                      <AdvisorSuggestionCard
+                        action={m.suggestedAction}
+                        adopted={!!m.adopted}
+                        onAdopt={() => handleAdoptSuggestion(i, m.suggestedAction!)}
+                        onDismiss={() => handleDismissSuggestion(i)}
+                      />
+                    )}
                   </View>
                 </View>
               ),
@@ -2236,21 +2435,14 @@ function AdvisorSideSheet({
 
         {messages.length > 0 && (
           <View style={styles.chatActionList}>
-            <TouchableOpacity style={styles.chatActionRow} onPress={onOpenWeekly} activeOpacity={0.7}>
-              <ChartNavIcon size={15} color={ParentColors.fgSecondary} />
-              <Text style={styles.chatActionText}>查看相關紀錄</Text>
-              <Chevron color={ParentColors.ink300} />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.chatActionRow} onPress={notReady} activeOpacity={0.7}>
-              <SlidersIcon size={15} color={ParentColors.fgSecondary} />
-              <Text style={styles.chatActionText}>調整任務建議</Text>
-              <Chevron color={ParentColors.ink300} />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.chatActionRow} onPress={onClose} activeOpacity={0.7}>
-              <BanIcon size={15} color={ParentColors.fgSecondary} />
-              <Text style={styles.chatActionText}>忽略這則建議</Text>
-              <Chevron color={ParentColors.ink300} />
-            </TouchableOpacity>
+            <View style={styles.advisorSuggestBtnRow}>
+              <TouchableOpacity style={styles.advisorSuggestAdoptBtn} onPress={onOpenWeekly} activeOpacity={0.8}>
+                <Text style={styles.advisorSuggestAdoptBtnText}>查看相關紀錄</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.advisorSuggestDismissBtn} onPress={onClose} activeOpacity={0.7}>
+                <Text style={styles.advisorSuggestDismissBtnText}>忽略這則建議</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
@@ -2520,10 +2712,18 @@ export default function ParentHomeTablet() {
     [],
   );
 
-  /** 建立成功後把首頁的今日任務與長期任務都更新一次。 */
+  /**
+   * 建立成功後把首頁的今日任務與長期任務都更新一次。
+   *
+   * 如果是從「指派任務」面板開的抽屜，成功後也要順便跳回待辦畫面 ——
+   * 不然面板留在原地、同一張「最近指派過的」標籤還在原本的位置，
+   * 抽屜關閉動畫剛播完的那一下很容易誤觸到同一顆標籤，等於自己
+   * 手滑又開了一次抽屜、帶著同一個標題。
+   */
   const handleRefreshAfterCreate = useCallback(async () => {
     refresh();
     ltRefresh();
+    setRightMode(mode => (mode === 'assign' ? 'pending' : mode));
   }, [refresh, ltRefresh]);
 
   const handleViewAllLongTerm = useCallback(() => {
@@ -2611,7 +2811,18 @@ export default function ParentHomeTablet() {
     pendingCounts[c.id] = unapprovedWishes.filter(w => w.child_id === c.id).length;
   }
 
-  if (loading) {
+  /*
+   * 抽屜開著的時候不要因為背景重新整理而整頁換成 spinner。
+   *
+   * useParentDashboard 的 refresh() 跟初次載入共用同一個 loading —— 建立任務
+   * 成功後 handleRefreshAfterCreate 會呼叫 refresh()，loading 短暫變 true。
+   * 這裡的 early return 會讓整棵樹（含正開著的 TaskCreationDrawer）從畫面上
+   * 消失又出現：對 React 來說那是「舊的抽屜被移除、換一個全新的抽屜掛上去」，
+   * 不是同一個元件重新 render —— 抽屜的路由、草稿、已完成畫面全部歸零，
+   * 家長會看到自己剛送出的表單憑空跳回起點頁。真正的初次載入沒有抽屜可丟，
+   * 不受影響。
+   */
+  if (loading && drawerTargetChildId === null) {
     return (
       <View style={[styles.centeredFill, { paddingTop: insets.top }]}>
         <ActivityIndicator size="large" color={ParentColors.accent} />
@@ -2816,6 +3027,7 @@ export default function ParentHomeTablet() {
           totalToday={totalToday}
           onClose={() => { setAdvisorOpen(false); setAdvisorInitialPrompt(undefined); }}
           onOpenWeekly={handleViewRecords}
+          onOpenTaskDrawer={openTaskDrawer}
         />
       )}
       {accountMenuOpen && accountMenuAnchor && (
@@ -2843,6 +3055,7 @@ export default function ParentHomeTablet() {
         taskAiClient={taskAiClientSetup.client}
         taskAiDeveloperNote={taskAiDeveloperNote}
         onRefreshTaskList={handleRefreshAfterCreate}
+        onSeedConsumed={() => setDrawerSeed(null)}
       />
     </View>
     </View>
@@ -3572,6 +3785,10 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     marginTop: 2,
   },
+  chatAiColumn: {
+    flex: 1,
+    gap: 8,
+  },
   chatAiBubble: {
     flex: 1,
   },
@@ -3581,29 +3798,67 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     color: ParentColors.fgPrimary,
   },
+  // ── 顧問建議卡片 ──
+  advisorSuggestCard: {
+    backgroundColor: ParentColors.tintPine,
+    borderRadius: 12,
+    padding: 12,
+    gap: 8,
+  },
+  advisorSuggestDiffText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    lineHeight: 18,
+    color: ParentColors.fgSecondary,
+  },
+  advisorSuggestErrorText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.error,
+  },
+  advisorSuggestBtnRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  advisorSuggestAdoptBtn: {
+    backgroundColor: ParentColors.pine500,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  advisorSuggestAdoptBtnDisabled: {
+    opacity: 0.6,
+  },
+  advisorSuggestAdoptBtnText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.bold,
+    color: '#fff',
+  },
+  advisorSuggestDismissBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  advisorSuggestDismissBtnText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+  },
+  advisorSuggestAdoptedText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.pine500,
+  },
   // ── 後續動作清單 ──
   chatActionList: {
     paddingHorizontal: 20,
     paddingBottom: 12,
     gap: 8,
-  },
-  chatActionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    minHeight: 44,
-    paddingHorizontal: 14,
-    borderRadius: ParentRadii.md,
-    borderWidth: 1,
-    borderColor: ParentColors.borderSoft,
-    backgroundColor: ParentColors.bgCanvas,
-  },
-  chatActionText: {
-    flex: 1,
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.sm,
-    fontWeight: ParentFontWeights.semi,
-    color: ParentColors.fgPrimary,
   },
   // ── 輸入框 ──
   chatInputRow: {
