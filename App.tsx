@@ -25,6 +25,7 @@ import GoalSetupScreen from './src/screens/onboarding/GoalSetupScreen';
 import TaskSelectionScreen from './src/screens/onboarding/TaskSelectionScreen';
 import OverviewScreen from './src/screens/onboarding/OverviewScreen';
 import LongTermDetailScreen from './src/screens/child/LongTermDetailScreen';
+import ChildProposalScreen from './src/screens/child/ChildProposalScreen';
 import ProfileScreen from './src/screens/child/ProfileScreen';
 import WalletScreen from './src/screens/child/WalletScreen';
 import WishScreen from './src/screens/child/WishScreen';
@@ -50,6 +51,14 @@ export type RootStackParamList = {
   Parent: undefined;            // legacy; redirect via EntryScreen
   ParentTab: undefined;         // parent tab navigator
   Profile: { childId: string };
+  /**
+   * 孩子提案（P0-2）。**不是**建立任務。
+   *
+   * 走 P0-1 的 SupabaseChildProposalService（create → transition proposed），
+   * 不經過 taskActions —— 送出後 tasks / child_tasks / wallets / transactions
+   * 都不會有任何新資料。
+   */
+  ChildProposal: { childId: string };
   GoalSetup: {
     childId: string;
     childNickname: string;
@@ -143,6 +152,7 @@ export default function App() {
             <Stack.Screen name="Wish" component={WishScreen} />
             <Stack.Screen name="Profile" component={ProfileScreen} />
             <Stack.Screen name="LongTermDetail" component={LongTermDetailScreen} />
+            <Stack.Screen name="ChildProposal" component={ChildProposalScreen} />
 
             {/* ── Parent side ───────────────────────────────── */}
             <Stack.Screen name="ParentTab" component={ParentTabNavigator} />
