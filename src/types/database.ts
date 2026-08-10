@@ -343,6 +343,23 @@ export type CreditLog = {
   updated_at: string;
 };
 
+export type InterventionLog = {
+  id: string;
+  family_id: string;
+  child_id: string;
+  parent_id: string | null;
+  task_id: string | null;
+  task_name_snapshot: string | null;
+  override_id: string | null;
+  correlation_id: string | null;
+  event_type: string;
+  trigger_source: string;
+  ai_suggested: unknown | null;
+  parent_decision: unknown | null;
+  context_snapshot: unknown | null;
+  created_at: string;
+};
+
 export type SiblingRelation = {
   id: string;
   family_id: string;
@@ -815,6 +832,27 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<CreditLog>;
+        Relationships: [];
+      };
+      intervention_log: {
+        Row: InterventionLog;
+        Insert: {
+          id?: string;
+          family_id: string;
+          child_id: string;
+          parent_id?: string | null;
+          task_id?: string | null;
+          task_name_snapshot?: string | null;
+          override_id?: string | null;
+          correlation_id?: string | null;
+          event_type: string;
+          trigger_source: string;
+          ai_suggested?: unknown | null;
+          parent_decision?: unknown | null;
+          context_snapshot?: unknown | null;
+          created_at?: string;
+        };
+        Update: Partial<InterventionLog>;
         Relationships: [];
       };
       sibling_relations: {
