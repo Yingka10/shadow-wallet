@@ -283,6 +283,7 @@ export function TaskCreationDrawer({
   taskAiDeveloperNote,
   onRefreshTaskList,
   onSwitchTab,
+  onSeedConsumed,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -322,6 +323,16 @@ export function TaskCreationDrawer({
   onRefreshTaskList?: () => Promise<void>;
   /** 建立成功後切到正確分頁。 */
   onSwitchTab?: (tab: CreatedTaskTab) => void;
+  /**
+   * 預填名稱套用完成後呼叫一次，讓上層把 initialCustomIntake 清成 null。
+   *
+   * 預填只該生效一次。留在上層 state 裡不清掉的話，只要這個元件因為任何
+   * 原因（例如上層重新 mount）重新初始化，seededForOpenRef 這個 ref 也會
+   * 歸零，舊的預填值就會被當成「新的」再套用一次 —— 家長會看到已經送出
+   * 的表單又跳回帶著同一個標題的第一步。清空上層那份是唯一不依賴這個元件
+   * 內部生命週期、真正杜絕重套的做法。
+   */
+  onSeedConsumed?: () => void;
 }) {
   const { width } = useWindowDimensions();
   const panelWidth = panelWidthFor(width);
@@ -503,7 +514,8 @@ export function TaskCreationDrawer({
     setPath('parent_custom');
     setEntrySelection('parent_custom');
     setRoute({ kind: 'custom_basics_title' });
-  }, [visible, initialCustomIntake, reset]);
+    onSeedConsumed?.();
+  }, [visible, initialCustomIntake, reset, onSeedConsumed]);
 
   useEffect(() => {
     progress.value = withTiming(shown ? 1 : 0, {

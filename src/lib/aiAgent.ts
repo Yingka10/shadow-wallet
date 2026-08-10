@@ -187,6 +187,47 @@ export async function suggestRewardCoin(rewardName: string): Promise<SuggestRewa
   }
 }
 
+export type AdvisorScheduleCandidate = {
+  taskId: string;
+  taskName: string;
+  claimPeriod: 'day' | 'week';
+  maxClaimsPerPeriod: number;
+  completedThisWeek: number;
+};
+
+export type AdvisorRecurrenceCandidate = {
+  taskId: string;
+  taskName: string;
+  recurrenceDays: number[];
+  completedWeekdays: number[];
+};
+
+/**
+ * 顧問聊天可能附帶的建議動作。跟週報一樣，taskId 與星期幾一律由後端從候選清單
+ * 帶出，不採信 AI 自己編的值（見 supabase/functions/ai-proxy/index.ts 的
+ * validateAdvisorSuggestedAction）。
+ */
+export type AdvisorSuggestedAction =
+  | {
+      kind: 'adjust_schedule';
+      taskId: string;
+      taskName: string;
+      currentClaimPeriod: 'day' | 'week';
+      currentMaxClaimsPerPeriod: number;
+      suggestedClaimPeriod: 'day' | 'week';
+      suggestedMaxClaimsPerPeriod: number;
+      actionLabel: string;
+    }
+  | {
+      kind: 'adjust_recurrence';
+      taskId: string;
+      taskName: string;
+      currentRecurrenceDays: number[];
+      suggestedRecurrenceDays: number[];
+      actionLabel: string;
+    }
+  | { kind: 'create_task'; suggestedTitle: string; actionLabel: string };
+
 export type AdvisorChatInput = {
   childName: string;
   question: string;
@@ -197,20 +238,31 @@ export type AdvisorChatInput = {
   weekHistory?: { dateLabel: string; tasks: string[] }[];
   longTermSummary: { name: string; progressPct: number }[];
   history?: { role: 'parent' | 'ai'; text: string }[];
+  /** 這個孩子這週可能值得調整的任務候選清單，讓顧問偶爾能附帶可套用的建議。 */
+  scheduleCandidates?: AdvisorScheduleCandidate[];
+  recurrenceCandidates?: AdvisorRecurrenceCandidate[];
+};
+
+export type AdvisorChatResult = {
+  reply: string;
+  suggestedAction: AdvisorSuggestedAction | null;
 };
 
 /**
  * 家長端「AI 教養顧問」自由問答——只餵入畫面上本來就會顯示的彙總資料，
- * 由 Gemini 產生溫暖白話的回覆。任何錯誤都 fallback 成誠實的「暫時無法回答」訊息，
- * 不會假裝回答或編造數字。
+ * 由 Gemini 產生溫暖白話的回覆，偶爾附帶一個可套用的建議動作。任何錯誤都
+ * fallback 成誠實的「暫時無法回答」訊息、不帶建議，不會假裝回答或編造數字。
  */
-export async function chatWithAdvisor(input: AdvisorChatInput): Promise<string> {
+export async function chatWithAdvisor(input: AdvisorChatInput): Promise<AdvisorChatResult> {
   try {
-    const result = await invokeAiProxy<{ reply: string }>('advisorChat', { ...input });
-    return result.reply || '目前想不到合適的回覆，可以換個方式問問看嗎？';
+    const result = await invokeAiProxy<AdvisorChatResult>('advisorChat', { ...input });
+    return {
+      reply: result.reply || '目前想不到合適的回覆，可以換個方式問問看嗎？',
+      suggestedAction: result.suggestedAction ?? null,
+    };
   } catch (err) {
     console.warn('[aiAgent.chatWithAdvisor] fallback due to error:', err);
-    return 'AI 顧問暫時連不上，晚點再試試看，或直接看下面的本週紀錄。';
+    return { reply: 'AI 顧問暫時連不上，晚點再試試看，或直接看下面的本週紀錄。', suggestedAction: null };
   }
 }
 
