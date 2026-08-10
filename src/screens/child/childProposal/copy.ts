@@ -20,7 +20,13 @@ export const PROPOSAL_COPY = {
   entry: '我想試試看',
   entryHint: '有想做的事，先說給 GrowBook 聽',
 
-  screenTitle: '我想試試看',
+  /**
+   * 流程本身的名字，頁首用。
+   *
+   * 四個問題和摘要都掛在同一個名字底下 —— 頁首不跟著每一頁換字，
+   * 孩子才知道自己還在同一件事情裡面，而不是被丟到五個不同的地方。
+   */
+  flowTitle: '開始新挑戰',
 
   goal: {
     question: '你想試試看什麼？',
@@ -30,35 +36,51 @@ export const PROPOSAL_COPY = {
   },
 
   motivation: {
-    question: '為什麼想做？',
-    hint: '想說再說，不想說也沒關係',
+    question: '你為什麼想做這件事？',
+    hint: '可以寫，也可以先跳過',
     placeholder: '例如：因為同學說這本書很好看',
     skip: '先跳過',
   },
 
   cadence: {
     question: '你想怎麼開始？',
-    hint: '之後都還可以改',
+    hint: '先選一個最適合你的開始方式',
     weeklyTimesSuffix: '次',
-    daysHint: '選你想做的日子',
+    weeklyTimesHint: '這週想做幾次呢？',
+    daysHint: '想在哪幾天做呢？',
+    /** 選完之後的安心話 —— 讓孩子知道現在選的不是不能反悔的決定。 */
+    changeable: '之後都還可以再調整。',
   },
 
   seenAs: {
-    question: '你希望這件事怎麼被看見？',
-    hint: '選一個最接近的就好',
+    // 「怎麼被看見」太抽象，孩子讀起來像考題。
+    // 換成「怎麼陪你」—— 同一件事，但講的是關係，不是評分。
+    question: '你希望 GrowBook 怎麼陪你？',
+    hint: '選一個你現在最想要的方式',
+    /** ⚠️ 單選＝現在最想要的陪伴方式，不是關掉其他功能。 */
     skip: '先跳過',
   },
 
   review: {
-    question: '這樣可以嗎？',
-    hint: '看一下，沒問題就送出',
-    goalLabel: '我想做的事',
+    question: '一起看看',
+    hint: '這就是你剛剛整理出的新挑戰',
+    goalLabel: '我想試試看',
     motivationLabel: '為什麼',
-    cadenceLabel: '怎麼開始',
-    seenAsLabel: '怎麼被看見',
+    cadenceLabel: '我想怎麼開始',
+    seenAsLabel: '我希望 GrowBook',
     empty: '還沒說',
-    submit: '送出',
+    submit: '送出這個想法',
     submitting: '送出中…',
+    /**
+     * 送出**之前**就先把話講清楚：記下來 ≠ 要等誰批准。
+     * 成功頁再講一次是確認；這裡講是承諾 —— 孩子按下去之前就該知道會發生什麼。
+     */
+    note: '想法記下來後，你就可以先開始試試看。\n爸媽之後也可以一起確認更適合的節奏和回饋。',
+  },
+
+  nav: {
+    prev: '上一步',
+    next: '下一步',
   },
 
   /**
@@ -85,32 +107,31 @@ export const PROPOSAL_COPY = {
   },
 } as const;
 
-/** 節奏選項的孩子語言。value 是 UI 的 kind，不是 DB 的 mode。 */
+/**
+ * 節奏選項的孩子語言。value 是 UI 的 kind，不是 DB 的 mode。
+ *
+ * 只有 label，沒有補充說明 —— 四個選項本來就一句話講得完，
+ * 每個再加一行小字只會讓這一頁看起來像要讀完才能選。
+ */
 export const CADENCE_OPTIONS: readonly {
   kind: CadenceKind;
   label: string;
-  hint: string;
 }[] = [
-  { kind: 'weekly_times', label: '一週做幾次', hint: '例如一週 4 次' },
-  { kind: 'certain_days', label: '固定哪幾天', hint: '例如每週二、四' },
-  { kind: 'just_once', label: '今天／一次就好', hint: '先做一次看看' },
-  { kind: 'not_sure', label: '我還不知道', hint: '想跟爸媽一起討論' },
+  { kind: 'weekly_times', label: '一週做幾次' },
+  { kind: 'certain_days', label: '想在哪幾天做' },
+  { kind: 'just_once', label: '今天先試一次' },
+  { kind: 'not_sure', label: '我還不知道' },
 ] as const;
 
-/** 「怎麼被看見」的選項。三個都不含任何數字 —— 孩子不決定幣值。 */
+/** 「希望 GrowBook 怎麼陪你」的選項。三個都不含任何數字 —— 孩子不決定幣值。 */
 export const SEEN_AS_OPTIONS: readonly {
   value: Exclude<SeenAsChoice, 'not_specified'>;
   label: string;
-  hint: string;
 }[] = [
-  { value: 'just_record', label: '記下我有做到', hint: '有做就留下紀錄' },
-  { value: 'see_progress', label: '看見我的進度', hint: '想看到自己走到哪裡' },
-  {
-    value: 'hopes_for_coin',
-    label: '如果適合，我希望有成長幣',
-    // 「如果適合」不是包裝 —— 發不發幣由家庭一起決定，這裡只收孩子的希望。
-    hint: '爸媽之後會一起看看適不適合',
-  },
+  { value: 'just_record', label: '幫我記下我有做到' },
+  { value: 'see_progress', label: '讓我看到自己的進度' },
+  // 「如果適合」不是包裝 —— 發不發幣由家庭一起決定，這裡只收孩子的希望。
+  { value: 'hopes_for_coin', label: '如果適合，也可以用成長幣鼓勵我' },
 ] as const;
 
 /** 星期標籤。索引 = 0(日) … 6(六)，與 toCadenceInput 的編碼一致。 */

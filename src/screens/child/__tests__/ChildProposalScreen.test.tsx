@@ -166,7 +166,61 @@ describe('摘要頁', () => {
     expect(screen.getByText(DEMO_GOAL)).toBeTruthy();
     expect(screen.getByText(DEMO_WHY)).toBeTruthy();
     expect(screen.getByText('一週 4 次')).toBeTruthy();
-    expect(screen.getByText('如果適合，我希望有成長幣')).toBeTruthy();
+    expect(screen.getByText('如果適合，也可以用成長幣鼓勵我')).toBeTruthy();
+  });
+
+  it('送出之前就先告訴孩子「記下來後就可以開始」', async () => {
+    const screen = render(<ChildProposalScreen />);
+    await fillGoldenPath(screen);
+
+    expect(screen.getByText(PROPOSAL_COPY.review.note)).toBeTruthy();
+  });
+
+  it('每一列都點得回去改', async () => {
+    const screen = render(<ChildProposalScreen />);
+    await fillGoldenPath(screen);
+
+    fireEvent.press(screen.getByLabelText(`${PROPOSAL_COPY.review.cadenceLabel}：一週 4 次`));
+
+    expect(screen.getByText(PROPOSAL_COPY.cadence.question)).toBeTruthy();
+    // 回去改不會把已經選的清掉。
+    expect(screen.getByTestId('proposal-times-picker')).toBeTruthy();
+  });
+});
+
+describe('進度只算四個問題', () => {
+  it('問題頁有四顆點，不是五顆', () => {
+    const screen = render(<ChildProposalScreen />);
+
+    expect(screen.getByTestId('proposal-progress')).toBeTruthy();
+    for (let i = 0; i < 4; i += 1) {
+      expect(screen.getByTestId(`proposal-progress-dot-${i}`)).toBeTruthy();
+    }
+    expect(screen.queryByTestId('proposal-progress-dot-4')).toBeNull();
+  });
+
+  it('摘要頁不再顯示進度 —— 它不是第五個問題', async () => {
+    const screen = render(<ChildProposalScreen />);
+    await fillGoldenPath(screen);
+
+    expect(screen.getByTestId('proposal-summary')).toBeTruthy();
+    expect(screen.queryByTestId('proposal-progress')).toBeNull();
+  });
+});
+
+describe('每一頁都走得回去', () => {
+  it('第二頁起，footer 有一顆「上一步」', () => {
+    const screen = render(<ChildProposalScreen />);
+
+    // 第一頁不放 —— 那裡的返回是離開流程，頁首的箭頭講得比較清楚。
+    expect(screen.queryByTestId('proposal-prev')).toBeNull();
+
+    fireEvent.changeText(screen.getByTestId('proposal-goal-input'), DEMO_GOAL);
+    fireEvent.press(screen.getByTestId('proposal-next'));
+
+    fireEvent.press(screen.getByTestId('proposal-prev'));
+    expect(screen.getByText(PROPOSAL_COPY.goal.question)).toBeTruthy();
+    expect(screen.getByTestId('proposal-goal-input').props.value).toBe(DEMO_GOAL);
   });
 });
 

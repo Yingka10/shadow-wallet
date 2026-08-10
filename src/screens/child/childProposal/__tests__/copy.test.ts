@@ -81,6 +81,55 @@ describe('入口的說法是孩子的語言', () => {
     expect(PROPOSAL_COPY.entry).toBe('我想試試看');
     expect(PROPOSAL_COPY.entry).not.toContain('任務');
   });
+
+  it('流程本身有一個名字，五頁共用', () => {
+    expect(PROPOSAL_COPY.flowTitle).toBe('開始新挑戰');
+  });
+});
+
+describe('第四題問的是陪伴，不是評分', () => {
+  it('問句是「怎麼陪你」，不是「怎麼被看見」', () => {
+    expect(PROPOSAL_COPY.seenAs.question).toBe('你希望 GrowBook 怎麼陪你？');
+  });
+
+  it('說清楚選的是「現在最想要的」，不是永久設定', () => {
+    expect(PROPOSAL_COPY.seenAs.hint).toBe('選一個你現在最想要的方式');
+    expect(PROPOSAL_COPY.seenAs.hint).toContain('現在');
+  });
+
+  it('仍然可以跳過', () => {
+    expect(PROPOSAL_COPY.seenAs.skip).toBe('先跳過');
+  });
+});
+
+describe('摘要頁是一起看看，不是最後確認關卡', () => {
+  it('標題與副標用的是規格拍板的說法', () => {
+    expect(PROPOSAL_COPY.review.question).toBe('一起看看');
+    expect(PROPOSAL_COPY.review.hint).toBe('這就是你剛剛整理出的新挑戰');
+  });
+
+  it('主按鈕送出的是「想法」，不是任務也不是申請', () => {
+    expect(PROPOSAL_COPY.review.submit).toBe('送出這個想法');
+    expect(PROPOSAL_COPY.review.submit).not.toContain('任務');
+    expect(PROPOSAL_COPY.review.submit).not.toContain('申請');
+  });
+
+  it('四個摘要標籤用孩子自己的說法', () => {
+    expect(PROPOSAL_COPY.review.goalLabel).toBe('我想試試看');
+    expect(PROPOSAL_COPY.review.motivationLabel).toBe('為什麼');
+    expect(PROPOSAL_COPY.review.cadenceLabel).toBe('我想怎麼開始');
+    expect(PROPOSAL_COPY.review.seenAsLabel).toBe('我希望 GrowBook');
+  });
+
+  it('送出前就講清楚：記下來之後可以先開始，不必等批准', () => {
+    const note = PROPOSAL_COPY.review.note;
+    expect(note).toContain('先開始試試看');
+    expect(note).toContain('節奏');
+    expect(note).toContain('回饋');
+    for (const word of ['審核', '批准', '核准', '才能', '不能']) {
+      expect({ word, present: note.includes(word) }).toEqual({ word, present: false });
+    }
+  });
 });
 
 describe('選項', () => {
@@ -96,10 +145,18 @@ describe('選項', () => {
   it('「我還不知道」是一個正當選項，不是沒填', () => {
     const notSure = CADENCE_OPTIONS.find((o) => o.kind === 'not_sure');
     expect(notSure?.label).toContain('還不知道');
-    expect(notSure?.hint).toContain('一起討論');
+    // 「不是沒填」這件事由摘要頁那句話說出來。
+    expect(describeCadence('not_sure')).toContain('一起討論');
   });
 
-  it('三個「怎麼被看見」的選項，都不含數字', () => {
+  it('選項只有一句話 —— 每個再加一行小字，這一頁就變成要讀完才能選', () => {
+    for (const opt of [...CADENCE_OPTIONS, ...SEEN_AS_OPTIONS]) {
+      expect(Object.keys(opt)).not.toContain('hint');
+      expect(opt.label.length).toBeLessThanOrEqual(16);
+    }
+  });
+
+  it('三個「怎麼陪你」的選項，都不含數字', () => {
     expect(SEEN_AS_OPTIONS.map((o) => o.value)).toEqual([
       'just_record',
       'see_progress',
@@ -108,6 +165,14 @@ describe('選項', () => {
     for (const opt of SEEN_AS_OPTIONS) {
       expect(opt.label).not.toMatch(/\d/);
     }
+  });
+
+  it('三個選項講的是 GrowBook 怎麼做，不是孩子要達成什麼', () => {
+    expect(SEEN_AS_OPTIONS.map((o) => o.label)).toEqual([
+      '幫我記下我有做到',
+      '讓我看到自己的進度',
+      '如果適合，也可以用成長幣鼓勵我',
+    ]);
   });
 
   it('成長幣那個選項講清楚「如果適合」', () => {
@@ -138,8 +203,9 @@ describe('摘要頁的一句話', () => {
     expect(describeCadence('not_sure')).toBe('想跟爸媽一起討論');
   });
 
-  it('怎麼被看見', () => {
-    expect(describeSeenAs('hopes_for_coin')).toBe('如果適合，我希望有成長幣');
+  it('希望 GrowBook 怎麼陪 —— 摘要頁講的話跟選項頁一模一樣', () => {
+    expect(describeSeenAs('hopes_for_coin')).toBe('如果適合，也可以用成長幣鼓勵我');
+    expect(describeSeenAs('just_record')).toBe('幫我記下我有做到');
     expect(describeSeenAs('not_specified')).toBe('還沒決定');
   });
 });

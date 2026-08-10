@@ -3,6 +3,10 @@
 // ─────────────────────────────────────────────────────────────────────────
 // 一次只問一件事。四個問題 ＋ 一頁摘要 ＋ 一頁成功。
 //
+// 這是「開始新挑戰」的步驟式引導，不是一張表單：
+// 四顆進度點只算四個問題，摘要頁不算第五顆 —— 摘要不是在問孩子新的事，
+// 是把他剛剛講的話唸一遍給他聽。
+//
 // 這個畫面刻意「薄」：所有判斷（能不能送、送出去長什麼樣、兩步流程）
 // 都在 childProposal/ 的純函式裡，這裡只負責收集與呈現。
 // 理由是那些規則要能被測試釘住，而渲染測試證明不了映射對不對。
@@ -23,6 +27,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import Svg, { Circle, Ellipse, Path } from 'react-native-svg';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
@@ -62,8 +67,9 @@ import {
 type ProposalRoute = RouteProp<RootStackParamList, 'ChildProposal'>;
 type Nav = StackNavigationProp<RootStackParamList, 'ChildProposal'>;
 
-/** 問題頁的順序。摘要是最後一頁，成功另外算（不在返回鏈上）。 */
-const STEP_ORDER: readonly ProposalStep[] = ['goal', 'motivation', 'cadence', 'seenAs', 'review'];
+/** 真正的問題只有四個。摘要是最後一頁，但不是第五個問題。 */
+const QUESTION_STEPS: readonly ProposalStep[] = ['goal', 'motivation', 'cadence', 'seenAs'];
+const STEP_ORDER: readonly ProposalStep[] = [...QUESTION_STEPS, 'review'];
 
 type Phase =
   | { kind: 'form'; step: ProposalStep }
@@ -184,16 +190,26 @@ export default function ChildProposalScreen() {
 
   const isReview = step === 'review';
   const canGoOn = step ? canLeaveStep(step, draft) : false;
+  const skipLabel =
+    step === 'motivation'
+      ? PROPOSAL_COPY.motivation.skip
+      : step === 'seenAs'
+        ? PROPOSAL_COPY.seenAs.skip
+        : null;
 
   return (
     <View style={webScreen}>
       <GradientBackground />
       <SafeAreaView style={styles.safe} edges={['bottom']}>
         <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+          {/* 頁首的一點日光與葉子。刻意只是一角，不是整塊 hero ——
+              這一頁的主角是那個問題，不是風景。 */}
+          <HeaderDaylight />
+
           <TouchableOpacity
             testID="proposal-back"
             accessibilityRole="button"
-            accessibilityLabel="上一步"
+            accessibilityLabel={PROPOSAL_COPY.nav.prev}
             style={styles.backBtn}
             onPress={goBack}
             activeOpacity={0.72}
@@ -201,13 +217,26 @@ export default function ChildProposalScreen() {
           >
             <Text style={styles.backMark}>‹</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>{PROPOSAL_COPY.screenTitle}</Text>
-          {/* 進度用點，不用「3/5」—— 數字會讓孩子覺得還有多久要交作業。 */}
-          <View style={styles.dots}>
-            {STEP_ORDER.map((s, i) => (
-              <View key={s} style={[styles.dot, i <= stepIndex && styles.dotOn]} />
-            ))}
-          </View>
+
+          <Text style={styles.headerTitle}>{PROPOSAL_COPY.flowTitle}</Text>
+
+          {/* 進度只算四個問題，而且用點不用「3/4」——
+              數字會讓孩子覺得還有多久要交作業。摘要頁不顯示。 */}
+          {isReview ? null : (
+            <View
+              testID="proposal-progress"
+              style={styles.dots}
+              accessibilityRole="progressbar"
+            >
+              {QUESTION_STEPS.map((s, i) => (
+                <View
+                  key={s}
+                  testID={`proposal-progress-dot-${i}`}
+                  style={[styles.dot, i <= stepIndex && styles.dotOn]}
+                />
+              ))}
+            </View>
+          )}
         </View>
 
         <KeyboardAvoidingView
@@ -254,9 +283,11 @@ export default function ChildProposalScreen() {
                 question={PROPOSAL_COPY.motivation.question}
                 hint={PROPOSAL_COPY.motivation.hint}
               >
+                {/* 沒有 height，只有 minHeight —— 一兩句就是一兩句的高度，
+                    寫多了自己長。一開始就給一大塊空白等於在說「這裡要寫很多」。 */}
                 <TextInput
                   testID="proposal-motivation-input"
-                  style={styles.input}
+                  style={[styles.input, styles.inputShort]}
                   value={draft.motivation}
                   onChangeText={(text) => setDraft((d) => withMotivation(d, text))}
                   placeholder={PROPOSAL_COPY.motivation.placeholder}
@@ -275,48 +306,60 @@ export default function ChildProposalScreen() {
                 {CADENCE_OPTIONS.map((option) => {
                   const selected = draft.cadence.kind === option.kind;
                   return (
-                    <View key={option.kind}>
+                    // 展開的內容包在同一張卡裡面 —— 選項與它的細節是一件事，
+                    // 掉出卡片外會讓孩子以為那排數字是另一個問題。
+                    <View
+                      key={option.kind}
+                      style={[styles.optionCard, selected && styles.optionCardOn]}
+                    >
                       <ChoiceRow
                         testID={`proposal-cadence-${option.kind}`}
                         label={option.label}
-                        hint={option.hint}
                         selected={selected}
                         onPress={() => setDraft((d) => withCadence(d, defaultFor(option.kind, d)))}
                       />
 
                       {selected && option.kind === 'weekly_times' && (
-                        <View testID="proposal-times-picker" style={styles.chipRow}>
-                          {TIMES.map((n) => {
-                            const on =
-                              draft.cadence.kind === 'weekly_times' &&
-                              draft.cadence.timesPerWeek === n;
-                            return (
-                              <TouchableOpacity
-                                key={n}
-                                testID={`proposal-times-${n}`}
-                                style={[styles.chip, on && styles.chipOn]}
-                                onPress={() =>
-                                  setDraft((d) =>
-                                    withCadence(d, { kind: 'weekly_times', timesPerWeek: n }),
-                                  )
-                                }
-                                accessibilityRole="button"
-                                accessibilityState={{ selected: on }}
-                                accessibilityLabel={`一週 ${n} ${PROPOSAL_COPY.cadence.weeklyTimesSuffix}`}
-                                activeOpacity={0.8}
-                              >
-                                <Text style={[styles.chipText, on && styles.chipTextOn]}>
-                                  {n}
-                                </Text>
-                              </TouchableOpacity>
-                            );
-                          })}
+                        <View testID="proposal-times-picker" style={styles.panel}>
+                          <Text style={styles.panelHint}>
+                            {PROPOSAL_COPY.cadence.weeklyTimesHint}
+                          </Text>
+                          <View style={styles.chipRow}>
+                            {TIMES.map((n) => {
+                              const on =
+                                draft.cadence.kind === 'weekly_times' &&
+                                draft.cadence.timesPerWeek === n;
+                              return (
+                                <TouchableOpacity
+                                  key={n}
+                                  testID={`proposal-times-${n}`}
+                                  style={[styles.chip, on && styles.chipOn]}
+                                  onPress={() =>
+                                    setDraft((d) =>
+                                      withCadence(d, { kind: 'weekly_times', timesPerWeek: n }),
+                                    )
+                                  }
+                                  accessibilityRole="button"
+                                  accessibilityState={{ selected: on }}
+                                  accessibilityLabel={`一週 ${n} ${PROPOSAL_COPY.cadence.weeklyTimesSuffix}`}
+                                  activeOpacity={0.8}
+                                >
+                                  <Text style={[styles.chipText, on && styles.chipTextOn]}>
+                                    {n}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                          <Text style={styles.panelNote}>
+                            {PROPOSAL_COPY.cadence.changeable}
+                          </Text>
                         </View>
                       )}
 
                       {selected && option.kind === 'certain_days' && (
-                        <View testID="proposal-days-picker">
-                          <Text style={styles.pickerHint}>{PROPOSAL_COPY.cadence.daysHint}</Text>
+                        <View testID="proposal-days-picker" style={styles.panel}>
+                          <Text style={styles.panelHint}>{PROPOSAL_COPY.cadence.daysHint}</Text>
                           <View style={styles.chipRow}>
                             {DAY_LABELS.map((label, day) => {
                               const on =
@@ -340,6 +383,9 @@ export default function ChildProposalScreen() {
                               );
                             })}
                           </View>
+                          <Text style={styles.panelNote}>
+                            {PROPOSAL_COPY.cadence.changeable}
+                          </Text>
                         </View>
                       )}
                     </View>
@@ -354,14 +400,20 @@ export default function ChildProposalScreen() {
                 hint={PROPOSAL_COPY.seenAs.hint}
               >
                 {SEEN_AS_OPTIONS.map((option) => (
-                  <ChoiceRow
+                  <View
                     key={option.value}
-                    testID={`proposal-seenas-${option.value}`}
-                    label={option.label}
-                    hint={option.hint}
-                    selected={draft.seenAs === option.value}
-                    onPress={() => setDraft((d) => withSeenAs(d, option.value))}
-                  />
+                    style={[
+                      styles.optionCard,
+                      draft.seenAs === option.value && styles.optionCardOn,
+                    ]}
+                  >
+                    <ChoiceRow
+                      testID={`proposal-seenas-${option.value}`}
+                      label={option.label}
+                      selected={draft.seenAs === option.value}
+                      onPress={() => setDraft((d) => withSeenAs(d, option.value))}
+                    />
+                  </View>
                 ))}
               </StepShell>
             )}
@@ -396,6 +448,12 @@ export default function ChildProposalScreen() {
                   />
                 </View>
 
+                {/* 按下去之前就先講清楚會發生什麼事：記下來，然後就可以開始。 */}
+                <View style={styles.noteBox}>
+                  <Sprout />
+                  <Text style={styles.noteText}>{PROPOSAL_COPY.review.note}</Text>
+                </View>
+
                 {error ? (
                   <View testID="proposal-error" style={styles.errorBox}>
                     <Text style={styles.errorTitle}>{PROPOSAL_COPY.error.title}</Text>
@@ -412,7 +470,7 @@ export default function ChildProposalScreen() {
 
           <View style={[styles.footer, { paddingBottom: 10 + Math.max(insets.bottom, 0) }]}>
             {/* 選填的步驟給一個明確的「先跳過」—— 沒有它，孩子會以為非填不可。 */}
-            {(step === 'motivation' || step === 'seenAs') && (
+            {skipLabel ? (
               <TouchableOpacity
                 testID="proposal-skip"
                 style={styles.skipBtn}
@@ -420,41 +478,56 @@ export default function ChildProposalScreen() {
                 activeOpacity={0.72}
                 accessibilityRole="button"
               >
-                <Text style={styles.skipText}>
-                  {step === 'motivation'
-                    ? PROPOSAL_COPY.motivation.skip
-                    : PROPOSAL_COPY.seenAs.skip}
-                </Text>
+                <Text style={styles.skipText}>{skipLabel}</Text>
               </TouchableOpacity>
-            )}
+            ) : null}
 
-            <TouchableOpacity
-              // testID 固定，不隨錯誤狀態改名：同一顆按鈕換 id 會讓
-              // 「重試」這條路徑在測試與 QA 腳本裡憑空消失一次。
-              // 按下去要做什麼由標籤（送出 / 再試一次）表達。
-              testID={isReview ? 'proposal-submit' : 'proposal-next'}
-              style={[styles.primaryBtn, (!canGoOn || submitting) && styles.primaryBtnOff]}
-              onPress={isReview ? handleSubmit : goNext}
-              disabled={submitting}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: !canGoOn || submitting }}
-            >
-              {submitting ? (
-                <View style={styles.btnRow}>
-                  <ActivityIndicator color={Colors.bgSurface} size="small" />
-                  <Text style={styles.primaryBtnText}>{PROPOSAL_COPY.review.submitting}</Text>
-                </View>
-              ) : (
-                <Text style={styles.primaryBtnText}>
-                  {isReview
-                    ? error
-                      ? PROPOSAL_COPY.error.retry
-                      : PROPOSAL_COPY.review.submit
-                    : '下一步'}
-                </Text>
-              )}
-            </TouchableOpacity>
+            <View style={styles.footerRow}>
+              {/* 第一頁沒有「上一步」—— 那裡的返回是離開，頁首的箭頭講得比較清楚。 */}
+              {stepIndex > 0 ? (
+                <TouchableOpacity
+                  testID="proposal-prev"
+                  style={[styles.secondaryBtn, styles.footerSecondary]}
+                  onPress={goBack}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.secondaryBtnText}>{PROPOSAL_COPY.nav.prev}</Text>
+                </TouchableOpacity>
+              ) : null}
+
+              <TouchableOpacity
+                // testID 固定，不隨錯誤狀態改名：同一顆按鈕換 id 會讓
+                // 「重試」這條路徑在測試與 QA 腳本裡憑空消失一次。
+                // 按下去要做什麼由標籤（送出這個想法 / 再試一次）表達。
+                testID={isReview ? 'proposal-submit' : 'proposal-next'}
+                style={[
+                  styles.primaryBtn,
+                  styles.footerPrimary,
+                  (!canGoOn || submitting) && styles.primaryBtnOff,
+                ]}
+                onPress={isReview ? handleSubmit : goNext}
+                disabled={submitting}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: !canGoOn || submitting }}
+              >
+                {submitting ? (
+                  <View style={styles.btnRow}>
+                    <ActivityIndicator color={Colors.bgSurface} size="small" />
+                    <Text style={styles.primaryBtnText}>{PROPOSAL_COPY.review.submitting}</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.primaryBtnText}>
+                    {isReview
+                      ? error
+                        ? PROPOSAL_COPY.error.retry
+                        : PROPOSAL_COPY.review.submit
+                      : PROPOSAL_COPY.nav.next}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -472,9 +545,45 @@ const TIMES = Array.from(
 );
 
 /**
+ * 頁首右上角的一點自然元素：日光 ＋ 兩片葉子。
+ *
+ * 刻意小、刻意淡、刻意不畫樹。整頁都放一棵大樹的話，五頁看起來會一樣，
+ * 孩子分不出自己走到哪裡；而 hero 佔掉的高度正好是問題該有的留白。
+ * 用已裝的 react-native-svg 畫，不加任何圖檔。
+ */
+function HeaderDaylight() {
+  return (
+    <View style={styles.daylight} pointerEvents="none">
+      <Svg width="100%" height="100%" viewBox="0 0 160 96">
+        <Circle cx={118} cy={26} r={20} fill={Colors.gold300} opacity={0.28} />
+        <Circle cx={118} cy={26} r={12} fill={Colors.gold300} opacity={0.35} />
+        <Ellipse cx={52} cy={64} rx={26} ry={11} fill={Colors.leaf200} opacity={0.4} />
+        <Ellipse cx={86} cy={78} rx={18} ry={8} fill={Colors.leaf300} opacity={0.28} />
+        <Path
+          d="M136 62c-14 2-22 10-22 20 12 1 21-7 22-20z"
+          fill={Colors.leaf300}
+          opacity={0.45}
+        />
+      </Svg>
+    </View>
+  );
+}
+
+/** 摘要頁那句話前面的小苗。畫的，不是 emoji —— emoji 在不同機器上長得不一樣。 */
+function Sprout() {
+  return (
+    <Svg width={18} height={20} viewBox="0 0 18 20">
+      <Path d="M9 19V9" stroke={Colors.leaf600} strokeWidth={1.8} strokeLinecap="round" />
+      <Path d="M9 10C9 6 6 4 2 4c0 4 3 6 7 6z" fill={Colors.leaf400} />
+      <Path d="M9 12c0-3.4 2.6-5.4 6-5.4 0 3.4-2.6 5.4-6 5.4z" fill={Colors.leaf300} />
+    </Svg>
+  );
+}
+
+/**
  * 選了某個節奏時，該帶什麼預設值。
  *
- * 已經選過的內容要留著：孩子點「一週做幾次」→ 選 4 → 好奇點了「固定哪幾天」
+ * 已經選過的內容要留著：孩子點「一週做幾次」→ 選 4 → 好奇點了「想在哪幾天做」
  * → 再點回來，那個 4 應該還在。每次都重設會讓他覺得自己剛剛做錯了什麼。
  *
  * 回傳型別明寫 CadenceChoice（不用 as const）—— 那會把 days 變成 readonly []，
@@ -512,35 +621,34 @@ function StepShell({
   );
 }
 
+/**
+ * 一列選項。節奏與「怎麼陪你」共用同一種列 ——
+ * 兩頁的互動長得一樣，孩子第二次就不用重新學怎麼點。
+ */
 function ChoiceRow({
   testID,
   label,
-  hint,
   selected,
   onPress,
 }: {
   testID: string;
   label: string;
-  hint: string;
   selected: boolean;
   onPress: () => void;
 }) {
   return (
     <TouchableOpacity
       testID={testID}
-      style={[styles.choice, selected && styles.choiceOn]}
+      style={styles.choice}
       onPress={onPress}
       activeOpacity={0.85}
       accessibilityRole="radio"
       accessibilityState={{ selected }}
       accessibilityLabel={label}
     >
-      <View style={[styles.radio, selected && styles.radioOn]}>
-        {selected ? <View style={styles.radioDot} /> : null}
-      </View>
-      <View style={styles.choiceText}>
-        <Text style={[styles.choiceLabel, selected && styles.choiceLabelOn]}>{label}</Text>
-        <Text style={styles.choiceHint}>{hint}</Text>
+      <Text style={[styles.choiceLabel, selected && styles.choiceLabelOn]}>{label}</Text>
+      <View style={[styles.mark, selected && styles.markOn]}>
+        {selected ? <Text style={styles.markGlyph}>✓</Text> : null}
       </View>
     </TouchableOpacity>
   );
@@ -586,10 +694,17 @@ const styles = StyleSheet.create({
   header: {
     minHeight: 68,
     paddingHorizontal: 14,
-    paddingBottom: 10,
+    paddingBottom: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  daylight: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    width: 160,
+    height: 96,
   },
   backBtn: {
     width: 44,
@@ -608,37 +723,37 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     flex: 1,
-    color: Colors.ink900,
-    fontSize: 19,
-    fontWeight: '900',
+    color: Colors.ink700,
+    fontSize: 16,
+    fontWeight: '800',
   },
-  dots: { flexDirection: 'row', gap: 5, alignItems: 'center' },
+  dots: { flexDirection: 'row', gap: 6, alignItems: 'center' },
   dot: {
-    width: 7,
-    height: 7,
+    width: 8,
+    height: 8,
     borderRadius: 4,
     backgroundColor: Colors.ink100,
   },
   dotOn: { backgroundColor: Colors.accent },
 
   body: { paddingHorizontal: 18, paddingBottom: 24 },
-  step: { paddingTop: 6 },
+  step: { paddingTop: 10 },
   question: {
-    fontSize: 25,
-    lineHeight: 34,
+    fontSize: 26,
+    lineHeight: 36,
     fontWeight: '900',
     color: Colors.ink900,
   },
   hint: {
-    marginTop: 6,
+    marginTop: 8,
     fontSize: 14,
     color: Colors.fgMuted,
     fontWeight: '600',
   },
-  stepBody: { marginTop: 20, gap: 10 },
+  stepBody: { marginTop: 26, gap: 12 },
 
   input: {
-    minHeight: 108,
+    minHeight: 128,
     borderRadius: 18,
     backgroundColor: Colors.bgSurface,
     borderWidth: 1,
@@ -650,62 +765,79 @@ const styles = StyleSheet.create({
     color: Colors.ink900,
     textAlignVertical: 'top',
   },
+  /** 選填的那一格不需要一大塊空白等著被填滿。 */
+  inputShort: { minHeight: 92 },
   fieldError: {
-    marginTop: 8,
+    marginTop: 10,
     fontSize: 14,
     fontWeight: '700',
     color: Colors.warning,
   },
 
+  optionCard: {
+    borderRadius: 20,
+    backgroundColor: Colors.bgSurface,
+    borderWidth: 1,
+    borderColor: Colors.borderSoft,
+    overflow: 'hidden',
+  },
+  optionCardOn: {
+    borderColor: Colors.accent,
+    backgroundColor: Colors.leaf50,
+  },
   choice: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    minHeight: 66,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 18,
-    backgroundColor: Colors.bgSurface,
-    borderWidth: 1,
-    borderColor: Colors.borderSoft,
+    minHeight: 64,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
   },
-  choiceOn: {
-    borderColor: Colors.accent,
-    backgroundColor: Colors.leaf50,
+  choiceLabel: {
+    flex: 1,
+    fontSize: 17,
+    lineHeight: 24,
+    fontWeight: '800',
+    color: Colors.ink900,
   },
-  radio: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+  choiceLabelOn: { color: Colors.leaf700 },
+  mark: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     borderWidth: 2,
     borderColor: Colors.ink100,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  radioOn: { borderColor: Colors.accent },
-  radioDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+  markOn: {
+    borderColor: Colors.accent,
     backgroundColor: Colors.accent,
   },
-  choiceText: { flex: 1, gap: 2 },
-  choiceLabel: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: Colors.ink900,
-  },
-  choiceLabelOn: { color: Colors.leaf700 },
-  choiceHint: {
-    fontSize: 13,
-    color: Colors.fgMuted,
-    fontWeight: '600',
+  markGlyph: {
+    fontSize: 15,
+    lineHeight: 18,
+    fontWeight: '900',
+    color: Colors.bgSurface,
   },
 
-  pickerHint: {
+  /** 展開的細節在同一張卡裡面，用一條髮絲線跟選項分開。 */
+  panel: {
+    paddingHorizontal: 18,
+    paddingBottom: 16,
+    borderTopWidth: 1,
+    borderTopColor: Colors.hairline,
+    paddingTop: 14,
+  },
+  panelHint: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.ink700,
+  },
+  panelNote: {
     marginTop: 10,
-    marginLeft: 4,
     fontSize: 13,
+    lineHeight: 19,
     fontWeight: '600',
     color: Colors.fgMuted,
   },
@@ -713,15 +845,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginTop: 10,
-    marginBottom: 4,
-    paddingHorizontal: 4,
+    marginTop: 12,
   },
   chip: {
-    minWidth: 48,
-    height: 48,
-    borderRadius: 24,
-    paddingHorizontal: 12,
+    minWidth: 44,
+    height: 46,
+    borderRadius: 14,
+    paddingHorizontal: 10,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Colors.bgSurface,
@@ -740,29 +870,47 @@ const styles = StyleSheet.create({
   chipTextOn: { color: Colors.bgSurface },
 
   summaryCard: {
-    borderRadius: 18,
+    borderRadius: 20,
     backgroundColor: Colors.bgSurface,
     borderWidth: 1,
     borderColor: Colors.borderSoft,
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
   },
-  summaryRow: { paddingVertical: 14, gap: 4 },
+  summaryRow: { paddingVertical: 16, gap: 5 },
   summaryRowLine: {
     borderBottomWidth: 1,
     borderBottomColor: Colors.hairline,
   },
   summaryLabel: {
     fontSize: 13,
-    fontWeight: '700',
-    color: Colors.fgMuted,
+    fontWeight: '800',
+    color: Colors.leaf700,
   },
   summaryValue: {
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '800',
     color: Colors.ink900,
-    lineHeight: 24,
+    lineHeight: 26,
   },
   summaryValueMuted: { color: Colors.ink300 },
+
+  noteBox: {
+    marginTop: 14,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    borderRadius: 16,
+    backgroundColor: Colors.leaf50,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  noteText: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 22,
+    fontWeight: '600',
+    color: Colors.leaf700,
+  },
 
   errorBox: {
     marginTop: 14,
@@ -787,9 +935,12 @@ const styles = StyleSheet.create({
 
   footer: {
     paddingHorizontal: 18,
-    paddingTop: 8,
-    gap: 8,
+    paddingTop: 10,
+    gap: 6,
   },
+  footerRow: { flexDirection: 'row', gap: 10 },
+  footerSecondary: { flex: 1 },
+  footerPrimary: { flex: 1.35 },
   primaryBtn: {
     minHeight: 56,
     borderRadius: 28,
@@ -803,6 +954,20 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '900',
     color: Colors.bgSurface,
+  },
+  secondaryBtn: {
+    minHeight: 56,
+    borderRadius: 28,
+    borderWidth: 1.5,
+    borderColor: Colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  secondaryBtnText: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: Colors.leaf700,
   },
   btnRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   skipBtn: {
