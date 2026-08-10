@@ -345,13 +345,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS child_proposals_task_unique
 --   2. 原始提案不可以被版本覆寫。分表之後這件事是結構性保證，
 --      不是靠所有人記得不要 UPDATE child_proposals。
 --
--- ⚠️ **這張表不存最終幣值。**
+-- ⚠️ **這張表不「計算」幣值，但必須「追溯」最後確認的幣值。**
 --
---    AI 可以建議節奏、步驟、時長，可以留下 reward eligibility 與
---    policy version。但「最後給幾個幣」由 coin policy 在建立正式任務
---    時決定（tasks.reward_coin_amount，走既有的 rewardEligibility →
---    coinPolicy 路徑）。這裡放一個 coin 欄位的話，AI 的建議就會
---    沿著 P0-5 一路寫進錢包 —— 那是產品明確拒絕的事。
+--    兩件事要分清楚，混在一起就會長出第二套 pricing engine：
+--
+--    · AI 建議（ai_snapshot、ai_suggested_coin_amount）
+--        誰都不該把它當成最終值。它是「當時 AI 說了什麼」。
+--
+--    · 家庭最後共同確認的回饋（confirmed_* 那一組）
+--        這是 shared version 的一部分 —— 三個月後家長問
+--        「我們當初講好一次幾個幣」，答案要在版本上找得到，
+--        而不是去翻現在的 tasks（那張表之後還會被調整）。
+--
+--    關鍵設計：**confirmed_* 不接受呼叫端傳值。**
+--    它由 transition_child_proposal_v1 在轉成 active 時，
+--    直接從 tasks 那一列**複製**過來（見第 9c 節）。
+--
+--    所以幣值仍然只有一個來源：既有的 rewardEligibility → coinPolicy
+--    → create_parent_task_v1 → tasks.reward_coin_amount。
+--    這裡存的是那個結果的不可變快照，不是另一條計算路徑。
+--    confirmed_source_task_id 指回那筆任務，隨時對得起來。
 -- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE IF NOT EXISTS child_proposal_plan_versions (
@@ -402,6 +415,36 @@ CREATE TABLE IF NOT EXISTS child_proposal_plan_versions (
   ai_snapshot     jsonb,
   ai_model        text,
   ai_request_id   text,
+
+  -- AI 建議的幣值。**這不是最終值，永遠不是。**
+  --
+  -- 攤成欄位而不是留在 ai_snapshot 裡，理由是它有一個明確的消費端：
+  -- 「AI 建議 12、家長最後給 8」這個對比要能用一句 SQL 查出來
+  -- （intervention_log 的 ai_suggested / parent_decision 就是同一個需求）。
+  -- 名字裡的 ai_suggested_ 是刻意的 —— 任何人看到這一欄都不會
+  -- 誤以為它可以拿去入帳。
+  ai_suggested_coin_amount integer,
+
+  -- ── 家庭最後共同確認的回饋（shared version 的一部分）─────────────────
+  --
+  -- 全部由 transition_child_proposal_v1 從 tasks 複製，呼叫端傳不進來。
+  -- 寫一次之後不可修改（見 child_proposal_plan_version_guard）。
+  --
+  -- 為什麼不是「需要時再 join tasks」：tasks 是**現況**，會被家長調整、
+  -- 會被 P0-8 改節奏。而「當初講好的是什麼」是一個歷史事實，
+  -- 被現況覆寫之後就永遠找不回來了。
+  confirmed_reward_policy         text,
+  confirmed_coin_amount           integer,
+  confirmed_payout_basis          text,
+  confirmed_claim_period          text,
+  confirmed_max_claims_per_period integer,
+  confirmed_reward_policy_version text,
+  confirmed_task_policy_version   text,
+  -- 這個快照是從哪一筆任務複製來的。它是「這裡沒有第二套定價」的證據 ——
+  -- 任何時候都可以拿它回去比對 tasks.reward_coin_amount。
+  confirmed_source_task_id        uuid REFERENCES tasks(id) ON DELETE SET NULL,
+  confirmed_by_user_id            uuid,
+  confirmed_at                    timestamptz,
 
   -- ── 版本時間語意 ────────────────────────────────────────────────────────
   --
@@ -517,6 +560,195 @@ ALTER TABLE child_proposal_plan_versions
 ALTER TABLE child_proposal_plan_versions
   ADD CONSTRAINT child_proposal_plan_versions_date_order
   CHECK (start_date IS NULL OR end_date IS NULL OR end_date >= start_date);
+
+-- ── 家庭最後共同確認的回饋 ────────────────────────────────────────────────
+--
+-- 補欄位用 ADD COLUMN IF NOT EXISTS 再來一次：上面的 CREATE TABLE 有
+-- IF NOT EXISTS，所以在「已經套用過這支 migration 的舊版本」的環境上
+-- 整段會被跳過。這一段讓那種環境也補得齊。
+
+ALTER TABLE child_proposal_plan_versions
+  ADD COLUMN IF NOT EXISTS ai_suggested_coin_amount        integer,
+  ADD COLUMN IF NOT EXISTS confirmed_reward_policy         text,
+  ADD COLUMN IF NOT EXISTS confirmed_coin_amount           integer,
+  ADD COLUMN IF NOT EXISTS confirmed_payout_basis          text,
+  ADD COLUMN IF NOT EXISTS confirmed_claim_period          text,
+  ADD COLUMN IF NOT EXISTS confirmed_max_claims_per_period integer,
+  ADD COLUMN IF NOT EXISTS confirmed_reward_policy_version text,
+  ADD COLUMN IF NOT EXISTS confirmed_task_policy_version   text,
+  ADD COLUMN IF NOT EXISTS confirmed_source_task_id        uuid,
+  ADD COLUMN IF NOT EXISTS confirmed_by_user_id            uuid,
+  ADD COLUMN IF NOT EXISTS confirmed_at                    timestamptz;
+
+COMMENT ON COLUMN child_proposal_plan_versions.ai_suggested_coin_amount IS
+  'AI 建議的幣值。永遠不是最終值 —— 最終值看 confirmed_coin_amount，'
+  '而那一欄由 RPC 從 tasks 複製，呼叫端傳不進來。';
+
+COMMENT ON COLUMN child_proposal_plan_versions.confirmed_coin_amount IS
+  '家長最後確認的幣值，從 tasks.reward_coin_amount 複製。'
+  '這裡不做任何計算 —— 幣值的唯一來源仍是 rewardEligibility → coinPolicy → tasks。';
+
+COMMENT ON COLUMN child_proposal_plan_versions.confirmed_source_task_id IS
+  '這份回饋快照是從哪一筆任務複製來的。存在的理由是可對帳：'
+  '任何時候都能拿它回去比對 tasks，證明這裡沒有第二套定價。';
+
+ALTER TABLE child_proposal_plan_versions
+  DROP CONSTRAINT IF EXISTS child_proposal_plan_versions_confirmed_source_fkey;
+ALTER TABLE child_proposal_plan_versions
+  ADD CONSTRAINT child_proposal_plan_versions_confirmed_source_fkey
+  FOREIGN KEY (confirmed_source_task_id) REFERENCES tasks(id) ON DELETE SET NULL;
+
+-- 確認是一個整體，不是十一個各自獨立的欄位。
+-- 只填一半的快照比沒有快照更糟 —— 它看起來像是有答案的。
+ALTER TABLE child_proposal_plan_versions
+  DROP CONSTRAINT IF EXISTS child_proposal_plan_versions_confirmed_atomic;
+ALTER TABLE child_proposal_plan_versions
+  ADD CONSTRAINT child_proposal_plan_versions_confirmed_atomic
+  CHECK (
+    CASE WHEN confirmed_at IS NULL
+      THEN confirmed_reward_policy IS NULL
+       AND confirmed_coin_amount IS NULL
+       AND confirmed_payout_basis IS NULL
+       AND confirmed_claim_period IS NULL
+       AND confirmed_max_claims_per_period IS NULL
+       AND confirmed_reward_policy_version IS NULL
+       AND confirmed_task_policy_version IS NULL
+       AND confirmed_source_task_id IS NULL
+      ELSE confirmed_reward_policy IS NOT NULL
+       AND confirmed_by_user_id IS NOT NULL
+       AND confirmed_payout_basis IS NOT NULL
+       AND confirmed_claim_period IS NOT NULL
+       AND confirmed_max_claims_per_period IS NOT NULL
+       AND btrim(COALESCE(confirmed_reward_policy_version, '')) <> ''
+       AND confirmed_source_task_id IS NOT NULL
+    END
+  );
+
+ALTER TABLE child_proposal_plan_versions
+  DROP CONSTRAINT IF EXISTS child_proposal_plan_versions_confirmed_policy_check;
+ALTER TABLE child_proposal_plan_versions
+  ADD CONSTRAINT child_proposal_plan_versions_confirmed_policy_check
+  CHECK (
+    confirmed_reward_policy IS NULL
+    OR confirmed_reward_policy IN
+       ('record_only', 'family_contribution', 'progress_only', 'coin_eligible')
+  );
+
+-- payout basis 只有三個值，而且每一個都由 tasks.claim_period 推導得出來
+-- （見 child_proposal_payout_basis）。多留「未來也許會用到」的值等於
+-- 現在就猜 —— D 類節點式發幣真的要進來時，那需要一支看得見的 migration。
+ALTER TABLE child_proposal_plan_versions
+  DROP CONSTRAINT IF EXISTS child_proposal_plan_versions_payout_basis_check;
+ALTER TABLE child_proposal_plan_versions
+  ADD CONSTRAINT child_proposal_plan_versions_payout_basis_check
+  CHECK (
+    confirmed_payout_basis IS NULL
+    OR confirmed_payout_basis IN ('per_completion', 'per_period', 'one_time')
+  );
+
+-- 沿用 tasks.claim_period 的三個值，不另立一套。
+ALTER TABLE child_proposal_plan_versions
+  DROP CONSTRAINT IF EXISTS child_proposal_plan_versions_confirmed_claim_period_check;
+ALTER TABLE child_proposal_plan_versions
+  ADD CONSTRAINT child_proposal_plan_versions_confirmed_claim_period_check
+  CHECK (
+    confirmed_claim_period IS NULL
+    OR confirmed_claim_period IN ('day', 'week', 'once')
+  );
+
+ALTER TABLE child_proposal_plan_versions
+  DROP CONSTRAINT IF EXISTS child_proposal_plan_versions_confirmed_max_claims_positive;
+ALTER TABLE child_proposal_plan_versions
+  ADD CONSTRAINT child_proposal_plan_versions_confirmed_max_claims_positive
+  CHECK (confirmed_max_claims_per_period IS NULL OR confirmed_max_claims_per_period > 0);
+
+-- 幣值只屬於 coin_eligible，而且 coin_eligible 一定要有幣值。
+--
+-- 兩個方向都要擋。少了前半，一筆「只記錄」的任務會帶著一個幣值數字，
+-- 而週報總有一天會把它加進去；少了後半，家長會看到「可獲得成長幣」
+-- 但版本上查不到到底是幾個。
+ALTER TABLE child_proposal_plan_versions
+  DROP CONSTRAINT IF EXISTS child_proposal_plan_versions_confirmed_coin_scope;
+ALTER TABLE child_proposal_plan_versions
+  ADD CONSTRAINT child_proposal_plan_versions_confirmed_coin_scope
+  CHECK (
+    confirmed_reward_policy IS NULL
+    OR (
+      CASE WHEN confirmed_reward_policy = 'coin_eligible'
+        THEN confirmed_coin_amount IS NOT NULL AND confirmed_coin_amount > 0
+        ELSE confirmed_coin_amount IS NULL
+      END
+    )
+  );
+
+-- **確認一定要有一個人的名字。**
+--
+-- ⚠️ 這裡曾經寫成 `authored_by <> 'ai' OR confirmed_at IS NULL`，
+--    而 staging 的第一次實跑就把它擋下來了。那條規則是錯的，
+--    錯在把兩件不同的事混成一件：
+--
+--      authored_by         這一版的**計畫內容**是誰起草的
+--      confirmed_by_user_id 這一份**回饋**是誰確認的
+--
+--    AI 起草的計畫當然可以成為家庭共同版本 —— 那正是 AI 該做的事。
+--    確認它的是家長，而且家長的帳號就記在 confirmed_by_user_id。
+--    禁止 AI 起草的版本被確認，只會逼出一個「把 AI 那版原封不動抄成
+--    parent 版本」的假動作，而且會讓共同版本再也對不回 AI 當初提了什麼。
+--
+--    真正要守住的是「AI 不決定幣值」，而那件事由三個地方保證：
+--    confirmed_* 只由 RPC 從 tasks 複製、命令帶幣值一律拒絕、
+--    AI 的建議只能進 ai_suggested_coin_amount。與 authored_by 無關。
+ALTER TABLE child_proposal_plan_versions
+  DROP CONSTRAINT IF EXISTS child_proposal_plan_versions_ai_not_reward_confirmable;
+ALTER TABLE child_proposal_plan_versions
+  DROP CONSTRAINT IF EXISTS child_proposal_plan_versions_confirmed_needs_actor;
+ALTER TABLE child_proposal_plan_versions
+  ADD CONSTRAINT child_proposal_plan_versions_confirmed_needs_actor
+  CHECK (confirmed_at IS NULL OR confirmed_by_user_id IS NOT NULL);
+
+-- AI 建議的幣值一定要有 AI 回應撐著。沒有 snapshot 的「AI 建議」
+-- 就只是一個沒有出處的數字。
+ALTER TABLE child_proposal_plan_versions
+  DROP CONSTRAINT IF EXISTS child_proposal_plan_versions_ai_suggestion_needs_snapshot;
+ALTER TABLE child_proposal_plan_versions
+  ADD CONSTRAINT child_proposal_plan_versions_ai_suggestion_needs_snapshot
+  CHECK (
+    ai_suggested_coin_amount IS NULL
+    OR (ai_snapshot IS NOT NULL AND ai_suggested_coin_amount >= 0)
+  );
+
+CREATE INDEX IF NOT EXISTS child_proposal_plan_versions_confirmed_idx
+  ON child_proposal_plan_versions (confirmed_source_task_id)
+  WHERE confirmed_source_task_id IS NOT NULL;
+
+
+-- ── payout basis 的推導 ───────────────────────────────────────────────────
+--
+-- 抽成 IMMUTABLE 函式而不是在 RPC 裡寫 CASE：這條映射之後 P0-5 與
+-- 家長端的顯示都會用到，寫兩份就會有一份先過期。
+-- 對照的是 create_parent_task_v1 第 9 節推導 claim_period 的那段。
+
+CREATE OR REPLACE FUNCTION public.child_proposal_payout_basis(p_claim_period text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT CASE p_claim_period
+    WHEN 'once' THEN 'one_time'       -- 單次任務，完成一次就結束
+    WHEN 'week' THEN 'per_period'     -- 每週 n 次，以週為結算單位
+    WHEN 'day'  THEN 'per_completion' -- 每天一次，每完成一次算一次
+    ELSE NULL
+  END;
+$$;
+
+COMMENT ON FUNCTION public.child_proposal_payout_basis(text) IS
+  'tasks.claim_period → 版本快照的 payout basis。回 NULL 代表遇到沒見過的 claim_period，'
+  '呼叫端必須當成錯誤，不可以塞一個預設值。';
+
+REVOKE ALL ON FUNCTION public.child_proposal_payout_basis(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.child_proposal_payout_basis(text)
+  TO authenticated, service_role;
+
 
 -- 每份提案的版號不重複。並發寫入兩個「第 3 版」時，其中一個拿 23505，
 -- 呼叫端重算版號重試 —— 這比事後發現版本歷史缺一格好。
@@ -746,11 +978,19 @@ CREATE TABLE IF NOT EXISTS child_proposal_status_events (
   from_status text,
   to_status   text    NOT NULL,
 
-  -- 誰做的。**這是唯一記錄 actor 角色的地方** ——
-  -- 孩子在這個 App 沒有自己的 auth 身分（孩子端跑在家長的 session 上，
-  -- 靠 PIN 選孩子），所以 actor_user_id 對「孩子做的」那幾筆
-  -- 記到的是家長的 user_id。actor_role 是由 RPC 傳入並驗證的，
-  -- 它比 actor_user_id 更接近事實。詳見 docs 的說明與 P0-6 風險清單。
+  -- ⚠️ actor_role 是**稽核 / 畫面用的角色標記，不是身分證明**。
+  --
+  -- 它由呼叫端在命令裡自陳，RPC 只檢查值在不在允許集合裡 ——
+  -- 沒有辦法驗證「說自己是 child 的那一次真的是孩子按的」，
+  -- 因為這個 App 一個家庭共用一個 auth session（孩子靠 PIN 選 profile）。
+  --
+  -- 能保證的只有 actor_user_id 這一欄：它是 auth.uid()，
+  -- 也就是「這個家庭的某一個已登入帳號」。孩子操作記到的會是家長帳號。
+  --
+  -- 讀這張表時請照著這個強度理解：
+  --   actor_user_id  = 可信（GoTrue 簽出來的）
+  --   actor_role     = 自陳（給人看的脈絡，不可拿來做安全判斷）
+  -- 完整說明見第 8 節。
   actor_role     text NOT NULL,
   actor_user_id  uuid,
 
@@ -762,8 +1002,9 @@ CREATE TABLE IF NOT EXISTS child_proposal_status_events (
 );
 
 COMMENT ON TABLE child_proposal_status_events IS
-  'append-only 的提案狀態轉換紀錄。actor_role 由 RPC 驗證後寫入；'
-  '孩子沒有獨立 auth 身分，actor_user_id 對孩子操作記到的是家長帳號。';
+  'append-only 的提案狀態轉換紀錄。'
+  'actor_user_id 可信（auth.uid()）；actor_role 是呼叫端自陳的稽核 / 畫面角色，'
+  '不是身分證明 —— 一個家庭共用一個 auth session，child identity 無法在 DB 層證明。';
 
 ALTER TABLE child_proposal_status_events
   DROP CONSTRAINT IF EXISTS child_proposal_status_events_actor_role_check;
@@ -895,9 +1136,31 @@ BEGIN
     OR NEW.duration_type IS DISTINCT FROM OLD.duration_type
     OR NEW.duration_days IS DISTINCT FROM OLD.duration_days
     OR NEW.reward_policy IS DISTINCT FROM OLD.reward_policy
-    OR NEW.ai_snapshot IS DISTINCT FROM OLD.ai_snapshot THEN
+    OR NEW.ai_snapshot IS DISTINCT FROM OLD.ai_snapshot
+    OR NEW.ai_suggested_coin_amount IS DISTINCT FROM OLD.ai_suggested_coin_amount THEN
     RAISE EXCEPTION
       'plan version 是不可變的（version %）：改計畫請新增一版', OLD.id
+      USING ERRCODE = '23514';
+  END IF;
+
+  -- 家庭最後共同確認的回饋是 write-once。
+  --
+  -- 允許從 NULL 填上（P0-5 轉成 active 的那一刻），但填上之後一個字都不能改。
+  -- 可改的話，「我們當初講好一次幾個幣」就會跟著現在的 tasks 一起被改寫 ——
+  -- 而那正是這組欄位存在的理由：tasks 是現況，這裡是當初講好的事。
+  IF OLD.confirmed_at IS NOT NULL AND (
+       NEW.confirmed_at                    IS DISTINCT FROM OLD.confirmed_at
+    OR NEW.confirmed_reward_policy         IS DISTINCT FROM OLD.confirmed_reward_policy
+    OR NEW.confirmed_coin_amount           IS DISTINCT FROM OLD.confirmed_coin_amount
+    OR NEW.confirmed_payout_basis          IS DISTINCT FROM OLD.confirmed_payout_basis
+    OR NEW.confirmed_claim_period          IS DISTINCT FROM OLD.confirmed_claim_period
+    OR NEW.confirmed_max_claims_per_period IS DISTINCT FROM OLD.confirmed_max_claims_per_period
+    OR NEW.confirmed_reward_policy_version IS DISTINCT FROM OLD.confirmed_reward_policy_version
+    OR NEW.confirmed_task_policy_version   IS DISTINCT FROM OLD.confirmed_task_policy_version
+    OR NEW.confirmed_source_task_id        IS DISTINCT FROM OLD.confirmed_source_task_id
+  ) THEN
+    RAISE EXCEPTION
+      '已確認的回饋快照不可修改（version %）：要改回饋請走調整流程並產生新版本', OLD.id
       USING ERRCODE = '23514';
   END IF;
 
@@ -1012,21 +1275,37 @@ CREATE TRIGGER child_proposals_guard_linked_task
 --
 -- 邊界是**家庭**，而且只給 SELECT。
 --
+-- ── 這個 App 實際的身分模型（不要照著別的假設寫程式）─────────────────────
+--
+-- 一個家庭共用一個 Supabase auth session（家長帳號）。孩子端跑在同一個
+-- session 上，用 PIN 選 child profile（見 ChildLoginScreen）。
+-- 所以對資料庫而言，家長操作與孩子操作的 auth.uid() **完全一樣**。
+--
+-- 這帶來一條清楚的分界，兩邊都不要誇大：
+--
+--   ✅ 跨家庭隔離是**硬邊界**。
+--      auth.uid() → parents.family_id 是真的、由 GoTrue 簽出來的。
+--      RLS 與每一支 RPC 的 assert_child_in_caller_family 都擋在這一層，
+--      而且擋得住惡意 client。
+--
+--   ❌ 同一個家庭裡「現在操作的是哪一個孩子」**證明不了**。
+--      沒有 child 層級的 credential，就沒有任何 policy、trigger 或 RPC
+--      能夠驗證這件事。p_command.actorRole 是呼叫端自己講的。
+--
+-- 所以 actor_role 在這份契約裡的定位是**稽核與畫面用的角色標記**，
+-- 不是身分證明（authentication proof）。它的用途是：
+--
+--   · 讓家長端與孩子端的畫面共用同一組狀態機（哪些按鈕該出現）
+--   · 讓 status event 留下「這一步是誰按的」以供事後閱讀
+--
+-- 它**不是**安全控制。一個惡意的同家庭 client 可以自稱任何角色。
+-- 這是已知且被接受的 P0 限制 —— 修掉它需要孩子有獨立 credential，
+-- 那是一整套 auth 子系統，不在這個工作包，也不該為了 P0 硬做。
+--
 -- 為什麼沒有 INSERT / UPDATE / DELETE policy：所有寫入都走第 9 節的
--- SECURITY DEFINER RPC。理由不是潔癖，是這個工作包的權限需求
--- （孩子只能動自己的 draft）在 RLS 裡**表達不出來**：
---
---   孩子在這個 App 沒有自己的 auth 身分。孩子端跑在家長的 Supabase
---   session 上，用 PIN 選孩子（見 ChildLoginScreen）。所以對資料庫
---   而言，孩子的每一個動作與家長的動作 auth.uid() 完全一樣，
---   沒有任何 policy 分得出來。
---
---   在這個前提下，「孩子只能動自己的」只能由 RPC 用一個明確傳入的
---   actor role 來執行，並把它記進 status event。RLS 負責它真正做得到
---   而且做得徹底的那件事：**跨家庭一律不可讀寫**。
---
---   把這個限制寫在這裡，是為了讓下一個人不要以為 RLS 已經擋住了
---   孩子越權 —— 它沒有，也不可能，除非孩子有自己的登入身分。
+-- SECURITY DEFINER RPC。這樣做**不會**變出 child identity 保證 ——
+-- 它換到的是另外三件實在的東西：狀態機一定跑到、跨家庭一定被 assert、
+-- 稽核事件一定被寫。RLS 直接開放寫入的話，這三件都會有人繞過。
 --
 -- 家庭比對用 parents 子查詢而非 my_family_id()：後者是 LIMIT 1，
 -- 一個 auth 帳號有多筆 parents 時會挑錯家。與 20260728 的做法一致。
@@ -1093,6 +1372,11 @@ GRANT SELECT ON child_proposals, child_proposal_plan_versions, child_proposal_tr
 -- 每一支 RPC 都要做同一件事，寫五遍就會有一遍寫錯。
 -- ═══════════════════════════════════════════════════════════════════════════
 
+-- 這一支是**跨家庭隔離的硬邊界**，而且只做這件事。
+--
+-- 它證明的是「auth.uid() 屬於這個孩子所在的家庭」—— 那是 GoTrue 簽出來的，
+-- 惡意 client 偽造不了。它**不**證明、也不可能證明「現在操作的是哪一個孩子」。
+-- 不要在呼叫端把它讀成後者。
 CREATE OR REPLACE FUNCTION public.assert_child_in_caller_family(p_child_id uuid)
 RETURNS uuid
 LANGUAGE plpgsql
@@ -1129,10 +1413,12 @@ GRANT EXECUTE ON FUNCTION public.assert_child_in_caller_family(uuid) TO authenti
 
 -- ── 9a. 建立提案 ──────────────────────────────────────────────────────────
 --
--- 只有孩子能建立提案。家長想建立任務走既有的 create_parent_task_v1 ——
--- 讓家長也能建立「孩子的提案」，等於允許家長冒名，
--- 而整張表存在的理由就是「孩子的原話」。
--- co_created 是例外，而且它記的是**共同**，不是家長獨自。
+-- 提案的來源只收 child / co_created。家長想建立任務走既有的
+-- create_parent_task_v1 —— 一份 parent 提出的東西不是「孩子的提案」。
+--
+-- ⚠️ 這是**產品語意上的區分，不是安全控制**。來源欄位一樣是呼叫端自陳，
+--    同家庭的 client 可以寫 'child'。這裡擋的是「畫面走錯入口」，
+--    不是「家長冒充孩子」—— 後者在這個身分模型下擋不住（第 8 節）。
 
 CREATE OR REPLACE FUNCTION public.create_child_proposal_v1(p_command jsonb)
 RETURNS jsonb
@@ -1226,10 +1512,13 @@ BEGIN
   )
   RETURNING id INTO v_proposal_id;
 
+  -- actor_role 記 'child'：建立提案這個動作在產品上一律歸給孩子
+  -- （co_created 也是孩子在場）。同樣是稽核標記，不是身分證明。
   INSERT INTO child_proposal_status_events
     (proposal_id, from_status, to_status, actor_role, actor_user_id, reason)
   VALUES
-    (v_proposal_id, NULL, v_status, 'child', auth.uid(), NULLIF(btrim(COALESCE(p_command ->> 'reason', '')), ''));
+    (v_proposal_id, NULL, v_status, 'child', auth.uid(),
+     NULLIF(btrim(COALESCE(p_command ->> 'reason', '')), ''));
 
   RETURN jsonb_build_object('ok', true, 'proposalId', v_proposal_id, 'status', v_status);
 END;
@@ -1263,6 +1552,7 @@ DECLARE
   v_make_current boolean;
   v_policy      text;
   v_eligibility text;
+  v_ai_suggested_coin int;
   v_version_no  int;
   v_version_id  uuid;
   v_weekly      smallint;
@@ -1309,14 +1599,35 @@ BEGIN
     NULLIF(btrim(COALESCE(p_command -> 'reward' ->> 'eligibility', '')), ''), 'not_evaluated'
   );
 
-  -- 這裡是「AI 不決定最終 coin」在 RPC 層的落實。
-  -- 命令裡帶任何幣值都直接拒絕 —— 靜靜忽略的話，呼叫端會以為它存進去了。
+  -- 這裡是「AI 建議 ≠ 最終確認」在 RPC 層的落實。
+  --
+  -- **最終幣值不接受呼叫端傳值，一個字都不接受。**
+  -- confirmed_* 只由 transition_child_proposal_v1 從 tasks 複製。
+  -- 靜靜忽略的話，呼叫端會以為它存進去了，然後家長端會顯示一個
+  -- 從來沒有被寫進資料庫的數字。
   IF p_command -> 'reward' ? 'coinAmount'
     OR p_command -> 'reward' ? 'finalAmount'
-    OR p_command ? 'coinAmount' THEN
+    OR p_command -> 'reward' ? 'confirmedCoinAmount'
+    OR p_command ? 'coinAmount'
+    OR p_command ? 'confirmedReward' THEN
     RETURN jsonb_build_object(
       'ok', false, 'code', 'POLICY_REJECTED',
-      'message', '計畫版本不儲存幣值：成長幣由 coin policy 在建立正式任務時決定'
+      'reason', 'REWARD_NOT_CLIENT_DECIDED',
+      'message',
+      '計畫版本不接受幣值：AI 建議請用 reward.aiSuggestedCoinAmount，'
+      '最終確認的回饋由家長確認時從正式任務複製'
+    );
+  END IF;
+
+  -- AI 建議的幣值可以存，但它進的是 ai_suggested_coin_amount，
+  -- 而且 CHECK 要求同時要有 ai_snapshot —— 沒有出處的數字不算建議。
+  v_ai_suggested_coin :=
+    NULLIF(btrim(COALESCE(p_command -> 'reward' ->> 'aiSuggestedCoinAmount', '')), '')::int;
+
+  IF v_ai_suggested_coin IS NOT NULL AND p_command -> 'aiSnapshot' IS NULL THEN
+    RETURN jsonb_build_object(
+      'ok', false, 'code', 'VALIDATION_FAILED',
+      'message', 'AI 建議幣值必須附上 aiSnapshot —— 沒有出處的建議不予保存'
     );
   END IF;
 
@@ -1338,7 +1649,7 @@ BEGIN
     preferred_time, preferred_time_custom, estimated_minutes,
     duration_type, duration_days, start_date, end_date,
     reward_policy, reward_eligibility, reward_policy_version, task_policy_version,
-    ai_snapshot, ai_model, ai_request_id,
+    ai_snapshot, ai_model, ai_request_id, ai_suggested_coin_amount,
     requires_child_review,
     -- 需要孩子接受的版本不會立刻生效；其餘的以「成為 current」為生效時間。
     effective_at,
@@ -1362,6 +1673,7 @@ BEGIN
     p_command -> 'aiSnapshot',
     NULLIF(btrim(COALESCE(p_command ->> 'aiModel', '')), ''),
     NULLIF(btrim(COALESCE(p_command ->> 'aiRequestId', '')), ''),
+    v_ai_suggested_coin,
     v_requires,
     CASE WHEN v_make_current AND NOT v_requires THEN v_now ELSE NULL END,
     CASE WHEN v_authored_by = 'parent' THEN v_now ELSE NULL END
@@ -1415,6 +1727,8 @@ DECLARE
   v_reason      text;
   v_task_id     uuid;
   v_current_ver uuid;
+  v_task        tasks%ROWTYPE;
+  v_payout_basis text;
   v_now         timestamptz := now();
 BEGIN
   IF COALESCE((p_command ->> 'schemaVersion')::int, 0) <> 1 THEN
@@ -1436,6 +1750,9 @@ BEGIN
     );
   END IF;
 
+  -- actorRole 只檢查「值認不認得」，不檢查「你是不是真的是這個角色」——
+  -- 後者在這個身分模型下驗證不了（第 8 節）。這一段是輸入驗證，不是授權。
+  -- 真正的授權在下面的 assert_child_in_caller_family：呼叫者必須屬於這個家庭。
   IF v_actor NOT IN ('child', 'parent') THEN
     RETURN jsonb_build_object(
       'ok', false, 'code', 'VALIDATION_FAILED',
@@ -1482,6 +1799,55 @@ BEGIN
         'message', '形成共同版本必須有一個生效的計畫版本'
       );
     END IF;
+
+    -- ══ 讀出正式任務，作為回饋快照的唯一來源 ════════════════════════════
+    --
+    -- 快照的每一個值都從這一列複製。命令裡就算夾帶幣值也進不來 ——
+    -- 這一支 RPC 根本沒有讀 p_command 的幣值欄位。
+    SELECT * INTO v_task FROM tasks t WHERE t.id = v_task_id;
+
+    IF v_task.id IS NULL THEN
+      RETURN jsonb_build_object(
+        'ok', false, 'code', 'VALIDATION_FAILED',
+        'message', format('找不到任務 %s', v_task_id)
+      );
+    END IF;
+
+    -- 家庭邊界。下面的 trigger 也會擋一次，這裡先擋是為了回一個看得懂的訊息。
+    IF v_task.family_id IS DISTINCT FROM
+       (SELECT cp.family_id FROM child_proposals cp WHERE cp.id = v_proposal_id) THEN
+      RAISE EXCEPTION 'Not authorized: task % belongs to another family', v_task_id
+        USING ERRCODE = '42501';
+    END IF;
+
+    v_payout_basis := public.child_proposal_payout_basis(v_task.claim_period);
+
+    -- 快照必須是完整的。缺一半的快照比沒有快照更糟 —— 它看起來像有答案。
+    --
+    -- 走 create_parent_task_v1 建立的任務一定填得齊這些欄位；
+    -- 填不齊代表這個 task_id 是舊路徑（taskActions / onboarding）建立的，
+    -- 那種任務不該被當成孩子提案的共同版本。
+    IF v_task.reward_policy IS NULL
+      OR btrim(COALESCE(v_task.reward_policy_version, '')) = ''
+      OR v_payout_basis IS NULL
+      OR v_task.max_claims_per_period IS NULL THEN
+      RETURN jsonb_build_object(
+        'ok', false, 'code', 'POLICY_REJECTED',
+        'reason', 'TASK_REWARD_SNAPSHOT_INCOMPLETE',
+        'message',
+        '這筆任務缺少回饋方式或政策版本，無法留下共同確認的回饋紀錄；'
+        '請以 create_parent_task_v1 建立的任務進行轉換'
+      );
+    END IF;
+
+    IF v_task.reward_policy = 'coin_eligible'
+      AND COALESCE(v_task.reward_coin_amount, 0) <= 0 THEN
+      RETURN jsonb_build_object(
+        'ok', false, 'code', 'POLICY_REJECTED',
+        'reason', 'TASK_REWARD_SNAPSHOT_INCOMPLETE',
+        'message', '可獲得成長幣的任務缺少幣值，無法留下共同確認的回饋紀錄'
+      );
+    END IF;
   ELSIF v_task_id IS NOT NULL THEN
     RETURN jsonb_build_object(
       'ok', false, 'code', 'VALIDATION_FAILED',
@@ -1519,14 +1885,37 @@ BEGIN
 
   -- 孩子接受了家長的版本 → 記在版本上，不只記在提案上。
   -- 「他接受的是哪一版」之後要查得出來。
-  IF v_to = 'active' AND v_actor = 'child' AND v_current_ver IS NOT NULL THEN
+  IF v_to = 'active' AND v_current_ver IS NOT NULL THEN
     UPDATE child_proposal_plan_versions
-       SET child_accepted_at = COALESCE(child_accepted_at, v_now),
-           effective_at      = COALESCE(effective_at, v_now)
-     WHERE id = v_current_ver;
-  ELSIF v_to = 'active' AND v_current_ver IS NOT NULL THEN
-    UPDATE child_proposal_plan_versions
-       SET effective_at = COALESCE(effective_at, v_now)
+       SET effective_at      = COALESCE(effective_at, v_now),
+           child_accepted_at = CASE WHEN v_actor = 'child'
+                                    THEN COALESCE(child_accepted_at, v_now)
+                                    ELSE child_accepted_at END,
+
+           -- ══ 家庭最後共同確認的回饋快照 ══════════════════════════════
+           --
+           -- 全部**從 tasks 複製**，一個值都不從命令來。
+           -- 這是「不建立第二套 pricing engine」在程式碼裡的落實：
+           -- 幣值仍然只由 rewardEligibility → coinPolicy →
+           -- create_parent_task_v1 決定，這裡只留一份不可變的副本。
+           --
+           -- COALESCE 是因為 write-once：重複轉 active 不該蓋掉第一次的快照
+           -- （雖然狀態機本來就不允許，但這裡不依賴那個保證）。
+           confirmed_reward_policy         = COALESCE(confirmed_reward_policy, v_task.reward_policy),
+           confirmed_coin_amount           = COALESCE(confirmed_coin_amount,
+                                                      CASE WHEN v_task.reward_policy = 'coin_eligible'
+                                                           THEN v_task.reward_coin_amount END),
+           confirmed_payout_basis          = COALESCE(confirmed_payout_basis, v_payout_basis),
+           confirmed_claim_period          = COALESCE(confirmed_claim_period, v_task.claim_period),
+           confirmed_max_claims_per_period = COALESCE(confirmed_max_claims_per_period,
+                                                      v_task.max_claims_per_period),
+           confirmed_reward_policy_version = COALESCE(confirmed_reward_policy_version,
+                                                      v_task.reward_policy_version),
+           confirmed_task_policy_version   = COALESCE(confirmed_task_policy_version,
+                                                      v_task.task_policy_version),
+           confirmed_source_task_id        = COALESCE(confirmed_source_task_id, v_task_id),
+           confirmed_by_user_id            = COALESCE(confirmed_by_user_id, auth.uid()),
+           confirmed_at                    = COALESCE(confirmed_at, v_now)
      WHERE id = v_current_ver;
   END IF;
 
@@ -1536,14 +1925,31 @@ BEGIN
     (v_proposal_id, v_from, v_to, v_actor, auth.uid(), v_current_ver, v_reason);
 
   RETURN jsonb_build_object(
-    'ok', true, 'proposalId', v_proposal_id, 'fromStatus', v_from, 'toStatus', v_to
+    'ok', true, 'proposalId', v_proposal_id, 'fromStatus', v_from, 'toStatus', v_to,
+    'planVersionId', v_current_ver,
+    -- 轉 active 時把快照原樣回傳，P0-5 可以直接比對它與 tasks 是否一致，
+    -- 不必再查一次。非 active 的轉換這一鍵是 null。
+    'confirmedReward', CASE WHEN v_to = 'active' THEN jsonb_build_object(
+      'rewardPolicy',       v_task.reward_policy,
+      'coinAmount',         CASE WHEN v_task.reward_policy = 'coin_eligible'
+                                 THEN v_task.reward_coin_amount END,
+      'payoutBasis',        v_payout_basis,
+      'claimPeriod',        v_task.claim_period,
+      'maxClaimsPerPeriod', v_task.max_claims_per_period,
+      'rewardPolicyVersion', v_task.reward_policy_version,
+      'taskPolicyVersion',  v_task.task_policy_version,
+      'sourceTaskId',       v_task_id
+    ) END
   );
 END;
 $$;
 
 COMMENT ON FUNCTION public.transition_child_proposal_v1(jsonb) IS
-  '孩子提案的狀態轉換閘門。合法性由 child_proposal_transition_allowed 判定（含 actor 角色）；'
-  'active 必須同時帶 linked task 與 current plan version。';
+  '孩子提案的狀態轉換閘門。合法性由 child_proposal_transition_allowed 判定；'
+  'active 必須同時帶 linked task 與 current plan version，'
+  '並把該任務的回饋（policy / amount / payout basis / claim 規則 / 政策版本）'
+  '複製成計畫版本上不可變的共同確認快照 —— 快照的值一律從 tasks 讀，不從命令來。'
+  'p_command.actorRole 是 audit / UI 角色，不是身分證明（見檔頭第 8 節）。';
 
 REVOKE ALL ON FUNCTION public.transition_child_proposal_v1(jsonb) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.transition_child_proposal_v1(jsonb) TO authenticated;

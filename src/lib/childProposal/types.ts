@@ -13,9 +13,15 @@
 // 合成一個型別的話，「孩子當初想做什麼」與「家長最後同意什麼」
 // 會變成同一個欄位，而那正是這個產品最不能弄丟的區別。
 //
-// ⚠️ 這裡沒有任何 coin 欄位，而且不是漏掉的。
-//    AI 與計畫版本可以決定節奏、步驟與回饋「方式」，
-//    最終幣值由 coin policy 在建立正式任務時決定（P0-5 之後）。
+// ⚠️ 幣值有兩組欄位，永遠不要互相代入：
+//
+//    ai_suggested_coin_amount  AI 說的。**永遠不是最終值。**
+//    confirmed_coin_amount     家庭最後共同確認的。由 RPC 從 tasks 複製，
+//                              呼叫端寫不進來。
+//
+//    這裡不計算任何幣值。唯一的計算路徑仍然是既有的
+//    rewardEligibility → coinPolicy → create_parent_task_v1 → tasks，
+//    confirmed_* 只是那個結果在確認當下的不可變快照。
 // ─────────────────────────────────────────────────────────────────────────
 
 // ---------------------------------------------------------------------------
@@ -47,19 +53,71 @@ export const CHILD_PROPOSAL_STATUSES: readonly ChildProposalStatus[] = [
 ] as const;
 
 /**
- * 誰做的這個動作。
+ * 這個動作在畫面與稽核上算誰做的。
  *
- * ⚠️ 這**不是**從 auth session 推導出來的，而且推導不出來 ——
- * 孩子在這個 App 沒有自己的登入身分（孩子端跑在家長的 Supabase session 上，
- * 用 PIN 選孩子）。所以 actor role 是呼叫端明講、RPC 驗證後記錄下來的。
- * 它擋得住「家長端畫面誤用孩子的轉換」，擋不住一個惡意的 client 謊報身分。
+ * ⚠️ **這是 audit / UI role，不是 authentication proof。**
  *
- * 真正修掉這件事需要孩子有獨立的 auth 身分。見完成報告的風險清單。
+ * 這個 App 一個家庭共用一個 Supabase auth session（家長帳號），
+ * 孩子端在同一個 session 上用 PIN 選 child profile。所以資料庫看到的
+ * `auth.uid()` 在家長操作與孩子操作時完全一樣，沒有任何 policy、
+ * trigger 或 RPC 分得出來。
+ *
+ * 它的正當用途只有兩個：
+ *   · 讓兩端畫面共用同一組狀態機（決定哪些按鈕該出現）
+ *   · 讓 status event 留下「這一步是誰按的」以供事後閱讀
+ *
+ * 它**不可以**被當成安全控制。同家庭的 client 可以自稱任何角色。
+ *
+ * 真正成立的邊界是**家庭**：`auth.uid() → parents.family_id` 由 GoTrue
+ * 簽出，RLS 與每支 RPC 的 assert 都擋在那一層，惡意 client 偽造不了。
+ *
+ * 這是已知且被接受的 P0 限制。修掉它需要孩子有獨立 credential，
+ * 那是一整套 auth 子系統，不在這個工作包的範圍。
  */
 export type ChildProposalActorRole = 'child' | 'parent';
 
 /** status event 另外允許 system（cron、資料修補），但 RPC 不接受。 */
 export type ChildProposalEventActorRole = ChildProposalActorRole | 'system';
+
+/**
+ * 回饋的發放依據。由 `tasks.claim_period` 推導，不是另一套設定：
+ *
+ *   once → one_time / week → per_period / day → per_completion
+ */
+export type ChildProposalPayoutBasis = 'per_completion' | 'per_period' | 'one_time';
+
+/** 沿用 tasks.claim_period 的三個值。 */
+export type ChildProposalClaimPeriod = 'day' | 'week' | 'once';
+
+/**
+ * 家庭最後共同確認的回饋 —— shared version 的一部分。
+ *
+ * ⚠️ **每一個值都是從 `tasks` 複製來的，不是在這裡算出來的。**
+ *
+ * 幣值的唯一來源仍然是既有的
+ * `rewardEligibility` → `coinPolicy` → `create_parent_task_v1` → `tasks`。
+ * 這裡存的是那個結果在「家長確認的那一刻」的不可變快照，
+ * 而 `sourceTaskId` 讓它隨時可以回去對帳。
+ *
+ * 為什麼不是需要時再 join tasks：tasks 是**現況**，會被家長調整、
+ * 會被 P0-8 改節奏。「當初講好的是什麼」是歷史事實，被現況覆寫之後
+ * 就永遠找不回來了。
+ *
+ * 與 AI 建議（`ChildProposalPlanVersion.ai_suggested_coin_amount`）
+ * 是兩組欄位，永遠不要互相代入。
+ */
+export type ChildProposalConfirmedReward = {
+  rewardPolicy: ChildProposalRewardPolicy;
+  /** 只有 coin_eligible 才有值，而且一定 > 0。 */
+  coinAmount: number | null;
+  payoutBasis: ChildProposalPayoutBasis;
+  claimPeriod: ChildProposalClaimPeriod;
+  maxClaimsPerPeriod: number;
+  rewardPolicyVersion: string;
+  taskPolicyVersion: string | null;
+  /** 這份快照複製自哪一筆任務。對帳用。 */
+  sourceTaskId: string;
+};
 
 // ---------------------------------------------------------------------------
 // 詞彙
@@ -197,6 +255,30 @@ export type ChildProposalPlanVersion = {
   ai_snapshot: unknown | null;
   ai_model: string | null;
   ai_request_id: string | null;
+  /**
+   * AI 建議的幣值。**永遠不是最終值。**
+   *
+   * 最終值看 confirmed_coin_amount —— 那一欄由 RPC 從 tasks 複製，
+   * 呼叫端傳不進來。兩者放在同一列是為了讓「AI 建議 12、家長給 8」
+   * 這個對比查得出來，不是為了讓其中一個代替另一個。
+   */
+  ai_suggested_coin_amount: number | null;
+
+  // ── 家庭最後共同確認的回饋（write-once，由 P0-5 轉 active 時寫入）──
+  //
+  // 結構化版本見 ChildProposalConfirmedReward。這裡逐欄攤平是因為
+  // 它們要能被查詢與統計（週報要能算「這個月確認了幾個 coin_eligible」）。
+  confirmed_reward_policy: ChildProposalRewardPolicy | null;
+  confirmed_coin_amount: number | null;
+  confirmed_payout_basis: ChildProposalPayoutBasis | null;
+  confirmed_claim_period: ChildProposalClaimPeriod | null;
+  confirmed_max_claims_per_period: number | null;
+  confirmed_reward_policy_version: string | null;
+  confirmed_task_policy_version: string | null;
+  /** 快照複製自哪一筆任務。對帳用 —— 證明這裡沒有第二套定價。 */
+  confirmed_source_task_id: string | null;
+  confirmed_by_user_id: string | null;
+  confirmed_at: string | null;
 
   requires_child_review: boolean;
   child_accepted_at: string | null;
@@ -296,6 +378,16 @@ export type TransitionProposalSuccess = {
   proposalId: string;
   fromStatus: ChildProposalStatus;
   toStatus: ChildProposalStatus;
+  /** 生效中的計畫版本。沒有版本的轉換（例如 draft → proposed）是 null。 */
+  planVersionId: string | null;
+  /**
+   * 轉成 active 時，RPC 從 tasks 複製下來的共同確認回饋快照。
+   * 其餘轉換一律 null。
+   *
+   * 原樣回傳的用意是讓 P0-5 可以直接比對它與剛建立的任務是否一致，
+   * 不必再查一次 —— 對不上就代表中間有人動了 tasks。
+   */
+  confirmedReward: ChildProposalConfirmedReward | null;
 };
 
 export type RecordTrialSuccess = {
@@ -364,15 +456,23 @@ export type AddChildProposalPlanVersionCommand = {
   startDate?: string;
   endDate?: string;
   /**
-   * 回饋**方式與資格**，不含金額。
+   * 回饋**方式、資格與 AI 建議**。
    *
-   * 型別上就沒有 coinAmount / finalAmount 這兩個鍵，而 RPC 收到它們會直接拒絕 ——
-   * 兩層都擋是因為命令是 jsonb，型別擋不住手寫的呼叫端。
+   * 這裡**沒有**最終幣值，而且不是漏掉的：最終幣值（confirmed_*）只由
+   * transition_child_proposal_v1 在轉成 active 時從 tasks 複製，
+   * 任何呼叫端都寫不進來。命令裡夾帶 coinAmount / finalAmount /
+   * confirmedCoinAmount 會被 RPC 以 REWARD_NOT_CLIENT_DECIDED 拒絕 ——
+   * 型別擋不住手寫的 jsonb 呼叫端，所以兩層都擋。
    */
   reward?: {
     policy?: ChildProposalRewardPolicy;
     eligibility?: ChildProposalRewardEligibility;
     policyVersion?: string;
+    /**
+     * AI 建議的幣值。必須同時附 aiSnapshot —— 沒有出處的建議不予保存。
+     * 存進 ai_suggested_coin_amount，永遠不會被當成最終值。
+     */
+    aiSuggestedCoinAmount?: number;
   };
   taskPolicyVersion?: string;
   aiSnapshot?: unknown;

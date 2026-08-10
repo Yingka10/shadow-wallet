@@ -91,7 +91,7 @@ function functionBody(name: string): string {
 
 describe('migration 可以重複套用', () => {
   it('表用 CREATE TABLE IF NOT EXISTS', () => {
-    expect(SQL.match(/CREATE TABLE(?! IF NOT EXISTS)/g) ?? []).toEqual([]);
+    expect(CODE.match(/CREATE TABLE(?! IF NOT EXISTS)/g) ?? []).toEqual([]);
     for (const table of TABLES) {
       expect({ table, created: SQL.includes(`CREATE TABLE IF NOT EXISTS ${table} (`) })
         .toEqual({ table, created: true });
@@ -99,7 +99,7 @@ describe('migration 可以重複套用', () => {
   });
 
   it('索引用 CREATE INDEX / UNIQUE INDEX IF NOT EXISTS', () => {
-    expect(SQL.match(/CREATE (UNIQUE )?INDEX(?! IF NOT EXISTS)/g) ?? []).toEqual([]);
+    expect(CODE.match(/CREATE (UNIQUE )?INDEX(?! IF NOT EXISTS)/g) ?? []).toEqual([]);
   });
 
   it('ALTER TABLE 加的 constraint 都先 DROP IF EXISTS', () => {
@@ -129,7 +129,7 @@ describe('migration 可以重複套用', () => {
   });
 
   it('函式一律 CREATE OR REPLACE', () => {
-    expect(SQL.match(/CREATE FUNCTION/g) ?? []).toEqual([]);
+    expect(CODE.match(/CREATE FUNCTION/g) ?? []).toEqual([]);
   });
 });
 
@@ -339,25 +339,23 @@ describe('child_proposal_plan_versions', () => {
     expect(block).toMatch(/^\s+task_policy_version\s/m);
   });
 
-  it('**不存最終幣值** —— AI 不決定 coin', () => {
-    for (const forbidden of [
-      'coin_amount',
-      'reward_coin',
-      'final_amount',
-      'suggested_amount',
-      'coin_override',
-    ]) {
+  it('不存任何自己算出來的幣值欄位 —— 沒有第二套 pricing engine', () => {
+    // reward_coin_* / coin_override / base_time_min 是 tasks 那條路徑的欄位。
+    // 出現在這裡就代表有人開始在版本上算幣值了。
+    for (const forbidden of ['reward_coin', 'coin_override', 'final_amount', 'base_time_min']) {
       expect({ forbidden, present: block.includes(forbidden) })
         .toEqual({ forbidden, present: false });
     }
   });
 
-  it('RPC 收到任何幣值一律拒絕，而不是靜靜忽略', () => {
+  it('RPC 收到任何最終幣值一律拒絕，而不是靜靜忽略', () => {
     const body = functionBody('add_child_proposal_plan_version_v1');
     expect(body).toContain("p_command -> 'reward' ? 'coinAmount'");
     expect(body).toContain("p_command -> 'reward' ? 'finalAmount'");
+    expect(body).toContain("p_command -> 'reward' ? 'confirmedCoinAmount'");
     expect(body).toContain("p_command ? 'coinAmount'");
-    expect(body).toContain("'code', 'POLICY_REJECTED'");
+    expect(body).toContain("p_command ? 'confirmedReward'");
+    expect(body).toContain("'reason', 'REWARD_NOT_CLIENT_DECIDED'");
   });
 
   it('reward_policy 排除 time_saving_eligible（3C／時間儲蓄不在本包）', () => {
@@ -411,6 +409,167 @@ describe('child_proposal_plan_versions', () => {
       ).test(body);
       expect({ column, guarded }).toEqual({ column, guarded: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B2. 家庭最後共同確認的回饋（shared version 可追溯）
+// ---------------------------------------------------------------------------
+
+describe('shared version 的回饋可追溯', () => {
+  const block = tableBlock('child_proposal_plan_versions');
+
+  it.each([
+    'confirmed_reward_policy',
+    'confirmed_coin_amount',
+    'confirmed_payout_basis',
+    'confirmed_claim_period',
+    'confirmed_max_claims_per_period',
+    'confirmed_reward_policy_version',
+    'confirmed_task_policy_version',
+    'confirmed_source_task_id',
+    'confirmed_by_user_id',
+    'confirmed_at',
+  ])('版本上有 %s', (column) => {
+    expect(block).toMatch(new RegExp(`^\\s+${column}\\s`, 'm'));
+    // 補欄位那一段也要有，否則已套用舊版本的環境補不齊。
+    expect(CODE).toContain(`ADD COLUMN IF NOT EXISTS ${column}`);
+  });
+
+  it('AI 建議與最終確認是兩組欄位，名字上就分得開', () => {
+    expect(block).toMatch(/^\s+ai_suggested_coin_amount\s/m);
+    expect(CODE).toContain('ADD COLUMN IF NOT EXISTS ai_suggested_coin_amount');
+  });
+
+  it('AI 建議的幣值一定要有 snapshot 撐著', () => {
+    expect(CODE).toContain('child_proposal_plan_versions_ai_suggestion_needs_snapshot');
+    expect(CODE).toContain(`CHECK (
+    ai_suggested_coin_amount IS NULL
+    OR (ai_snapshot IS NOT NULL AND ai_suggested_coin_amount >= 0)
+  )`);
+  });
+
+  it('確認一定掛在一個真實帳號上', () => {
+    // 這裡刻意**不**限制 authored_by：AI 起草的計畫當然可以成為共同版本，
+    // 確認它的是家長，名字記在 confirmed_by_user_id。
+    // （初版寫成 authored_by <> 'ai'，staging 第一次實跑就把它擋下來了。）
+    expect(CODE).toContain(
+      "CHECK (confirmed_at IS NULL OR confirmed_by_user_id IS NOT NULL)",
+    );
+    expect(CODE).not.toContain("CHECK (authored_by <> 'ai' OR confirmed_at IS NULL)");
+  });
+
+  it('AI 起草的版本仍然可以被確認 —— 沒有任何 constraint 擋 authored_by', () => {
+    const confirmedChecks = [
+      ...CODE.matchAll(/ADD CONSTRAINT (\w*confirmed\w*)\s+CHECK \(([^;]*)\);/g),
+    ].map((m) => ({ name: m[1], body: m[2] }));
+    expect(confirmedChecks.length).toBeGreaterThan(0);
+    for (const c of confirmedChecks) {
+      expect({ name: c.name, mentionsAuthor: c.body.includes('authored_by') })
+        .toEqual({ name: c.name, mentionsAuthor: false });
+    }
+  });
+
+  it('快照是全有全無 —— 不會出現只填一半的確認', () => {
+    expect(CODE).toContain('child_proposal_plan_versions_confirmed_atomic');
+    expect(CODE).toContain('CASE WHEN confirmed_at IS NULL');
+  });
+
+  it('coin_eligible 一定有金額，不發幣一定沒有金額（兩個方向都擋）', () => {
+    expect(CODE).toContain('child_proposal_plan_versions_confirmed_coin_scope');
+    expect(CODE).toContain(`CASE WHEN confirmed_reward_policy = 'coin_eligible'
+        THEN confirmed_coin_amount IS NOT NULL AND confirmed_coin_amount > 0
+        ELSE confirmed_coin_amount IS NULL
+      END`);
+  });
+
+  it('payout basis 與 claim period 都沿用既有詞彙，沒有另立一套', () => {
+    expect(CODE).toContain(
+      "confirmed_payout_basis IN ('per_completion', 'per_period', 'one_time')",
+    );
+    expect(CODE).toContain("confirmed_claim_period IN ('day', 'week', 'once')");
+  });
+
+  it('payout basis 由 tasks.claim_period 推導，映射只有一份', () => {
+    const body = functionBody('child_proposal_payout_basis');
+    expect(body).toContain("WHEN 'once' THEN 'one_time'");
+    expect(body).toContain("WHEN 'week' THEN 'per_period'");
+    expect(body).toContain("WHEN 'day'  THEN 'per_completion'");
+    expect(body).toContain('IMMUTABLE');
+    // 沒見過的 claim_period 回 NULL，呼叫端必須當錯誤，不可塞預設值。
+    expect(body).toContain('ELSE NULL');
+  });
+
+  it('**快照的每一個值都從 tasks 複製，一個都不從命令來**', () => {
+    const body = functionBody('transition_child_proposal_v1');
+    const flat = body.replace(/\s+/g, ' ');
+
+    expect(body).toContain('SELECT * INTO v_task FROM tasks t WHERE t.id = v_task_id;');
+
+    const COPIED: [string, string][] = [
+      ['confirmed_reward_policy', 'v_task.reward_policy'],
+      ['confirmed_coin_amount', 'v_task.reward_coin_amount'],
+      ['confirmed_payout_basis', 'v_payout_basis'],
+      ['confirmed_claim_period', 'v_task.claim_period'],
+      ['confirmed_max_claims_per_period', 'v_task.max_claims_per_period'],
+      ['confirmed_reward_policy_version', 'v_task.reward_policy_version'],
+      ['confirmed_task_policy_version', 'v_task.task_policy_version'],
+      ['confirmed_source_task_id', 'v_task_id'],
+    ];
+
+    for (const [column, source] of COPIED) {
+      const escaped = source.replace(/\./g, '\\.');
+      const fromTask = new RegExp(`${column} = COALESCE\\([^;]*?${escaped}`).test(flat);
+      expect({ column, fromTask }).toEqual({ column, fromTask: true });
+    }
+
+    // 命令裡的幣值鍵在這一支根本沒有被讀過 —— 沒有讀就沒有路徑。
+    expect(body).not.toContain("p_command ->> 'coinAmount'");
+    expect(body).not.toContain("p_command -> 'reward'");
+    expect(body).not.toContain("p_command ->> 'rewardPolicy'");
+  });
+
+  it('快照殘缺的任務不可以成為共同版本', () => {
+    const body = functionBody('transition_child_proposal_v1');
+    expect(body).toContain("'reason', 'TASK_REWARD_SNAPSHOT_INCOMPLETE'");
+    expect(body).toContain('v_task.reward_policy IS NULL');
+    expect(body).toContain("btrim(COALESCE(v_task.reward_policy_version, '')) = ''");
+    expect(body).toContain('v_payout_basis IS NULL');
+  });
+
+  it('linked task 的家庭邊界在 RPC 就先擋一次', () => {
+    expect(functionBody('transition_child_proposal_v1'))
+      .toContain('Not authorized: task % belongs to another family');
+  });
+
+  it('快照是 write-once —— 填上之後一個字都不能改', () => {
+    const body = functionBody('child_proposal_plan_version_guard');
+    expect(body).toContain('IF OLD.confirmed_at IS NOT NULL AND (');
+    for (const column of [
+      'confirmed_reward_policy',
+      'confirmed_coin_amount',
+      'confirmed_payout_basis',
+      'confirmed_claim_period',
+      'confirmed_max_claims_per_period',
+      'confirmed_reward_policy_version',
+      'confirmed_source_task_id',
+    ]) {
+      const guarded = new RegExp(
+        `NEW\\.${column}\\s+IS DISTINCT FROM OLD\\.${column}\\b`,
+      ).test(body);
+      expect({ column, guarded }).toEqual({ column, guarded: true });
+    }
+  });
+
+  it('AI 建議的幣值也是不可變的（它是歷史事實）', () => {
+    expect(functionBody('child_proposal_plan_version_guard'))
+      .toContain('NEW.ai_suggested_coin_amount IS DISTINCT FROM OLD.ai_suggested_coin_amount');
+  });
+
+  it('RPC 把快照原樣回傳，P0-5 可以直接對帳', () => {
+    const body = functionBody('transition_child_proposal_v1');
+    expect(body).toContain("'confirmedReward'");
+    expect(body).toContain("'sourceTaskId',       v_task_id");
   });
 });
 
@@ -596,6 +755,70 @@ describe('權限與家庭邊界', () => {
   it('回絕一定要有原因', () => {
     expect(functionBody('transition_child_proposal_v1'))
       .toContain("'reason', 'CLOSE_REQUIRES_REASON'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 身分模型的敘述必須誠實
+// ---------------------------------------------------------------------------
+//
+// 這一段測的是**文件與註解**，看起來不像測試該做的事。
+// 做的理由是：這個契約唯一會害人的方式，就是下一個人以為 RLS 已經
+// 擋住了 child identity。那不是程式錯誤，是敘述錯誤 ——
+// 而敘述錯誤沒有任何其他測試抓得到。
+
+describe('child identity 的限制被誠實標示', () => {
+  const TYPES = readText(join(process.cwd(), 'src', 'lib', 'childProposal', 'types.ts'));
+  const DOC = readText(
+    join(process.cwd(), 'docs', 'CONTRACT_P0-1_child-proposal.md'),
+  );
+
+  it('SQL 明講 actor_role 不是身分證明', () => {
+    expect(SQL).toContain('不是身分證明');
+    expect(SQL).toContain('稽核 / 畫面用的角色標記');
+  });
+
+  it('型別的 doc comment 明講它是 audit / UI role', () => {
+    expect(TYPES).toContain('audit / UI role，不是 authentication proof');
+    expect(TYPES).toContain('它**不可以**被當成安全控制');
+  });
+
+  it('文件把「硬邊界」與「證明不了」分開列出', () => {
+    expect(DOC).toContain('跨家庭隔離');
+    expect(DOC).toContain('證明不了');
+  });
+
+  it('沒有任何地方宣稱 RLS 擋得住孩子越權', () => {
+    // 這幾種說法都是在承諾一件做不到的事。
+    for (const overclaim of [
+      'RLS 擋住孩子',
+      'RLS 保證孩子',
+      'RLS 限制孩子只能',
+      'policy 分得出孩子',
+    ]) {
+      expect({ overclaim, present: SQL.includes(overclaim) || TYPES.includes(overclaim) })
+        .toEqual({ overclaim, present: false });
+    }
+  });
+
+  it('跨家庭仍然是硬邊界，而且說得出是哪一段程式在擋', () => {
+    expect(functionBody('assert_child_in_caller_family'))
+      .toContain('SELECT 1 FROM parents p WHERE p.user_id = auth.uid() AND p.family_id = v_family');
+    expect(SQL).toContain('跨家庭隔離是**硬邊界**');
+  });
+
+  it('沒有為了 P0 塞進一套 child auth 子系統', () => {
+    // 新增 child credential 會長成這些東西。一個都不該出現。
+    for (const forbidden of [
+      'child_credentials',
+      'child_sessions',
+      'child_tokens',
+      'pin_hash',
+      'CREATE TABLE IF NOT EXISTS child_auth',
+    ]) {
+      expect({ forbidden, present: CODE.includes(forbidden) })
+        .toEqual({ forbidden, present: false });
+    }
   });
 });
 

@@ -27,6 +27,7 @@ import {
   TRANSITION_CHILD_PROPOSAL_RPC,
 } from '../childProposalService';
 import type {
+  AddChildProposalPlanVersionCommand,
   CreateChildProposalCommand,
   RecordChildProposalTrialCommand,
   TransitionChildProposalCommand,
@@ -115,9 +116,16 @@ describe('成功的回應', () => {
     ).resolves.toEqual({ ok: true, planVersionId: 'v-2', versionNo: 2, isCurrent: true });
   });
 
-  it('轉換回傳前後狀態', async () => {
+  it('轉換回傳前後狀態；非 active 的轉換沒有回饋快照', async () => {
     mockRpc.mockResolvedValue({
-      data: { ok: true, proposalId: 'p-1', fromStatus: 'draft', toStatus: 'proposed' },
+      data: {
+        ok: true,
+        proposalId: 'p-1',
+        fromStatus: 'draft',
+        toStatus: 'proposed',
+        planVersionId: null,
+        confirmedReward: null,
+      },
       error: null,
     });
 
@@ -133,6 +141,8 @@ describe('成功的回應', () => {
       proposalId: 'p-1',
       fromStatus: 'draft',
       toStatus: 'proposed',
+      planVersionId: null,
+      confirmedReward: null,
     });
     expect(mockRpc.mock.calls[0][0]).toBe(TRANSITION_CHILD_PROPOSAL_RPC);
   });
@@ -149,6 +159,139 @@ describe('成功的回應', () => {
       duplicate: true,
       walletEffect: 'none',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 共同確認的回饋快照
+// ---------------------------------------------------------------------------
+
+const COIN_SNAPSHOT = {
+  rewardPolicy: 'coin_eligible',
+  coinAmount: 8,
+  payoutBasis: 'per_completion',
+  claimPeriod: 'day',
+  maxClaimsPerPeriod: 1,
+  rewardPolicyVersion: 'reward-2026-07',
+  taskPolicyVersion: 'task-2026-07',
+  sourceTaskId: 'task-1',
+};
+
+function activeResponse(confirmedReward: unknown) {
+  return {
+    data: {
+      ok: true,
+      proposalId: 'p-1',
+      fromStatus: 'proposed',
+      toStatus: 'active',
+      planVersionId: 'v-3',
+      confirmedReward,
+    },
+    error: null,
+  };
+}
+
+const ACTIVATE: TransitionChildProposalCommand = {
+  schemaVersion: 1,
+  proposalId: 'p-1',
+  toStatus: 'active',
+  actorRole: 'parent',
+  taskId: 'task-1',
+};
+
+describe('shared version 的回饋可追溯', () => {
+  it('轉 active 時把快照原樣帶回來', async () => {
+    mockRpc.mockResolvedValue(activeResponse(COIN_SNAPSHOT));
+
+    await expect(service().transition(ACTIVATE)).resolves.toEqual({
+      ok: true,
+      proposalId: 'p-1',
+      fromStatus: 'proposed',
+      toStatus: 'active',
+      planVersionId: 'v-3',
+      confirmedReward: COIN_SNAPSHOT,
+    });
+  });
+
+  it('不發幣的共同版本一樣有快照，只是沒有金額', async () => {
+    const snapshot = {
+      ...COIN_SNAPSHOT,
+      rewardPolicy: 'record_only',
+      coinAmount: null,
+    };
+    mockRpc.mockResolvedValue(activeResponse(snapshot));
+
+    const result = await service().transition(ACTIVATE);
+    expect(result).toMatchObject({ ok: true, confirmedReward: snapshot });
+  });
+
+  it('命令裡沒有任何幣值欄位可以帶 —— 最終值由 RPC 從 tasks 複製', () => {
+    // @ts-expect-error 轉換命令不接受幣值
+    const bad: TransitionChildProposalCommand = { ...ACTIVATE, coinAmount: 8 };
+    expect(bad.taskId).toBe('task-1');
+  });
+
+  it('轉 active 卻沒有快照就當失敗 —— 沒有回饋紀錄的共同版本不是共同版本', async () => {
+    mockRpc.mockResolvedValue(activeResponse(null));
+
+    await expect(service().transition(ACTIVATE)).resolves.toEqual({
+      ok: false,
+      code: 'UNKNOWN',
+      reason: 'CONFIRMED_REWARD_MISSING',
+      message: '變更提案狀態失敗：共同版本缺少確認的回饋紀錄',
+    });
+  });
+
+  it.each([
+    ['缺 sourceTaskId（對不了帳）', { ...COIN_SNAPSHOT, sourceTaskId: '' }],
+    ['缺 rewardPolicyVersion', { ...COIN_SNAPSHOT, rewardPolicyVersion: '' }],
+    ['缺 payoutBasis', { ...COIN_SNAPSHOT, payoutBasis: undefined }],
+    ['缺 claimPeriod', { ...COIN_SNAPSHOT, claimPeriod: undefined }],
+    ['缺 maxClaimsPerPeriod', { ...COIN_SNAPSHOT, maxClaimsPerPeriod: null }],
+    ['coin_eligible 卻沒有金額', { ...COIN_SNAPSHOT, coinAmount: null }],
+    ['coin_eligible 金額是 0', { ...COIN_SNAPSHOT, coinAmount: 0 }],
+    ['不發幣卻夾帶金額', { ...COIN_SNAPSHOT, rewardPolicy: 'progress_only' }],
+  ])('殘缺的快照不算數：%s', async (_label, snapshot) => {
+    mockRpc.mockResolvedValue(activeResponse(snapshot));
+
+    await expect(service().transition(ACTIVATE)).resolves.toMatchObject({
+      ok: false,
+      reason: 'CONFIRMED_REWARD_MISSING',
+    });
+  });
+
+  it('AI 建議的幣值走自己的鍵，不會被當成最終值', async () => {
+    mockRpc.mockResolvedValue({
+      data: { ok: true, planVersionId: 'v-2', versionNo: 2, isCurrent: true },
+      error: null,
+    });
+
+    await service().addPlanVersion({
+      schemaVersion: 1,
+      proposalId: 'p-1',
+      authoredBy: 'ai',
+      aiSnapshot: { suggestion: '一週三次' },
+      reward: { policy: 'coin_eligible', aiSuggestedCoinAmount: 12 },
+    });
+
+    const sent = mockRpc.mock.calls[0][1] as { p_command: Record<string, unknown> };
+    const reward = sent.p_command.reward as Record<string, unknown>;
+    expect(reward.aiSuggestedCoinAmount).toBe(12);
+    // 命令裡永遠不該出現這些鍵 —— RPC 收到會直接 POLICY_REJECTED。
+    expect(reward).not.toHaveProperty('coinAmount');
+    expect(reward).not.toHaveProperty('finalAmount');
+    expect(reward).not.toHaveProperty('confirmedCoinAmount');
+  });
+
+  it('計畫版本命令沒有最終幣值的鍵可以填', () => {
+    const bad: AddChildProposalPlanVersionCommand = {
+      schemaVersion: 1,
+      proposalId: 'p-1',
+      authoredBy: 'parent',
+      // @ts-expect-error 最終幣值不由呼叫端決定，reward 上沒有這個鍵
+      reward: { policy: 'coin_eligible', coinAmount: 8 },
+    };
+    expect(bad.proposalId).toBe('p-1');
   });
 });
 

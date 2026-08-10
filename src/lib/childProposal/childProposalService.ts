@@ -16,6 +16,7 @@ import type {
   AddChildProposalPlanVersionCommand,
   AddPlanVersionResult,
   ChildProposalFailure,
+  ChildProposalConfirmedReward,
   ChildProposalFailureCode,
   ChildProposalStatus,
   CreateAdjustmentRequestResult,
@@ -153,6 +154,32 @@ function isFailure(value: unknown): value is ChildProposalFailure {
   return typeof value === 'object' && value !== null && (value as { ok?: unknown }).ok === false;
 }
 
+/**
+ * 共同確認的回饋快照長得對不對。
+ *
+ * 逐鍵檢查而不是直接 cast：這一包會被家長端顯示成「我們講好一次 8 個幣」，
+ * 少一個鍵就會變成畫面上的 undefined。而且 coin_eligible 一定要有金額 ——
+ * DB 有 CHECK 擋，但回傳值經過 PostgREST，這裡再確認一次不算多餘。
+ */
+function isConfirmedReward(value: unknown): value is ChildProposalConfirmedReward {
+  if (typeof value !== 'object' || value === null) return false;
+  const r = value as Record<string, unknown>;
+
+  if (typeof r.rewardPolicy !== 'string') return false;
+  if (typeof r.payoutBasis !== 'string') return false;
+  if (typeof r.claimPeriod !== 'string') return false;
+  if (typeof r.maxClaimsPerPeriod !== 'number') return false;
+  if (typeof r.rewardPolicyVersion !== 'string' || r.rewardPolicyVersion.length === 0) {
+    return false;
+  }
+  if (typeof r.sourceTaskId !== 'string' || r.sourceTaskId.length === 0) return false;
+
+  // 幣值與回饋方式必須互相對得上，兩個方向都查。
+  const hasCoin = typeof r.coinAmount === 'number' && r.coinAmount > 0;
+  if (r.rewardPolicy === 'coin_eligible') return hasCoin;
+  return r.coinAmount === null || r.coinAmount === undefined;
+}
+
 export class SupabaseChildProposalService {
   /** 孩子提出一個想法。只會落在 draft 或 proposed。 */
   async create(command: CreateChildProposalCommand): Promise<CreateChildProposalResult> {
@@ -210,7 +237,31 @@ export class SupabaseChildProposalService {
     const toStatus = requireStatus(result.payload, 'toStatus', fallback);
     if (isFailure(toStatus)) return toStatus;
 
-    return { ok: true, proposalId: id, fromStatus, toStatus };
+    const planVersionId =
+      typeof result.payload.planVersionId === 'string' ? result.payload.planVersionId : null;
+
+    // 轉成 active 卻沒有回饋快照，代表 RPC 是舊版本或 migration 沒套齊。
+    // 當成失敗處理：一份沒有共同確認回饋的 shared version 不是 shared version，
+    // 而讓它靜靜通過的話，這件事要等到家長三個月後回頭查才會被發現。
+    if (toStatus === 'active' && !isConfirmedReward(result.payload.confirmedReward)) {
+      return {
+        ok: false,
+        code: 'UNKNOWN',
+        reason: 'CONFIRMED_REWARD_MISSING',
+        message: `${fallback}：共同版本缺少確認的回饋紀錄`,
+      };
+    }
+
+    return {
+      ok: true,
+      proposalId: id,
+      fromStatus,
+      toStatus,
+      planVersionId,
+      confirmedReward: isConfirmedReward(result.payload.confirmedReward)
+        ? result.payload.confirmedReward
+        : null,
+    };
   }
 
   /**
