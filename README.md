@@ -30,10 +30,18 @@ Shadow Wallet 是一個家庭教養行動 App，核心是「bookkeeping + 任務
 
 ## 任務類型 (Task Category)
 
-- Task-A: 基本生活自理 (6-9 歲不發幣)
-- Task-B: 家庭本分 (不發幣，累積 time_saving_min)
-- Task-C: 超出本分貢獻 (發幣)
-- Task-D: 學習成長里程碑 (節點式發幣)
+2026-07 改版，代號 A/B/C/D 不變、語義已更新。完整規格見 `docs/SPEC_task-taxonomy-2026-07.md`。
+
+- Task-A: 生活常規 (2-6 歲養成期可少量發幣並遞減退場；6 歲以上預設隱藏)
+- Task-B: 家庭參與 (不發幣，也不給時間儲蓄；改以家庭葉片/貢獻紀錄/週報肯定)
+- Task-C: 自主挑戰 (發幣或時間儲蓄；來源須為孩子提出或親子協商)
+- Task-D: 學習與技能 (發幣或時間儲蓄；獎勵投入與持續，排除結果導向)
+
+任務除了「目的 (A/B/C/D)」還有三個維度: 執行期間 (單次/週期/長期)、任務來源、回饋方式。
+長期任務不是第五類，是執行形式。
+
+> 程式碼尚未完全跟上新定義，落差與待辦見 `docs/DELTA_task-taxonomy-2026-07.md`。
+> 下方「關鍵業務邏輯」描述的是**現況 code**，其中 Task-A 不發幣與 Task-B 時間儲蓄兩點與新分類牴觸。
 
 ## 技術棧
 
@@ -70,8 +78,11 @@ docs/superpowers/            # 規格與實作計畫文件
 coin = Math.round(base_time_min * difficulty)
 ```
 
-- Task-A / Task-B: 不發幣
+- Task-A / Task-B: 不發幣 (⚠️ 新分類要求 A 類 2-6 歲可發幣，未實作)
 - Task-D: 可用 coin_override
+
+另有一套建立任務時的建議幣值路徑 (`ai-proxy/analyzeTask` → 八步資格閘門 → `coin-policy.json`)，
+與上面的完成時計算並存且尚未對齊。
 
 2. 前置解鎖折扣 (6-9 歲)
 
@@ -79,11 +90,15 @@ coin = Math.round(base_time_min * difficulty)
 displayCoin = Math.round(baseCoin * (allABCompleted ? 1.0 : 0.7))
 ```
 
+⚠️ 前提已被新分類動搖 (A 類退場、B 類不商品化)，保留/改條件/移除待團隊決定。
+
 3. Task-B 時間儲蓄
 
 ```ts
 time_saved = task.time_saving_min
 ```
+
+⚠️ 與新分類牴觸: 新規則的時間儲蓄屬 C/D，B 類改為貢獻紀錄。
 
 4. 時區與日期
 - 統一使用 Asia/Taipei
@@ -181,6 +196,8 @@ npx tsc --noEmit
 ## 主要文件
 
 - CLAUDE.md: 產品定位、資料表、核心規則、開發規範
+- docs/SPEC_task-taxonomy-2026-07.md: 任務分類、分齡體驗與回饋規則 (分類的單一來源)
+- docs/DELTA_task-taxonomy-2026-07.md: 上述分類與現況程式碼的落差清單
 - docs/superpowers/specs/2026-05-09-flow1-goal-task-setup-design.md
 - docs/superpowers/plans/2026-05-09-flow1-goal-task-setup.md
 - docs/superpowers/plans/2026-05-10-child-daily-cycle.md

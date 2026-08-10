@@ -4,6 +4,7 @@ import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import isoWeek from 'dayjs/plugin/isoWeek';
 import { supabase } from '../lib/supabase';
+import { updateTaskSchedule, updateTaskRecurrenceDays } from '../lib/taskActions';
 import type { TaskCategory } from '../types/database';
 
 dayjs.extend(utc);
@@ -32,7 +33,14 @@ export type WeeklyCoinFlow = {
 export type SuggestionAction =
   | 'adjust_reminder'
   | 'increase_difficulty'
-  | 'add_contribution';
+  | 'add_contribution'
+  | 'adjust_schedule'
+  | 'adjust_recurrence'
+  | 'pause_or_renegotiate'
+  | 'break_down_goal';
+
+export type ScheduleClaimPeriod = 'day' | 'week' | 'once';
+const VALID_CLAIM_PERIODS: ScheduleClaimPeriod[] = ['day', 'week', 'once'];
 
 export type WeeklySuggestion = {
   body: string;
@@ -40,7 +48,62 @@ export type WeeklySuggestion = {
   action: SuggestionAction;
   taskId?: string;
   taskName?: string;
+  currentClaimPeriod?: ScheduleClaimPeriod;
+  currentMaxClaimsPerPeriod?: number;
+  suggestedClaimPeriod?: ScheduleClaimPeriod;
+  suggestedMaxClaimsPerPeriod?: number;
+  currentRecurrenceDays?: number[];
+  suggestedRecurrenceDays?: number[];
+  adopted?: boolean;
+  /** 家長按下「再觀察一週」——跟 adopted 互斥，兩者都代表這則建議已經有結論了。 */
+  deferred?: boolean;
+  /** 套用/觀察的當下時間（ISO），家長按下按鈕才會寫入。 */
+  decidedAt?: string;
+  /**
+   * 家長實際套用的值——跟 suggestedClaimPeriod 等「AI 原始建議」分開存。
+   * 家長按「修改建議」改過數字再套用時，這裡記的是他真正選的那組值，
+   * suggestedX 永遠維持 AI（或候選清單）當初給的原始建議，兩者都留著
+   * 才對得起「原始建議／家長最後選擇」都要保存的要求。
+   */
+  adoptedClaimPeriod?: ScheduleClaimPeriod;
+  adoptedMaxClaimsPerPeriod?: number;
+  adoptedRecurrenceDays?: number[];
 };
+
+function isValidDayArray(v: unknown): v is number[] {
+  return Array.isArray(v)
+    && v.length > 0
+    && v.every(d => typeof d === 'number' && Number.isInteger(d) && d >= 0 && d <= 6)
+    && new Set(v).size === v.length;
+}
+
+/**
+ * Gemini's weekly-report output isn't structured yet, so schedule-suggestion
+ * fields may be missing, malformed, or hand-seeded for testing. Drop them
+ * (keep the plain-text suggestion) unless both fields of a kind are present and valid.
+ */
+function sanitizeSuggestions(raw: WeeklySuggestion[]): WeeklySuggestion[] {
+  return raw.map(sg => {
+    let clean = sg;
+
+    const validPeriod = VALID_CLAIM_PERIODS.includes(sg.suggestedClaimPeriod as ScheduleClaimPeriod);
+    const validMax = typeof sg.suggestedMaxClaimsPerPeriod === 'number'
+      && Number.isInteger(sg.suggestedMaxClaimsPerPeriod)
+      && sg.suggestedMaxClaimsPerPeriod > 0;
+    if (!sg.taskId || !validPeriod || !validMax) {
+      const { suggestedClaimPeriod, suggestedMaxClaimsPerPeriod, currentClaimPeriod, currentMaxClaimsPerPeriod, ...rest } = clean;
+      clean = rest;
+    }
+
+    const validDays = isValidDayArray(sg.suggestedRecurrenceDays);
+    if (!sg.taskId || !validDays) {
+      const { suggestedRecurrenceDays, currentRecurrenceDays, ...rest } = clean;
+      clean = rest;
+    }
+
+    return clean;
+  });
+}
 
 export type GrowthMoment = {
   id: string;
@@ -106,6 +169,16 @@ export type ParentWeeklyReportData = {
   totalTasks: number;
   checkIns: number;
   timeSavedMin: number;
+  /** 這週完成任務時，孩子自己開始 vs 被家長提醒才開始的次數——start_mode 統計。 */
+  selfStartedCount: number;
+  remindedCount: number;
+  /**
+   * 完成時段分布（晚餐後／睡前）——純資訊，不是建議依據。只有完成時記的
+   * planned_time_window，沒有「排定 vs 實際」的對比資料，不足以判斷該不該
+   * 調整時段。
+   */
+  afterDinnerCount: number;
+  beforeBedCount: number;
   aiInsight: string;
   dialoguePrompt: string;
   activity: WeeklyActivityBar[];
@@ -129,6 +202,23 @@ export type ParentWeeklyReportData = {
   addMoment: (title: string, body: string) => Promise<void>;
   refresh: () => void;
   requestAiRefresh: () => Promise<void>;
+  adoptScheduleSuggestion: (
+    taskId: string,
+    claimPeriod: ScheduleClaimPeriod,
+    maxClaimsPerPeriod: number,
+  ) => Promise<void>;
+  adoptRecurrenceSuggestion: (taskId: string, recurrenceDays: number[]) => Promise<void>;
+  deferSuggestion: (
+    taskId: string,
+    action: SuggestionAction,
+    seed?: Pick<WeeklySuggestion, 'body' | 'actionLabel' | 'taskName'>,
+  ) => Promise<void>;
+  acknowledgeSuggestion: (
+    taskId: string,
+    action: SuggestionAction,
+    seed?: Pick<WeeklySuggestion, 'body' | 'actionLabel' | 'taskName'>,
+  ) => Promise<void>;
+  revertSuggestion: (taskId: string, action: SuggestionAction) => Promise<void>;
 };
 
 // ---------------------------------------------------------------------------
@@ -259,6 +349,10 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
   const [totalTasks, setTotalTasks] = useState(0);
   const [checkIns, setCheckIns] = useState(0);
   const [timeSavedMin, setTimeSavedMin] = useState(0);
+  const [selfStartedCount, setSelfStartedCount] = useState(0);
+  const [remindedCount, setRemindedCount] = useState(0);
+  const [afterDinnerCount, setAfterDinnerCount] = useState(0);
+  const [beforeBedCount, setBeforeBedCount] = useState(0);
   const [aiInsight, setAiInsight] = useState(PENDING_INSIGHT);
   const [suggestions, setSuggestions] = useState<WeeklySuggestion[]>(PENDING_SUGGESTIONS);
   const [affirmations, setAffirmations] = useState<string[]>(PENDING_AFFIRMATIONS);
@@ -295,7 +389,7 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
         supabase.from('child_tasks').select('task_id').eq('child_id', childId).eq('is_active', true),
         supabase
           .from('task_completions')
-          .select('id, task_id, coin_earned, time_saved_min, completed_at, status, tasks(name)')
+          .select('id, task_id, coin_earned, time_saved_min, completed_at, status, start_mode, planned_time_window, tasks(name)')
           .eq('child_id', childId)
           .gte('completed_at', startISO)
           .lte('completed_at', endISO),
@@ -322,6 +416,14 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
       const previousCompletionData = previousCompletionsRes.data ?? [];
       setCheckIns(completionData.length);
       setTimeSavedMin(completionData.reduce((sum, c) => sum + (c.time_saved_min ?? 0), 0));
+      // 主動開始 vs 家長提醒——start_mode 一直都有記，只是從沒被彙總進週報過。
+      setSelfStartedCount(completionData.filter(c => c.start_mode === 'self_started').length);
+      setRemindedCount(completionData.filter(c => c.start_mode === 'reminded').length);
+      // 完成時段分布——純資料顯示，不做成「建議」：這裡只有完成當下記的一筆
+      // planned_time_window，沒有「排定哪個時段、實際做到沒」的對比資料，
+      // 沒有足夠信號可以判斷「哪個時段比較好」，硬做規則建議會是亂猜。
+      setAfterDinnerCount(completionData.filter(c => c.planned_time_window === 'after_dinner').length);
+      setBeforeBedCount(completionData.filter(c => c.planned_time_window === 'before_bed').length);
 
       const walletId = walletRes.data?.id ?? null;
 
@@ -349,7 +451,7 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
         familyId
           ? supabase
               .from('weekly_reports')
-              .select('motivation_observation, ai_suggestions')
+              .select('motivation_observation, ai_suggestions, task_adjustments')
               .eq('family_id', familyId)
               .eq('child_id', childId)
               .eq('week_start', weekStartDate)
@@ -433,17 +535,16 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
           affirmations?: string[];
           dialogue?: string;
         } | null;
+        task_adjustments: { abandonment_tier?: 1 | 2 | 3 | null } | null;
       } | null;
 
       if (report?.motivation_observation) {
         setAiInsight(report.motivation_observation);
-        setSuggestions(report.ai_suggestions?.suggestions ?? PENDING_SUGGESTIONS);
         setAffirmations(report.ai_suggestions?.affirmations ?? PENDING_AFFIRMATIONS);
         setDialoguePrompt(report.ai_suggestions?.dialogue ?? '');
         setAiReady(true);
       } else {
         setAiInsight(PENDING_INSIGHT);
-        setSuggestions(PENDING_SUGGESTIONS);
         setAffirmations(PENDING_AFFIRMATIONS);
         setDialoguePrompt('');
         setAiReady(false);
@@ -461,7 +562,50 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
       for (const c of previousCompletionData) {
         previousDoneByTask.set(c.task_id, (previousDoneByTask.get(c.task_id) ?? 0) + 1);
       }
-      setLongTermGoals(rawLTGs.map(g => mapGoalProgress(g, start, weeklyDoneByTask, previousDoneByTask)));
+      const mappedLTGs = rawLTGs.map(g => mapGoalProgress(g, start, weeklyDoneByTask, previousDoneByTask));
+      setLongTermGoals(mappedLTGs);
+
+      // 規則版建議：棄坑分級（detect-abandonment 已經算好、寫進 task_adjustments，
+      // 這裡只是接上來變成一則可以「採用/觀察」的建議卡片）跟拆小目標（用長期
+      // 任務「這週沒有進度」的既有訊號）。跟 AI 建議走同一個陣列、同一套持久化
+      // 機制。棄坑分級是整個孩子層級的訊號、不是特定任務，借用 childId 當
+      // taskId 方便沿用既有的 adopt/defer/patch；拆小目標則是真的有對應任務，
+      // 用該長期任務自己的 taskId。
+      const baseSuggestions = report?.ai_suggestions?.suggestions
+        ? sanitizeSuggestions(report.ai_suggestions.suggestions)
+        : [];
+      const abandonmentTier = report?.task_adjustments?.abandonment_tier ?? null;
+      const hasAbandonmentSuggestion = baseSuggestions.some(
+        sg => sg.action === 'pause_or_renegotiate' && sg.taskId === childId,
+      );
+      const abandonmentSuggestion: WeeklySuggestion[] =
+        (typeof abandonmentTier === 'number' && abandonmentTier >= 2 && !hasAbandonmentSuggestion)
+          ? [{
+              body: abandonmentTier >= 3
+                ? '已經連續 14 天以上沒有任務完成紀錄，現在的安排可能跟孩子的步調不合了，建議先暫停、找時間重新聊聊怎麼調整。'
+                : '已經一週左右沒有任務完成紀錄，建議留意一下，看看是不是有什麼地方卡住了。',
+              actionLabel: '前往任務管理',
+              action: 'pause_or_renegotiate',
+              taskId: childId,
+              taskName: childRes.data?.nickname || undefined,
+            }]
+          : [];
+
+      // Tier 2（7天）以上才提，Tier 1（3天）留給孩子端的溫和提示，週報不用重複說。
+      // 拆小目標：這週完全沒進度的長期任務，最多提 2 個，不要一次洗版。
+      const stalledGoals = mappedLTGs.filter(g => g.noProgressThisWeek).slice(0, 2);
+      const breakDownSuggestions: WeeklySuggestion[] = stalledGoals
+        .filter(g => !baseSuggestions.some(sg => sg.action === 'break_down_goal' && sg.taskId === g.taskId))
+        .map(g => ({
+          body: `「${g.taskName}」這週還沒有進度，目標可能一次要求太多了，建議跟孩子聊聊，看看能不能拆成幾個更小的步驟慢慢來。`,
+          actionLabel: '前往長期任務',
+          action: 'break_down_goal',
+          taskId: g.taskId,
+          taskName: g.taskName,
+        }));
+
+      const finalSuggestions = [...baseSuggestions, ...abandonmentSuggestion, ...breakDownSuggestions];
+      setSuggestions(finalSuggestions.length > 0 ? finalSuggestions : PENDING_SUGGESTIONS);
 
       // ── 「查看完整紀錄」四分頁清單 ───────────────────────────────────────────
       // 先建立「id → 真實名稱」對照表，讓每一筆紀錄都能顯示任務／獎勵的真名。
@@ -603,6 +747,155 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     await fetchAll();
   }, [childId, fetchAll]);
 
+  /**
+   * 幫某一則建議的紀錄打補丁（讓卡片留在清單裡，只換按鈕/badge，不整筆刪掉）。
+   * 套用、觀察都經過這裡，只是 patch 的內容不同。
+   *
+   * 同一個任務可能同時有排程建議跟排定日建議（taskId 相同），一定要連 action
+   * 種類一起比對，不然處理其中一則會把另一則也標成同樣的結論。
+   */
+  const patchSuggestionRecord = useCallback(async (
+    taskId: string,
+    action: SuggestionAction,
+    patch: Partial<WeeklySuggestion>,
+    /**
+     * 用來「補插入」的最小資料——像棄坑分級這種規則版建議是前端合成的，
+     * 家長第一次按套用/觀察之前根本沒被寫進 DB 過，這時候找不到既有紀錄
+     * 可以打補丁，要用這份資料生一筆新的，而不是靜靜跳過。
+     */
+    seed?: Pick<WeeklySuggestion, 'body' | 'actionLabel' | 'taskName'>,
+  ) => {
+    const weekStartDate = getWeekBounds(weekOffset).start.format('YYYY-MM-DD');
+    const { data: reportRow, error: fetchErr } = await supabase
+      .from('weekly_reports')
+      .select('id, ai_suggestions')
+      .eq('child_id', childId)
+      .eq('week_start', weekStartDate)
+      .maybeSingle();
+
+    if (fetchErr || !reportRow) return;
+
+    const current = (reportRow.ai_suggestions ?? {}) as {
+      suggestions?: WeeklySuggestion[];
+      affirmations?: string[];
+      dialogue?: string;
+    };
+    const existing = current.suggestions ?? [];
+    const matched = existing.some(sg => sg.taskId === taskId && sg.action === action);
+    const updated = matched
+      ? existing.map(sg => (sg.taskId === taskId && sg.action === action ? { ...sg, ...patch } : sg))
+      : [
+          ...existing,
+          {
+            body: seed?.body ?? '',
+            actionLabel: seed?.actionLabel ?? '',
+            ...(seed?.taskName ? { taskName: seed.taskName } : null),
+            action,
+            taskId,
+            ...patch,
+          } as WeeklySuggestion,
+        ];
+
+    await supabase
+      .from('weekly_reports')
+      .update({ ai_suggestions: { ...current, suggestions: updated } })
+      .eq('id', reportRow.id);
+  }, [childId, weekOffset]);
+
+  const adoptScheduleSuggestion = useCallback(async (
+    taskId: string,
+    claimPeriod: ScheduleClaimPeriod,
+    maxClaimsPerPeriod: number,
+  ) => {
+    await updateTaskSchedule(taskId, claimPeriod, maxClaimsPerPeriod);
+    await patchSuggestionRecord(taskId, 'adjust_schedule', {
+      adopted: true,
+      deferred: false,
+      decidedAt: new Date().toISOString(),
+      // 家長編輯過就跟 AI 原始建議不一樣了——兩者分開存，suggestedX 永遠是原始建議。
+      adoptedClaimPeriod: claimPeriod,
+      adoptedMaxClaimsPerPeriod: maxClaimsPerPeriod,
+    });
+    await fetchAll();
+  }, [patchSuggestionRecord, fetchAll]);
+
+  const adoptRecurrenceSuggestion = useCallback(async (
+    taskId: string,
+    recurrenceDays: number[],
+  ) => {
+    await updateTaskRecurrenceDays(taskId, recurrenceDays);
+    await patchSuggestionRecord(taskId, 'adjust_recurrence', {
+      adopted: true,
+      deferred: false,
+      decidedAt: new Date().toISOString(),
+      adoptedRecurrenceDays: recurrenceDays,
+    });
+    await fetchAll();
+  }, [patchSuggestionRecord, fetchAll]);
+
+  /** 「再觀察一週」——跟採用一樣是個真的決定，要留紀錄，不是單純從畫面上消失。 */
+  const deferSuggestion = useCallback(async (
+    taskId: string,
+    action: SuggestionAction,
+    seed?: Pick<WeeklySuggestion, 'body' | 'actionLabel' | 'taskName'>,
+  ) => {
+    await patchSuggestionRecord(taskId, action, {
+      deferred: true,
+      decidedAt: new Date().toISOString(),
+    }, seed);
+    await fetchAll();
+  }, [patchSuggestionRecord, fetchAll]);
+
+  /**
+   * 有些建議「採用」不是自動改資料庫，是帶家長去對應畫面自己處理——
+   * 暫停/重新協商、拆小目標都是需要親子對話的決定，不該讓 AI 或規則引擎
+   * 幫忙盲目寫入。這裡只負責留下「家長已經看過、決定要處理」的紀錄，
+   * 實際導頁由呼叫端（畫面）自己做。
+   */
+  const acknowledgeSuggestion = useCallback(async (
+    taskId: string,
+    action: SuggestionAction,
+    seed?: Pick<WeeklySuggestion, 'body' | 'actionLabel' | 'taskName'>,
+  ) => {
+    await patchSuggestionRecord(taskId, action, {
+      adopted: true,
+      deferred: false,
+      decidedAt: new Date().toISOString(),
+    }, seed);
+    await fetchAll();
+  }, [patchSuggestionRecord, fetchAll]);
+
+  /**
+   * 取消套用——回到採用前的狀態。
+   *
+   * currentClaimPeriod/currentMaxClaimsPerPeriod/currentRecurrenceDays 本來就是
+   * 「採用前」的快照（候選清單算的時候存的），不用另外多存一份「舊值」，直接拿來
+   * 當復原目標，把任務改回去、把這則建議的 adopted 狀態清掉即可。
+   */
+  const revertSuggestion = useCallback(async (taskId: string, action: SuggestionAction) => {
+    const sg = suggestions.find(s => s.taskId === taskId && s.action === action);
+    if (!sg) return;
+
+    if (action === 'adjust_schedule') {
+      if (sg.currentClaimPeriod == null || sg.currentMaxClaimsPerPeriod == null) return;
+      await updateTaskSchedule(taskId, sg.currentClaimPeriod, sg.currentMaxClaimsPerPeriod);
+    } else if (action === 'adjust_recurrence') {
+      if (sg.currentRecurrenceDays == null) return;
+      await updateTaskRecurrenceDays(taskId, sg.currentRecurrenceDays);
+    } else {
+      return;
+    }
+
+    await patchSuggestionRecord(taskId, action, {
+      adopted: false,
+      decidedAt: undefined,
+      adoptedClaimPeriod: undefined,
+      adoptedMaxClaimsPerPeriod: undefined,
+      adoptedRecurrenceDays: undefined,
+    });
+    await fetchAll();
+  }, [suggestions, patchSuggestionRecord, fetchAll]);
+
   const requestAiRefresh = useCallback(async () => {
     const weekStartDate = getWeekBounds(weekOffset).start.format('YYYY-MM-DD');
     const { error: err } = await supabase.functions.invoke('generate-weekly-report', {
@@ -619,6 +912,10 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     totalTasks,
     checkIns,
     timeSavedMin,
+    selfStartedCount,
+    remindedCount,
+    afterDinnerCount,
+    beforeBedCount,
     aiInsight,
     dialoguePrompt,
     activity,
@@ -642,5 +939,10 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     addMoment,
     refresh: fetchAll,
     requestAiRefresh,
+    adoptScheduleSuggestion,
+    adoptRecurrenceSuggestion,
+    deferSuggestion,
+    acknowledgeSuggestion,
+    revertSuggestion,
   };
 }

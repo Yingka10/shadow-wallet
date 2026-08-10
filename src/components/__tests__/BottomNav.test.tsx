@@ -1,5 +1,5 @@
 import React from 'react';
-import { Platform, StyleSheet } from 'react-native';
+import { Platform, StyleSheet, type ViewStyle } from 'react-native';
 import { render, screen, fireEvent } from '@testing-library/react-native';
 import BottomNav, { bottomNavStyles } from '../BottomNav';
 import { Colors } from '../../constants/colors';
@@ -36,7 +36,7 @@ describe('BottomNav', () => {
   });
 
   it('uses a fixed bottom bar instead of a floating tray', () => {
-    const nav = StyleSheet.flatten(bottomNavStyles.nav);
+    const nav: ViewStyle = StyleSheet.flatten(bottomNavStyles.nav);
 
     expect(nav.backgroundColor).toBe(Colors.navBg);
     expect(nav.borderRadius).toBeUndefined();

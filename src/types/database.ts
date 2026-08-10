@@ -1,3 +1,11 @@
+import type {
+  ChildProposal,
+  ChildProposalAdjustmentRequest,
+  ChildProposalPlanVersion,
+  ChildProposalStatusEvent,
+  ChildProposalTrialEvent,
+} from '../lib/childProposal/types';
+
 // ── 通用 enum 型別 ───────────────────────────────────────────
 
 export type AgeGroup = '2-4' | '4-6' | '6-9' | '9-12';
@@ -10,7 +18,14 @@ export type MotivationLevel = 'amotivation' | 'external' | 'introjected' | 'inte
 export type PersonalityType = 'competitive' | 'relational' | 'curious';
 export type TaskCategory = 'A' | 'B' | 'C' | 'D';
 export type DayType = 'weekday' | 'weekend' | 'both' | 'custom' | 'once';
-export type LongTermType = 'habit' | 'skill' | 'family' | 'challenge';
+/**
+ * long_term_goals.goal_type 與 tasks.long_term_type 的允許值。
+ *
+ * 以 live DB 的 CHECK 為準（habit / skill / responsibility / challenge）。
+ * 這裡原本寫的是 'family' —— 那個值資料庫從來不接受，所有寫入它的路徑
+ * 都會被 check constraint 擋下。修正見 migration 20260731000000。
+ */
+export type LongTermType = 'habit' | 'skill' | 'responsibility' | 'challenge';
 export type AccountType = 'SINGLE' | 'DOUBLE';
 export type ParentRole = 'primary' | 'co';
 export type AiMode = 'conservative' | 'balanced' | 'auto';
@@ -26,6 +41,8 @@ export type CompletionStatus = 'completed' | 'flagged';
 export type GoalStatus = 'active' | 'completed' | 'paused';
 export type PoolType = 'family_time' | 'game_time';
 export type ReportedBy = 'child' | 'parent';
+export type PreferredTimeWindow = 'after_dinner' | 'before_bed';
+export type CompletionStartMode = 'self_started' | 'reminded';
 
 /** Maps day-number (as string key) to coin reward. E.g. {"7": 20, "14": 40, "21": 80} */
 export type CheckpointRewards = Record<string, number>;
@@ -107,7 +124,81 @@ export type Task = {
   recurrence_days: number[] | null;
   due_date: string | null;
   created_at: string;
+
+  // ── 預設任務抽屜新增的欄位（migration 20260728000000 / 20260729000000）──
+  //
+  // 這些在 DB 都是 nullable 欄位，這裡卻標成 optional：因為這份型別是**手寫**的，
+  // 而現有查詢多半只 select 舊欄位。標成必填會讓每一個既有的 Task 物件字面量
+  // 突然缺欄位，但那些程式碼其實沒有壞。
+  // 真正生成 types 之後要把 optional 改回 `| null`——見
+  // docs/TASK_REWARD_POLICY_AUDIT.md 的 generated types checklist。
+  // 四個維度（目的仍在 category，其餘在這裡）
+  duration_type?: 'one_time' | 'recurring' | 'long_term' | null;
+  plan_mode?: 'growth_plan' | 'short_support' | 'family_role' | null;
+  task_source?: 'parent' | 'child' | 'co_created' | 'system' | 'system_suggested' | null;
+  reward_policy?: RewardPolicyValue | null;
+  completion_policy?:
+    | 'complete_once' | 'keep_recurring' | 'finish_project'
+    | 'review_and_continue' | 'stabilize_and_exit' | null;
+
+  // 內容
+  original_expectation?: string | null;
+  completion_description?: string | null;
+  task_details?: string | null;
+  notes?: string | null;
+
+  // 排程
+  schedule_mode?: 'one_time' | 'fixed_days' | 'weekly_frequency' | 'plan_schedule' | null;
+  weekly_frequency?: number | null;
+  start_date?: string | null;
+  /** 單次任務安排在哪一天。與 due_date 不同：後者是「過了就隱藏」。 */
+  scheduled_date?: string | null;
+  preferred_time?: string | null;
+  preferred_time_custom?: string | null;
+  /** 家長估計的投入分鐘。刻意與 base_time_min 分開，不參與幣值計算。 */
+  estimated_minutes?: number | null;
+  claim_period?: 'day' | 'week' | 'once' | null;
+  max_claims_per_period?: number | null;
+
+  // 回顧與協助
+  review_enabled?: boolean | null;
+  review_after_days?: number | null;
+  support_level?: string | null;
+
+  // 成長幣
+  /** 完成一次可獲得的成長幣。新任務的 canonical 來源。 */
+  reward_coin_amount?: number | null;
+  reward_coin_suggested_amount?: number | null;
+  reward_coin_min?: number | null;
+  reward_coin_max?: number | null;
+
+  // 四種版本
+  /** 任務政策（分類／來源／回饋資格／結束規則）的版本。 */
+  task_policy_version?: string | null;
+  /** 做出這筆回饋決策的政策版本。可發幣是 coin-policy，不發幣是回饋資格政策。 */
+  reward_policy_version?: string | null;
+  preset_catalog_version?: string | null;
+  command_schema_version?: number | null;
+
+  // 溯源
+  preset_family_id?: string | null;
+  preset_variant_id?: string | null;
+  /** DB 上是 NOT NULL DEFAULT false —— 這裡標 optional 只是為了不動既有字面量。 */
+  created_from_preset?: boolean;
+  /**
+   * 建立這筆任務的 client 請求識別碼（migration 20260730000000）。
+   * 有 unique index，是「網路重送不會建出第二筆」的唯一依據。legacy 任務為 null。
+   */
+  creation_request_id?: string | null;
 };
+
+/** tasks.reward_policy 的允許值（migration 20260728000000 的 CHECK）。 */
+export type RewardPolicyValue =
+  | 'record_only'
+  | 'family_contribution'
+  | 'progress_only'
+  | 'coin_eligible'
+  | 'time_saving_eligible';
 
 export type TaskCompletion = {
   id: string;
@@ -121,6 +212,8 @@ export type TaskCompletion = {
   time_saved_min: number;
   mentor_child_id: string | null;
   override_id: string | null;
+  planned_time_window: PreferredTimeWindow | null;
+  start_mode: CompletionStartMode | null;
   created_at: string;
 };
 
@@ -182,6 +275,11 @@ export type LongTermGoal = {
   checkpoint_rewards: CheckpointRewards | null;
   motivation_note: string | null;
   started_at: string;
+  /** 計畫最後一天（含）；新長期任務由 long_term_goals 保存。 */
+  end_date?: string | null;
+  /** 第幾天做第一次回顧。0 或 null = 家長關掉了。抽屜的長期任務會寫它。 */
+  first_review_after_days?: number | null;
+  weekend_review_enabled?: boolean | null;
   next_review_at: string | null;
   completed_at: string | null;
   created_at: string;
@@ -190,6 +288,7 @@ export type LongTermGoal = {
   interrupt_count: number;
   last_active_date: string | null;
   active_days: number[] | null;     // 0=日,1=一,...,6=六; null=every day
+  preferred_time_window: PreferredTimeWindow | null;
   // 技能學習專用
   level_definitions: Record<string, any>[] | null;
   current_level: number | null;
@@ -252,6 +351,23 @@ export type CreditLog = {
   repair_task_completed: boolean;
   current_score: number;
   updated_at: string;
+};
+
+export type InterventionLog = {
+  id: string;
+  family_id: string;
+  child_id: string;
+  parent_id: string | null;
+  task_id: string | null;
+  task_name_snapshot: string | null;
+  override_id: string | null;
+  correlation_id: string | null;
+  event_type: string;
+  trigger_source: string;
+  ai_suggested: unknown | null;
+  parent_decision: unknown | null;
+  context_snapshot: unknown | null;
+  created_at: string;
 };
 
 export type SiblingRelation = {
@@ -326,6 +442,99 @@ export type ChildTask = {
   is_active: boolean;
   created_at: string;
 };
+
+// ── 預設任務抽屜的持久化子表（20260728000000_task_drawer_persistence_v1）──
+//
+// 這些是 application-level 型別，不是 Supabase CLI 產生的。
+// 專案沒有提交 generated types（本檔全部手寫），所以照現有慣例補在這裡。
+
+/** 任務目前生效的選項答案。更新採同一交易內 replace，歷史走 task_change_events。 */
+export type TaskPresetSelection = {
+  id: string;
+  task_id: string;
+  option_group_id: string;
+  option_id: string;
+  custom_value: string | null;
+  created_at: string;
+};
+
+export type TaskPlanMilestone = {
+  id: string;
+  task_id: string;
+  long_term_goal_id: string | null;
+  title: string;
+  target_day: number | null;
+  sort_order: number;
+  created_at: string;
+};
+
+export type TaskPlanSupportStep = {
+  id: string;
+  task_id: string;
+  long_term_goal_id: string | null;
+  text: string;
+  sort_order: number;
+  is_custom: boolean;
+  created_at: string;
+};
+
+export type TaskRoleResponsibility = {
+  id: string;
+  task_id: string;
+  long_term_goal_id: string | null;
+  text: string;
+  sort_order: number;
+  is_custom: boolean;
+  created_at: string;
+};
+
+/** append-only 稽核。snapshot 是當下的命令摘要，不是現況查詢來源。 */
+export type TaskChangeEvent = {
+  id: string;
+  task_id: string;
+  event_type: 'created_from_preset' | 'updated_from_preset' | 'archived';
+  actor_user_id: string | null;
+  task_policy_version: string | null;
+  reward_policy_version: string | null;
+  command_schema_version: number | null;
+  snapshot: unknown | null;
+  created_at: string;
+};
+
+/** create_parent_task_v1 的回傳形狀（jsonb）。 */
+export type CreateParentTaskRpcResult =
+  | { ok: true; taskId: string; relatedIds: string[] | null }
+  | {
+      ok: false;
+      code: 'VALIDATION_FAILED' | 'POLICY_REJECTED' | 'PERSISTENCE_FAILED' | 'UNKNOWN';
+      message: string;
+    };
+
+// ── 孩子提案 / 版本契約（P0-1）────────────────────────────────
+//
+// 實際定義在 src/lib/childProposal/types.ts —— 那裡同時放著命令、
+// 狀態機與 RPC 結果型別，一起讀才看得懂欄位的意義。
+// 這裡 re-export 是為了讓「DB row 型別從 types/database 拿」這個
+// 既有慣例維持成立，不必記住哪幾張表是例外。
+
+export type {
+  ChildProposal,
+  ChildProposalPlanVersion,
+  ChildProposalTrialEvent,
+  ChildProposalAdjustmentRequest,
+  ChildProposalStatusEvent,
+  ChildProposalStatus,
+  ChildProposalActorRole,
+  ChildProposalSource,
+  ChildProposalCadenceMode,
+  ChildRewardPreference,
+  ChildProposalRewardPolicy,
+  ChildProposalRewardEligibility,
+  ChildProposalPlanAuthor,
+  ChildProposalTrialOutcome,
+  ChildProposalAdjustmentKind,
+  ChildProposalAdjustmentStatus,
+} from '../lib/childProposal/types';
 
 // ── Database 型別（供 createClient<Database> 使用）────────────
 //
@@ -446,6 +655,8 @@ export interface Database {
           coin_override?: number | null;
           is_system_default?: boolean;
           allow_repeat?: boolean;
+          claim_period?: 'day' | 'week';
+          max_claims_per_period?: number;
           min_age?: number;
           max_age?: number;
           is_active?: boolean;
@@ -659,6 +870,27 @@ export interface Database {
         Update: Partial<CreditLog>;
         Relationships: [];
       };
+      intervention_log: {
+        Row: InterventionLog;
+        Insert: {
+          id?: string;
+          family_id: string;
+          child_id: string;
+          parent_id?: string | null;
+          task_id?: string | null;
+          task_name_snapshot?: string | null;
+          override_id?: string | null;
+          correlation_id?: string | null;
+          event_type: string;
+          trigger_source: string;
+          ai_suggested?: unknown | null;
+          parent_decision?: unknown | null;
+          context_snapshot?: unknown | null;
+          created_at?: string;
+        };
+        Update: Partial<InterventionLog>;
+        Relationships: [];
+      };
       sibling_relations: {
         Row: SiblingRelation;
         Insert: {
@@ -765,6 +997,105 @@ export interface Database {
         Update: Partial<ParentObservation>;
         Relationships: [];
       };
+      task_preset_selections: {
+        Row: TaskPresetSelection;
+        Insert: {
+          id?: string;
+          task_id: string;
+          option_group_id: string;
+          option_id: string;
+          custom_value?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<TaskPresetSelection>;
+        Relationships: [];
+      };
+      task_plan_milestones: {
+        Row: TaskPlanMilestone;
+        Insert: {
+          id?: string;
+          task_id: string;
+          long_term_goal_id?: string | null;
+          title: string;
+          target_day?: number | null;
+          sort_order: number;
+          created_at?: string;
+        };
+        Update: Partial<TaskPlanMilestone>;
+        Relationships: [];
+      };
+      task_plan_support_steps: {
+        Row: TaskPlanSupportStep;
+        Insert: {
+          id?: string;
+          task_id: string;
+          long_term_goal_id?: string | null;
+          text: string;
+          sort_order: number;
+          is_custom?: boolean;
+          created_at?: string;
+        };
+        Update: Partial<TaskPlanSupportStep>;
+        Relationships: [];
+      };
+      task_role_responsibilities: {
+        Row: TaskRoleResponsibility;
+        Insert: {
+          id?: string;
+          task_id: string;
+          long_term_goal_id?: string | null;
+          text: string;
+          sort_order: number;
+          is_custom?: boolean;
+          created_at?: string;
+        };
+        Update: Partial<TaskRoleResponsibility>;
+        Relationships: [];
+      };
+      task_change_events: {
+        Row: TaskChangeEvent;
+        // client 沒有 INSERT policy —— 只有 SECURITY DEFINER 函式寫得進去。
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+
+      // ── 孩子提案 / 版本契約（P0-1，migration 20260810000000）────────────
+      //
+      // 五張表都只有 SELECT policy —— 寫入一律走 child proposal 的
+      // SECURITY DEFINER RPC（見 src/lib/childProposal）。所以 Insert 與
+      // Update 一律是 never：型別層直接擋掉「順手 supabase.from().insert()」，
+      // 那條路徑會繞過狀態機與所有 actor 檢查。
+      child_proposals: {
+        Row: ChildProposal;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      child_proposal_plan_versions: {
+        Row: ChildProposalPlanVersion;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      child_proposal_trial_events: {
+        Row: ChildProposalTrialEvent;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      child_proposal_adjustment_requests: {
+        Row: ChildProposalAdjustmentRequest;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      child_proposal_status_events: {
+        Row: ChildProposalStatusEvent;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -816,6 +1147,43 @@ export interface Database {
         Args: Record<string, never>;
         Returns: string;
       };
+      create_parent_task_v1: {
+        // 整個命令用單一 jsonb 傳，欄位還會長；拆成命名參數之後每次加欄位都要改簽章。
+        // 實際形狀是 taskDrawer/taskPersistence 的 CreateParentTaskCommand，
+        // 那是 domain contract，刻意不從 types/database.ts 反向 import。
+        Args: { p_command: object };
+        Returns: CreateParentTaskRpcResult;
+      };
+      // ── 孩子提案 / 版本契約（P0-1）────────────────────────────────
+      //
+      // 五支都是 jsonb 命令進、jsonb 結果出，與 create_parent_task_v1 同一套慣例。
+      // 結果型別是 unknown：實際形狀在 src/lib/childProposal/types.ts，
+      // 而 childProposalService 會逐鍵驗證再回傳結構化結果 ——
+      // 在這裡宣告成功形狀等於允許呼叫端跳過那層驗證。
+      create_child_proposal_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      add_child_proposal_plan_version_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      transition_child_proposal_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      record_child_proposal_trial_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      create_child_proposal_adjustment_request_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      child_proposal_transition_allowed: {
+        Args: { p_from: string; p_to: string; p_actor_role?: string | null };
+        Returns: boolean;
+      };
       mark_task_atomic: {
         Args: {
           p_task_id: string;
@@ -834,6 +1202,14 @@ export interface Database {
           p_parent_note?: string | null;
         };
         Returns: { ok?: boolean; error?: string; status?: string; finalCoins?: number };
+      };
+      record_completion_context: {
+        Args: {
+          p_completion_id: string;
+          p_planned_time_window: PreferredTimeWindow;
+          p_start_mode: CompletionStartMode | null;
+        };
+        Returns: { ok: boolean };
       };
       submit_onboarding: {
         Args: {
@@ -858,6 +1234,21 @@ export interface Database {
           p_coin_cost: number;
         };
         Returns: undefined;
+      };
+      update_task_schedule: {
+        Args: {
+          p_task_id: string;
+          p_claim_period: 'day' | 'week' | 'once';
+          p_max_claims_per_period: number;
+        };
+        Returns: { error?: string; taskId?: string; claimPeriod?: string; maxClaimsPerPeriod?: number };
+      };
+      update_task_recurrence_days: {
+        Args: {
+          p_task_id: string;
+          p_recurrence_days: number[];
+        };
+        Returns: { error?: string; taskId?: string; recurrenceDays?: number[] };
       };
     };
     Enums: {

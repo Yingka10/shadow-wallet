@@ -150,6 +150,17 @@ export const ParentColors = {
   borderMedium: 'rgba(92, 76, 45, 0.18)',
   hairline:     'rgba(92, 76, 45, 0.14)',
 
+  // Overlay 遮罩（抽屜／對話框）—— ink900 的半透明，與 ParentTopBar 既有 backdrop 同色系
+  scrim: 'rgba(28, 27, 23, 0.38)',
+  // 窄 viewport（< 900）用的較深遮罩：抽屜寬度不變，但主頁被擠成一字一行的
+  // 破碎文字會搶視線，加深到讓輪廓還在、字不再讀得出來。
+  scrimCompact: 'rgba(28, 27, 23, 0.62)',
+
+  // 破壞性次要按鈕的柔和磚紅（error 的低彩度版本，只用於文字與邊框，不做大面積填色）
+  dangerSoft:       '#A8563A',
+  dangerSoftBorder: 'rgba(168, 86, 58, 0.38)',
+  dangerSoftBg:     '#FBF3EF',
+
   // Status（相容舊名）
   success: '#5E9A32',   // = done
   warn:    '#C28A3A',   // = pending

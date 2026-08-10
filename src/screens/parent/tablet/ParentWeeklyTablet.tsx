@@ -4,7 +4,7 @@
 // 紀錄 tab: skipped (future).
 // Only renders when width >= 768 (returns null otherwise).
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -21,11 +21,14 @@ import type { StackNavigationProp } from '@react-navigation/stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../../../App';
 import { useSelectedChild } from '../../../context/SelectedChildContext';
+import { supabase } from '../../../lib/supabase';
 import {
   useParentWeeklyReport,
   type WeeklyActivityBar,
   type GrowthMoment,
   type LongTermGoalProgress,
+  type ScheduleClaimPeriod,
+  type SuggestionAction,
 } from '../../../hooks/useParentWeeklyReport';
 import {
   useParentMonthlyReport,
@@ -51,6 +54,8 @@ import {
   ClockIcon,
   BellIcon,
 } from './home/homeIcons';
+import { WeekdayPicker } from './taskDrawer/editors';
+import { WEEKDAYS } from './taskDrawer/taskDraft';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -132,12 +137,14 @@ function MinusIcon({ size = 11, color = ParentColors.error }: { size?: number; c
 // Sub-components
 // ─────────────────────────────────────────────────────────────────────────────
 
-function MetricTile({ label, value, note, tone = 'neutral', icon }: {
+function MetricTile({ label, value, note, tone = 'neutral', icon, compact = false }: {
   label: string;
   value: string;
   note: string;
   tone?: 'neutral' | 'green' | 'orange';
   icon?: React.ReactNode;
+  /** 給「主動 1・提醒 0」這種比純數字長的文字用——字級跟大數字的卡片不一樣，擠在一起才不會爆版。 */
+  compact?: boolean;
 }) {
   const toneStyle =
     tone === 'green' ? s.metricValueGreen :
@@ -148,7 +155,7 @@ function MetricTile({ label, value, note, tone = 'neutral', icon }: {
     <View style={s.metricTile}>
       {icon != null && <View style={s.metricIconWrap}>{icon}</View>}
       <Text style={s.metricLabel}>{label}</Text>
-      <Text style={[s.metricValue, toneStyle]}>{value}</Text>
+      <Text style={[s.metricValue, compact && s.metricValueCompact, toneStyle]}>{value}</Text>
       <Text style={s.metricNote}>{note}</Text>
     </View>
   );
@@ -156,7 +163,10 @@ function MetricTile({ label, value, note, tone = 'neutral', icon }: {
 
 function formatWeeklyChange(goal: LongTermGoalProgress) {
   if (goal.weeklyCompleted === 0) {
-    return '本週尚未開始｜查看調整建議';
+    // 「查看調整建議」以前只是純文字、沒接任何功能。現在「這週值得一起回顧」
+    // 底下真的會出現一張拆小目標建議卡片（見 break_down_goal），這裡不用再
+    // 重複喊一次同樣的話。
+    return '本週尚未開始';
   }
   const unit = goal.unit || '次';
   const delta = goal.weeklyCompleted - goal.previousWeeklyCompleted;
@@ -200,9 +210,140 @@ type ReviewPrompt = {
   title: string;
   prompt: string;
   tone: 'green' | 'orange';
+  taskId?: string;
+  action?: SuggestionAction;
+  actionLabel?: string;
+  currentClaimPeriod?: ScheduleClaimPeriod;
+  currentMaxClaimsPerPeriod?: number;
+  suggestedClaimPeriod?: ScheduleClaimPeriod;
+  suggestedMaxClaimsPerPeriod?: number;
+  currentRecurrenceDays?: number[];
+  suggestedRecurrenceDays?: number[];
+  adopted?: boolean;
+  deferred?: boolean;
+  decidedAt?: string;
 };
 
-function ReviewPromptCard({ item }: { item: ReviewPrompt }) {
+const CLAIM_PERIOD_LABEL: Record<ScheduleClaimPeriod, string> = {
+  day: '每天', week: '每週', once: '整個任務期間',
+};
+
+const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // 週一 ~ 週日
+const WEEKDAY_LABEL: Record<number, string> = Object.fromEntries(
+  WEEKDAYS.map(d => [d.value, d.label]),
+);
+
+/** 「週二、三、五」這種顯示字串，固定週一排到週日的順序。 */
+function formatDays(days: number[]): string {
+  const sorted = [...days].sort((a, b) => WEEKDAY_ORDER.indexOf(a) - WEEKDAY_ORDER.indexOf(b));
+  return `週${sorted.map(d => WEEKDAY_LABEL[d]).join('、')}`;
+}
+
+/** 「8/10 14:30」這種顯示字串，給「已套用」badge 標記決定時間。 */
+function formatDecidedAt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('zh-TW', {
+    month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+}
+
+// 'once'（整個任務期間、次數上限永不重置）不放進這個編輯器：這個功能只處理
+// 週期性任務的頻率上限調整，混進「一輩子只能做幾次」的單次任務語意會誤導家長。
+const CLAIM_PERIOD_OPTIONS: ScheduleClaimPeriod[] = ['day', 'week'];
+
+type ScheduleAdoptOverride =
+  | { claimPeriod: ScheduleClaimPeriod; maxClaimsPerPeriod: number }
+  | { recurrenceDays: number[] };
+
+function ReviewPromptCard({ item, onAdopt, onDefer, onRevert, onAcknowledge }: {
+  item: ReviewPrompt;
+  onAdopt: (item: ReviewPrompt, override?: ScheduleAdoptOverride) => Promise<void>;
+  onDefer: (item: ReviewPrompt) => Promise<void>;
+  onRevert: (item: ReviewPrompt) => Promise<void>;
+  onAcknowledge: (item: ReviewPrompt) => Promise<void>;
+}) {
+  const [adopting, setAdopting] = useState(false);
+  const [deferring, setDeferring] = useState(false);
+  const [reverting, setReverting] = useState(false);
+  const [adoptError, setAdoptError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [editClaimPeriod, setEditClaimPeriod] = useState<ScheduleClaimPeriod>(item.suggestedClaimPeriod ?? 'week');
+  const [editMaxClaims, setEditMaxClaims] = useState(item.suggestedMaxClaimsPerPeriod ?? 1);
+  const [editRecurrenceDays, setEditRecurrenceDays] = useState<number[]>(item.suggestedRecurrenceDays ?? []);
+  const isScheduleSuggestion = item.taskId != null
+    && item.suggestedClaimPeriod != null
+    && item.suggestedMaxClaimsPerPeriod != null;
+  const isRecurrenceSuggestion = item.taskId != null
+    && item.suggestedRecurrenceDays != null;
+  // 這種建議「採用」不是自動改資料庫，是帶家長去對應畫面自己處理——沒有
+  // current/suggested 數值可以顯示 diff，也沒有東西可以「取消套用」。
+  const isAcknowledgeSuggestion = item.taskId != null
+    && (item.action === 'pause_or_renegotiate' || item.action === 'break_down_goal')
+    && !isScheduleSuggestion && !isRecurrenceSuggestion;
+  const isActionable = isScheduleSuggestion || isRecurrenceSuggestion || isAcknowledgeSuggestion;
+
+  const startEditing = () => {
+    setEditClaimPeriod(item.suggestedClaimPeriod ?? 'week');
+    setEditMaxClaims(item.suggestedMaxClaimsPerPeriod ?? 1);
+    setEditRecurrenceDays(item.suggestedRecurrenceDays ?? []);
+    setAdoptError(null);
+    setEditing(true);
+  };
+
+  const handleAdopt = async (override?: ScheduleAdoptOverride) => {
+    setAdopting(true);
+    setAdoptError(null);
+    try {
+      await onAdopt(item, override);
+      setEditing(false);
+    } catch (e) {
+      console.error('[ReviewPromptCard] adopt error:', e);
+      setAdoptError(e instanceof Error ? e.message : '採用失敗，請稍後再試');
+    } finally {
+      setAdopting(false);
+    }
+  };
+
+  const handleDefer = async () => {
+    setDeferring(true);
+    setAdoptError(null);
+    try {
+      await onDefer(item);
+    } catch (e) {
+      console.error('[ReviewPromptCard] defer error:', e);
+      setAdoptError(e instanceof Error ? e.message : '操作失敗，請稍後再試');
+    } finally {
+      setDeferring(false);
+    }
+  };
+
+  const handleAcknowledge = async () => {
+    setAdopting(true);
+    setAdoptError(null);
+    try {
+      await onAcknowledge(item);
+    } catch (e) {
+      console.error('[ReviewPromptCard] acknowledge error:', e);
+      setAdoptError(e instanceof Error ? e.message : '操作失敗，請稍後再試');
+    } finally {
+      setAdopting(false);
+    }
+  };
+
+  const handleRevert = async () => {
+    setReverting(true);
+    setAdoptError(null);
+    try {
+      await onRevert(item);
+    } catch (e) {
+      console.error('[ReviewPromptCard] revert error:', e);
+      setAdoptError(e instanceof Error ? e.message : '取消套用失敗，請稍後再試');
+    } finally {
+      setReverting(false);
+    }
+  };
+
   return (
     <View style={s.reviewPromptRow}>
       <View style={[s.reviewPromptDot, item.tone === 'orange' && s.reviewPromptDotOrange]}>
@@ -213,6 +354,145 @@ function ReviewPromptCard({ item }: { item: ReviewPrompt }) {
       <View style={s.reviewPromptBody}>
         <Text style={s.reviewPromptTitle}>{item.title}</Text>
         <Text style={s.reviewPromptText}>{item.prompt}</Text>
+        {isScheduleSuggestion && !editing && (
+          <Text style={s.scheduleDiffText}>
+            {item.currentClaimPeriod != null && item.currentMaxClaimsPerPeriod != null
+              ? `目前：${CLAIM_PERIOD_LABEL[item.currentClaimPeriod]}最多 ${item.currentMaxClaimsPerPeriod} 次　→　`
+              : ''}
+            建議：{CLAIM_PERIOD_LABEL[item.suggestedClaimPeriod!]}最多 {item.suggestedMaxClaimsPerPeriod} 次
+          </Text>
+        )}
+        {isRecurrenceSuggestion && !editing && (
+          <Text style={s.scheduleDiffText}>
+            {item.currentRecurrenceDays != null
+              ? `目前：${formatDays(item.currentRecurrenceDays)}　→　`
+              : ''}
+            建議：{formatDays(item.suggestedRecurrenceDays!)}
+          </Text>
+        )}
+
+        {isScheduleSuggestion && editing && (
+          <View style={s.editBox}>
+            <Text style={s.editLabel}>調整為</Text>
+            <View style={s.editPeriodRow}>
+              {CLAIM_PERIOD_OPTIONS.map(p => (
+                <TouchableOpacity
+                  key={p}
+                  style={[s.editPeriodChip, editClaimPeriod === p && s.editPeriodChipActive]}
+                  onPress={() => setEditClaimPeriod(p)}
+                >
+                  <Text style={[s.editPeriodChipText, editClaimPeriod === p && s.editPeriodChipTextActive]}>
+                    {CLAIM_PERIOD_LABEL[p]}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={s.editStepperRow}>
+              <Text style={s.editLabel}>最多完成次數</Text>
+              <View style={s.editStepper}>
+                <TouchableOpacity
+                  style={s.editStepperBtn}
+                  onPress={() => setEditMaxClaims(v => Math.max(1, v - 1))}
+                >
+                  <Text style={s.editStepperBtnText}>－</Text>
+                </TouchableOpacity>
+                <Text style={s.editStepperValue}>{editMaxClaims}</Text>
+                <TouchableOpacity
+                  style={s.editStepperBtn}
+                  onPress={() => setEditMaxClaims(v => v + 1)}
+                >
+                  <Text style={s.editStepperBtnText}>＋</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        )}
+        {isRecurrenceSuggestion && editing && (
+          <View style={s.editBox}>
+            <Text style={s.editLabel}>調整為</Text>
+            <WeekdayPicker value={editRecurrenceDays} onChange={setEditRecurrenceDays} />
+          </View>
+        )}
+
+        {isActionable && (
+          <View style={s.reviewPromptActions}>
+            {item.adopted ? (
+              <>
+                <View style={s.adoptedBadge}>
+                  <CheckSquareIcon size={13} color={ParentColors.teal500} />
+                  <Text style={s.adoptedBadgeText}>
+                    已套用{item.decidedAt ? `・${formatDecidedAt(item.decidedAt)}` : ''}
+                  </Text>
+                </View>
+                {/* 帶去別的畫面處理的建議沒有「套用的數值」可以復原，不給取消按鈕。 */}
+                {!isAcknowledgeSuggestion && (
+                  <TouchableOpacity style={s.deferBtn} onPress={handleRevert} disabled={reverting}>
+                    {reverting
+                      ? <ActivityIndicator size="small" color={ParentColors.fgSecondary} />
+                      : <Text style={s.deferBtnText}>取消套用</Text>}
+                  </TouchableOpacity>
+                )}
+              </>
+            ) : isAcknowledgeSuggestion ? (
+              <>
+                <TouchableOpacity
+                  style={s.adoptBtn}
+                  onPress={handleAcknowledge}
+                  disabled={adopting || deferring}
+                >
+                  {adopting
+                    ? <ActivityIndicator size="small" color={ParentColors.accent} />
+                    : <Text style={s.adoptBtnText}>{item.actionLabel || '前往處理'}</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={s.deferBtn} onPress={handleDefer} disabled={adopting || deferring}>
+                  {deferring
+                    ? <ActivityIndicator size="small" color={ParentColors.fgSecondary} />
+                    : <Text style={s.deferBtnText}>再觀察一週</Text>}
+                </TouchableOpacity>
+              </>
+            ) : editing ? (
+              <>
+                <TouchableOpacity
+                  style={s.adoptBtn}
+                  onPress={() => handleAdopt(
+                    isRecurrenceSuggestion
+                      ? { recurrenceDays: editRecurrenceDays }
+                      : { claimPeriod: editClaimPeriod, maxClaimsPerPeriod: editMaxClaims },
+                  )}
+                  disabled={adopting || (isRecurrenceSuggestion && editRecurrenceDays.length === 0)}
+                >
+                  {adopting
+                    ? <ActivityIndicator size="small" color={ParentColors.accent} />
+                    : <Text style={s.adoptBtnText}>確認採用</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={s.deferBtn} onPress={() => setEditing(false)} disabled={adopting}>
+                  <Text style={s.deferBtnText}>取消</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={s.adoptBtn}
+                  onPress={() => handleAdopt()}
+                  disabled={adopting || deferring}
+                >
+                  {adopting
+                    ? <ActivityIndicator size="small" color={ParentColors.accent} />
+                    : <Text style={s.adoptBtnText}>採用建議</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={s.deferBtn} onPress={startEditing} disabled={adopting || deferring}>
+                  <Text style={s.deferBtnText}>修改建議</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.deferBtn} onPress={handleDefer} disabled={adopting || deferring}>
+                  {deferring
+                    ? <ActivityIndicator size="small" color={ParentColors.fgSecondary} />
+                    : <Text style={s.deferBtnText}>再觀察一週</Text>}
+                </TouchableOpacity>
+              </>
+            )}
+            {adoptError && <Text style={s.adoptErrorText}>{adoptError}</Text>}
+          </View>
+        )}
       </View>
     </View>
   );
@@ -306,12 +586,185 @@ function RecordEmpty({ text }: { text: string }) {
   );
 }
 
-function PlaceholderView({ title }: { title: string }) {
+type InterventionLogRow = {
+  id: string;
+  event_type: string;
+  task_name_snapshot: string | null;
+  parent_decision: unknown;
+  created_at: string;
+};
+
+/**
+ * 把 intervention_log 那筆寫死給機器看的 JSON（parent_decision）翻成家長看得懂的一句話。
+ * 目前只有這兩種 event_type 會被寫入（見 update_task_schedule / update_task_recurrence_days
+ * 兩支 RPC），其他型別一律用通用文字兜底，不讓畫面因為未知格式而空白或壞掉。
+ *
+ * 不帶任務名稱——這支只負責「改了什麼」，任務名稱由外層的分組標題負責，
+ * 不然按任務分組之後每一行還要重複講一次任務名字，反而更亂。
+ */
+function describeInterventionChange(row: InterventionLogRow): string {
+  if (row.event_type === 'task_schedule_adjusted') {
+    const d = row.parent_decision as {
+      old_claim_period?: ScheduleClaimPeriod; new_claim_period?: ScheduleClaimPeriod;
+      old_max_claims_per_period?: number; new_max_claims_per_period?: number;
+    } | null;
+    if (d?.old_claim_period && d.new_claim_period && d.old_max_claims_per_period != null && d.new_max_claims_per_period != null) {
+      return `${CLAIM_PERIOD_LABEL[d.old_claim_period]}最多 ${d.old_max_claims_per_period} 次　→　${CLAIM_PERIOD_LABEL[d.new_claim_period]}最多 ${d.new_max_claims_per_period} 次`;
+    }
+    return '調整了完成次數上限';
+  }
+  if (row.event_type === 'task_recurrence_updated') {
+    const d = row.parent_decision as { old_recurrence_days?: number[]; new_recurrence_days?: number[] } | null;
+    if (Array.isArray(d?.old_recurrence_days) && Array.isArray(d?.new_recurrence_days)) {
+      return `${formatDays(d!.old_recurrence_days!)}　→　${formatDays(d!.new_recurrence_days!)}`;
+    }
+    return '調整了排定的星期';
+  }
+  return '有一筆調整紀錄';
+}
+
+type InterventionGroup = {
+  taskName: string;
+  entries: InterventionLogRow[];
+};
+
+const INTERVENTION_EVENT_LABEL: Record<string, string> = {
+  task_schedule_adjusted: '次數上限',
+  task_recurrence_updated: '排定星期',
+};
+
+/** 同一個任務底下，次數上限跟排定星期是兩件不同的事，混在一起看很難比對前後變化。 */
+function splitByEventType(entries: InterventionLogRow[]): { label: string; entries: InterventionLogRow[] }[] {
+  const order = ['task_schedule_adjusted', 'task_recurrence_updated'];
+  return order
+    .map(eventType => ({
+      label: INTERVENTION_EVENT_LABEL[eventType],
+      entries: entries.filter(row => row.event_type === eventType),
+    }))
+    .filter(group => group.entries.length > 0);
+}
+
+/** 依任務分組，每組內維持新到舊；組跟組之間依「該組最新一筆」排序，最近有動作的任務排最前面。 */
+function groupInterventionRows(rows: InterventionLogRow[]): InterventionGroup[] {
+  const order: string[] = [];
+  const byTask = new Map<string, InterventionLogRow[]>();
+  for (const row of rows) {
+    const key = row.task_name_snapshot?.trim() || '其他調整';
+    if (!byTask.has(key)) {
+      byTask.set(key, []);
+      order.push(key);
+    }
+    byTask.get(key)!.push(row);
+  }
+  // rows 本來就是 created_at desc 撈出來的，所以 order 的插入順序天然就是
+  // 「每個任務最近一次出現的順序」，不用再另外排序。
+  return order.map(taskName => ({ taskName, entries: byTask.get(taskName)! }));
+}
+
+/** 紀錄 tab——讀 intervention_log，依任務分組顯示「上次調整了什麼」，取代原本的佔位畫面。 */
+function HistoryView({ childId }: { childId: string }) {
+  const [rows, setRows] = useState<InterventionLogRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const { data, error: err } = await supabase
+          .from('intervention_log')
+          .select('id, event_type, task_name_snapshot, parent_decision, created_at')
+          .eq('child_id', childId)
+          .in('event_type', ['task_schedule_adjusted', 'task_recurrence_updated'])
+          .order('created_at', { ascending: false })
+          .limit(50);
+        if (cancelled) return;
+        if (err) throw err;
+        setRows((data ?? []) as InterventionLogRow[]);
+      } catch (e) {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : '載入失敗，請稍後再試');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void load();
+    return () => { cancelled = true; };
+  }, [childId]);
+
+  const groups = useMemo(() => groupInterventionRows(rows), [rows]);
+  const [expandedTask, setExpandedTask] = useState<string | null>(null);
+  const didSetDefaultExpanded = useRef(false);
+
+  // 預設展開最近有動作的那個任務（groups[0]），其餘收合——一次只看一個
+  // 任務的變化，不用在一長串裡自己找。只做這一次：家長收合第一個任務時
+  // expandedTask 也會變 null，不能拿「是不是 null」來判斷要不要重新展開，
+  // 不然永遠收不掉最上面那個。
+  useEffect(() => {
+    if (groups.length > 0 && !didSetDefaultExpanded.current) {
+      didSetDefaultExpanded.current = true;
+      setExpandedTask(groups[0].taskName);
+    }
+  }, [groups]);
+
+  if (loading) {
+    return (
+      <View style={s.placeholder}>
+        <ActivityIndicator size="small" color={ParentColors.accent} />
+      </View>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <View style={s.placeholder}>
+        <Text style={s.placeholderSub}>{loadError}</Text>
+      </View>
+    );
+  }
+
+  if (groups.length === 0) {
+    return (
+      <View style={s.placeholder}>
+        <Text style={s.placeholderTitle}>紀錄</Text>
+        <Text style={s.placeholderSub}>目前還沒有調整紀錄</Text>
+      </View>
+    );
+  }
+
   return (
-    <View style={s.placeholder}>
-      <Text style={s.placeholderTitle}>{title}</Text>
-      <Text style={s.placeholderSub}>即將推出</Text>
-    </View>
+    <ScrollView style={s.historyScroll} contentContainerStyle={s.historyScrollContent}>
+      <Text style={s.sectionTitle}>調整紀錄</Text>
+      {groups.map(group => {
+        const isExpanded = expandedTask === group.taskName;
+        return (
+          <View key={group.taskName} style={s.historyGroup}>
+            <TouchableOpacity
+              style={s.historyGroupHeader}
+              onPress={() => setExpandedTask(isExpanded ? null : group.taskName)}
+              activeOpacity={0.7}
+            >
+              <Text style={s.historyGroupTitle}>{group.taskName}</Text>
+              <Text style={s.historyGroupChevron}>{isExpanded ? '▾' : '▸'}</Text>
+            </TouchableOpacity>
+            {isExpanded && splitByEventType(group.entries).map(sub => (
+              <View key={sub.label} style={s.historySubGroup}>
+                <Text style={s.historySubGroupTitle}>{sub.label}</Text>
+                <View style={s.historyList}>
+                  {sub.entries.map(row => (
+                    <View key={row.id} style={s.historyRow}>
+                      <Text style={s.historyRowText}>{describeInterventionChange(row)}</Text>
+                      <Text style={s.historyRowMeta}>{formatDecidedAt(row.created_at)}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ))}
+          </View>
+        );
+      })}
+    </ScrollView>
   );
 }
 
@@ -563,7 +1016,7 @@ export default function ParentWeeklyTablet() {
 
   const {
     childName, weekLabel, weekRange,
-    timeSavedMin,
+    timeSavedMin, selfStartedCount, remindedCount, afterDinnerCount, beforeBedCount,
     aiInsight, aiReady, dialoguePrompt,
     activity, coinFlow, suggestions,
     moments, longTermGoals,
@@ -571,7 +1024,8 @@ export default function ParentWeeklyTablet() {
     loading, error,
     canGoBack, canGoForward,
     goBack, goForward,
-    refresh, requestAiRefresh,
+    refresh, requestAiRefresh, adoptScheduleSuggestion, adoptRecurrenceSuggestion,
+    deferSuggestion, revertSuggestion, acknowledgeSuggestion,
   } = useParentWeeklyReport(childId);
 
   const [recordTab, setRecordTab] = useState(0);
@@ -642,14 +1096,29 @@ export default function ParentWeeklyTablet() {
         prompt: '可以問問他：這週哪一件事做起來最順？',
         tone: 'green' as const,
       }];
-  // AI 產生的回顧建議（後端 weekly_reports.ai_suggestions）優先；沒有才落回上面的模板
+  // AI 產生的回顧建議（後端 weekly_reports.ai_suggestions）優先；沒有才落回上面的模板。
+  // deferred 是家長按過「再觀察一週」的真實決定（寫回 DB），不是本地狀態——
+  // 下週重新產生報告會是全新一列，不需要在同一週裡再顯示回來。
   const aiReviewPrompts: ReviewPrompt[] = suggestions
+    .filter(sg => !sg.deferred)
     .map(sg => ({
       title: sg.taskName?.trim() || sg.actionLabel || '本週建議',
       prompt: sg.body,
       tone: (sg.action === 'adjust_reminder' ? 'orange' : 'green') as ReviewPrompt['tone'],
+      taskId: sg.taskId,
+      action: sg.action,
+      actionLabel: sg.actionLabel,
+      currentClaimPeriod: sg.currentClaimPeriod,
+      currentMaxClaimsPerPeriod: sg.currentMaxClaimsPerPeriod,
+      suggestedClaimPeriod: sg.suggestedClaimPeriod,
+      suggestedMaxClaimsPerPeriod: sg.suggestedMaxClaimsPerPeriod,
+      currentRecurrenceDays: sg.currentRecurrenceDays,
+      suggestedRecurrenceDays: sg.suggestedRecurrenceDays,
+      adopted: sg.adopted,
+      decidedAt: sg.decidedAt,
     }))
-    .slice(0, 3);
+    // 可以實際採用的排程建議優先顯示。
+    .sort((a, b) => Number(b.taskId != null) - Number(a.taskId != null));
   const displayReviewPrompts = aiReady && aiReviewPrompts.length > 0
     ? aiReviewPrompts
     : safeReviewPrompts;
@@ -825,6 +1294,32 @@ export default function ParentWeeklyTablet() {
                       }
                     />
                   )}
+                  {(selfStartedCount > 0 || remindedCount > 0) && (
+                    <MetricTile
+                      compact
+                      label="開始方式"
+                      value={`主動 ${selfStartedCount}・提醒 ${remindedCount}`}
+                      note="本週完成次數"
+                      icon={
+                        <IconBubble bg={ParentColors.tintGold}>
+                          <BellIcon size={18} color={ParentColors.gold700} />
+                        </IconBubble>
+                      }
+                    />
+                  )}
+                  {(afterDinnerCount > 0 || beforeBedCount > 0) && (
+                    <MetricTile
+                      compact
+                      label="完成時段"
+                      value={`晚餐後 ${afterDinnerCount}・睡前 ${beforeBedCount}`}
+                      note="本週分布，僅供參考"
+                      icon={
+                        <IconBubble bg={ParentColors.tintPine}>
+                          <ClockIcon size={18} color={ParentColors.pine400} />
+                        </IconBubble>
+                      }
+                    />
+                  )}
                 </View>
               </View>
 
@@ -861,7 +1356,44 @@ export default function ParentWeeklyTablet() {
                 </View>
                 <View style={s.reviewPromptList}>
                   {displayReviewPrompts.map((item, i) => (
-                    <ReviewPromptCard key={`${item.title}-${i}`} item={item} />
+                    <ReviewPromptCard
+                      key={`${item.title}-${i}`}
+                      item={item}
+                      onAdopt={async (i2, override) => {
+                        if (i2.taskId == null) return;
+                        const isRecurrence = (override && 'recurrenceDays' in override)
+                          || (!override && i2.suggestedRecurrenceDays != null);
+                        if (isRecurrence) {
+                          const recurrenceDays = override && 'recurrenceDays' in override
+                            ? override.recurrenceDays
+                            : i2.suggestedRecurrenceDays;
+                          if (recurrenceDays == null) return;
+                          await adoptRecurrenceSuggestion(i2.taskId, recurrenceDays);
+                          return;
+                        }
+                        const claimPeriod = override && 'claimPeriod' in override ? override.claimPeriod : i2.suggestedClaimPeriod;
+                        const maxClaimsPerPeriod = override && 'maxClaimsPerPeriod' in override ? override.maxClaimsPerPeriod : i2.suggestedMaxClaimsPerPeriod;
+                        if (claimPeriod == null || maxClaimsPerPeriod == null) return;
+                        await adoptScheduleSuggestion(i2.taskId, claimPeriod, maxClaimsPerPeriod);
+                      }}
+                      onDefer={async (i2) => {
+                        if (i2.taskId == null || i2.action == null) return;
+                        await deferSuggestion(i2.taskId, i2.action, {
+                          body: i2.prompt, actionLabel: i2.actionLabel ?? '', taskName: i2.title,
+                        });
+                      }}
+                      onRevert={async (i2) => {
+                        if (i2.taskId == null || i2.action == null) return;
+                        await revertSuggestion(i2.taskId, i2.action);
+                      }}
+                      onAcknowledge={async (i2) => {
+                        if (i2.taskId == null || i2.action == null) return;
+                        await acknowledgeSuggestion(i2.taskId, i2.action, {
+                          body: i2.prompt, actionLabel: i2.actionLabel ?? '', taskName: i2.title,
+                        });
+                        handleNavigateManage('tasks');
+                      }}
+                    />
                   ))}
                 </View>
               </View>
@@ -950,7 +1482,7 @@ export default function ParentWeeklyTablet() {
       {view === 'monthly' && <MonthlyView childId={childId} />}
 
       {/* ── History placeholder ───────────────────────────────────────── */}
-      {view === 'history' && <PlaceholderView title="紀錄" />}
+      {view === 'history' && <HistoryView childId={childId} />}
 
     </View>
     </View>
@@ -1199,6 +1731,10 @@ const s = StyleSheet.create({
     fontWeight: ParentFontWeights.bold,
     color: ParentColors.fgPrimary,
     marginTop: 9,
+  },
+  metricValueCompact: {
+    fontSize: 16,
+    marginTop: 8,
   },
   metricValueGreen: {
     color: ParentColors.success,
@@ -1601,6 +2137,67 @@ const s = StyleSheet.create({
     color: ParentColors.fgMuted,
   },
 
+  // ── 紀錄 tab：調整歷史 ──
+  historyScroll: {
+    flex: 1,
+  },
+  historyScrollContent: {
+    padding: ParentSpacing.cardPad,
+    gap: 12,
+  },
+  historyGroup: {
+    gap: 8,
+  },
+  historyGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  historyGroupTitle: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgPrimary,
+  },
+  historyGroupChevron: {
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgMuted,
+  },
+  historySubGroup: {
+    gap: 6,
+    marginTop: 4,
+    marginLeft: 8,
+  },
+  historySubGroupTitle: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgSecondary,
+  },
+  historyList: {
+    gap: 8,
+  },
+  historyRow: {
+    backgroundColor: ParentColors.bgCanvas,
+    borderRadius: ParentRadii.md,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    padding: 14,
+    gap: 4,
+  },
+  historyRowText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgPrimary,
+    lineHeight: 20,
+  },
+  historyRowMeta: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+  },
+
   // ── Monthly reflection input ──────────────────────────────────────────────
   reflectionInput: {
     backgroundColor: ParentColors.bgSurfaceWarm,
@@ -1867,6 +2464,141 @@ const s = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
     color: ParentColors.fgSecondary,
+  },
+  scheduleDiffText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.accent,
+    marginTop: 6,
+  },
+  editBox: {
+    marginTop: 8,
+    gap: 8,
+  },
+  editLabel: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgSecondary,
+  },
+  editPeriodRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  editPeriodChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: ParentRadii.pill,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    backgroundColor: ParentColors.bgSurface,
+  },
+  editPeriodChipActive: {
+    borderColor: ParentColors.teal100,
+    backgroundColor: ParentColors.teal50,
+  },
+  editPeriodChipText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    color: ParentColors.fgSecondary,
+  },
+  editPeriodChipTextActive: {
+    color: ParentColors.accent,
+    fontWeight: ParentFontWeights.semi,
+  },
+  editStepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  editStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  editStepperBtn: {
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editStepperBtnText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 15,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.accent,
+  },
+  editStepperValue: {
+    fontFamily: ParentFonts.body,
+    fontSize: 13,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgPrimary,
+    minWidth: 16,
+    textAlign: 'center',
+  },
+  reviewPromptActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  adoptBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: ParentRadii.pill,
+    borderWidth: 1,
+    borderColor: ParentColors.teal100,
+    backgroundColor: ParentColors.teal50,
+    minWidth: 76,
+    alignItems: 'center',
+  },
+  adoptBtnText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.accent,
+  },
+  deferBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: ParentRadii.pill,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    backgroundColor: 'transparent',
+  },
+  deferBtnText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgSecondary,
+  },
+  adoptedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: ParentRadii.pill,
+    backgroundColor: ParentColors.teal50,
+  },
+  adoptedBadgeText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.teal500,
+  },
+  adoptErrorText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 12,
+    color: ParentColors.warn,
+    width: '100%',
   },
   dialogueCard: {
     backgroundColor: ParentColors.bgSurface,

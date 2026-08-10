@@ -17,3 +17,12 @@ verify_jwt = false
 
 [functions.generate-degradation-suggestion]
 verify_jwt = true
+
+# Gateway 先擋掉沒有合法 JWT 的請求。
+# Function 內部仍然保留 auth.getUser() —— 兩層的用途不同：
+#   gateway  = 拒絕「沒有合法 JWT」的請求
+#   function = 取得並確認「真正是哪一個 authenticated user」
+# 只靠 gateway 的話，Function 自己不知道呼叫者是誰，也無法在 GoTrue
+# 掛掉時決定不放行。只靠 Function 的話，未授權流量仍會啟動 runtime 並花錢。
+[functions.task-ai-recommendation]
+verify_jwt = true

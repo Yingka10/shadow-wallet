@@ -3,7 +3,9 @@
 > Claude Code 每次啟動自動讀取此檔案。
 > 此專案所有 coding 決策都在這個脈絡下進行。
 > **系統現況(哪些做了、哪些是斷的)以 `AUDIT_2026-07.md` 為準;MASTER.md 是設計意圖,不是現況。**
-> 本檔 2026-07-04 依審計結果修正過一輪;之後的規則:哪個 PR 讓敘述變真/變假,就在同一個 PR 更新對應段落(只由 A 改)。
+> **任務分類 A/B/C/D 的定義以 `docs/SPEC_task-taxonomy-2026-07.md` 為準**(2026-07 改版,代號沒變、語義變了);
+> 該分類與現況程式碼的落差見 `docs/DELTA_task-taxonomy-2026-07.md`。
+> 本檔 2026-07-04 依審計結果修正過一輪;之後的規則:哪個 PR 讓敘述變真/變假,就在同一個 PR 更新對應段落。
 
 ---
 
@@ -60,12 +62,23 @@
 
 ### 任務類型（Task Category）
 
-| 代號 | 名稱 | 說明 |
-|------|------|------|
-| Task-A | 基本生活自理 | 6-9 歲已退出幣制 |
-| Task-B | 家庭本分 | 不發幣，給時間儲蓄（time_saving_min） |
-| Task-C | 超出本分貢獻 | 發幣，幣值較高 |
-| Task-D | 學習成長里程碑 | 拆解成子任務節點，節點完成才發幣 |
+> **分類定義已於 2026-07 改版**，正式規格見 `docs/SPEC_task-taxonomy-2026-07.md`。
+> 代號 A/B/C/D 沒變，**語義變了**；程式碼尚未完全跟上，落差清單見 `docs/DELTA_task-taxonomy-2026-07.md`。
+> 下表左半是新定義（設計依據），右半是**目前 code 的實際行為**（寫程式時以右半為準）。
+
+| 代號 | 新名稱（2026-07） | 新規則 | code 現況 |
+|------|------|------|------|
+| Task-A | 生活常規 | 2-6 歲養成初期可少量發幣，隨 skill_status 遞減退場；6 歲以上預設隱藏 | 一律不發幣（`fn_complete_task.sql:50`）；`skill_status` 欄位不存在 |
+| Task-B | 家庭參與 | 不發幣，**也不給時間儲蓄**；改以家庭葉片／貢獻紀錄／週報肯定 | 不發幣，但仍寫 `time_savings`（`fn_complete_task.sql:107`） |
+| Task-C | 自主挑戰 | 發幣或時間儲蓄；**來源須為孩子提出或親子協商** | 發幣；`source` 欄位不存在，來源未落地 |
+| Task-D | 學習與技能 | 發幣或時間儲蓄；獎勵投入與持續，**排除結果導向** | 節點式發幣（`fn_complete_task.sql:121`） |
+
+**任務目的（A/B/C/D）之外還有三個維度**：執行期間（單次／週期／長期）、任務來源、回饋方式。
+長期任務**不是第五類**，是執行形式。目前 DB 只有 `category` 一欄，其餘維度未落地（DELTA §4）。
+
+幣值資格與計算的規則引擎已實作於 `supabase/functions/ai-proxy/`：
+`rewardEligibility.ts`（資格閘門）→ `coinPolicy.ts` + `coin-policy.json`（幣值，policyVersion 版本化）。
+⚠️ 平板家長端目前仍呼叫舊的 `suggestTaskCoin`，這套沒跑到（DELTA §3）。
 
 ### 系統流程（Flow）
 
@@ -117,6 +130,13 @@ coin = coin_override  // 家長直接設定
 // Task-B 不計算幣，改計算時間儲蓄
 time_saved = task.time_saving_min
 ```
+⚠️ 上面是 `fn_complete_task` 的**現況**。兩點與 2026-07 新分類牴觸：
+Task-B 不該再有時間儲蓄（DELTA §2）；Task-A 在 2-6 歲該能發幣（DELTA §1）。改動前先看 DELTA。
+
+另有一套**新的建議幣值路徑**（建立任務時算，非完成時算）：
+`ai-proxy` 的 `analyzeTask` → `runEligibilityGate`（八步資格閘門）→ `calcCoins`
+（時間分級 band → baseCoins → 難度加減 → range clamp，數字在 `coin-policy.json`）。
+兩條路徑目前並存且未對齊，不要假設誰是唯一來源。
 
 ### 前置解鎖制（6-9 歲）
 ```typescript
@@ -125,6 +145,8 @@ const discount = allABCompleted ? 1.0 : 0.7
 displayCoin = Math.round(baseCoin * discount)
 // 不完全隱藏，只是顯示打折幣值並說明原因
 ```
+⚠️ **前提已被新分類動搖、處置未定**（DELTA §5）：6 歲以上 A 類預設退場、B 類不再商品化，
+「前置任務」實際只剩 B 類。團隊決定保留／改條件／移除之前，**不要改這段邏輯**。
 
 ### 信任制底線
 ```typescript

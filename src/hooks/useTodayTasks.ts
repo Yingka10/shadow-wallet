@@ -3,7 +3,6 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { supabase } from '../lib/supabase';
-import { applyHabitResume } from '../lib/taskActions';
 import { taipeiDayRange } from '../lib/taipeiDate';
 import { isTaskDueToday } from '../lib/taskSchedule';
 import type { Task, LongTermGoal } from '../types/database';
@@ -97,21 +96,7 @@ export function useTodayTasks(childId: string): UseTodayTasksResult {
       const goals: LongTermGoal[] = goalRows ?? [];
       const goalsByTaskId = new Map(goals.map(g => [g.task_id, g]));
 
-      // 5. Apply habit resume (soft reset) for missed days
-      for (const goal of goals) {
-        if (goal.goal_type === 'habit') {
-          await applyHabitResume(
-            goal.id,
-            childId,
-            goal.task_id,
-            goal.current_day,
-            goal.checkpoint_rewards,
-            goal.active_days,
-          );
-        }
-      }
-
-      // 6. Derive prerequisite status: all Task-A and Task-B completed today
+      // 5. Derive prerequisite status: all Task-A and Task-B completed today
       const aTasks = tasks.filter(t => t.category === 'A' && !t.is_long_term);
       const bTasks = tasks.filter(t => t.category === 'B' && !t.is_long_term);
       const prereqMet =
@@ -119,7 +104,7 @@ export function useTodayTasks(childId: string): UseTodayTasksResult {
         bTasks.every(t => completedIds.has(t.id));
       setIsPrerequisiteMet(prereqMet);
 
-      // 7. Split into three buckets
+      // 6. Split into three buckets
       const longTerm = tasks
         .filter(t => t.is_long_term)
         .map(t => ({ ...t, isCompleted: completedIds.has(t.id), goal: goalsByTaskId.get(t.id) }));
