@@ -117,3 +117,39 @@ Expected: no whitespace errors and no proposal/version, parent home, weekly repo
 Run: `git add docs/superpowers/specs/2026-08-10-p0-7-long-term-honest-progress-design.md docs/superpowers/plans/2026-08-10-p0-7-long-term-honest-progress.md src/screens/child/longTermGoalPresentation.ts src/screens/child/__tests__/longTermGoalPresentation.test.ts src/components/child/LongTermGoalDetailView.tsx src/components/child/__tests__/LongTermGoalDetailView.test.tsx src/screens/child/__tests__/LongTermDetailScreen.test.tsx && git commit -m "fix: make long-term progress evidence-based"`
 
 Expected: one local commit on `fix/p0-7-long-term-honest-progress`; no push or merge.
+
+### Task 5: Stop read-time habit rollback
+
+**Files:**
+- Create: `src/hooks/__tests__/useTodayTasks.test.ts`
+- Modify: `src/hooks/useTodayTasks.ts`
+- Modify: `src/lib/taskActions.ts`
+
+- [x] **Step 1: Write the failing hook regression test**
+
+Render `useTodayTasks('child-1')` with Supabase returning one active habit goal whose
+`current_day` is already positive and no completion for today. Mock the legacy
+`applyHabitResume` boundary and assert that initial load and `refresh()` never call it.
+
+- [x] **Step 2: Run the focused test and confirm RED**
+
+Run: `npx.cmd jest src/hooks/__tests__/useTodayTasks.test.ts --runInBand`
+
+Expected: FAIL because the existing fetch loop calls `applyHabitResume` for the habit.
+
+- [x] **Step 3: Remove the runtime invocation**
+
+Delete the `applyHabitResume` import and the habit-resume loop from `useTodayTasks`.
+Keep `applyHabitResume` itself and its legacy unit tests unchanged; do not add another
+write path or alter completion, wallet, checkpoint, proposal, or version behavior.
+Mark the retained helper as deprecated legacy behavior without changing its implementation.
+
+- [x] **Step 4: Run focused and P0-7 regression verification**
+
+Run the new hook suite, the six existing P0-7 suites, `npx.cmd tsc --noEmit`, and
+`git diff --check`. Expected: all commands exit 0.
+
+- [ ] **Step 5: Commit and update the existing remote branch**
+
+Commit only the plan, hook, retained-helper documentation, and hook regression test, then push
+`fix/p0-7-long-term-honest-progress` without merging.
