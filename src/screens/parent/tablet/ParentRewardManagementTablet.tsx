@@ -5,6 +5,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   useWindowDimensions,
   View,
@@ -190,18 +191,31 @@ function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) 
   );
 }
 
+const WISH_REJECT_NOTES = ['先保留，晚點再聊', '幣值需要再討論', '目前不符合家規'];
+
 function PendingWishCard({
   wish,
   childName,
   onApprove,
+  onReject,
 }: {
   wish: ChildWishItem;
   childName: string;
-  onApprove: (id: string) => void;
+  onApprove: (id: string, coinCost: number) => void;
+  onReject: (id: string, note?: string) => void;
 }) {
   const category = inferRewardCategory(wish.name);
-  const suggestedLow = Math.max(20, Math.round((wish.coin_cost * 0.75) / 5) * 5);
-  const suggestedHigh = Math.max(suggestedLow + 10, Math.round((wish.coin_cost * 1.05) / 5) * 5);
+  const suggested = wish.ai_suggested_coins ?? 40;
+  const [mode, setMode] = useState<'idle' | 'editing' | 'rejecting'>('idle');
+  const [priceInput, setPriceInput] = useState(String(suggested));
+  const parsedPrice = Math.round(Number(priceInput));
+  const priceValid = Number.isFinite(parsedPrice) && parsedPrice > 0;
+
+  const submitApprove = () => {
+    if (!priceValid) return;
+    onApprove(wish.id, parsedPrice);
+  };
+
   return (
     <View style={s.pendingCard}>
       <CategoryThumb category={category} />
@@ -213,19 +227,86 @@ function PendingWishCard({
           </View>
         </View>
         <Text style={s.metaText}>{childName}｜提交時間：{formatDate(wish.created_at)}</Text>
-        <Text style={s.noteLabel}>孩子想說</Text>
-        <Text style={s.quoteText}>我想把它放進自己的獎勵清單</Text>
-        <View style={s.aiPill}>
-          <Text style={s.aiPillText}>AI 建議：{suggestedLow}-{suggestedHigh} 枚成長幣</Text>
-        </View>
+        {wish.child_reason ? (
+          <>
+            <Text style={s.noteLabel}>孩子想說</Text>
+            <Text style={s.quoteText}>{wish.child_reason}</Text>
+          </>
+        ) : null}
+        {wish.ai_summary ? (
+          <>
+            <Text style={s.noteLabel}>AI 整理</Text>
+            <Text style={s.quoteText}>{wish.ai_summary}</Text>
+          </>
+        ) : null}
+        {wish.confirm_needed.length > 0 ? (
+          <View style={s.confirmNeededRow}>
+            {wish.confirm_needed.map(item => (
+              <View key={item} style={s.confirmNeededChip}>
+                <Text style={s.confirmNeededChipText}>待確認：{item}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+        {mode === 'editing' ? (
+          <View style={s.priceEditRow}>
+            <Text style={s.priceEditLabel}>幣值</Text>
+            <TextInput
+              style={s.priceEditInput}
+              value={priceInput}
+              onChangeText={setPriceInput}
+              keyboardType="number-pad"
+            />
+            <Text style={s.priceEditLabel}>枚</Text>
+            {!priceValid ? <Text style={s.priceEditError}>幣值要大於 0</Text> : null}
+          </View>
+        ) : (
+          <View style={s.aiPill}>
+            <Text style={s.aiPillText}>AI 建議：{suggested} 枚成長幣</Text>
+          </View>
+        )}
+        {mode === 'rejecting' ? (
+          <View style={s.rejectNoteRow}>
+            {WISH_REJECT_NOTES.map(note => (
+              <TouchableOpacity
+                key={note}
+                style={s.rejectNoteBtn}
+                onPress={() => onReject(wish.id, note)}
+                activeOpacity={0.8}
+              >
+                <Text style={s.rejectNoteBtnText}>{note}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : null}
       </View>
       <View style={s.pendingActions}>
-        <TouchableOpacity style={s.primarySmallButton} onPress={() => onApprove(wish.id)} activeOpacity={0.8}>
-          <Text style={s.primarySmallButtonText}>加入獎勵清單</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={s.secondarySmallButton} activeOpacity={0.75}>
-          <Text style={s.secondarySmallButtonText}>先聊聊／不加入</Text>
-        </TouchableOpacity>
+        {mode === 'rejecting' ? (
+          <TouchableOpacity style={s.secondarySmallButton} onPress={() => setMode('idle')} activeOpacity={0.75}>
+            <Text style={s.secondarySmallButtonText}>取消</Text>
+          </TouchableOpacity>
+        ) : (
+          <>
+            <TouchableOpacity
+              style={[s.primarySmallButton, mode === 'editing' && !priceValid && s.primarySmallButtonDisabled]}
+              onPress={() => (mode === 'editing' ? submitApprove() : onApprove(wish.id, suggested))}
+              disabled={mode === 'editing' && !priceValid}
+              activeOpacity={0.8}
+            >
+              <Text style={s.primarySmallButtonText}>{mode === 'editing' ? '確認加入' : '加入獎勵清單'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.secondarySmallButton}
+              onPress={() => setMode(mode === 'editing' ? 'idle' : 'editing')}
+              activeOpacity={0.75}
+            >
+              <Text style={s.secondarySmallButtonText}>{mode === 'editing' ? '取消調整' : '調整幣值'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.secondarySmallButton} onPress={() => setMode('rejecting')} activeOpacity={0.75}>
+              <Text style={s.secondarySmallButtonText}>先聊聊／不加入</Text>
+            </TouchableOpacity>
+          </>
+        )}
         <KebabIcon />
       </View>
     </View>
@@ -386,6 +467,7 @@ export default function ParentRewardManagementTablet() {
     approveRequest,
     rejectRequest,
     approveChildWish,
+    rejectChildWish,
   } = useParentRedemption(child?.family_id ?? null);
 
   const selectedChildName = childName || allChildren.find(c => c.id === childId)?.nickname || '孩子';
@@ -516,16 +598,27 @@ export default function ParentRewardManagementTablet() {
     Alert.alert('新增獎勵', '新增獎勵表單會接在這個入口。');
   }, []);
 
-  const handleApproveWish = useCallback(async (id: string) => {
+  const handleApproveWish = useCallback(async (id: string, coinCost: number) => {
     setActionMessage(null);
     try {
-      await approveChildWish(id);
+      await approveChildWish(id, coinCost);
       await fetchAll();
       setActionMessage('已加入獎勵清單');
     } catch {
       setActionMessage('目前無法加入，請稍後再試');
     }
   }, [approveChildWish, fetchAll]);
+
+  const handleRejectWish = useCallback(async (id: string, note?: string) => {
+    setActionMessage(null);
+    try {
+      await rejectChildWish(id, note);
+      await fetchAll();
+      setActionMessage('已先保留，之後可再和孩子討論');
+    } catch {
+      setActionMessage('目前無法保留，請稍後再試');
+    }
+  }, [fetchAll, rejectChildWish]);
 
   const handleApproveRequest = useCallback(async (id: string, adjustedCoins?: number) => {
     setActionMessage(null);
@@ -605,6 +698,7 @@ export default function ParentRewardManagementTablet() {
                         wish={wish}
                         childName={childNameFor(wish.child_id, selectedChildName, allChildren)}
                         onApprove={handleApproveWish}
+                        onReject={handleRejectWish}
                       />
                     ))}
                     {pendingRedemptions.map(request => (
@@ -951,6 +1045,76 @@ const s = StyleSheet.create({
     fontSize: ParentFontSizes.xs,
     fontWeight: ParentFontWeights.bold,
   },
+  confirmNeededRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: ParentSpacing[2],
+    marginTop: ParentSpacing[2],
+  },
+  confirmNeededChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: ParentRadii.pill,
+    borderWidth: 1,
+    borderColor: ParentColors.amber700,
+    backgroundColor: ParentColors.tintAmber,
+  },
+  confirmNeededChipText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.amber700,
+  },
+  priceEditRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ParentSpacing[2],
+    marginTop: ParentSpacing[2],
+  },
+  priceEditLabel: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgSecondary,
+  },
+  priceEditError: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.error,
+  },
+  priceEditInput: {
+    minWidth: 70,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: ParentRadii.sm,
+    borderWidth: 1,
+    borderColor: ParentColors.pine500,
+    backgroundColor: ParentColors.bgSurface,
+    fontFamily: ParentFonts.mono,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgPrimary,
+  },
+  rejectNoteRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: ParentSpacing[2],
+    marginTop: ParentSpacing[2],
+  },
+  rejectNoteBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: ParentRadii.pill,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    backgroundColor: ParentColors.bgSurfaceWarm,
+  },
+  rejectNoteBtnText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgSecondary,
+  },
   aiPill: {
     alignSelf: 'flex-start',
     marginTop: ParentSpacing[2],
@@ -978,6 +1142,9 @@ const s = StyleSheet.create({
     paddingHorizontal: 20,
     borderRadius: ParentRadii.md,
     backgroundColor: ParentColors.pine500,
+  },
+  primarySmallButtonDisabled: {
+    opacity: 0.5,
   },
   primarySmallButtonText: {
     fontFamily: ParentFonts.body,

@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import Svg, { Circle, Path, Ellipse, G } from 'react-native-svg';
 import { Colors } from '../constants/colors';
+import { clarifyWish, type WishClarifyHistoryTurn } from '../lib/aiAgent';
 
 type BubbleConfig = {
   size: number;
@@ -25,11 +26,25 @@ type BubbleConfig = {
   delay: number;
 };
 
+export type WishSubmitPayload = {
+  /** 孩子輸入的原句，含贅字語助詞，未經摘要。 */
+  wishText: string;
+  /** AI 濃縮過的短標題（去掉「我想要」之類贅詞），畫面上顯示這個，不是 wishText。 */
+  shortTitle: string;
+  wishType: 'item' | 'privilege';
+  reason: string;
+  summary: string;
+  suggestedCoins: number;
+  confirmNeeded: string[];
+};
+
 interface WishModalComponentProps {
   visible: boolean;
   onClose: () => void;
-  onSubmit: (wishText: string) => Promise<void>;
+  onSubmit: (payload: WishSubmitPayload) => Promise<void>;
   childNickname?: string;
+  /** 用來調整 AI 澄清問答的口吻，未提供時預設 MVP 主打的 6-9 歲。 */
+  ageGroup?: string;
 }
 
 /**
@@ -41,16 +56,27 @@ interface WishModalComponentProps {
  * - 語音/文字輸入（先用文字）
  * - 確認流程
  */
+type Step = 'listening' | 'confirm' | 'clarifying' | 'sending';
+
 export default function WishModalComponent({
   visible,
   onClose,
   onSubmit,
   childNickname = '小寶貝',
+  ageGroup = '6-9',
 }: WishModalComponentProps) {
-  const [step, setStep] = useState<'listening' | 'confirm'>('listening');
+  const [step, setStep] = useState<Step>('listening');
   const [wishText, setWishText] = useState('');
   const [loading, setLoading] = useState(false);
   const [useImage, setUseImage] = useState(false);
+
+  // ── 澄清問答 ──────────────────────────────────────────────
+  // 選項式追問，最多兩輪（見 aiAgent.clarifyWish）。以選項按鈕為主，
+  // 但選項有時候套不上孩子真正想講的話，所以也留一個自己打字的入口。
+  const [clarifyLoading, setClarifyLoading] = useState(false);
+  const [currentQuestion, setCurrentQuestion] = useState<{ question: string; options: string[] } | null>(null);
+  const [customAnswer, setCustomAnswer] = useState('');
+  const historyRef = useRef<WishClarifyHistoryTurn[]>([]);
 
   const treeAnimVal = useRef(new Animated.Value(0)).current;
   const bubbleAnims = useRef([
@@ -76,6 +102,10 @@ export default function WishModalComponent({
     if (visible) {
       setStep('listening');
       setWishText('');
+      setClarifyLoading(false);
+      setCurrentQuestion(null);
+      setCustomAnswer('');
+      historyRef.current = [];
       treeAnimVal.setValue(0);
       Animated.timing(treeAnimVal, {
         toValue: 1,
@@ -144,15 +174,15 @@ export default function WishModalComponent({
         setStep('confirm');
       }
     } else if (step === 'confirm') {
-      setLoading(true);
+      historyRef.current = [];
+      setStep('clarifying');
+      setClarifyLoading(true);
       try {
-        await onSubmit(wishText.trim());
-        setWishText('');
-        onClose();
+        const result = await clarifyWish(wishText.trim(), ageGroup, []);
+        await applyClarifyResult(result);
       } catch (err) {
-        console.error('[WishModal] submit error:', err);
-      } finally {
-        setLoading(false);
+        console.error('[WishModal] clarify error:', err);
+        await finalizeWish({ shortTitle: wishText.trim(), wishType: 'item', reason: wishText.trim(), summary: wishText.trim(), suggestedCoins: 40, confirmNeeded: [] });
       }
     }
   };
@@ -160,6 +190,55 @@ export default function WishModalComponent({
   const handleRestart = () => {
     setWishText('');
     setStep('listening');
+  };
+
+  /** clarifyWish 的回應要嘛是再問一題，要嘛是整理完成——分派到對應的下一步。 */
+  const applyClarifyResult = async (result: Awaited<ReturnType<typeof clarifyWish>>) => {
+    if (result.done === false) {
+      setCurrentQuestion({ question: result.question, options: result.options });
+      setClarifyLoading(false);
+      return;
+    }
+    await finalizeWish(result);
+  };
+
+  const handleOptionAnswer = async (option: string) => {
+    if (!currentQuestion || !option.trim()) return;
+    historyRef.current = [...historyRef.current, { question: currentQuestion.question, answer: option.trim() }];
+    setCurrentQuestion(null);
+    setCustomAnswer('');
+    setClarifyLoading(true);
+    try {
+      const result = await clarifyWish(wishText.trim(), ageGroup, historyRef.current);
+      await applyClarifyResult(result);
+    } catch (err) {
+      console.error('[WishModal] clarify error:', err);
+      await finalizeWish({ shortTitle: wishText.trim(), wishType: 'item', reason: wishText.trim(), summary: wishText.trim(), suggestedCoins: 40, confirmNeeded: [] });
+    }
+  };
+
+  /** AI 整理完成後，只用友善文字送出——幣值／分類這些大人語言不出現在孩子面前。 */
+  const finalizeWish = async (data: {
+    shortTitle: string;
+    wishType: 'item' | 'privilege';
+    reason: string;
+    summary: string;
+    suggestedCoins: number;
+    confirmNeeded: string[];
+  }) => {
+    setClarifyLoading(false);
+    setStep('sending');
+    setLoading(true);
+    try {
+      await onSubmit({ wishText: wishText.trim(), ...data });
+      setWishText('');
+      onClose();
+    } catch (err) {
+      console.error('[WishModal] submit error:', err);
+      setStep('confirm');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -255,18 +334,34 @@ export default function WishModalComponent({
 
           {/* 狀態文本 */}
           <Text style={styles.treeStatus}>
-            {step === 'listening' ? '許願樹正在等待⋯' : '許願樹收到你的願望⋯'}
+            {step === 'listening' && '許願樹正在等待⋯'}
+            {step === 'confirm' && '許願樹收到你的願望⋯'}
+            {step === 'clarifying' && '許願樹正在想一想⋯'}
+            {step === 'sending' && '許願樹幫你種下願望⋯'}
           </Text>
 
           {/* 對話框區域 */}
           <View style={styles.dialogArea}>
-            {step === 'listening' ? (
+            {step === 'listening' && (
               <Text style={styles.dialogText}>
                 {`${childNickname}，\n你想要什麼？\n說給許願樹聽吧！`}
               </Text>
-            ) : (
+            )}
+            {step === 'confirm' && (
               <Text style={styles.dialogText}>
                 {`許願樹聽到了，\n${childNickname} 想要：`}
+              </Text>
+            )}
+            {step === 'clarifying' && (
+              <Text style={styles.dialogText}>
+                {clarifyLoading || !currentQuestion
+                  ? '許願樹想再多問一點點⋯'
+                  : currentQuestion.question}
+              </Text>
+            )}
+            {step === 'sending' && (
+              <Text style={styles.dialogText}>
+                {`許願樹收到了！\n幫你把願望種下去⋯`}
               </Text>
             )}
           </View>
@@ -298,6 +393,56 @@ export default function WishModalComponent({
                   <Text style={styles.cbtnNoText}>重新說一次</Text>
                 </TouchableOpacity>
               </View>
+            </View>
+          )}
+
+          {/* 澄清問答：選項按鈕為主，也留一個自己打字的入口 */}
+          {step === 'clarifying' && (
+            <View style={styles.clarifyArea}>
+              {clarifyLoading || !currentQuestion ? (
+                <ActivityIndicator size="small" color={Colors.success} />
+              ) : (
+                <>
+                  <View style={styles.optionList}>
+                    {currentQuestion.options.map(option => (
+                      <TouchableOpacity
+                        key={option}
+                        style={styles.optionBtn}
+                        onPress={() => handleOptionAnswer(option)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.optionBtnText}>{option}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={styles.customAnswerDivider}>或是自己打</Text>
+                  <View style={styles.customAnswerRow}>
+                    <TextInput
+                      style={styles.customAnswerInput}
+                      placeholder="輸入你想說的"
+                      placeholderTextColor="#9a9060"
+                      value={customAnswer}
+                      onChangeText={setCustomAnswer}
+                      maxLength={40}
+                    />
+                    <TouchableOpacity
+                      style={[styles.customAnswerBtn, !customAnswer.trim() && styles.customAnswerBtnDisabled]}
+                      onPress={() => handleOptionAnswer(customAnswer)}
+                      disabled={!customAnswer.trim()}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.customAnswerBtnText}>送出</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+            </View>
+          )}
+
+          {/* 送出中 */}
+          {step === 'sending' && (
+            <View style={styles.clarifyArea}>
+              <ActivityIndicator size="small" color={Colors.success} />
             </View>
           )}
 
@@ -406,55 +551,125 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   confirmBox: {
-    marginHorizontal: 20,
-    marginBottom: 8,
-    backgroundColor: 'rgba(140,180,60,0.07)',
+    marginHorizontal: 24,
+    marginBottom: 12,
+    backgroundColor: 'rgba(140,180,60,0.08)',
     borderWidth: 0.5,
     borderColor: 'rgba(140,180,60,0.22)',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+    borderRadius: 16,
+    paddingVertical: 18,
+    paddingHorizontal: 18,
+    alignItems: 'center',
   },
   confirmLabel: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#8a9050',
-    marginBottom: 6,
+    marginBottom: 8,
   },
   confirmValue: {
-    fontSize: 13,
-    color: '#4a3a20',
-    marginBottom: 10,
-    fontWeight: '500',
+    fontSize: 17,
+    color: '#3a2f18',
+    marginBottom: 16,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   confirmBtns: {
     flexDirection: 'row',
-    gap: 8,
+    justifyContent: 'center',
+    gap: 12,
   },
   cbtn: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 20,
+    minHeight: 44,
+    paddingVertical: 11,
+    paddingHorizontal: 22,
+    borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
   },
   cbtnYes: {
-    backgroundColor: 'rgba(100,140,40,0.12)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(100,140,40,0.32)',
+    backgroundColor: 'rgba(100,140,40,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(100,140,40,0.4)',
   },
   cbtnYesText: {
-    fontSize: 12,
-    color: '#5a7a20',
-    fontWeight: '500',
+    fontSize: 14,
+    color: '#4d7620',
+    fontWeight: '700',
   },
   cbtnNo: {
     backgroundColor: 'transparent',
     borderWidth: 0.5,
-    borderColor: 'rgba(160,140,80,0.18)',
+    borderColor: 'rgba(160,140,80,0.22)',
   },
   cbtnNoText: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#9a8060',
+  },
+  clarifyArea: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    width: '100%',
+    alignItems: 'center',
+    minHeight: 60,
+    justifyContent: 'center',
+  },
+  optionList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  optionBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 20,
+    backgroundColor: 'rgba(100,140,40,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(100,140,40,0.32)',
+  },
+  optionBtnText: {
+    fontSize: 13,
+    color: '#5a7a20',
+    fontWeight: '600',
+  },
+  customAnswerDivider: {
+    fontSize: 11,
+    color: '#9a9060',
+    marginTop: 14,
+    marginBottom: 8,
+  },
+  customAnswerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    width: '100%',
+  },
+  customAnswerInput: {
+    flex: 1,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    backgroundColor: '#fff8e8',
+    borderWidth: 0.5,
+    borderColor: 'rgba(180,150,80,0.14)',
+    borderRadius: 20,
+    fontSize: 13,
+    color: '#4a3a20',
+  },
+  customAnswerBtn: {
+    paddingVertical: 9,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: 'rgba(100,140,40,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(100,140,40,0.32)',
+  },
+  customAnswerBtnDisabled: {
+    opacity: 0.5,
+  },
+  customAnswerBtnText: {
+    fontSize: 13,
+    color: '#5a7a20',
+    fontWeight: '600',
   },
   voiceArea: {
     paddingHorizontal: 20,

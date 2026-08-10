@@ -226,7 +226,7 @@ function ChildWishCard({
 }: {
   wish: ChildWishItem;
   allChildren: RedemptionChildInfo[];
-  onConfirm: (id: string) => Promise<void>;
+  onConfirm: (id: string, coinCost: number) => Promise<void>;
 }) {
   const [submitting, setSubmitting] = useState(false);
   const ownerName = childName(allChildren, wish.child_id ?? '');
@@ -235,7 +235,7 @@ function ChildWishCard({
   const handleConfirm = async () => {
     setSubmitting(true);
     try {
-      await onConfirm(wish.id);
+      await onConfirm(wish.id, wish.ai_suggested_coins ?? 40);
     } catch {
       Alert.alert('錯誤', '確認失敗，請稍後再試');
       setSubmitting(false);
@@ -261,7 +261,9 @@ function ChildWishCard({
       <View style={styles.childWishFooter}>
         <View style={styles.childWishCoinRow}>
           <CoinGlyph size={12} />
-          <Text style={styles.childWishCoinText}>{wish.coin_cost} 幣</Text>
+          <Text style={styles.childWishCoinText}>
+            {isConfirmed ? wish.coin_cost : wish.ai_suggested_coins ?? 40} 幣
+          </Text>
         </View>
         {!isConfirmed ? (
           <TouchableOpacity
@@ -540,7 +542,7 @@ function PendingTab({
   allChildren: RedemptionChildInfo[];
   onApprove: (id: string, adjustedCoins?: number) => Promise<void>;
   onRequestReject: (id: string) => void;
-  onConfirmWish: (id: string) => Promise<void>;
+  onConfirmWish: (id: string, coinCost: number) => Promise<void>;
 }) {
   const pendingChildWishes = childWishes.filter(w => w.is_active && !w.parent_approved);
 
@@ -1284,8 +1286,8 @@ export default function ParentRedemptionScreen() {
     await fetchAll();
   }, [addParentProposal, fetchAll]);
 
-  const handleConfirmWish = useCallback(async (wishId: string) => {
-    await approveChildWish(wishId);
+  const handleConfirmWish = useCallback(async (wishId: string, coinCost: number) => {
+    await approveChildWish(wishId, coinCost);
     clearRecentChildWish();
     await fetchAll();
   }, [approveChildWish, clearRecentChildWish, fetchAll]);
@@ -1350,7 +1352,7 @@ export default function ParentRedemptionScreen() {
               <View style={styles.syncBannerText}>
                 <Text style={styles.syncBannerTitle}>收到孩子新願望</Text>
                 <Text style={styles.syncBannerSub} numberOfLines={2}>
-                  {childName(children, recentChildWish.child_id ?? '')} · {recentChildWish.name} · {recentChildWish.coin_cost} 幣
+                  {childName(children, recentChildWish.child_id ?? '')} · {recentChildWish.name} · {recentChildWish.ai_suggested_coins ?? 40} 幣
                 </Text>
               </View>
               <TouchableOpacity
