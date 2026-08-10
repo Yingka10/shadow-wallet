@@ -52,6 +52,22 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 
 const mockSetSelectedChild = jest.fn();
+const mockProposalRefresh = jest.fn();
+const mockUseParentProposals = jest.fn((_childId: string, _familyId: string | null) => ({
+  proposals: [{
+    id: 'proposal-1', family_id: 'family-1', child_id: 'child-1', status: 'proposed',
+    child_original_goal: '我想兩週把這本書讀完',
+    child_original_motivation: '因為同學說這本書很好看', proposal_source: 'child',
+    cadence_mode: 'weekly_frequency', cadence_weekly_frequency: 4, cadence_days: null,
+    preferred_time: null, preferred_time_custom: null, estimated_minutes: null,
+    child_reward_preference: 'hopes_for_coin', child_note: null, current_plan_version_id: null,
+    task_id: null, closed_reason: null, closed_at: null, proposed_at: null, activated_at: null,
+    created_at: '2026-08-11T00:00:00Z', updated_at: '2026-08-11T00:00:00Z',
+  }],
+  loading: false,
+  error: null,
+  refresh: mockProposalRefresh,
+}));
 jest.mock('../../../../context/SelectedChildContext', () => ({
   useSelectedChild: () => ({
     childId: 'child-1',
@@ -62,6 +78,11 @@ jest.mock('../../../../context/SelectedChildContext', () => ({
     ],
     setSelectedChild: mockSetSelectedChild,
   }),
+}));
+
+jest.mock('../../../../hooks/useParentProposals', () => ({
+  useParentProposals: (childId: string, familyId: string | null) =>
+    mockUseParentProposals(childId, familyId),
 }));
 
 const mockChild1 = {
@@ -159,12 +180,37 @@ function withoutComments(code: string): string {
 
 beforeEach(() => {
   mockSetSelectedChild.mockClear();
+  mockProposalRefresh.mockClear();
+  mockUseParentProposals.mockClear();
   mockUseChildDetails.mockReset();
   mockUseChildDetails.mockReturnValue({
     child: null,
     loading: false,
     error: null,
     refresh: jest.fn(),
+  });
+});
+
+describe('P0-4 家長首頁孩子提案', () => {
+  it('以目前孩子與家庭讀取，並在一般摘要前顯示真實提案', async () => {
+    await openHome();
+
+    expect(mockUseParentProposals).toHaveBeenLastCalledWith('child-1', 'family-1');
+    expect(screen.getByText('承恩有一個新的挑戰想法')).toBeTruthy();
+    expect(screen.getByText('我想兩週把這本書讀完')).toBeTruthy();
+    expect(screen.getByText('一週 4 次')).toBeTruthy();
+
+    expect(SOURCE.indexOf('<ParentProposalSection')).toBeLessThan(SOURCE.indexOf('<WeekSummary'));
+    expect(SOURCE).toContain('proposalRefresh();');
+  });
+
+  it('首頁接線只有唯讀 refresh，不接 proposal transition、task 或 wallet mutation', () => {
+    const proposalComponent = fs.readFileSync(
+      path.resolve(__dirname, '..', 'home', 'ParentProposalSection.tsx'),
+      'utf8',
+    );
+    expect(proposalComponent).not.toMatch(/\.transition\(|\.insert\(|\.update\(|\.rpc\(/);
+    expect(proposalComponent).not.toMatch(/wallet|createTask|AI 建議/);
   });
 });
 
