@@ -1200,11 +1200,20 @@ const s = StyleSheet.create({
   multiline: {
     paddingTop: ParentSpacing[3],
   },
+  /**
+   * 底線式，不是有邊框的方塊——用在夾在一般文字中間的短數字
+   * （例如「約第 __ 天」），要跟兩側文字的底線對齊，不能看起來像獨立的卡片。
+   */
   inputCompact: {
-    minHeight: 32,
-    paddingHorizontal: ParentSpacing[2],
-    paddingVertical: 4,
+    minHeight: 0,
+    borderWidth: 0,
+    borderBottomWidth: 1,
+    borderRadius: 0,
+    backgroundColor: 'transparent',
+    paddingHorizontal: 2,
+    paddingVertical: 0,
     fontSize: ParentFontSizes.xs,
+    lineHeight: ParentFontSizes.xs + 4,
     textAlign: 'center',
   },
   inputError: {
