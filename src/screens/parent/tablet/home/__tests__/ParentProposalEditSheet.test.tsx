@@ -59,4 +59,23 @@ describe('ParentProposalEditSheet', () => {
     expect(screen.getByText('固定星期至少選一天')).toBeTruthy();
     expect(screen.getByText('正在存下來…')).toBeTruthy();
   });
+
+  it('原本未指定時間時沿用 canonical when_needed，不因只改 cadence 偷改成晚餐後', () => {
+    const onSave = jest.fn();
+    const withoutTime = {
+      ...card,
+      currentPlanVersion: { ...card.currentPlanVersion!, preferred_time: null },
+    } as ParentProposalCardData;
+    render(<ParentProposalEditSheet
+      visible card={withoutTime} saving={false} error={null}
+      onClose={jest.fn()} onSave={onSave}
+    />);
+    fireEvent.changeText(screen.getByTestId('proposal-weekly-frequency-input'), '3');
+    fireEvent.press(screen.getByText('存下來，讓孩子看看'));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      cadenceWeeklyFrequency: 3,
+      preferredTime: 'when_needed',
+      preferredTimeCustom: null,
+    }));
+  });
 });
