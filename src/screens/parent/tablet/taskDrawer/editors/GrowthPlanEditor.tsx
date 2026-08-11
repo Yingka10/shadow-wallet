@@ -5,7 +5,7 @@
 // 畫面上不得出現 AI 字樣。
 
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   ParentColors,
   ParentFonts,
@@ -80,6 +80,15 @@ export function GrowthPlanEditor({
     showErrors ? (errors as Record<string, string | undefined>)[key as string] : undefined;
 
   const patch = (partial: Partial<GrowthPlanDraft>) => onChange({ ...draft, ...partial });
+
+  /** 跟前一項／後一項交換位置。邊界（第一項往上、最後一項往下）不動作。 */
+  const moveMilestone = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= draft.milestones.length) return;
+    const next = [...draft.milestones];
+    [next[index], next[target]] = [next[target], next[index]];
+    patch({ milestones: next });
+  };
 
   const toggleOption = (group: OptionGroup, optionId: string) => {
     const current = draft.selectedOptions[group.id] ?? [];
@@ -316,8 +325,37 @@ export function GrowthPlanEditor({
           <View style={s.milestoneList}>
             {draft.milestones.map((milestone, index) => (
               <View key={milestone.id} style={s.milestoneRow}>
-                <View style={s.milestoneIndex}>
-                  <Text style={s.milestoneIndexText}>{index + 1}</Text>
+                <View style={s.milestoneOrder}>
+                  <Pressable
+                    onPress={() => moveMilestone(index, -1)}
+                    disabled={index === 0}
+                    accessibilityRole="button"
+                    accessibilityLabel={`把第 ${index + 1} 個里程碑往前移`}
+                    hitSlop={8}
+                  >
+                    <Text style={[s.milestoneMoveGlyph, index === 0 && s.milestoneMoveGlyphDisabled]}>
+                      ▲
+                    </Text>
+                  </Pressable>
+                  <View style={s.milestoneIndex}>
+                    <Text style={s.milestoneIndexText}>{index + 1}</Text>
+                  </View>
+                  <Pressable
+                    onPress={() => moveMilestone(index, 1)}
+                    disabled={index === draft.milestones.length - 1}
+                    accessibilityRole="button"
+                    accessibilityLabel={`把第 ${index + 1} 個里程碑往後移`}
+                    hitSlop={8}
+                  >
+                    <Text
+                      style={[
+                        s.milestoneMoveGlyph,
+                        index === draft.milestones.length - 1 && s.milestoneMoveGlyphDisabled,
+                      ]}
+                    >
+                      ▼
+                    </Text>
+                  </Pressable>
                 </View>
                 <View style={s.milestoneMain}>
                   <DraftTextInput
@@ -329,9 +367,27 @@ export function GrowthPlanEditor({
                     }}
                     accessibilityLabel={`第 ${index + 1} 個里程碑`}
                   />
-                  {milestone.targetDay ? (
-                    <Text style={s.milestoneDay}>約第 {milestone.targetDay} 天</Text>
-                  ) : null}
+                  <View style={s.milestoneDayRow}>
+                    <Text style={s.milestoneDayPrefix}>約第</Text>
+                    <View style={s.milestoneDayField}>
+                      <DraftTextInput
+                        value={milestone.targetDay?.toString() ?? ''}
+                        onChangeText={v => {
+                          const parsed = Number.parseInt(v, 10);
+                          const next = [...draft.milestones];
+                          next[index] = {
+                            ...milestone,
+                            targetDay: v.trim() === '' || !Number.isFinite(parsed) ? undefined : parsed,
+                          };
+                          patch({ milestones: next });
+                        }}
+                        placeholder="—"
+                        keyboardNumeric
+                        accessibilityLabel={`第 ${index + 1} 個里程碑的預估天數`}
+                      />
+                    </View>
+                    <Text style={s.milestoneDayPrefix}>天</Text>
+                  </View>
                 </View>
                 <SelectableChip
                   label={milestone.enabled ? '使用中' : '已關閉'}
@@ -500,6 +556,20 @@ const s = StyleSheet.create({
     alignItems: 'flex-start',
     gap: ParentSpacing[3],
   },
+  milestoneOrder: {
+    alignItems: 'center',
+    gap: 2,
+    flexShrink: 0,
+  },
+  milestoneMoveGlyph: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.pine500,
+    padding: 2,
+  },
+  milestoneMoveGlyphDisabled: {
+    color: ParentColors.borderSoft,
+  },
   milestoneIndex: {
     width: 26,
     height: 26,
@@ -507,7 +577,6 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: ParentColors.tintPine,
-    marginTop: 10,
     flexShrink: 0,
   },
   milestoneIndexText: {
@@ -521,9 +590,17 @@ const s = StyleSheet.create({
     minWidth: 0,
     gap: 4,
   },
-  milestoneDay: {
+  milestoneDayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ParentSpacing[1],
+  },
+  milestoneDayPrefix: {
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.xs,
     color: ParentColors.fgMuted,
+  },
+  milestoneDayField: {
+    width: 56,
   },
 });
