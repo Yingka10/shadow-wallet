@@ -104,6 +104,24 @@ function makeScheduledCompletions(
   return completions;
 }
 
+function makeWeeklyFrequencyTask(overrides: Partial<Task> = {}): Task {
+  return makeTask({
+    schedule_mode: 'weekly_frequency',
+    weekly_frequency: 4,
+    recurrence_days: null,
+    ...overrides,
+  });
+}
+
+function makeWeeklyFrequencyGoal(overrides: Partial<LongTermGoal> = {}): LongTermGoal {
+  return makeGoal({
+    total_days: 8,
+    active_days: null,
+    end_date: '2026-08-16',
+    ...overrides,
+  });
+}
+
 describe('buildGoalPresentation', () => {
   it.each([
     ['reading_habit', makeTask(), makeGoal()],
@@ -346,6 +364,100 @@ describe('buildGoalPresentation', () => {
     expect(result.weekTarget).toBe(4);
     expect(result.weekProgressLabel).toBe('本週完成 3／4 次');
     expect(result.overallLabel).toBe('3 / 16 次');
+  });
+
+  it.each([
+    [0, []],
+    [1, ['2026-08-03T19:00:00+08:00']],
+    [3, [
+      '2026-08-03T19:00:00+08:00',
+      '2026-08-06T19:00:00+08:00',
+      '2026-08-07T10:00:00+08:00',
+    ]],
+    [4, [
+      '2026-08-03T19:00:00+08:00',
+      '2026-08-04T19:00:00+08:00',
+      '2026-08-06T19:00:00+08:00',
+      '2026-08-07T10:00:00+08:00',
+    ]],
+  ] as const)(
+    'counts flexible weekly-frequency progress as %i/4 without weekday eligibility',
+    (completed, completedAtValues) => {
+      const result = buildGoalPresentation(
+        makeWeeklyFrequencyTask(),
+        makeWeeklyFrequencyGoal(),
+        completedAtValues.map((completedAt, index) =>
+          makeCompletion(`flex-${index}`, completedAt, null),
+        ),
+        dayjs.tz('2026-08-07T12:00:00', 'Asia/Taipei'),
+      );
+
+      expect(result.weekCompleted).toBe(completed);
+      expect(result.weekTarget).toBe(4);
+      expect(result.weekProgressLabel).toBe(`本週完成 ${completed}／4 次`);
+      expect(result.weekDays).toEqual([]);
+      expect(result.planState).toBe('active');
+      expect(result.canCompleteToday).toBe(true);
+    },
+  );
+
+  it('caps displayed flexible weekly progress at its target while retaining real cumulative input', () => {
+    const result = buildGoalPresentation(
+      makeWeeklyFrequencyTask(),
+      makeWeeklyFrequencyGoal(),
+      [3, 4, 5, 6, 7].map((day) =>
+        makeCompletion(`aug-${day}`, `2026-08-${String(day).padStart(2, '0')}T10:00:00+08:00`, null),
+      ),
+      dayjs.tz('2026-08-07T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.weekCompleted).toBe(4);
+    expect(result.weekProgressLabel).toBe('本週完成 4／4 次');
+    expect(result.overallLabel).toBe('5 / 8 次');
+  });
+
+  it('counts one flexible completion per Taipei date inside inclusive plan boundaries', () => {
+    const result = buildGoalPresentation(
+      makeWeeklyFrequencyTask(),
+      makeWeeklyFrequencyGoal({
+        started_at: '2026-08-03',
+        end_date: '2026-08-09',
+        active_days: [1],
+      }),
+      [
+        makeCompletion('before-start', '2026-08-02T23:59:59+08:00', null),
+        makeCompletion('start-from-utc', '2026-08-02T16:30:00Z', null),
+        makeCompletion('same-taipei-day', '2026-08-03T20:00:00+08:00', null),
+        makeCompletion('thursday', '2026-08-06T19:00:00+08:00', null),
+        makeCompletion('sunday', '2026-08-09T22:00:00+08:00', null),
+        makeCompletion('after-end', '2026-08-10T00:00:01+08:00', null),
+      ],
+      dayjs.tz('2026-08-09T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.weekCompleted).toBe(3);
+    expect(result.overallLabel).toBe('3 / 8 次');
+    expect(result.weekProgressLabel).toBe('本週完成 3／4 次');
+    expect(result.weekDays).toEqual([]);
+  });
+
+  it('keeps flexible progress after calendar gaps without missed or off-schedule judgments', () => {
+    const result = buildGoalPresentation(
+      makeWeeklyFrequencyTask(),
+      makeWeeklyFrequencyGoal(),
+      [
+        makeCompletion('monday', '2026-08-03T19:00:00+08:00', null),
+        makeCompletion('thursday', '2026-08-06T19:00:00+08:00', null),
+      ],
+      dayjs.tz('2026-08-07T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.weekCompleted).toBe(2);
+    expect(result.overallLabel).toBe('2 / 8 次');
+    expect(result.weekDays).toEqual([]);
+    expect(result.weekSummary).toContain('這週還差 2 次');
+    expect(`${result.todayStatusText ?? ''} ${result.weekSummary}`)
+      .not.toMatch(/漏掉|尚未記錄|未安排|off-schedule|失敗|歸零|重新開始/i);
   });
 
   it('keeps completed progress when a scheduled day in the middle was missed', () => {

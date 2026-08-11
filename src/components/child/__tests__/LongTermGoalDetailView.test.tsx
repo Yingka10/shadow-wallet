@@ -800,6 +800,38 @@ describe('LongTermGoalDetailView', () => {
     expect(week.queryByTestId('goal-day-caption-1')).toBeNull();
   });
 
+  it('renders weekly-frequency reading progress without a weekday judgement timeline', () => {
+    const presentation = buildGoalPresentation(
+      makeTask({
+        schedule_mode: 'weekly_frequency',
+        weekly_frequency: 4,
+        recurrence_days: null,
+        due_date: '2026-08-16',
+      }),
+      makeGoal({
+        total_days: 8,
+        active_days: null,
+        started_at: '2026-08-03',
+        end_date: '2026-08-16',
+      }),
+      [
+        { id: 'monday', completed_at: '2026-08-03T19:00:00+08:00', planned_time_window: null, start_mode: null },
+        { id: 'thursday', completed_at: '2026-08-06T19:00:00+08:00', planned_time_window: null, start_mode: null },
+        { id: 'friday', completed_at: '2026-08-07T10:00:00+08:00', planned_time_window: null, start_mode: null },
+      ],
+      dayjs('2026-08-07T12:00:00+08:00'),
+    );
+
+    renderView(presentation);
+
+    const week = within(screen.getByTestId('goal-week'));
+    expect(screen.getByText('本週進度')).toBeTruthy();
+    expect(week.getByText('本週完成 3／4 次')).toBeTruthy();
+    expect(week.getByText(/這週還差 1 次/)).toBeTruthy();
+    expect(week.queryByTestId('goal-day-caption-1')).toBeNull();
+    expect(week.queryByText(/尚未記錄|未安排|漏掉/)).toBeNull();
+  });
+
   it.each([
     [
       'skill',

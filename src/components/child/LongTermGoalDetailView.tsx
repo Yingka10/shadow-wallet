@@ -652,6 +652,7 @@ function WeekProgressCard({
   const showsDailySchedule =
     presentation.planState === 'active'
     && presentation.weekTarget > 0
+    && presentation.weekDays.some((day) => day.isScheduled)
     && (
       presentation.goalKind === 'reading_habit'
       || presentation.goalKind === 'habit'
