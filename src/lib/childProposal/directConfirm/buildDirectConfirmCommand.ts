@@ -9,6 +9,15 @@ import type {
 } from '../types';
 import { CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION } from '../types';
 
+/**
+ * 第一次回顧排在幾天後。
+ *
+ * 與家長抽屜的 DRAFT_FALLBACKS.firstReviewDays 同值，也與 staging 上
+ * 既有的 16 筆 long_term_goals 一致 —— 這條路徑建出來的長期計畫不該
+ * 長得跟家長自己建的不一樣。
+ */
+const DEFAULT_FIRST_REVIEW_DAYS = 7;
+
 const PURPOSE: Record<NonNullable<ChildProposalPlanVersion['purpose_category']>, PurposeCategory> = {
   A: 'life_routine',
   B: 'family_participation',
@@ -99,7 +108,15 @@ function evaluationCommand(card: ParentProposalCardData): CreateParentTaskComman
     schedule,
     content: { selectedOptions: {}, customOptionValues: {} },
     ...(plan.duration_type === 'long_term' ? {
-      review: { reviewEnabled: true, firstReviewAfterDays: 0, weekendReviewEnabled: false },
+      // 0 會被 long_term_goals_first_review_check（> 0）擋下來，而那個錯誤
+      // 發生在 create_parent_task_core_v1 裡面 —— 整筆確認回滾，家長只看到
+      // 「建立共同計畫失敗」。用抽屜的同一個預設值（7 天後第一次回顧），
+      // 並夾住不超過計畫長度：durationDays 只有 1 天時，第 7 天不存在。
+      review: {
+        reviewEnabled: true,
+        firstReviewAfterDays: Math.min(DEFAULT_FIRST_REVIEW_DAYS, plan.duration_days!),
+        weekendReviewEnabled: false,
+      },
       plan: { durationDays: plan.duration_days!, milestones: [], supportSteps: [], focusOptionIds: [] },
     } : null),
     metadata: {

@@ -92,6 +92,25 @@ describe('P0-5A child proposal direct confirm migration', () => {
     expect(confirm).not.toMatch(/\b(INSERT|UPDATE|DELETE)\s+(INTO\s+|FROM\s+)?(wallets|transactions|task_completions)\b/i);
   });
 
+  // 2026-08-11 staging 驗收抓到的兩個 bug。兩個都只在**真的跑一次**時才會現形，
+  // 所以把它們釘在靜態斷言上 —— 下一個人改這段時不必先燒掉一次 staging。
+  it('firstReviewAfterDays 不是 0，而且不超過計畫長度', () => {
+    // 0 會被 long_term_goals_first_review_check（NULL 或 > 0）擋下來，
+    // 而錯誤發生在 create_parent_task_core_v1 最內層 —— 整筆確認回滾，
+    // 家長只看到「建立共同計畫失敗」，看不出原因。
+    expect(SQL).not.toMatch(/'firstReviewAfterDays',\s*0\b/);
+    expect(SQL).toContain("'firstReviewAfterDays', LEAST(7, v_plan.duration_days)");
+  });
+
+  it('改名成 core 是有條件的 —— migration 必須可以重複套用', () => {
+    // 裸的 ALTER FUNCTION … RENAME 在第二次套用時以 42723 中止（實測），
+    // 而且如果真的執行了，會把 wrapper 改名成 core，變成 wrapper 呼叫 wrapper。
+    const rename = SQL.slice(SQL.indexOf('RENAME TO create_parent_task_core_v1') - 700,
+                             SQL.indexOf('RENAME TO create_parent_task_core_v1'));
+    expect(rename).toContain("p.proname = 'create_parent_task_core_v1'");
+    expect(rename).toContain('IF NOT EXISTS');
+  });
+
   it('RPC 權限固定且 core 不暴露給 authenticated', () => {
     expect(SQL).toContain('REVOKE ALL ON FUNCTION public.create_parent_task_core_v1(jsonb) FROM authenticated');
     expect(SQL).toContain('REVOKE ALL ON FUNCTION public.confirm_child_proposal_v1(jsonb) FROM PUBLIC, anon');

@@ -90,8 +90,22 @@ ALTER TABLE task_change_events ADD CONSTRAINT task_change_events_type_check CHEC
 
 -- Preserve the existing canonical implementation as an internal core. The new
 -- public wrapper changes no preset/parent_custom behavior.
-ALTER FUNCTION public.create_parent_task_v1(jsonb)
-  RENAME TO create_parent_task_core_v1;
+--
+-- 只有第一次套用時才改名。第二次套用時 core 已經存在，而那時
+-- create_parent_task_v1 是下面那個 wrapper —— 再改一次名會把 wrapper
+-- 蓋成 core，整條鏈就變成 wrapper 呼叫 wrapper。裸的 ALTER FUNCTION
+-- 會以 42723 中止（實測於 staging replay），所以這裡先問再做。
+DO $rename$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public' AND p.proname = 'create_parent_task_core_v1'
+  ) THEN
+    ALTER FUNCTION public.create_parent_task_v1(jsonb)
+      RENAME TO create_parent_task_core_v1;
+  END IF;
+END
+$rename$;
 
 REVOKE ALL ON FUNCTION public.create_parent_task_core_v1(jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.create_parent_task_core_v1(jsonb) FROM anon;
@@ -496,8 +510,16 @@ BEGIN
       'content', jsonb_build_object(
         'selectedOptions', '{}'::jsonb, 'customOptionValues', '{}'::jsonb
       ),
+      -- firstReviewAfterDays 不可以是 0：long_term_goals_first_review_check
+      -- 要求 NULL 或 > 0，而 create_parent_task_core_v1 是原樣寫進去的
+      -- （NULLIF(…, '') 只擋空字串，擋不掉 0）。0 的話每一次長期計畫的
+      -- 確認都會在最內層失敗、整筆回滾，家長只看到「建立共同計畫失敗」。
+      -- 7 與家長抽屜的 DRAFT_FALLBACKS.firstReviewDays 同值；夾住不超過
+      -- 計畫長度，因為 duration_days 可以小到 1 天。
       'review', CASE WHEN v_plan.duration_type = 'long_term' THEN jsonb_build_object(
-        'reviewEnabled', true, 'firstReviewAfterDays', 0, 'weekendReviewEnabled', false
+        'reviewEnabled', true,
+        'firstReviewAfterDays', LEAST(7, v_plan.duration_days),
+        'weekendReviewEnabled', false
       ) END,
       'plan', CASE WHEN v_plan.duration_type = 'long_term' THEN jsonb_build_object(
         'durationDays', v_plan.duration_days,
