@@ -1,6 +1,7 @@
 import {
   computeFallbackRecurrenceSuggestion,
   computeFallbackScheduleSuggestion,
+  containsArabicDigit,
   formatWeekdaysZh,
   validateRecurrenceSuggestion,
   validateScheduleSuggestion,
@@ -120,5 +121,19 @@ describe('computeFallbackRecurrenceSuggestion', () => {
 describe('formatWeekdaysZh', () => {
   it('orders weekdays Monday-first with Sunday last', () => {
     expect(formatWeekdaysZh([0, 3, 1])).toBe('週一、三、日');
+  });
+});
+
+describe('containsArabicDigit', () => {
+  it('detects an Arabic digit anywhere in the string', () => {
+    expect(containsArabicDigit('這週完成了 4 項任務')).toBe(true);
+    expect(containsArabicDigit('第3次做到了')).toBe(true);
+    expect(containsArabicDigit('100%')).toBe(true);
+  });
+
+  it('returns false for text with no Arabic digits, including Chinese numerals', () => {
+    expect(containsArabicDigit('這週辛苦了，繼續保持！')).toBe(false);
+    expect(containsArabicDigit('做了好幾次，非常棒')).toBe(false);
+    expect(containsArabicDigit('第三次也做到了')).toBe(false);
   });
 });

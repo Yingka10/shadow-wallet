@@ -21,6 +21,7 @@ import {
   CLAIM_PERIOD_LABEL_ZH,
   computeFallbackRecurrenceSuggestion,
   computeFallbackScheduleSuggestion,
+  containsArabicDigit,
   formatWeekdaysZh,
   validateRecurrenceSuggestion,
   validateScheduleSuggestion,
@@ -196,20 +197,21 @@ ${scheduleSection}${recurrenceSection}
    「Task-A / A 類 / B 類」「完成率」「動機類型」「教養風格」「里程碑」「幣值流動」這類詞。
    例如：不要說「里程碑」，改說「一個小目標」；不要說「完成率偏低」，改說「這週做起來比較吃力」。
 4. 內容要具體、要有畫面感，避免空泛的場面話；可以自然帶到上面看到的實際情況。
+5. **motivation_observation、dialogue、affirmations、suggestions 這幾個給人看的欄位，絕對不要出現任何阿拉伯數字**（次數、天數、幾項、百分比都算）——這些數字畫面上其他地方會用真實資料顯示，你這裡寫的數字沒辦法保證跟畫面對得上，一律用「這幾天」「好幾次」「大部分時候」這種不精確但不會出錯的講法代替。只有 schedule_suggestion／recurrence_suggestion 這兩個欄位例外，那裡才需要、也才可以寫具體數字。
 
 請只回傳 JSON（前後不要有任何其他文字或說明）：
 {
-  "motivation_observation": "給家長看的一段觀察，3~5句、溫暖具體，說說這週孩子的狀態、看到的亮點、以及可以多留意的地方。像在跟家長分享，不要說教。",
-  "dialogue": "一段家長可以直接對孩子說出口的開場白（3~4句、90字內），用『我』的口吻，先真心肯定這週看到的一件具體小事，再用一個溫柔的開放式問題，邀請孩子聊聊還沒開始或覺得困難的部分。語氣像關心，不像檢討。",
+  "motivation_observation": "給家長看的一段觀察，3~5句、溫暖具體，說說這週孩子的狀態、看到的亮點、以及可以多留意的地方。像在跟家長分享，不要說教。不能包含任何數字。",
+  "dialogue": "一段家長可以直接對孩子說出口的開場白（3~4句、90字內），用『我』的口吻，先真心肯定這週看到的一件具體小事，再用一個溫柔的開放式問題，邀請孩子聊聊還沒開始或覺得困難的部分。語氣像關心，不像檢討。不能包含任何數字。",
   "suggestions": [
-    {"body": "給家長的貼心建議，40~60字，白話、可以馬上做，說明為什麼這樣做對孩子好", "actionLabel": "按鈕文字（5字內）", "action": "adjust_reminder"},
-    {"body": "給家長的貼心建議，40~60字，白話、具體", "actionLabel": "按鈕文字（5字內）", "action": "increase_difficulty"},
-    {"body": "給家長的貼心建議，40~60字，白話、具體", "actionLabel": "按鈕文字（5字內）", "action": "add_contribution"}
+    {"body": "給家長的貼心建議，40~60字、白話、可以馬上做，說明為什麼這樣做對孩子好，不能包含任何數字", "actionLabel": "按鈕文字（5字內）", "action": "adjust_reminder"},
+    {"body": "給家長的貼心建議，40~60字、白話、具體，不能包含任何數字", "actionLabel": "按鈕文字（5字內）", "action": "increase_difficulty"},
+    {"body": "給家長的貼心建議，40~60字、白話、具體，不能包含任何數字", "actionLabel": "按鈕文字（5字內）", "action": "add_contribution"}
   ],
   "affirmations": [
-    "一句家長可以直接傳給孩子的溫暖讚美，25字內，講到具體的事",
-    "另一句溫暖讚美，25字內",
-    "再一句溫暖讚美，25字內"
+    "一句家長可以直接傳給孩子的溫暖讚美，25字內，講到具體的事，不能包含任何數字",
+    "另一句溫暖讚美，25字內，不能包含任何數字",
+    "再一句溫暖讚美，25字內，不能包含任何數字"
   ],
   "task_recommendations": [
     {"category": "B", "suggestion": "針對某一方面給家長的調整建議，40~60字，白話、溫柔、可執行"}
@@ -250,11 +252,24 @@ ${scheduleSection}${recurrenceSection}
     throw new Error('Gemini response missing required fields');
   }
 
+  // motivation_observation 是報告開頭最顯眼的一段——AI 亂寫的數字最容易被抓包，
+  // 寧可整份報告退回 fallback（那邊的數字是真的算出來的），也不要冒風險寫出去。
+  if (containsArabicDigit(parsed.motivation_observation)) {
+    throw new Error('motivation_observation contains an AI-generated number');
+  }
+
+  const safeDialogue = typeof parsed.dialogue === 'string' && !containsArabicDigit(parsed.dialogue)
+    ? parsed.dialogue
+    : '';
+  const safeAffirmations = Array.isArray(parsed.affirmations)
+    ? parsed.affirmations.filter((a): a is string => typeof a === 'string' && !containsArabicDigit(a))
+    : [];
+
   return {
     motivation_observation: parsed.motivation_observation,
-    dialogue: typeof parsed.dialogue === 'string' ? parsed.dialogue : '',
+    dialogue: safeDialogue,
     suggestions: parsed.suggestions,
-    affirmations: Array.isArray(parsed.affirmations) ? parsed.affirmations : [],
+    affirmations: safeAffirmations,
     task_recommendations: Array.isArray(parsed.task_recommendations) ? parsed.task_recommendations : [],
     schedule_suggestion: validateScheduleSuggestion(parsed.schedule_suggestion, ctx.scheduleCandidates),
     recurrence_suggestion: validateRecurrenceSuggestion(parsed.recurrence_suggestion, ctx.recurrenceCandidates),
