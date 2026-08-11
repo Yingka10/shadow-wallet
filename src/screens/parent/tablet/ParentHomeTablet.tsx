@@ -99,7 +99,9 @@ import {
 } from './home/homeIcons';
 import { WeekSummary } from './home/WeekSummary';
 import { TipCard, WeekDigestCard, buildWeekDigestLines, TaskPackCard } from './home/RightRailCards';
+import { ParentProposalSection } from './home/ParentProposalSection';
 import { ParentSidebar, type ChildOption, type ManageSection } from './ParentSidebar';
+import { useParentProposals } from '../../../hooks/useParentProposals';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
@@ -2672,6 +2674,13 @@ export default function ParentHomeTablet() {
   } = useParentDashboard(childId);
 
   const {
+    proposals: childProposals,
+    loading: proposalsLoading,
+    error: proposalsError,
+    refresh: proposalRefresh,
+  } = useParentProposals(childId, familyId);
+
+  const {
     items: ltItems,
     totalActive: ltTotalActive,
     loading: ltLoading,
@@ -2683,7 +2692,8 @@ export default function ParentHomeTablet() {
       refresh();
       ltRefresh();
       void refreshRedemption();
-    }, [refresh, ltRefresh, refreshRedemption]),
+      void proposalRefresh();
+    }, [refresh, ltRefresh, refreshRedemption, proposalRefresh]),
   );
 
   // ── 建立任務抽屜的資料 ────────────────────────────────────────────────────
@@ -2923,6 +2933,14 @@ export default function ParentHomeTablet() {
           contentContainerStyle={[styles.mainContent, { paddingTop: 4, paddingBottom: 40 }]}
           showsVerticalScrollIndicator={false}
         >
+          <ParentProposalSection
+            childName={nickname}
+            proposals={childProposals}
+            loading={proposalsLoading}
+            error={proposalsError}
+            onRetry={() => { void proposalRefresh(); }}
+          />
+
           {/* ── 待你確認 hero 卡（沒有待審就安靜帶過） ── */}
           {childPendingCount > 0 ? (
             <View style={styles.heroCard}>

@@ -53,6 +53,7 @@ import TaskCompleteModal from '../../components/TaskCompleteModal';
 import FeedbackAnimation, { type FeedbackType } from '../../components/FeedbackAnimation';
 import { CoinIcon } from '../../components/icons/TaskIcons';
 import { completeTask, createChildTask } from '../../lib/taskActions';
+import { PROPOSAL_COPY } from './childProposal/copy';
 import { supabase } from '../../lib/supabase';
 import { Colors } from '../../constants/colors';
 import { webMouseDraggableScroll, webScreen } from '../../constants/webStyles';
@@ -71,6 +72,21 @@ type ChildMeta = {
 type GoalTone = 'piano' | 'book' | 'sleep' | 'growth';
 
 const TASK_DIFF_OPTIONS = [1, 1.5, 2, 2.5, 3];
+
+/**
+ * 舊的「孩子直接新增任務」入口（createChildTask → 直接 insert tasks/child_tasks）。
+ *
+ * **P0-2 起關閉。** 孩子端的入口改成提案流程（ChildProposalScreen），
+ * 那條路徑走 P0-1 的 proposal 契約，不會建立正式任務、不會發幣。
+ *
+ * 為什麼是關掉而不是刪掉：這段程式與 taskActions.createChildTask 都還在，
+ * 之後如果需要一個「家長在孩子裝置上直接補一筆」的路徑，這裡是現成的。
+ * 直接刪掉會連同它踩過的坑（due date 換算、recurrence 映射）一起消失。
+ *
+ * ⚠️ 改成 true 之前先想清楚：Demo 使用者會因此看到兩個很像的入口，
+ *    而其中一個會直接建立正式任務、繞過家長確認。
+ */
+const LEGACY_CHILD_TASK_ENTRY_ENABLED = false;
 
 type AddTaskType = 'temp' | 'recurring';
 type DueOption = 'today' | 'tomorrow' | 'dayAfter' | 'thisWeek';
@@ -632,12 +648,36 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={styles.addRow} onPress={openAddTask} activeOpacity={0.72}>
+          {/*
+            孩子端唯一的「我有想做的事」入口。
+            走提案流程 —— 不建立正式任務、不發幣，家長之後一起確認。
+            舊的直接建立任務入口見 LEGACY_CHILD_TASK_ENTRY_ENABLED。
+          */}
+          <TouchableOpacity
+            testID="child-proposal-entry"
+            style={styles.addRow}
+            onPress={() => navigation.navigate('ChildProposal', { childId })}
+            activeOpacity={0.72}
+            accessibilityRole="button"
+            accessibilityLabel={PROPOSAL_COPY.entry}
+          >
             <View style={styles.addPlus}>
               <Text style={styles.addPlusText}>＋</Text>
             </View>
-            <Text style={styles.addRowText}>新增任務</Text>
+            <View style={styles.addRowTextWrap}>
+              <Text style={styles.addRowText}>{PROPOSAL_COPY.entry}</Text>
+              <Text style={styles.addRowHint}>{PROPOSAL_COPY.entryHint}</Text>
+            </View>
           </TouchableOpacity>
+
+          {LEGACY_CHILD_TASK_ENTRY_ENABLED ? (
+            <TouchableOpacity style={styles.addRow} onPress={openAddTask} activeOpacity={0.72}>
+              <View style={styles.addPlus}>
+                <Text style={styles.addPlusText}>＋</Text>
+              </View>
+              <Text style={styles.addRowText}>新增任務</Text>
+            </TouchableOpacity>
+          ) : null}
         </ScrollView>
 
         <BottomNav
@@ -696,8 +736,9 @@ export default function HomeScreen() {
           onComplete={handleFeedbackComplete}
         />
 
+        {/* 舊的新增任務表單。LEGACY_CHILD_TASK_ENTRY_ENABLED = false 時不掛載。 */}
         <Modal
-          visible={addTaskVisible}
+          visible={LEGACY_CHILD_TASK_ENTRY_ENABLED && addTaskVisible}
           transparent
           animationType="slide"
           onRequestClose={() => setAddTaskVisible(false)}
@@ -1739,6 +1780,16 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '900',
     marginTop: -1,
+  },
+  addRowTextWrap: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  addRowHint: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.fgMuted,
   },
   addRowText: {
     color: Colors.leaf700,
