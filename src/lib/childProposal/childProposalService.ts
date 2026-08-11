@@ -16,6 +16,7 @@ import type {
   AddChildProposalPlanVersionCommand,
   AddPlanVersionResult,
   ChildProposalFailure,
+  ChildProposal,
   ChildProposalConfirmedReward,
   ChildProposalFailureCode,
   ChildProposalStatus,
@@ -181,6 +182,35 @@ function isConfirmedReward(value: unknown): value is ChildProposalConfirmedRewar
 }
 
 export class SupabaseChildProposalService {
+  /**
+   * 家長首頁的唯讀入口。
+   *
+   * family / child / status 都在 DB query 篩選，不能先撈回前端再過濾；後者會讓
+   * 換孩子時短暫看到手足資料，也會把不屬於這個家庭的列帶進 client memory。
+   */
+  async listProposedForParent({
+    familyId,
+    childId,
+    limit = 3,
+  }: {
+    familyId: string;
+    childId: string;
+    limit?: number;
+  }): Promise<ChildProposal[]> {
+    const safeLimit = Math.max(1, Math.min(3, Math.trunc(limit)));
+    const { data, error } = await supabase
+      .from('child_proposals')
+      .select('*')
+      .eq('family_id', familyId)
+      .eq('child_id', childId)
+      .eq('status', 'proposed')
+      .order('created_at', { ascending: false })
+      .limit(safeLimit);
+
+    if (error) throw new Error(error.message || '讀取孩子提案失敗');
+    return data ?? [];
+  }
+
   /** 孩子提出一個想法。只會落在 draft 或 proposed。 */
   async create(command: CreateChildProposalCommand): Promise<CreateChildProposalResult> {
     const fallback = '建立提案失敗';
