@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import type { ChildProposal } from '../../../../lib/childProposal';
+import type { ParentProposalCardData } from '../../../../lib/childProposal/types';
 import {
   ParentColors,
   ParentFonts,
@@ -20,19 +20,36 @@ import { presentParentProposal } from './parentProposalPresentation';
 
 type Props = {
   childName: string;
-  proposals: ChildProposal[];
+  proposals: ParentProposalCardData[];
   loading: boolean;
   error: string | null;
   onRetry: () => void;
+  onConfirm: (card: ParentProposalCardData) => void;
+  confirmingProposalId: string | null;
+  confirmError: string | null;
+  successMessage: string | null;
 };
 
-export function ParentProposalSection({ childName, proposals, loading, error, onRetry }: Props) {
+export function ParentProposalSection({
+  childName,
+  proposals,
+  loading,
+  error,
+  onRetry,
+  onConfirm,
+  confirmingProposalId,
+  confirmError,
+  successMessage,
+}: Props) {
   const cards = useMemo(
-    () => proposals.slice(0, 3).map(item => presentParentProposal(item, childName)),
+    () => proposals.slice(0, 3).map(item => ({
+      source: item,
+      view: presentParentProposal(item, childName),
+    })),
     [childName, proposals],
   );
 
-  if (!loading && !error && cards.length === 0) return null;
+  if (!loading && !error && !successMessage && !confirmError && cards.length === 0) return null;
 
   return (
     <View style={styles.section} testID="parent-proposal-section">
@@ -40,6 +57,9 @@ export function ParentProposalSection({ childName, proposals, loading, error, on
         <Text style={styles.sectionTitle}>需要一起看看</Text>
         <Text style={styles.sectionMeta}>孩子自己提出的新想法</Text>
       </View>
+
+      {successMessage && <Text style={styles.successText}>{successMessage}</Text>}
+      {confirmError && <Text style={styles.errorText}>{confirmError}</Text>}
 
       {loading && cards.length === 0 ? (
         <View style={styles.stateCard}>
@@ -55,7 +75,7 @@ export function ParentProposalSection({ childName, proposals, loading, error, on
         </View>
       ) : (
         <View style={styles.cardList}>
-          {cards.map(card => (
+          {cards.map(({ source, view: card }) => (
             <View key={card.id} style={styles.card}>
               <View style={styles.cardHead}>
                 <View style={styles.ideaMark}>
@@ -68,7 +88,7 @@ export function ParentProposalSection({ childName, proposals, loading, error, on
               </View>
 
               <View style={styles.detailBlock}>
-                <Text style={styles.detailLabel}>孩子的想法</Text>
+                <Text style={styles.detailLabel}>孩子原本怎麼說</Text>
                 <Text style={styles.goalText}>{card.goal}</Text>
               </View>
               {card.motivation && (
@@ -87,6 +107,64 @@ export function ParentProposalSection({ childName, proposals, loading, error, on
                   <Text style={styles.detailText}>{card.rewardHope}</Text>
                 </View>
               </View>
+
+              {card.planTitle ? (
+                <View style={styles.planBlock}>
+                  <Text style={styles.planEyebrow}>GrowBook 幫忙整理</Text>
+                  <Text style={styles.planTitle}>{card.planTitle}</Text>
+                  {card.planSummary && <Text style={styles.detailText}>{card.planSummary}</Text>}
+                  <View style={styles.summaryRow}>
+                    {card.planCadence && (
+                      <View style={styles.summaryItem}>
+                        <Text style={styles.detailLabel}>這份計畫的節奏</Text>
+                        <Text style={styles.detailText}>{card.planCadence}</Text>
+                      </View>
+                    )}
+                    {card.estimatedTime && (
+                      <View style={styles.summaryItem}>
+                        <Text style={styles.detailLabel}>每次投入</Text>
+                        <Text style={styles.detailText}>{card.estimatedTime}</Text>
+                      </View>
+                    )}
+                  </View>
+                  {card.completionDescription && (
+                    <View style={styles.detailBlock}>
+                      <Text style={styles.detailLabel}>一次完成標準</Text>
+                      <Text style={styles.detailText}>{card.completionDescription}</Text>
+                    </View>
+                  )}
+                  {card.nextStep && (
+                    <View style={styles.detailBlock}>
+                      <Text style={styles.detailLabel}>下一步</Text>
+                      <Text style={styles.detailText}>{card.nextStep}</Text>
+                    </View>
+                  )}
+                  {card.rhythmCopy && <Text style={styles.rhythmText}>{card.rhythmCopy}</Text>}
+                  {card.rewardSuggestion && (
+                    <View style={styles.rewardBlock}>
+                      <Text style={styles.suggestionLabel}>{card.rewardSuggestionLabel}</Text>
+                      <Text style={styles.detailText}>{card.rewardSuggestion}</Text>
+                    </View>
+                  )}
+                </View>
+              ) : null}
+
+              {confirmingProposalId === card.id ? (
+                <View style={styles.confirmingRow}>
+                  <ActivityIndicator size="small" color={ParentColors.accent} />
+                  <Text style={styles.detailText}>正在建立共同計畫…</Text>
+                </View>
+              ) : card.canConfirm ? (
+                <TouchableOpacity
+                  style={styles.confirmButton}
+                  onPress={() => onConfirm(source)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.confirmButtonText}>確認這個計畫</Text>
+                </TouchableOpacity>
+              ) : card.waitingMessage ? (
+                <Text style={styles.waitingText}>{card.waitingMessage}</Text>
+              ) : null}
             </View>
           ))}
         </View>
@@ -205,5 +283,76 @@ const styles = StyleSheet.create({
     padding: ParentSpacing[3],
     borderRadius: ParentRadii.md,
     backgroundColor: ParentColors.bgSurfaceWarm,
+  },
+  planBlock: {
+    gap: ParentSpacing[3],
+    padding: ParentSpacing[4],
+    borderRadius: ParentRadii.md,
+    backgroundColor: ParentColors.bgSurfaceWarm,
+  },
+  planEyebrow: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.accent,
+  },
+  planTitle: {
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.base,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgPrimary,
+  },
+  rhythmText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    lineHeight: 21,
+    color: ParentColors.accent,
+  },
+  rewardBlock: {
+    gap: ParentSpacing[1],
+    paddingTop: ParentSpacing[2],
+    borderTopWidth: 1,
+    borderTopColor: ParentColors.borderSoft,
+  },
+  suggestionLabel: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.pending,
+  },
+  confirmButton: {
+    alignItems: 'center',
+    paddingHorizontal: ParentSpacing[4],
+    paddingVertical: ParentSpacing[3],
+    borderRadius: ParentRadii.pill,
+    backgroundColor: ParentColors.accent,
+  },
+  confirmButtonText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    fontWeight: ParentFontWeights.bold,
+    color: '#FFFFFF',
+  },
+  confirmingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: ParentSpacing[2],
+  },
+  waitingText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgMuted,
+  },
+  successText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.success,
+  },
+  errorText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.error,
   },
 });

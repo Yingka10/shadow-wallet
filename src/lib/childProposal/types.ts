@@ -304,6 +304,8 @@ export type ChildProposalPlanVersion = {
   ai_snapshot: unknown | null;
   ai_model: string | null;
   ai_request_id: string | null;
+  /** Parent adoption 指向被採用的 AI version；不重用 ai_request_id。 */
+  adopted_from_plan_version_id: string | null;
   /**
    * AI 建議的幣值。**永遠不是最終值。**
    *
@@ -398,6 +400,8 @@ export type ChildProposalStatusEvent = {
 export type ChildProposalFailureCode =
   | 'VALIDATION_FAILED'
   | 'POLICY_REJECTED'
+  | 'STALE_PLAN_VERSION'
+  | 'POLICY_CHANGED'
   | 'PERSISTENCE_FAILED'
   | 'UNKNOWN';
 
@@ -468,6 +472,43 @@ export type RecordTrialResult = RecordTrialSuccess | ChildProposalFailure;
 export type CreateAdjustmentRequestResult =
   | CreateAdjustmentRequestSuccess
   | ChildProposalFailure;
+
+/** 家長首頁的一張卡：Proposal 原話加上 exact current Plan Version。 */
+export type ParentProposalCardData = {
+  proposal: ChildProposal;
+  currentPlanVersion: ChildProposalPlanVersion | null;
+};
+
+export type ConfirmChildProposalCommand = {
+  schemaVersion: typeof CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION;
+  proposalId: string;
+  expectedPlanVersionId: string;
+  rewardDecision: {
+    rewardPolicy: ChildProposalRewardPolicy;
+    eligibility: 'allowed';
+    coin: {
+      suggestedAmount: number;
+      finalAmount: number;
+      minAllowed: number;
+      maxAllowed: number;
+      calculationBasis: unknown;
+    } | null;
+    rewardPolicyVersion: string;
+    explanation: string;
+  };
+};
+
+export type ConfirmChildProposalSuccess = {
+  ok: true;
+  proposalId: string;
+  planVersionId: string;
+  taskId: string;
+  relatedIds: string[];
+  confirmedReward: ChildProposalConfirmedReward;
+  idempotentReplay: boolean;
+};
+
+export type ConfirmChildProposalResult = ConfirmChildProposalSuccess | ChildProposalFailure;
 
 // ---------------------------------------------------------------------------
 // 命令

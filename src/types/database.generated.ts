@@ -1148,6 +1148,7 @@ export type Database = {
           created_at: string
           created_from_preset: boolean
           creation_request_id: string | null
+          creation_source: string
           day_type: string
           difficulty: number
           due_date: string | null
@@ -1159,6 +1160,7 @@ export type Database = {
           is_long_term: boolean
           is_system_default: boolean
           long_term_type: string | null
+          next_step: string | null
           max_age: number
           max_claims_per_period: number
           min_age: number
@@ -1168,6 +1170,7 @@ export type Database = {
           plan_mode: string | null
           preferred_time: string | null
           preferred_time_custom: string | null
+          progress_model: string | null
           preset_catalog_version: string | null
           preset_family_id: string | null
           preset_variant_id: string | null
@@ -1202,6 +1205,7 @@ export type Database = {
           created_at?: string
           created_from_preset?: boolean
           creation_request_id?: string | null
+          creation_source?: string
           day_type?: string
           difficulty?: number
           due_date?: string | null
@@ -1213,6 +1217,7 @@ export type Database = {
           is_long_term?: boolean
           is_system_default?: boolean
           long_term_type?: string | null
+          next_step?: string | null
           max_age?: number
           max_claims_per_period?: number
           min_age?: number
@@ -1222,6 +1227,7 @@ export type Database = {
           plan_mode?: string | null
           preferred_time?: string | null
           preferred_time_custom?: string | null
+          progress_model?: string | null
           preset_catalog_version?: string | null
           preset_family_id?: string | null
           preset_variant_id?: string | null
@@ -1256,6 +1262,7 @@ export type Database = {
           created_at?: string
           created_from_preset?: boolean
           creation_request_id?: string | null
+          creation_source?: string
           day_type?: string
           difficulty?: number
           due_date?: string | null
@@ -1267,6 +1274,7 @@ export type Database = {
           is_long_term?: boolean
           is_system_default?: boolean
           long_term_type?: string | null
+          next_step?: string | null
           max_age?: number
           max_claims_per_period?: number
           min_age?: number
@@ -1276,6 +1284,7 @@ export type Database = {
           plan_mode?: string | null
           preferred_time?: string | null
           preferred_time_custom?: string | null
+          progress_model?: string | null
           preset_catalog_version?: string | null
           preset_family_id?: string | null
           preset_variant_id?: string | null
@@ -1516,6 +1525,7 @@ export type Database = {
         Returns: Json
       }
       create_parent_task_v1: { Args: { p_command: Json }; Returns: Json }
+      confirm_child_proposal_v1: { Args: { p_command: Json }; Returns: Json }
       get_age_group: { Args: { birth_date: string }; Returns: string }
       map_completion_policy: { Args: { p_policy: string }; Returns: string }
       map_purpose_category: { Args: { p_purpose: string }; Returns: string }

@@ -2678,7 +2678,11 @@ export default function ParentHomeTablet() {
     loading: proposalsLoading,
     error: proposalsError,
     refresh: proposalRefresh,
-  } = useParentProposals(childId, familyId);
+    confirmProposal,
+    confirmingProposalId,
+    confirmError: proposalConfirmError,
+    successMessage: proposalSuccessMessage,
+  } = useParentProposals(childId, familyId, undefined, child?.age_group ?? null);
 
   const {
     items: ltItems,
@@ -2939,6 +2943,15 @@ export default function ParentHomeTablet() {
             loading={proposalsLoading}
             error={proposalsError}
             onRetry={() => { void proposalRefresh(); }}
+            onConfirm={(card) => {
+              void confirmProposal(card).then(() => {
+                refresh();
+                ltRefresh();
+              });
+            }}
+            confirmingProposalId={confirmingProposalId}
+            confirmError={proposalConfirmError}
+            successMessage={proposalSuccessMessage}
           />
 
           {/* ── 待你確認 hero 卡（沒有待審就安靜帶過） ── */}

@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
-import type { ChildProposal } from '../../lib/childProposal';
+import type { ChildProposal, ParentProposalCardData } from '../../lib/childProposal';
 import { useParentProposals, type ParentProposalReader } from '../useParentProposals';
 
 jest.mock('../../lib/supabase', () => ({ supabase: {} }));
@@ -17,6 +17,10 @@ function proposal(id: string, childId: string): ChildProposal {
   };
 }
 
+function card(id: string, childId: string): ParentProposalCardData {
+  return { proposal: proposal(id, childId), currentPlanVersion: null };
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;
@@ -26,12 +30,12 @@ function deferred<T>() {
 
 describe('useParentProposals', () => {
   it('提供 loading、資料與手動 refresh', async () => {
-    const first = deferred<ChildProposal[]>();
+    const first = deferred<ParentProposalCardData[]>();
     const reader: ParentProposalReader = { listProposedForParent: jest.fn(() => first.promise) };
     const { result } = renderHook(() => useParentProposals('child-a', 'family-1', reader));
 
     expect(result.current.loading).toBe(true);
-    act(() => first.resolve([proposal('p-a', 'child-a')]));
+    act(() => first.resolve([card('p-a', 'child-a')]));
     await waitFor(() => expect(result.current.proposals).toHaveLength(1));
     expect(result.current.loading).toBe(false);
 
@@ -53,7 +57,7 @@ describe('useParentProposals', () => {
   it('selected child 改變後以新 child/family 重新讀取', async () => {
     const reader: ParentProposalReader = {
       listProposedForParent: jest.fn(({ childId }) =>
-        Promise.resolve([proposal(`p-${childId}`, childId)])),
+        Promise.resolve([card(`p-${childId}`, childId)])),
     };
     const { result, rerender } = renderHook<
       ReturnType<typeof useParentProposals>,
@@ -62,22 +66,21 @@ describe('useParentProposals', () => {
       ({ childId }: { childId: string }) => useParentProposals(childId, 'family-1', reader),
       { initialProps: { childId: 'child-a' } },
     );
-    await waitFor(() => expect(result.current.proposals[0]?.child_id).toBe('child-a'));
+    await waitFor(() => expect(result.current.proposals[0]?.proposal.child_id).toBe('child-a'));
 
     rerender({ childId: 'child-b' });
-    await waitFor(() => expect(result.current.proposals[0]?.child_id).toBe('child-b'));
-
+    await waitFor(() => expect(result.current.proposals[0]?.proposal.child_id).toBe('child-b'));
     expect(reader.listProposedForParent).toHaveBeenLastCalledWith({
       childId: 'child-b', familyId: 'family-1', limit: 3,
     });
   });
 
   it('較慢的上一個孩子回應不會蓋掉目前孩子', async () => {
-    const a = deferred<ChildProposal[]>();
+    const a = deferred<ParentProposalCardData[]>();
     const reader: ParentProposalReader = {
       listProposedForParent: jest.fn(({ childId }) => childId === 'child-a'
         ? a.promise
-        : Promise.resolve([proposal('p-b', 'child-b')])),
+        : Promise.resolve([card('p-b', 'child-b')]))
     };
     const { result, rerender } = renderHook<
       ReturnType<typeof useParentProposals>,
@@ -88,11 +91,54 @@ describe('useParentProposals', () => {
     );
 
     rerender({ childId: 'child-b' });
-    await waitFor(() => expect(result.current.proposals[0]?.id).toBe('p-b'));
-    act(() => a.resolve([proposal('p-a', 'child-a')]));
+    await waitFor(() => expect(result.current.proposals[0]?.proposal.id).toBe('p-b'));
+    act(() => a.resolve([card('p-a', 'child-a')]));
     await act(async () => { await Promise.resolve(); });
+    expect(result.current.proposals[0]?.proposal.id).toBe('p-b');
+  });
 
-    expect(result.current.proposals[0]?.id).toBe('p-b');
+  it('confirm 時提供 loading，成功後 refresh 讓 proposed card 消失', async () => {
+    const item = card('p-a', 'child-a');
+    const confirm = deferred<{ ok: true; taskId: string }>();
+    const reader: ParentProposalReader = {
+      listProposedForParent: jest.fn()
+        .mockResolvedValueOnce([item])
+        .mockResolvedValueOnce([]),
+      confirmDirect: jest.fn(() => confirm.promise as never),
+    };
+    const { result } = renderHook(() =>
+      useParentProposals('child-a', 'family-1', reader, '6-9'));
+    await waitFor(() => expect(result.current.proposals).toHaveLength(1));
+
+    let pending!: Promise<unknown>;
+    act(() => { pending = result.current.confirmProposal(item); });
+    expect(result.current.confirmingProposalId).toBe('p-a');
+
+    await act(async () => {
+      confirm.resolve({ ok: true, taskId: 'task-1' });
+      await pending;
+    });
+    expect(reader.confirmDirect).toHaveBeenCalledWith(item, '6-9');
+    expect(result.current.proposals).toEqual([]);
+    expect(result.current.successMessage).toBe('已經一起確認好了');
+    expect(result.current.confirmingProposalId).toBeNull();
+  });
+
+  it('typed confirm failure 保留訊息，不把 card 當成功移除', async () => {
+    const item = card('p-a', 'child-a');
+    const reader: ParentProposalReader = {
+      listProposedForParent: jest.fn().mockResolvedValue([item]),
+      confirmDirect: jest.fn().mockResolvedValue({
+        ok: false, code: 'STALE_PLAN_VERSION', message: '計畫已更新，請重新整理',
+      }),
+    };
+    const { result } = renderHook(() =>
+      useParentProposals('child-a', 'family-1', reader, '6-9'));
+    await waitFor(() => expect(result.current.proposals).toHaveLength(1));
+
+    await act(async () => { await result.current.confirmProposal(item); });
+    expect(result.current.confirmError).toBe('計畫已更新，請重新整理');
+    expect(result.current.proposals).toHaveLength(1);
   });
 
   it('缺 child 或 family 時不查詢並呈現空狀態', () => {

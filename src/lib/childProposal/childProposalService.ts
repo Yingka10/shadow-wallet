@@ -12,6 +12,7 @@
 import { supabase } from '../supabase';
 import { mapPostgresErrorCode } from '../parentTaskCreationService';
 import { CHILD_PROPOSAL_STATUSES } from './types';
+import { buildDirectConfirmCommand } from './directConfirm';
 import type { AgeGroup } from '../../types/database';
 import type {
   AddChildProposalPlanVersionCommand,
@@ -21,6 +22,7 @@ import type {
   ChildProposalConfirmedReward,
   ChildProposalFailureCode,
   ChildProposalStatus,
+  ConfirmChildProposalResult,
   CreateAdjustmentRequestResult,
   CreateChildProposalAdjustmentRequestCommand,
   CreateChildProposalCommand,
@@ -29,6 +31,7 @@ import type {
   RecordTrialResult,
   TransitionChildProposalCommand,
   TransitionProposalResult,
+  ParentProposalCardData,
 } from './types';
 
 /** RPC 名稱。改版時會是 _v2，舊版仍留著給尚未更新的 client。 */
@@ -38,9 +41,10 @@ export const TRANSITION_CHILD_PROPOSAL_RPC = 'transition_child_proposal_v1';
 export const RECORD_CHILD_PROPOSAL_TRIAL_RPC = 'record_child_proposal_trial_v1';
 export const CREATE_CHILD_PROPOSAL_ADJUSTMENT_RPC =
   'create_child_proposal_adjustment_request_v1';
+export const CONFIRM_CHILD_PROPOSAL_RPC = 'confirm_child_proposal_v1';
 
 /**
- * 只有這五支。型別上就不接受任意字串 —— 打錯名字要在編譯期就被抓到，
+ * 只有這六支。型別上就不接受任意字串 —— 打錯名字要在編譯期就被抓到，
  * 不是等到 PostgREST 回 PGRST202 才發現 migration「沒套用」。
  */
 type ChildProposalRpcName =
@@ -48,11 +52,14 @@ type ChildProposalRpcName =
   | typeof ADD_CHILD_PROPOSAL_PLAN_VERSION_RPC
   | typeof TRANSITION_CHILD_PROPOSAL_RPC
   | typeof RECORD_CHILD_PROPOSAL_TRIAL_RPC
-  | typeof CREATE_CHILD_PROPOSAL_ADJUSTMENT_RPC;
+  | typeof CREATE_CHILD_PROPOSAL_ADJUSTMENT_RPC
+  | typeof CONFIRM_CHILD_PROPOSAL_RPC;
 
 const FAILURE_CODES: ChildProposalFailureCode[] = [
   'VALIDATION_FAILED',
   'POLICY_REJECTED',
+  'STALE_PLAN_VERSION',
+  'POLICY_CHANGED',
   'PERSISTENCE_FAILED',
   'UNKNOWN',
 ];
@@ -197,7 +204,7 @@ export class SupabaseChildProposalService {
     familyId: string;
     childId: string;
     limit?: number;
-  }): Promise<ChildProposal[]> {
+  }): Promise<ParentProposalCardData[]> {
     const safeLimit = Math.max(1, Math.min(3, Math.trunc(limit)));
     const { data, error } = await supabase
       .from('child_proposals')
@@ -209,7 +216,70 @@ export class SupabaseChildProposalService {
       .limit(safeLimit);
 
     if (error) throw new Error(error.message || '讀取孩子提案失敗');
-    return data ?? [];
+    const proposals = data ?? [];
+    const currentIds = proposals
+      .map(proposal => proposal.current_plan_version_id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+
+    if (currentIds.length === 0) {
+      return proposals.map(proposal => ({ proposal, currentPlanVersion: null }));
+    }
+
+    const { data: versions, error: versionError } = await supabase
+      .from('child_proposal_plan_versions')
+      .select('*')
+      .in('id', currentIds);
+    if (versionError) throw new Error(versionError.message || '讀取 GrowBook 計畫失敗');
+
+    const byId = new Map((versions ?? []).map(version => [version.id, version]));
+    return proposals.map(proposal => {
+      const version = proposal.current_plan_version_id
+        ? byId.get(proposal.current_plan_version_id) ?? null
+        : null;
+      return {
+        proposal,
+        // Exact id plus proposal ownership: a mismatched row is not a usable plan.
+        currentPlanVersion: version?.proposal_id === proposal.id ? version : null,
+      };
+    });
+  }
+
+  /** One UI action, one orchestration RPC. The UI never assembles a task command. */
+  async confirmDirect(
+    card: ParentProposalCardData,
+    childAgeGroup: string,
+  ): Promise<ConfirmChildProposalResult> {
+    const built = buildDirectConfirmCommand(card, childAgeGroup);
+    if (built.ok !== true) return built;
+
+    const fallback = '建立共同計畫失敗';
+    const result = await callProposalRpc(CONFIRM_CHILD_PROPOSAL_RPC, built.command, fallback);
+    if (result.ok !== true) return result;
+
+    const proposalId = requireId(result.payload, 'proposalId', fallback);
+    if (isFailure(proposalId)) return proposalId;
+    const planVersionId = requireId(result.payload, 'planVersionId', fallback);
+    if (isFailure(planVersionId)) return planVersionId;
+    const taskId = requireId(result.payload, 'taskId', fallback);
+    if (isFailure(taskId)) return taskId;
+    if (!isConfirmedReward(result.payload.confirmedReward)) {
+      return {
+        ok: false, code: 'UNKNOWN', reason: 'CONFIRMED_REWARD_MISSING',
+        message: `${fallback}：共同版本缺少確認的回饋紀錄`,
+      };
+    }
+
+    return {
+      ok: true,
+      proposalId,
+      planVersionId,
+      taskId,
+      relatedIds: Array.isArray(result.payload.relatedIds)
+        ? result.payload.relatedIds.filter((id): id is string => typeof id === 'string')
+        : [],
+      confirmedReward: result.payload.confirmedReward,
+      idempotentReplay: result.payload.idempotentReplay === true,
+    };
   }
 
   /**
