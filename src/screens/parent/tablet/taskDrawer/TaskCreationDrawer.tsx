@@ -134,6 +134,7 @@ import {
   collectTaskRuleFindings,
   createTaskAiInputSignature,
   initialItems,
+  mergeRegeneratedSuggestions,
   markItemApplied,
   markItemKept,
   markItemUndone,
@@ -672,6 +673,10 @@ export function TaskCreationDrawer({
     // 同一時間只允許一個請求。重複按不會產生第二次付費呼叫。
     if (aiState.kind === 'loading') return;
 
+    // 重新產生時，已經決定（採用／保留）的項目要留著——見 handleAiRequest
+    // 下面 result.status === 'suggestions' 分支的說明。
+    const previousItems = aiState.kind === 'suggestions' ? aiState.items : [];
+
     abortAiRequest();
     const controller = new AbortController();
     aiAbortRef.current = controller;
@@ -730,11 +735,18 @@ export function TaskCreationDrawer({
           inputSignature: aiSignature,
           summary: result.summary,
           // 拿到就先算一次狀態：草稿在等待期間可能已經被改過。
-          items: initialItems(result.suggestions, requestedDraft),
+          //
+          // previousItems 非空＝這是「重新產生」，不是第一次請求：把上一批
+          // 已經決定的項目留著，只用新的一批換掉還沒決定的部分。
+          // token 當 id 前綴——同一次 handleAiRequest 呼叫的專屬編號，
+          // 保證跟上一批的 "s1"／"s2" 不會撞。
+          items: previousItems.length > 0
+            ? mergeRegeneratedSuggestions(previousItems, result.suggestions, requestedDraft, String(token))
+            : initialItems(result.suggestions, requestedDraft),
         });
       }
     }
-  }, [abortAiRequest, aiEligible, aiInput, aiSignature, aiState.kind, draft, taskAiClient]);
+  }, [abortAiRequest, aiEligible, aiInput, aiSignature, aiState, draft, taskAiClient]);
 
   /**
    * 採用一項建議。

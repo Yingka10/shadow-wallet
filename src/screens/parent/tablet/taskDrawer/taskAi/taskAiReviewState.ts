@@ -237,3 +237,33 @@ export function initialItems(
     requestedDraft,
   );
 }
+
+/**
+ * 重新產生一批建議時，把上一批**已經決定**的項目（採用／採用後又編輯／
+ * 保留）留在畫面上，只用新的一批取代還沒決定（pending／stale）的部分。
+ *
+ * 家長沒理由因為多按了一次「重新產生」，就看不到自己剛才已經做過的決定；
+ * 那些決定也已經真的寫進草稿了，讓卡片跟著消失只會讓人以為復原了。
+ *
+ * `idPrefix` 是必要的：Gemini 每次都從 "s1" 開始編號，兩批的 id 天生會撞——
+ * 撞了的話 `markItemApplied` 這類用 id 比對的函式會同時改到兩批裡同 id
+ * 的項目。呼叫端要給一個跨批次保證不重複的字串（例如遞增的請求序號）。
+ */
+export function mergeRegeneratedSuggestions(
+  previousItems: readonly TaskAiSuggestionItem[],
+  newSuggestions: readonly TaskAiSuggestion[],
+  requestedDraft: TaskDraft,
+  idPrefix: string,
+): TaskAiSuggestionItem[] {
+  const decided = previousItems.filter(
+    item => item.state === 'applied' || item.state === 'applied_edited' || item.state === 'kept',
+  );
+  const fresh = newSuggestions.map(suggestion => ({
+    ...suggestion,
+    id: `${idPrefix}:${suggestion.id}`,
+  }));
+  return refreshItemStates(
+    [...decided, ...initialItems(fresh, requestedDraft)],
+    requestedDraft,
+  );
+}

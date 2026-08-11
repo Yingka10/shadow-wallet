@@ -239,6 +239,11 @@ function AiBody({
           <Text style={s.aiBody}>{TASK_AI_COPY.noChange}</Text>
           {/* summary 已經過 client validator 的長度與安全檢查。 */}
           <Text style={s.aiBody}>{state.summary}</Text>
+          <RequestButton
+            label={TASK_AI_COPY.regenerateButton}
+            variant="secondary"
+            onPress={onRequest}
+          />
         </>
       );
 
@@ -266,6 +271,16 @@ function AiBody({
               onUndo={onUndo}
             />
           ))}
+          {/*
+            已經決定（採用／保留）的項目會在重新產生後留著——見
+            mergeRegeneratedSuggestions。放在卡片列表最後，不跟「採用」
+            「保留」搶視覺，家長要主動找才會按到。
+          */}
+          <RequestButton
+            label={TASK_AI_COPY.regenerateButton}
+            variant="secondary"
+            onPress={onRequest}
+          />
         </>
       );
   }
@@ -274,22 +289,34 @@ function AiBody({
 function RequestButton({
   label,
   disabled,
+  variant = 'primary',
   onPress,
 }: {
   label: string;
   disabled?: boolean;
+  /** secondary：次要動作，例如「重新產生建議」——不跟「採用」搶視覺。 */
+  variant?: 'primary' | 'secondary';
   onPress: () => void;
 }) {
+  const secondary = variant === 'secondary';
   return (
     <Pressable
-      style={[s.aiButton, disabled && s.aiButtonDisabled]}
+      style={[s.aiButton, secondary && s.aiButtonSecondary, disabled && s.aiButtonDisabled]}
       onPress={onPress}
       disabled={disabled}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled: !!disabled, busy: !!disabled }}
     >
-      <Text style={[s.aiButtonText, disabled && s.aiButtonTextDisabled]}>{label}</Text>
+      <Text
+        style={[
+          s.aiButtonText,
+          secondary && s.aiButtonTextSecondary,
+          disabled && s.aiButtonTextDisabled,
+        ]}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -439,6 +466,10 @@ const s = StyleSheet.create({
     color: ParentColors.accent,
   },
   aiButtonTextDisabled: { color: ParentColors.fgMuted },
+  // 「重新產生建議」是次要動作，跟「採用」「保留」不搶視覺——
+  // 每按一次都是一次真的、算進限流額度的請求，故意不用強調色。
+  aiButtonSecondary: { borderColor: ParentColors.borderSoft },
+  aiButtonTextSecondary: { color: ParentColors.fgMuted },
 
   card: {
     borderRadius: ParentRadii.md,

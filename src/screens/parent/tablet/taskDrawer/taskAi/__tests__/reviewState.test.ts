@@ -20,6 +20,7 @@ import {
   markItemApplied,
   markItemKept,
   markItemUndone,
+  mergeRegeneratedSuggestions,
   refreshItemStates,
   userFacingUnavailable,
   type TaskAiSuggestion,
@@ -328,6 +329,69 @@ describe('43, 50. 復原', () => {
     const back = refreshItemStates(refreshItemStates(items, wandered), draft);
     expect(back[0].state).toBe('applied');
     expect(canUndoItem(back[0])).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 重新產生建議：已決定的項目要留著，id 不可撞
+// ---------------------------------------------------------------------------
+
+describe('mergeRegeneratedSuggestions', () => {
+  const titleSug = suggestion('s1', 'title', BASE.title, '每天閱讀二十分鐘');
+  const minutesSug = suggestion('s2', 'sessionMinutes', CURRENT_MINUTES, 30);
+
+  it('已採用的項目留著，還沒決定的被新的一批取代', () => {
+    const applied = applyTaskAiSuggestion({ draft: BASE, suggestion: titleSug });
+    if (!applied.applied) throw new Error('預期套用成功');
+    const previous = markItemApplied(initialItems([titleSug, minutesSug], BASE), titleSug.id, applied.record);
+
+    // 新的一批只有一則，而且是完全不同的欄位。
+    const newBatch = [suggestion('s1', 'notes', null, '每天寫一句心得')];
+    const merged = mergeRegeneratedSuggestions(previous, newBatch, applied.draft, 'req2');
+
+    // 已採用的 title 建議還在，minutesSug（pending，沒被決定過）消失了。
+    expect(merged).toHaveLength(2);
+    const appliedItem = merged.find(i => i.suggestion.fieldPath === 'title');
+    expect(appliedItem?.state).toBe('applied');
+    expect(merged.some(i => i.suggestion.fieldPath === 'sessionMinutes')).toBe(false);
+
+    // 新的一批以 pending 狀態出現。
+    const freshItem = merged.find(i => i.suggestion.fieldPath === 'notes');
+    expect(freshItem?.state).toBe('pending');
+  });
+
+  it('保留原設定的項目也留著', () => {
+    const kept = markItemKept(initialItems([titleSug], BASE), titleSug.id);
+    const merged = mergeRegeneratedSuggestions(kept, [], BASE, 'req2');
+    expect(merged).toHaveLength(1);
+    expect(merged[0].state).toBe('kept');
+  });
+
+  it('兩批建議的 id 天生會撞（Gemini 每次都從 s1 開始編號），merge 之後不能互相干擾', () => {
+    // 上一批的 s1 已經採用了。
+    const applied = applyTaskAiSuggestion({ draft: BASE, suggestion: titleSug });
+    if (!applied.applied) throw new Error('預期套用成功');
+    const previous = markItemApplied(initialItems([titleSug], BASE), titleSug.id, applied.record);
+
+    // 新的一批剛好也用 "s1" 當 id（模型行為，不是我們控制的）。
+    const collidingBatch = [suggestion('s1', 'notes', null, '寫一句心得')];
+    const merged = mergeRegeneratedSuggestions(previous, collidingBatch, applied.draft, 'req2');
+
+    // 兩個 s1 的 id 必須不一樣，否則下面採用新那則時會連帶改到舊的。
+    const ids = merged.map(i => i.suggestion.id);
+    expect(new Set(ids).size).toBe(ids.length);
+
+    const newItemId = merged.find(i => i.suggestion.fieldPath === 'notes')!.suggestion.id;
+    const afterApplyingNew = markItemApplied(merged, newItemId, {
+      fieldPath: 'notes',
+      suggestionId: newItemId,
+      previousValue: null,
+    });
+
+    // 舊的那則（title）狀態不受影響，還是原本採用的那筆。
+    const oldItem = afterApplyingNew.find(i => i.suggestion.fieldPath === 'title');
+    expect(oldItem?.state).toBe('applied');
+    expect(oldItem?.record).toBe(applied.record);
   });
 });
 

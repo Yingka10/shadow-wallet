@@ -49,6 +49,7 @@ export {
   canApplyItem,
   canUndoItem,
   initialItems,
+  mergeRegeneratedSuggestions,
   markItemApplied,
   markItemKept,
   markItemUndone,
