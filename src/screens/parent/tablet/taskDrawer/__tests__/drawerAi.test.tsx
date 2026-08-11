@@ -495,6 +495,33 @@ describe('40-50. 逐項處置', () => {
     expect(r.getAllByText('把讀到的一段講給家人聽')).toHaveLength(1);
   });
 
+  it('重新產生建議：拿到 no_change 也不會讓已採用的項目消失', async () => {
+    // 這裡刻意不用 withSuggestions（auto client，每次呼叫都回同一份結果）——
+    // 要驗證的正是「第二次呼叫回了不同的東西」，兩次呼叫要能各自 settle。
+    const client = new ControllableAiClient();
+    const { r } = openPresetReview(client);
+
+    await press(r, '取得調整建議');
+    await act(async () => {
+      client.settle({ kind: 'result', result: suggestionsResult([COMPLETION_SUGGESTION]) });
+    });
+    await press(r, '採用這項');
+    expect(r.getByText('已採用')).toBeTruthy();
+
+    await press(r, '重新產生建議');
+    await act(async () => {
+      client.settle(
+        { kind: 'result', result: { status: 'no_change', schemaVersion: 1, summary: '已經很清楚了。', suggestions: [] } },
+        1,
+      );
+    });
+
+    // 模型這次說不用調整了，但已經採用的那張卡片不能因此消失——
+    // 那個決定已經真的寫進草稿裡了。
+    expect(r.getByText('已經很清楚了。')).toBeTruthy();
+    expect(r.getByText('已採用')).toBeTruthy();
+  });
+
   it('42. 保留原設定不會改到草稿', async () => {
     const { r } = withSuggestions([COMPLETION_SUGGESTION]);
     await press(r, '取得調整建議');

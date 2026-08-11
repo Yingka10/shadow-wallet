@@ -723,6 +723,22 @@ export function TaskCreationDrawer({
           return;
         }
         if (result.status === 'no_change') {
+          // 重新產生時模型判斷「不用再調整了」，但上一批已經決定
+          // （採用／保留）的項目不能因此消失——那些決定已經寫進草稿了，
+          // 卡片憑空消失只會讓家長以為被復原了。傳空陣列給
+          // mergeRegeneratedSuggestions 就是「只留決定過的，不加新的」。
+          const decided = previousItems.length > 0
+            ? mergeRegeneratedSuggestions(previousItems, [], requestedDraft, String(token))
+            : [];
+          if (decided.length > 0) {
+            setAiState({
+              kind: 'suggestions',
+              inputSignature: aiSignature,
+              summary: result.summary,
+              items: decided,
+            });
+            return;
+          }
           setAiState({
             kind: 'no_change',
             inputSignature: aiSignature,
