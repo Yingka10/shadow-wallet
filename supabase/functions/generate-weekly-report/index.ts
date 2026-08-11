@@ -25,6 +25,8 @@ import {
   formatWeekdaysZh,
   validateRecurrenceSuggestion,
   validateScheduleSuggestion,
+  weeklyFallbackForced,
+  WEEKLY_FALLBACK_FLAG,
   type RecurrenceCandidate,
   type RecurrenceSuggestion,
   type ScheduleCandidate,
@@ -76,13 +78,14 @@ const BAUMRIND_LABELS: Record<string, string> = {
 const GEMINI_TIMEOUT_MS = 8000;
 
 /**
- * 設 Edge Function secret `FORCE_AI_FALLBACK=true` 可以直接跳過 Gemini、
- * 立刻進入 processChild 既有的 computeFallbackInsight 路徑——排練 Demo Q&A、
- * 或想確認降級週報長什麼樣子時用，正式環境不要設這個變數。
+ * 週報的降級開關現在是 `FORCE_WEEKLY_REPORT_FALLBACK`，**不是**
+ * `FORCE_AI_FALLBACK` —— 後者 ai-proxy 也讀，而 Supabase 的 secret 是
+ * project 層級的，打開它會把 Demo 唯一必須 live 的提案 AI 一起關掉。
+ * 判斷邏輯放在 validators.ts（純函式，可在 Jest 下測）。
  */
 async function callGemini(prompt: string): Promise<string> {
-  if (Deno.env.get('FORCE_AI_FALLBACK') === 'true') {
-    throw new Error('FORCE_AI_FALLBACK enabled — skipping Gemini call');
+  if (weeklyFallbackForced((name) => Deno.env.get(name))) {
+    throw new Error(`${WEEKLY_FALLBACK_FLAG} enabled — skipping Gemini call`);
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
