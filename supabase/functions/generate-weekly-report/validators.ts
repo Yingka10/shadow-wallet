@@ -5,6 +5,34 @@
  * unit-tested under Jest/Node as well as Deno.
  */
 
+/**
+ * 週報專用的降級開關名稱。
+ *
+ * 為什麼不能沿用 `FORCE_AI_FALLBACK`：**ai-proxy 讀的是同一個名字**
+ * （見 supabase/functions/ai-proxy/gemini.ts）。Supabase 的 secret 是
+ * project 層級的，所以在 staging 打開 `FORCE_AI_FALLBACK` 只為了讓週報
+ * deterministic，會連帶把孩子提案的 AI 計畫草稿一起關掉 —— 而那正是
+ * Demo 唯一必須 live 的 AI。
+ */
+export const WEEKLY_FALLBACK_FLAG = 'FORCE_WEEKLY_REPORT_FALLBACK';
+
+/** 舊名字。既有 dev workflow 還在用，所以保留相容；Demo runner 一律不設它。 */
+export const LEGACY_FALLBACK_FLAG = 'FORCE_AI_FALLBACK';
+
+/**
+ * 週報是否被要求走 deterministic fallback。
+ *
+ * 注入 getEnv 而不是直接讀 Deno.env，這個檔案才能在 Jest 下被測到 ——
+ * 「新旗標有效、舊旗標仍相容、而且 ai-proxy 不讀新旗標」這三件事
+ * 必須是可測的，不能只靠註解宣稱。
+ */
+export function weeklyFallbackForced(
+  getEnv: (name: string) => string | undefined,
+): boolean {
+  return getEnv(WEEKLY_FALLBACK_FLAG) === 'true'
+    || getEnv(LEGACY_FALLBACK_FLAG) === 'true';
+}
+
 export type ScheduleClaimPeriod = 'day' | 'week' | 'once';
 
 /** A task that hit its claim-frequency cap this week — a candidate for a schedule-adjustment suggestion. */

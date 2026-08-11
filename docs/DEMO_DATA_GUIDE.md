@@ -19,6 +19,46 @@ staging 上同時住著兩組資料，用途相反。搞混它們的後果不對
 
 ---
 
+## Demo State
+
+Demo 資料分成兩個狀態。**Reset Point 是 State A。**
+
+| | 內容 | 狀態 |
+|---|---|---|
+| **State A**｜Demo Start | 家庭身分 + 六筆背景任務 + 上週與本週的背景生活紀錄 + 兩份週報 | **現在可用** |
+| **State B**｜Review Snapshot | State A + 閱讀提案（媽媽 4→3 → 孩子接受）+ 執行紀錄 | `WAITING_FOR_P0_5B` |
+
+State A 的定義是：**「核心閱讀故事還沒開始，但這個家庭已經有一段真實生活歷史。」**
+
+必須存在：家庭／家長／承恩／spending wallet、六筆背景任務與 active 指派、
+三個長期目標、上週與本週的完成紀錄、對應 transactions、非 0 錢包餘額、
+上週與本週的 `weekly_reports`、顧問看得到的 past-7-days 紀錄。
+
+必須不存在：**任何 `child_proposals`**（含 plan version / status / trial /
+adjustment 殘留），以及由閱讀提案產生的 canonical task。
+reset 之後 `child_proposals` 在 Demo family 範圍內是 0。
+
+> **每一次教授測試、影片錄製、正式 Demo、重要截圖之前，先 `reseed --state=a`。**
+> 不要跨 ISO 週沿用上一輪的 Demo 資料 —— 週界以週一為首，週日 23:59 → 週一 00:00
+> 「本週」的定義會整個換掉，前一天 seed 的資料會全部被算進「上一週」，
+> 週報看起來會是空的。
+
+### State B 之後要長什麼樣（P0-10B 再實作）
+
+State A ＋ 閱讀提案 ＋ 媽媽把一週 4 次改成 3 次 ＋ 孩子接受
+＋ canonical task `weekly_frequency = 3` ＋ 本週不同日期的完成紀錄。
+
+⚠️ **這裡有一個產品一致性問題，P0-10B 要先拍板：**
+故事是「4 → 3」，所以孩子接受之後正式計畫的 `weekly_frequency` 就是 **3**，
+不是 4。那麼執行畫面正確的顯示是「本週 2/3」或「本週 3/3」，
+**不會是「本週 3/4」** —— 3/4 只有在計畫仍是 4 次的情況下才成立，
+而那和「媽媽調整成 3 次」互相矛盾。
+
+建議展示 **本週 2/3**：還有進行中的感覺，週報也比較好談
+「已經開始穩定進行，但仍有空間」。
+
+---
+
 ## Demo 資料
 
 ### 內容
@@ -50,6 +90,58 @@ PERFORM set_config('request.jwt.claims',
                    json_build_object('sub', <user_id>)::text, true);
 ```
 
+### 背景生活紀錄（State A）
+
+上週 5 筆、本週 4 筆，全部走 **`complete_task` → `record_completion_context`**
+這兩支正式 RPC，不直接寫 `task_completions` / `transactions`，
+更不直接 `UPDATE wallets SET balance`。
+
+P0-6 已經把 completion／transaction／wallet 收斂進 `complete_task`；
+seed 若改用 INSERT，等於複製一份發幣規則出來，之後任何規則改動
+Demo 資料都會安靜地跟產品脫節。
+
+| | 內容 |
+|---|---|
+| 上週 | 週一：運動練習 ＋ 整理書包；週三：餐後整理 ＋ 四週閱讀計畫；週五：運動練習 |
+| 本週 | 運動練習、四週閱讀計畫、餐後整理、四週餐桌小幫手，輪流落在已經過去的週一/三/五 |
+| 錢包 | **36 枚**（運動練習 12 × 3 次），等於 transactions 之和 |
+| 開始方式 | `self_started` 5 ／ `reminded` 4 |
+| 完成時段 | `after_dinner` 6 ／ `before_bed` 3 |
+
+幾條刻意的設計：
+
+- **只落在週一／三／五。** 六筆任務的 `recurrence_days` 就是 `[1,3,5]`，
+  排定日以外的完成會被 `validRhythmCompletions` 丟掉 —— 孩子端看不到、
+  週報卻算得到。那種不一致比少一筆紀錄糟得多。
+- **本週只用「已經過去的」排定日。** 週一執行時只有一天可用，四筆就疊在
+  那一天（不同任務，合法）；週日執行則自然攤成三天。哪一天跑都有合理資料。
+- **長期任務的起點挪到上週一。** 否則背景紀錄會落在 plan window 之前，
+  被 `buildGoalPresentation` 整個丟掉。
+- **「完成學校作業」刻意不完成。** 它是 `day_type='once'`，完成後
+  `child_tasks` 會被停用；留著它當「今天還沒做的那一件」。
+- **沒有 C 類任務，而這是對的。** C（自主挑戰）依定義來自孩子自己提出，
+  那正是 Demo 要現場 live 跑的那條故事線。State A 的 C 是空的，
+  代表「孩子還沒提出想法」，不是資料缺漏。
+
+seed 最後會自我驗證：錢包餘額必須等於交易總和、每一筆 `earn` 都要指得回
+一次真的完成、背景紀錄剛好 9 筆。任何一條不成立就整包回滾。
+
+### 週報
+
+`weekly_reports` 由**正式的 `generate-weekly-report` Edge Function** 產生，
+不手寫 JSON —— `ai_suggestions` 的欄位形狀決定前端「採用／修改／復原」
+按鈕顯不顯示，手寫必然會漂移。
+
+數字仍然是從真實 DB 資料即時彙總來的；deterministic 的只有文字與建議形狀，
+而且該列會帶 `used_fallback: true`。**不要對外說那是 Gemini 生成的**，
+產品上就叫「本週觀察／建議」。
+
+> ⚠️ **staging 只設 `FORCE_WEEKLY_REPORT_FALLBACK=true`，
+> 絕對不要設 `FORCE_AI_FALLBACK`。**
+> 後者 `ai-proxy` 也讀，而 Supabase 的 secret 是 project 層級的 ——
+> 打開它會把孩子提案的 AI 計畫草稿一起關掉，而那是 Demo 唯一必須 live 的 AI。
+> runner 永遠不設舊旗標，有測試盯著。
+
 ### 執行
 
 ```bash
@@ -57,26 +149,77 @@ export DEMO_STAGING_REF=<staging ref>   # 必填，腳本不猜目標
 export DEMO_PASSWORD=<Demo 家長的登入密碼>
 
 supabase/verify/staging/run_demo.sh reset
-supabase/verify/staging/run_demo.sh seed
-supabase/verify/staging/run_demo.sh reseed   # 兩者依序
+supabase/verify/staging/run_demo.sh seed    --state=a
+supabase/verify/staging/run_demo.sh reseed  --state=a   # 兩者依序
+supabase/verify/staging/run_demo.sh dry-run --state=a   # 只數不寫
 ```
+
+預設 `--state=a`。傳 `--state=b` 會回 `STATE_B_NOT_AVAILABLE_YET` 並退出，
+**不會偷偷退回 A** —— 拿到 A 的資料卻以為是 B，比直接失敗糟得多。
 
 走 `supabase db query --linked`，用 CLI 的臨時登入角色，**不需要資料庫密碼**。
 
-執行前 runner 會：確認 `supabase/.temp/project-ref` 等於 `DEMO_STAGING_REF`、
-確認專案名稱是 `growbook-staging`、印出目標。任何一項不符就中止。
+### 防護
 
-### reset 的範圍
+執行前 runner 會依序檢查，任何一項不符就中止：
+
+1. `DEMO_STAGING_REF` 必填 —— 不猜目標
+2. `supabase/.temp/project-ref` 必須完全相符
+3. 專案名稱必須是 `growbook-staging`（比 ref 更難意外撞上）
+4. **production ref 黑名單** —— linked ref／參數／`SUPABASE_URL`
+   任何一個 target 證據命中就退出
+5. family 必須是 `GrowBook Demo Family`、child 必須是 `承恩`
+6. 印出 `PROJECT REF / PROJECT NAME / FAMILY / CHILD / STATE` 給人看
+7. reset 內建**破壞性筆數上限**；超過就停手要求人工確認，
+   **刻意不提供 `--force` 繞道**
+
+`--dry-run` 只做 `SELECT`／`count`，印出各表將刪幾筆、將建幾筆，一列都不寫。
+
+### reset 的範圍與順序
 
 每一條 `DELETE` 都以 Demo family 的固定 id 為範圍，並在動手前確認
-那個 id 的 `family_name` 真的是 `GrowBook Demo Family`。
+那個 id 的 `family_name` 與 child 的 `nickname` 都對得上。
+沒有 `TRUNCATE`、沒有無 `WHERE` 的 `DELETE`、沒有「刪第一個家庭」。
 
-沒有 `TRUNCATE`、沒有無 `WHERE` 的 `DELETE`、沒有「刪第一個家庭」這種
-不穩定的判斷。有一支測試逐條檢查這件事。
+**順序是這支腳本的全部重點。** 決定順序的是非 CASCADE 的外鍵：
+
+```
+intervention_log        RESTRICT，必須最早
+child_proposals         ← 必須在 tasks 之前（四張子表 CASCADE 自動帶走）
+reward_items / redemption_requests   reward_items.child_id 是 NO ACTION
+task_completions.override_id 斷開 → overrides → task_completions
+transactions → task 附屬表 → child_tasks → long_term_goals → tasks
+reports / moments → wallets → children → parents → families
+auth.identities → auth.users        （families.created_by 是 NO ACTION）
+```
+
+為什麼提案圖一定要排在 `tasks` 之前：
+`child_proposals.task_id` 與 `child_proposal_plan_versions.confirmed_source_task_id`
+都是 `ON DELETE SET NULL`。刪掉 canonical task 會把它們設成 NULL，
+接著撞上 `child_proposals_active_consistency` 與 `..._confirmed_atomic` 兩條 CHECK。
+
+**這不是理論。** 舊版 reset 寫於 P0-1 落地之前，順序是 `… → tasks → children`，
+在 staging 上實測會直接噴：
+
+```
+ERROR: 23514 new row for relation "child_proposals" violates check
+constraint "child_proposals_active_consistency"
+CONTEXT: SQL statement "UPDATE ONLY child_proposals SET task_id = NULL ..."
+         SQL statement "DELETE FROM tasks WHERE family_id = v_family"
+```
+
+也就是說：只要 Demo 真的跑過一次「提案 → 家長確認 → 正式任務」，
+舊版 reset 就必定失敗。現在的版本在同一個狀態下清得乾淨。
+
+reset 最後會自我驗證 Demo 範圍歸零、且沒有留下孤兒 plan version。
 
 ### 可重複執行
 
-`reset → seed → reset → seed` 的結果完全一致（實測比對過所有計數）。
+`reset → seed → verify` 在 staging 實跑三輪，結果完全一致：
+9 筆完成、3 筆交易、錢包 36、6 筆任務、6 個 active 指派、3 個長期目標、
+提案 0、上週 5 筆／本週 4 筆、顧問窗口跨 3 天、零 off-schedule、
+零 plan window 外、零孤兒 earn。
+
 身分用固定 id，六筆任務各有固定的 `clientRequestId`，
 所以連 DB 層的 idempotency 也會擋一次重複。
 
