@@ -498,6 +498,26 @@ function ReviewPromptCard({ item, onAdopt, onDefer, onRevert, onAcknowledge }: {
   );
 }
 
+function AffirmationsCard({ affirmations, aiReady }: { affirmations: string[]; aiReady: boolean }) {
+  if (affirmations.length === 0) return null;
+  return (
+    <View style={s.dialogueCard}>
+      <View style={s.dialogueHeader}>
+        <View style={[s.dialogueIcon, { backgroundColor: ParentColors.amber300 + '33' }]}>
+          <SparkleIcon size={13} color={ParentColors.warn} />
+        </View>
+        <Text style={s.sectionTitle}>這週值得肯定的地方</Text>
+      </View>
+      {affirmations.map((line, i) => (
+        <Text key={i} style={[s.dialogueText, s.affirmationLine]}>・{line}</Text>
+      ))}
+      <Text style={s.dialogueFootnote}>
+        {aiReady ? 'AI 依本週紀錄整理，家長可自行調整說法' : '通用鼓勵語句，AI 洞察生成後會換成貼合本週紀錄的版本'}
+      </Text>
+    </View>
+  );
+}
+
 function DialogueCard({ childName, dialoguePrompt, aiReady }: {
   childName: string;
   dialoguePrompt: string;
@@ -1017,7 +1037,7 @@ export default function ParentWeeklyTablet() {
   const {
     childName, weekLabel, weekRange,
     timeSavedMin, selfStartedCount, remindedCount, afterDinnerCount, beforeBedCount,
-    aiInsight, aiReady, dialoguePrompt,
+    aiInsight, aiReady, dialoguePrompt, affirmations,
     activity, coinFlow, suggestions,
     moments, longTermGoals,
     taskRecords, coinRecords, timeSavingRecords, redemptionRecords,
@@ -1397,6 +1417,8 @@ export default function ParentWeeklyTablet() {
                   ))}
                 </View>
               </View>
+
+              <AffirmationsCard affirmations={affirmations} aiReady={aiReady} />
 
               <DialogueCard childName={childName} dialoguePrompt={dialoguePrompt} aiReady={aiReady} />
 
@@ -2639,6 +2661,9 @@ const s = StyleSheet.create({
     fontSize: 12,
     color: ParentColors.fgMuted,
     marginTop: 14,
+  },
+  affirmationLine: {
+    marginBottom: 8,
   },
   recordTabs: {
     flexDirection: 'row',
