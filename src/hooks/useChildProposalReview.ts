@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  SupabaseChildProposalService,
-  type ChildProposalReviewData,
-} from '../lib/childProposal';
+import { SupabaseChildProposalService } from '../lib/childProposal/childProposalService';
+import type { ChildProposalReviewData } from '../lib/childProposal/types';
 
 export type ChildProposalReviewReader = Pick<
   SupabaseChildProposalService,

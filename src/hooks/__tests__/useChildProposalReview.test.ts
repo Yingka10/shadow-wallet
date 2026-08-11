@@ -60,7 +60,10 @@ describe('useChildProposalReview', () => {
         .mockReturnValueOnce(oldRead.promise)
         .mockResolvedValueOnce([review('new')]),
     } as any;
-    const { result, rerender } = renderHook(
+    const { result, rerender } = renderHook<
+      ReturnType<typeof useChildProposalReview>,
+      { childId: string }
+    >(
       ({ childId }) => useChildProposalReview(childId, 'family-a', 'middle', reader),
       { initialProps: { childId: 'child-a' } },
     );
@@ -76,7 +79,10 @@ describe('useChildProposalReview', () => {
       listNeedsReviewForChild: jest.fn().mockResolvedValue([review('p1')]),
       acceptReview: jest.fn().mockReturnValue(pending.promise),
     } as any;
-    const { result, rerender } = renderHook(
+    const { result, rerender } = renderHook<
+      ReturnType<typeof useChildProposalReview>,
+      { childId: string }
+    >(
       ({ childId }) => useChildProposalReview(childId, 'family-a', 'middle', reader),
       { initialProps: { childId: 'child-a' } },
     );

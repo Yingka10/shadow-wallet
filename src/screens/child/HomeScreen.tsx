@@ -46,8 +46,10 @@ import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../../../App';
 import { useTodayTasks, type TodayTask } from '../../hooks/useTodayTasks';
 import { useWallet } from '../../hooks/useWallet';
+import { useChildProposalReview } from '../../hooks/useChildProposalReview';
 import BottomNav from '../../components/BottomNav';
 import GrassGroundScene from '../../components/child/GrassGroundScene';
+import { ChildPlanReviewCard } from '../../components/child/ChildPlanReviewCard';
 import { Moon, Star, Firefly, NightHills } from '../../components/child/NightAssets';
 import TaskCompleteModal from '../../components/TaskCompleteModal';
 import FeedbackAnimation, { type FeedbackType } from '../../components/FeedbackAnimation';
@@ -228,6 +230,21 @@ export default function HomeScreen() {
   const [modal, setModal] = useState<ModalState>({ task: null, visible: false });
   const [feedback, setFeedback] = useState<FeedbackState>({ visible: false, type: 'task-a', value: 0 });
   const [childMeta, setChildMeta] = useState<ChildMeta | null>(null);
+  const {
+    reviews: proposalReviews,
+    loading: proposalReviewLoading,
+    error: proposalReviewError,
+    refresh: refreshProposalReviews,
+    accept: acceptProposalReview,
+    requestChanges: requestProposalChanges,
+    actingProposalId,
+    actionError: proposalReviewActionError,
+    successMessage: proposalReviewSuccess,
+  } = useChildProposalReview(
+    childId,
+    childMeta?.familyId ?? null,
+    childMeta?.ageGroup ?? null,
+  );
 
   const [addTaskVisible, setAddTaskVisible] = useState(false);
   const [newTaskName, setNewTaskName] = useState('');
@@ -455,7 +472,11 @@ export default function HomeScreen() {
           style={[styles.scroll, webMouseDraggableScroll]}
           contentContainerStyle={[styles.scrollContent, styles.scrollContentWithNav]}
           refreshControl={
-            <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={HOME.primaryGreen} />
+            <RefreshControl
+              refreshing={loading || proposalReviewLoading}
+              onRefresh={() => { refresh(); void refreshProposalReviews(); }}
+              tintColor={HOME.primaryGreen}
+            />
           }
           showsVerticalScrollIndicator={false}
         >
@@ -653,6 +674,29 @@ export default function HomeScreen() {
             走提案流程 —— 不建立正式任務、不發幣，家長之後一起確認。
             舊的直接建立任務入口見 LEGACY_CHILD_TASK_ENTRY_ENABLED。
           */}
+          {proposalReviewSuccess && <Text style={styles.reviewSuccess}>{proposalReviewSuccess}</Text>}
+          {proposalReviews[0] && (
+            <ChildPlanReviewCard
+              review={proposalReviews[0]}
+              saving={actingProposalId === proposalReviews[0].proposal.id}
+              error={proposalReviewActionError}
+              onAccept={() => {
+                void acceptProposalReview(proposalReviews[0]).then(completed => {
+                  if (completed) refresh();
+                });
+              }}
+              onRequestChanges={() => { void requestProposalChanges(proposalReviews[0]); }}
+              onRetry={() => { void refreshProposalReviews(); }}
+            />
+          )}
+          {proposalReviewError && proposalReviews.length === 0 && (
+            <View style={styles.reviewError}>
+              <Text style={styles.reviewErrorText}>讀取要一起看的安排失敗</Text>
+              <TouchableOpacity onPress={() => { void refreshProposalReviews(); }}>
+                <Text style={styles.reviewRetry}>重新看看</Text>
+              </TouchableOpacity>
+            </View>
+          )}
           <TouchableOpacity
             testID="child-proposal-entry"
             style={styles.addRow}
@@ -1764,6 +1808,25 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     marginBottom: 8,
   },
+  reviewSuccess: {
+    color: Colors.success,
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  reviewError: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: Colors.borderSoft,
+    backgroundColor: Colors.bgSurface,
+  },
+  reviewErrorText: { flex: 1, color: Colors.fgSecondary, fontSize: 14 },
+  reviewRetry: { color: Colors.accent, fontSize: 14, fontWeight: '800' },
   addPlus: {
     width: 34,
     height: 34,
