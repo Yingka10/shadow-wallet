@@ -15,6 +15,11 @@ const GEMINI_URL = (model: string) =>
 // 目前 gemini-flash-latest 實際指向 gemini-3.6-flash。
 const MODEL_CHAIN = ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-2.0-flash'];
 
+// 沒有這個限制的話，Gemini 端網路卡住時 fetch 可能懸著不回應很久（遠超正常
+// TCP timeout），家長會看著顧問聊天/週報轉圈轉很久才等到 fallback。硬性中斷
+// 比等待「自然失敗」快得多、也更可預期——尤其是 Demo 現場網路不穩的時候。
+const GEMINI_TIMEOUT_MS = 8000;
+
 async function callGeminiOnce(prompt: string, model: string, jsonMode: boolean): Promise<string> {
   const body: Record<string, unknown> = {
     contents: [{ parts: [{ text: prompt }] }],
@@ -23,11 +28,24 @@ async function callGeminiOnce(prompt: string, model: string, jsonMode: boolean):
     body.generationConfig = { responseMimeType: 'application/json' };
   }
 
-  const res = await fetch(GEMINI_URL(model), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(GEMINI_URL(model), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error(`Gemini timed out after ${GEMINI_TIMEOUT_MS}ms (model ${model})`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) throw new Error(`Gemini error ${res.status}: ${await res.text()}`);
 
@@ -40,8 +58,15 @@ async function callGeminiOnce(prompt: string, model: string, jsonMode: boolean):
 /**
  * 呼叫 Gemini，依 MODEL_CHAIN 逐一嘗試。
  * 遇到 429（配額）或 404（model 不存在）時換下一個 model；其他錯誤直接拋出。
+ *
+ * 設 Edge Function secret `FORCE_AI_FALLBACK=true` 可以直接跳過 Gemini、
+ * 立刻進入呼叫端既有的 fallback 路徑——排練 Demo Q&A、或想在沒有網路的
+ * 環境下確認降級畫面長什麼樣子時用，正式環境不要設這個變數。
  */
 export async function callGemini(prompt: string, jsonMode = false): Promise<string> {
+  if (Deno.env.get('FORCE_AI_FALLBACK') === 'true') {
+    throw new Error('FORCE_AI_FALLBACK enabled — skipping Gemini call');
+  }
   let lastErr: unknown;
   for (const model of MODEL_CHAIN) {
     try {

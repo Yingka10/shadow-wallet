@@ -69,15 +69,41 @@ const BAUMRIND_LABELS: Record<string, string> = {
   free_fatigue: '給孩子很大空間，日常較少主動介入',
 };
 
+// 沒有這個限制的話，Gemini 端網路卡住時 fetch 可能懸著不回應很久（遠超正常
+// TCP timeout），週報永遠生不出來、processChild 的 fallback 也永遠等不到觸發
+// 的機會。硬性中斷比等待「自然失敗」快得多、也更可預期。
+const GEMINI_TIMEOUT_MS = 8000;
+
+/**
+ * 設 Edge Function secret `FORCE_AI_FALLBACK=true` 可以直接跳過 Gemini、
+ * 立刻進入 processChild 既有的 computeFallbackInsight 路徑——排練 Demo Q&A、
+ * 或想確認降級週報長什麼樣子時用，正式環境不要設這個變數。
+ */
 async function callGemini(prompt: string): Promise<string> {
-  const res = await fetch(GEMINI_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: 'application/json' },
-    }),
-  });
+  if (Deno.env.get('FORCE_AI_FALLBACK') === 'true') {
+    throw new Error('FORCE_AI_FALLBACK enabled — skipping Gemini call');
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(GEMINI_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: 'application/json' },
+      }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error(`Gemini timed out after ${GEMINI_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) throw new Error(`Gemini error ${res.status}`);
   const data = await res.json() as {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
