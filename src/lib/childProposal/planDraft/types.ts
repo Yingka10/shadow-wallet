@@ -74,19 +74,38 @@ export type PlanDraftCategory = 'A' | 'B' | 'C' | 'D';
 /** 這份草稿的節奏是誰決定的。孩子選過就一定是 child。 */
 export type PlanDraftCadenceSource = 'child' | 'ai_suggested' | 'none';
 
+/**
+ * 這件事「在做什麼」的封閉列舉。
+ *
+ * 存在的理由只有一個：App 端要用它組出**正式的完成標準**。
+ * 模型從固定清單挑一個，句子由 canonicalPlanFields 自己寫 ——
+ * 所以正式的完成標準永遠不是模型那天剛好寫出來的自由文字。
+ */
+export type PlanDraftActivityKind =
+  | 'reading'
+  | 'practice'
+  | 'exercise'
+  | 'creating'
+  | 'learning'
+  | 'helping'
+  | 'other';
+
 export type ChildProposalPlanDraft = {
   schemaVersion: typeof CHILD_PROPOSAL_PLAN_DRAFT_SCHEMA_VERSION;
 
   planTitle: string;
   planSummary: string;
   /**
-   * 做一次算完成什麼。
+   * 模型寫的完成說明。
    *
-   * 目前 child_proposal_plan_versions **沒有**這一欄，所以它存在
-   * ai_snapshot 裡等 P0-5 取用（正式任務才有 completion_description）。
-   * 這是刻意的：不為了一個還沒有人讀的欄位改 schema。
+   * ⚠️ 這是 **AI candidate / 稽核證據**，只會進 ai_snapshot。
+   *    真正寫進 `completion_description` 欄位的是
+   *    `canonicalCompletionDescription()` 組出來的固定句型。
    */
   completionDescription: string;
+  activityKind: PlanDraftActivityKind;
+  /** 模型建議的下一步。要通過 validateNextStep 才會成為 next_step。 */
+  nextStepSuggestion: string | null;
 
   cadence: PlanDraftCadence | null;
   cadenceSource: PlanDraftCadenceSource;
@@ -148,6 +167,7 @@ export const PLAN_DRAFT_LIMITS = {
   maxTitleLength: 24,
   maxSummaryLength: 160,
   maxCompletionLength: 60,
+  maxNextStepLength: 40,
   maxReasonLength: 80,
   minMinutes: 1,
   maxMinutes: 180,

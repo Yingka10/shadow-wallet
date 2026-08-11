@@ -13,6 +13,8 @@ function draft(overrides: Partial<ChildProposalPlanDraft> = {}): ChildProposalPl
     planTitle: '兩週閱讀挑戰',
     planSummary: '先用一週 4 次的節奏開始。',
     completionDescription: '完成一次約定的閱讀時段',
+    activityKind: 'reading',
+    nextStepSuggestion: '選一本想看的書，閱讀約 15 分鐘',
     cadence: { mode: 'weekly_frequency', weeklyFrequency: 4 },
     cadenceSource: 'child',
     estimatedMinutes: 15,

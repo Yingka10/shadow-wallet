@@ -14,6 +14,19 @@ export {
 } from './buildPlanDraftInput';
 export { planDraftUnavailable, validatePlanDraftResult } from './validatePlanDraftResult';
 export {
+  canonicalPlanFields,
+  canonicalCompletionDescription,
+  canonicalNextStep,
+  canonicalProgressModel,
+  canonicalPurposeCategory,
+  validateNextStep,
+  NEXT_STEP_MAX_LENGTH,
+  NEXT_STEP_MIN_LENGTH,
+  type CanonicalPlanFields,
+  type NextStepRejection,
+  type NextStepResult,
+} from './canonicalPlanFields';
+export {
   buildPlanDraftSnapshot,
   toAddPlanVersionCommand,
   PLAN_DRAFT_SNAPSHOT_VERSION,

@@ -60,6 +60,8 @@ describe('列舉兩邊一致', () => {
     ['幣值狀態', ['priced', 'unpriced', 'coin_disabled', 'gated']],
     ['節奏來源', ['child', 'ai_suggested', 'none']],
     ['回饋方式', ['record_only', 'family_contribution', 'progress_only', 'coin_eligible']],
+    // 封閉列舉。少一個值，App 端就會把那種活動整筆拒收。
+    ['活動種類', ['reading', 'practice', 'exercise', 'creating', 'learning', 'helping', 'other']],
   ])('%s', (_label, values) => {
     for (const value of values) {
       expect({ value, inFunction: LOGIC.includes(`'${value}'`) })
@@ -79,6 +81,39 @@ describe('列舉兩邊一致', () => {
 
   it('schema 版本兩邊都是 1', () => {
     expect(LOGIC).toContain('CHILD_PROPOSAL_PLAN_DRAFT_SCHEMA_VERSION = 1');
+  });
+
+  it('Function 端有回 activityKind 與 nextStepSuggestion —— App 端靠它們組 canonical 欄位', () => {
+    expect(LOGIC).toContain('activityKind');
+    expect(LOGIC).toContain('nextStepSuggestion');
+    // prompt 也必須真的要求它們，否則模型不會給。
+    expect(LOGIC).toContain('"activityKind":"reading"');
+    expect(LOGIC).toContain('"nextStepSuggestion"');
+  });
+});
+
+describe('canonical 欄位由 App 端算，Function 端不越權', () => {
+  it('Function 端不決定 progress model', () => {
+    // Function 回的是「理解」，不是 canonical 欄位。這兩個識別字出現在
+    // Function 端，就代表它開始自己組 P0-5 要的值了 —— 那會變成兩個地方
+    // 各有一套推導規則，而其中一套遲早會被忘記。
+    //
+    // （prompt 裡的「完成一次約定的閱讀時段」是給模型的**範例**，
+    //   那一句只會進 ai_snapshot 當候選，不是結構化欄位的值。）
+    for (const forbidden of ['progressModel', 'weekly_rhythm']) {
+      expect({ forbidden, present: LOGIC.includes(forbidden) })
+        .toEqual({ forbidden, present: false });
+    }
+  });
+
+  it('canonical 完成標準的句型只在 App 端', () => {
+    const canonical = readFileSync(
+      join(process.cwd(), 'src', 'lib', 'childProposal', 'planDraft', 'canonicalPlanFields.ts'),
+      'utf8',
+    );
+    expect(canonical).toContain('完成一次約定的');
+    // 而 Function 端沒有任何地方在組這個句子（它只在 prompt 裡當範例）。
+    expect(LOGIC).not.toContain('`完成一次約定的');
   });
 });
 

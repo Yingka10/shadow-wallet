@@ -74,6 +74,13 @@ export type PlanDraftOutcome =
       planVersionId: string;
       versionNo: number;
       aiRequestId: string;
+      /**
+       * DB 的 unique index 擋下了這一次插入，回傳的是既有那一版。
+       *
+       * 仍然是 `saved` —— 結果與預期完全一致（那一版就在那裡）。
+       * 分開記是為了讓 log 分得出「真的併發過」與「一次就寫成」。
+       */
+      duplicateSuppressed: boolean;
     };
 
 const AGE_GROUPS: readonly string[] = ['2-4', '4-6', '6-9', '9-12'];
@@ -155,6 +162,9 @@ export async function generateChildProposalPlanDraft(
     planVersionId: saved.planVersionId,
     versionNo: saved.versionNo,
     aiRequestId,
+    // 呼叫前的查重擋掉大部分重試；真的併發時由 DB 的 unique index 收尾，
+    // RPC 回既有那一版並標記 duplicate。兩層都不會留下第二份草稿。
+    duplicateSuppressed: saved.duplicate,
   };
 }
 

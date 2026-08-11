@@ -113,7 +113,28 @@ describe('成功的回應', () => {
 
     await expect(
       service().addPlanVersion({ schemaVersion: 1, proposalId: 'p-1', authoredBy: 'parent' }),
-    ).resolves.toEqual({ ok: true, planVersionId: 'v-2', versionNo: 2, isCurrent: true });
+    ).resolves.toEqual({
+      ok: true, planVersionId: 'v-2', versionNo: 2, isCurrent: true,
+      // 舊版 RPC 不回這個鍵 —— 沒有就是「這是新的一版」，不是 undefined。
+      duplicate: false,
+    });
+  });
+
+  it('同一把 aiRequestId 撞到既有版本 → 成功且標記 duplicate，不是失敗', async () => {
+    mockRpc.mockResolvedValue({
+      data: { ok: true, planVersionId: 'v-1', versionNo: 1, isCurrent: true, duplicate: true },
+      error: null,
+    });
+
+    // 背景重試撞到既有版本時，正確的結果是「早就存好了」。
+    // 當成失敗的話，呼叫端會一直重試一件已經完成的事。
+    await expect(
+      service().addPlanVersion({
+        schemaVersion: 1, proposalId: 'p-1', authoredBy: 'ai', aiRequestId: 'cpd1:p-1:abcd',
+      }),
+    ).resolves.toEqual({
+      ok: true, planVersionId: 'v-1', versionNo: 1, isCurrent: true, duplicate: true,
+    });
   });
 
   it('轉換回傳前後狀態；非 active 的轉換沒有回饋快照', async () => {

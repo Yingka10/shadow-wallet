@@ -172,6 +172,28 @@ export type ChildProposalRewardEligibility = 'not_evaluated' | 'allowed' | 'bloc
 /** 計畫版本是誰寫的。ai 是第一等公民 —— 不記的話事後分不出誰的主意。 */
 export type ChildProposalPlanAuthor = 'child' | 'parent' | 'ai';
 
+/**
+ * 這件事「為什麼做」。與 tasks 的 A/B/C/D 同一組語意
+ * （見 docs/SPEC_task-taxonomy-2026-07.md）。
+ *
+ * ⚠️ 長期**不是**第五類。那是 duration_type ——
+ *    混進來的話，一個兩週的閱讀挑戰會變成一種新的任務種類。
+ */
+export type ChildProposalPurposeCategory = 'A' | 'B' | 'C' | 'D';
+
+/**
+ * 進度怎麼看。
+ *
+ * `weekly_rhythm` —— 以每週節奏看「本週 X / Y」：
+ *   · 累積真實完成次數
+ *   · 中斷一次不歸零（不以 streak 為主進度）
+ *   · 不宣稱有不存在的里程碑完成
+ *
+ * P0 只有這一個值，而且是**推導**出來的，不是 AI 說了算。
+ * 證據不足時是 null —— 不猜。
+ */
+export type ChildProposalProgressModel = 'weekly_rhythm';
+
 export type ChildProposalTrialOutcome = 'tried' | 'completed' | 'skipped';
 
 export type ChildProposalAdjustmentKind =
@@ -235,7 +257,34 @@ export type ChildProposalPlanVersion = {
   plan_title: string | null;
   plan_summary: string | null;
 
+  // ── P0-5 直接讀的結構化欄位 ────────────────────────────────────────────
+  //
+  // 這四欄刻意**不只**存在 ai_snapshot 裡。snapshot 是「當時 AI 回了什麼」
+  // 的稽核紀錄，形狀會隨 prompt 改版而變、也沒有任何 CHECK 擋得住裡面的值。
+  // 讓建立正式任務去解那段 JSON，等於讓任務的分類與完成標準取決於
+  // 一段沒有 schema 的東西。
+
+  purpose_category: ChildProposalPurposeCategory | null;
+  /**
+   * 一次怎樣才算完成。
+   *
+   * ⚠️ 由 deterministic transformer 產生的固定句型，**不是 LLM 的自由文字**。
+   *    D 類學習任務獎勵的是可控制的投入與練習，不是最後結果 ——
+   *    句型永遠是「完成一次…時段」，結構上就寫不出「讀完整本書」。
+   */
+  completion_description: string | null;
+  progress_model: ChildProposalProgressModel | null;
+  /** 孩子下一次最小可做的步驟。沒有可靠建議時是 null —— 不生成假內容。 */
+  next_step: string | null;
+
   cadence_mode: ChildProposalCadenceMode | null;
+  /**
+   * 一週要完成幾次，**日期彈性**。
+   *
+   * 「一週 4 次」不是「系統替孩子挑了四個固定星期」——
+   * 所以 weekly_frequency 的列，cadence_days 一定是 null（DB 有 CHECK）。
+   * 要指定星期是 fixed_days，那才有 scheduled day / missed day 的語意。
+   */
   cadence_weekly_frequency: number | null;
   cadence_days: number[] | null;
   preferred_time: string | null;
@@ -371,6 +420,13 @@ export type AddPlanVersionSuccess = {
   planVersionId: string;
   versionNo: number;
   isCurrent: boolean;
+  /**
+   * 同一把 aiRequestId 已經有一版了，這次沒有新增。
+   *
+   * **這不是錯誤。** 背景重試撞到既有版本時，正確的結果是「早就存好了」，
+   * 而不是「儲存失敗」—— 後者會讓呼叫端一直重試一件已經完成的事。
+   */
+  duplicate: boolean;
 };
 
 export type TransitionProposalSuccess = {
@@ -449,6 +505,26 @@ export type AddChildProposalPlanVersionCommand = {
   authoredBy: ChildProposalPlanAuthor;
   planTitle?: string;
   planSummary?: string;
+
+  /**
+   * P0-5 直接讀的結構化欄位。
+   *
+   * 每一個都有明確的權威來源，而且**都不是 LLM 的自由文字**：
+   *   purposeCategory       AI 語意理解 → 既有 rewardEligibility 閘門
+   *   completionDescription deterministic transformer（固定句型）
+   *   progressModel         deterministic adapter（依 category/duration/cadence 推導）
+   *   nextStep              通過長度與內容驗證的 AI 建議，不合格就 null
+   */
+  purposeCategory?: ChildProposalPurposeCategory;
+  completionDescription?: string;
+  progressModel?: ChildProposalProgressModel;
+  nextStep?: string;
+
+  /**
+   * ⚠️ mode = 'weekly_frequency' 時**不可以**帶 days —— RPC 會以
+   * WEEKLY_FREQUENCY_HAS_NO_DAYS 拒絕。一週幾次是彈性的週目標，
+   * 不是排定的星期幾。
+   */
   cadence?: ChildProposalCadenceInput;
   estimatedMinutes?: number;
   durationType?: 'one_time' | 'recurring' | 'long_term';

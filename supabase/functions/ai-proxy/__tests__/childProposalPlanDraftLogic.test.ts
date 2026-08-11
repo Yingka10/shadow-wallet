@@ -47,6 +47,8 @@ function understanding(
     planTitle: '兩週閱讀挑戰',
     planSummary: '先用一週 4 次的節奏，每次讀一個不會太大的段落。',
     completionDescription: '完成一次約定的閱讀時段',
+    activityKind: 'reading',
+    nextStepSuggestion: '選一本想看的書，閱讀約 15 分鐘',
     category: 'D',
     categoryReason: '練習閱讀，有進步軌跡',
     estimatedMinutes: 15,
@@ -334,6 +336,37 @@ describe('看不懂的輸出就是沒有草稿', () => {
     ['期間超過上限', { durationDays: 5000 }],
   ])('%s → null', (_label, patch) => {
     expect(normalizePlanDraftUnderstanding({ ...understanding(), ...patch })).toBeNull();
+  });
+
+  it('活動種類認不出來時退回 other —— 挑一個「最像」的會寫出不相干的完成標準', () => {
+    const parsed = normalizePlanDraftUnderstanding({
+      ...understanding(), activityKind: '看影片學東西',
+    });
+    expect(parsed?.activityKind).toBe('other');
+  });
+
+  it.each(['reading', 'practice', 'exercise', 'creating', 'learning', 'helping', 'other'])(
+    '認得 %s',
+    (activityKind) => {
+      const parsed = normalizePlanDraftUnderstanding({ ...understanding(), activityKind });
+      expect(parsed?.activityKind).toBe(activityKind);
+    },
+  );
+
+  it('下一步建議可以沒有 —— 想不到就是 null，不硬湊', () => {
+    expect(
+      normalizePlanDraftUnderstanding({ ...understanding(), nextStepSuggestion: null }),
+    ).toMatchObject({ nextStepSuggestion: null });
+    expect(
+      normalizePlanDraftUnderstanding({ ...understanding(), nextStepSuggestion: '   ' }),
+    ).toMatchObject({ nextStepSuggestion: null });
+  });
+
+  it('prompt 有要求活動種類與下一步，而且給了封閉清單', () => {
+    const prompt = buildPlanDraftPrompt(input());
+    expect(prompt).toContain('activityKind 從清單裡挑一個最接近的，不要自己造詞');
+    expect(prompt).toContain('nextStepSuggestion');
+    expect(prompt).toContain('想不到具體的就給 null');
   });
 
   it('難度看不懂時退回 standard，不整筆丟掉', () => {

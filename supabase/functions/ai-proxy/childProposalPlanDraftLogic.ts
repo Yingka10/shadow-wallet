@@ -60,6 +60,24 @@ export type ChildProposalPlanDraftInput = {
 
 export type PlanDraftDifficulty = 'easy' | 'standard' | 'hard';
 
+/**
+ * 這件事「在做什麼」的封閉列舉。
+ *
+ * 存在的理由只有一個：App 端要用它組出**正式的完成標準**，而正式的完成標準
+ * 不可以照抄模型的自由文字。讓模型從一個固定清單裡挑一個，句子由我們自己寫 ——
+ * 這樣「完成一次約定的閱讀時段」是我們的句型，不是模型那天剛好寫得好。
+ *
+ * 認不出來時退回 `other`，不是猜一個最像的。
+ */
+export type PlanDraftActivityKind =
+  | 'reading'
+  | 'practice'
+  | 'exercise'
+  | 'creating'
+  | 'learning'
+  | 'helping'
+  | 'other';
+
 export type PlanDraftUnderstanding = {
   planTitle: string;
   planSummary: string;
@@ -71,6 +89,15 @@ export type PlanDraftUnderstanding = {
    * 模型被要求這樣寫，而 outcomeBased 讓沒照做的情況仍然攔得下來。
    */
   completionDescription: string;
+  /** 封閉列舉。App 端用它組正式的完成標準。 */
+  activityKind: PlanDraftActivityKind;
+  /**
+   * 孩子下一次最小可做的步驟。
+   *
+   * 名字裡的 Suggestion 是刻意的：它是**建議**，要通過 App 端的長度與內容
+   * 驗證才會成為 next_step。過不了就是 null —— 不生成假內容。
+   */
+  nextStepSuggestion: string | null;
   category: Category;
   categoryReason: string;
   estimatedMinutes: number;
@@ -106,7 +133,17 @@ export type ChildProposalPlanDraft = {
 
   planTitle: string;
   planSummary: string;
+  /**
+   * 模型寫的完成說明。
+   *
+   * ⚠️ 這是 **AI candidate / 稽核證據**，不是正式的完成標準。
+   *    正式的那一個由 App 端的 deterministic transformer 依 activityKind
+   *    組出來（見 canonicalPlanFields.ts）—— 不照抄這一段。
+   */
   completionDescription: string;
+  activityKind: PlanDraftActivityKind;
+  /** 建議的下一步。要通過驗證才會成為 next_step。 */
+  nextStepSuggestion: string | null;
 
   cadence: PlanDraftCadence | null;
   /** child = 照抄孩子選的；ai_suggested = 孩子沒選，這是 AI 提的。 */
@@ -156,6 +193,7 @@ export const PLAN_DRAFT_LIMITS = {
   maxTitleLength: 24,
   maxSummaryLength: 160,
   maxCompletionLength: 60,
+  maxNextStepLength: 40,
   maxReasonLength: 80,
   minMinutes: 1,
   maxMinutes: 180,
@@ -259,6 +297,14 @@ ${input.preferredTime ? `孩子想做的時段：${input.preferredTime}` : ''}
 6. estimatedMinutes 是「做一次大概花幾分鐘」，${PLAN_DRAFT_LIMITS.minMinutes}-${PLAN_DRAFT_LIMITS.maxMinutes} 的整數，要符合這個年紀能持續的長度。
 7. 如果這件事聽起來是在獎勵一次性的成績或名次，outcomeBased 給 true。
 8. 如果分不清楚這是家裡本來就該做的事還是額外的挑戰，needsClarification 給 true 並寫一句 clarificationQuestion 給爸媽看。
+9. activityKind 從清單裡挑一個最接近的，不要自己造詞：
+   reading（看書/閱讀）、practice（練習某項技能，例如樂器、單字）、exercise（身體活動）、
+   creating（畫畫、寫作、做東西）、learning（學一個新東西）、helping（幫忙家裡）、other（都不像）。
+10. nextStepSuggestion 寫「今天或下一次，最小可以做的一步」，${PLAN_DRAFT_LIMITS.maxNextStepLength} 字以內，
+   要是一個孩子看完就知道現在要做什麼的動作。
+   可以：「選一本想看的書，閱讀約 15 分鐘」。
+   不可以：「讀完整本書」「養成閱讀習慣」（前者是結果，後者不是一個動作）。
+   想不到具體的就給 null，**不要硬湊一句**。
 
 類別定義（判斷「為什麼做」，不是判斷難度）：
 A = 生活常規（刷牙、整理書包）
@@ -269,7 +315,7 @@ D = 學習與技能（練習、學習新東西、有進步軌跡）
 planSummary 用溫暖的白話寫 2 句以內，要講得出孩子原本想做什麼、以及先用什麼節奏開始。不要出現「任務」「審核」「批准」「系統」這些字。
 
 只回傳 JSON，前後不要有其他文字：
-{"planTitle":"兩週閱讀挑戰","planSummary":"...","completionDescription":"完成一次約定的閱讀時段","category":"D","categoryReason":"40字內","estimatedMinutes":15,"difficulty":"standard","outcomeBased":false,"needsClarification":false,"clarificationQuestion":null,"durationDays":14,"suggestedCadence":null}
+{"planTitle":"兩週閱讀挑戰","planSummary":"...","completionDescription":"完成一次約定的閱讀時段","activityKind":"reading","nextStepSuggestion":"選一本想看的書，閱讀約 15 分鐘","category":"D","categoryReason":"40字內","estimatedMinutes":15,"difficulty":"standard","outcomeBased":false,"needsClarification":false,"clarificationQuestion":null,"durationDays":14,"suggestedCadence":null}
 
 suggestedCadence 只能是 null 或以下三種其中一種：
 {"mode":"weekly_frequency","weeklyFrequency":3}
@@ -298,6 +344,15 @@ function intInRange(value: unknown, min: number, max: number): number | null {
 
 const CATEGORIES: readonly string[] = ['A', 'B', 'C', 'D'];
 const DIFFICULTIES: readonly string[] = ['easy', 'standard', 'hard'];
+export const ACTIVITY_KINDS: readonly PlanDraftActivityKind[] = [
+  'reading',
+  'practice',
+  'exercise',
+  'creating',
+  'learning',
+  'helping',
+  'other',
+];
 
 /**
  * 節奏建議的形狀檢查。
@@ -380,10 +435,20 @@ export function normalizePlanDraftUnderstanding(
     : null;
   if (durationDaysGiven && durationDays === null) return null;
 
+  // 認不出來就是 other。挑一個「最像」的會讓完成標準寫出一句
+  // 跟這件事沒關係的話，而那句話會變成正式任務的完成標準。
+  const activityKind: PlanDraftActivityKind =
+    typeof raw.activityKind === 'string'
+      && (ACTIVITY_KINDS as readonly string[]).includes(raw.activityKind)
+      ? (raw.activityKind as PlanDraftActivityKind)
+      : 'other';
+
   return {
     planTitle,
     planSummary,
     completionDescription,
+    activityKind,
+    nextStepSuggestion: text(raw.nextStepSuggestion, PLAN_DRAFT_LIMITS.maxNextStepLength),
     category,
     categoryReason: text(raw.categoryReason, PLAN_DRAFT_LIMITS.maxReasonLength) ?? '',
     estimatedMinutes,
@@ -477,6 +542,8 @@ export function composePlanDraft(args: {
     planTitle: understanding.planTitle,
     planSummary: understanding.planSummary,
     completionDescription: understanding.completionDescription,
+    activityKind: understanding.activityKind,
+    nextStepSuggestion: understanding.nextStepSuggestion,
 
     cadence,
     cadenceSource,

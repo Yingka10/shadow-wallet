@@ -30,6 +30,15 @@ const DIFFICULTIES: readonly string[] = ['easy', 'standard', 'hard'];
 const DURATION_TYPES: readonly string[] = ['one_time', 'recurring', 'long_term'];
 const PRICING_STATUSES: readonly string[] = ['priced', 'unpriced', 'coin_disabled', 'gated'];
 const CADENCE_SOURCES: readonly string[] = ['child', 'ai_suggested', 'none'];
+const ACTIVITY_KINDS: readonly string[] = [
+  'reading',
+  'practice',
+  'exercise',
+  'creating',
+  'learning',
+  'helping',
+  'other',
+];
 const REWARD_POLICIES: readonly string[] = [
   'record_only',
   'family_contribution',
@@ -132,6 +141,25 @@ function validateDraft(value: unknown): ChildProposalPlanDraft | null {
   );
   if (planTitle === null || planSummary === null || completionDescription === null) return null;
 
+  // 封閉列舉。認不出來就整筆不放行 —— 這一欄決定正式完成標準的句型，
+  // 靜靜退回 'other' 會讓一個閱讀計畫的完成標準變成「完成一次說好的步驟」。
+  if (typeof raw.activityKind !== 'string' || !ACTIVITY_KINDS.includes(raw.activityKind)) {
+    return null;
+  }
+
+  // 建議可以沒有（null），但不可以是一個看不懂的型別。
+  const nextStepSuggestion =
+    raw.nextStepSuggestion === null || raw.nextStepSuggestion === undefined
+      ? null
+      : nonEmptyString(raw.nextStepSuggestion, PLAN_DRAFT_LIMITS.maxNextStepLength);
+  if (
+    raw.nextStepSuggestion !== null
+    && raw.nextStepSuggestion !== undefined
+    && nextStepSuggestion === null
+  ) {
+    return null;
+  }
+
   const cadence = validCadence(raw.cadence);
   if (cadence === 'invalid') return null;
 
@@ -212,6 +240,8 @@ function validateDraft(value: unknown): ChildProposalPlanDraft | null {
     planTitle,
     planSummary,
     completionDescription,
+    activityKind: raw.activityKind as ChildProposalPlanDraft['activityKind'],
+    nextStepSuggestion,
     cadence,
     cadenceSource: raw.cadenceSource as ChildProposalPlanDraft['cadenceSource'],
     estimatedMinutes,

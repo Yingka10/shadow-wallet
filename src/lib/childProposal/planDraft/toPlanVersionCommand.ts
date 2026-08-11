@@ -19,6 +19,7 @@
 
 // 直接指向定義它的檔案，不走 taskCatalog 的 barrel（見 planDraftClient 的同一則說明）。
 import { TASK_POLICY_VERSION } from '../../../screens/parent/tablet/taskDrawer/taskCatalog/types';
+import { canonicalPlanFields, type CanonicalPlanFields } from './canonicalPlanFields';
 import {
   CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION,
   type AddChildProposalPlanVersionCommand,
@@ -43,8 +44,24 @@ export type PlanDraftSnapshot = {
   plan: {
     planTitle: string;
     planSummary: string;
-    /** 目前沒有結構欄位可放，P0-5 建立正式任務時取用。 */
-    completionDescription: string;
+    /**
+     * ⚠️ **模型寫的那一句，只是稽核證據。**
+     *
+     * 正式的完成標準在結構化欄位 `completion_description`，由
+     * canonicalCompletionDescription 依 activityKind 組出固定句型。
+     * 兩者都記下來，是為了讓「模型當時想寫什麼」與「我們最後用了什麼」
+     * 可以被比對 —— 那正是 snapshot 該做的事。
+     */
+    aiCompletionDescriptionCandidate: string;
+    /** 實際寫進結構化欄位的那一句。 */
+    canonicalCompletionDescription: string;
+    activityKind: ChildProposalPlanDraft['activityKind'];
+    purposeCategory: ChildProposalPlanDraft['category'];
+    progressModel: string | null;
+    /** 模型建議的下一步（不論有沒有通過驗證）。 */
+    aiNextStepSuggestion: string | null;
+    /** 通過驗證、真的寫進欄位的那一句；沒過就是 null。 */
+    canonicalNextStep: string | null;
     cadence: ChildProposalPlanDraft['cadence'];
     /** child = 照抄孩子選的；ai_suggested = 孩子沒選才由 AI 提。 */
     cadenceSource: ChildProposalPlanDraft['cadenceSource'];
@@ -78,10 +95,11 @@ export type PlanDraftSnapshot = {
 export function buildPlanDraftSnapshot(args: {
   input: ChildProposalPlanDraftInput;
   draft: ChildProposalPlanDraft;
+  canonical: CanonicalPlanFields;
   requestId: string;
   generatedAt: string;
 }): PlanDraftSnapshot {
-  const { input, draft, requestId, generatedAt } = args;
+  const { input, draft, canonical, requestId, generatedAt } = args;
   return {
     snapshotVersion: PLAN_DRAFT_SNAPSHOT_VERSION,
     source: 'ai-proxy/childProposalPlanDraft',
@@ -92,7 +110,13 @@ export function buildPlanDraftSnapshot(args: {
     plan: {
       planTitle: draft.planTitle,
       planSummary: draft.planSummary,
-      completionDescription: draft.completionDescription,
+      aiCompletionDescriptionCandidate: draft.completionDescription,
+      canonicalCompletionDescription: canonical.completionDescription,
+      activityKind: draft.activityKind,
+      purposeCategory: canonical.purposeCategory,
+      progressModel: canonical.progressModel,
+      aiNextStepSuggestion: draft.nextStepSuggestion,
+      canonicalNextStep: canonical.nextStep,
       cadence: draft.cadence,
       cadenceSource: draft.cadenceSource,
       durationType: draft.durationType,
@@ -130,6 +154,9 @@ export function toAddPlanVersionCommand(args: {
 }): AddChildProposalPlanVersionCommand {
   const { proposalId, input, draft, requestId, generatedAt } = args;
 
+  // 四個 canonical 欄位。**在這裡算，不是從模型的回應照抄。**
+  const canonical = canonicalPlanFields(draft);
+
   return {
     schemaVersion: CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION,
     proposalId,
@@ -137,6 +164,13 @@ export function toAddPlanVersionCommand(args: {
 
     planTitle: draft.planTitle,
     planSummary: draft.planSummary,
+
+    // ── P0-5 直接讀得到的結構化欄位 ──────────────────────────────────────
+    // 這四個不放在 ai_snapshot 裡等人去解 JSON。
+    purposeCategory: canonical.purposeCategory,
+    completionDescription: canonical.completionDescription,
+    ...(canonical.progressModel !== null ? { progressModel: canonical.progressModel } : null),
+    ...(canonical.nextStep !== null ? { nextStep: canonical.nextStep } : null),
 
     ...(draft.cadence
       ? {
@@ -172,7 +206,7 @@ export function toAddPlanVersionCommand(args: {
     },
     taskPolicyVersion: TASK_POLICY_VERSION,
 
-    aiSnapshot: buildPlanDraftSnapshot({ input, draft, requestId, generatedAt }),
+    aiSnapshot: buildPlanDraftSnapshot({ input, draft, canonical, requestId, generatedAt }),
     aiModel: draft.model,
     aiRequestId: requestId,
 

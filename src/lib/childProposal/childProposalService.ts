@@ -311,6 +311,9 @@ export class SupabaseChildProposalService {
       planVersionId: id,
       versionNo,
       isCurrent: result.payload.isCurrent === true,
+      // 舊版 RPC 不回這個鍵 —— 沒有就當成「這是新的一版」，
+      // 而不是把 undefined 當成 true 讓呼叫端以為什麼都沒發生。
+      duplicate: result.payload.duplicate === true,
     };
   }
 

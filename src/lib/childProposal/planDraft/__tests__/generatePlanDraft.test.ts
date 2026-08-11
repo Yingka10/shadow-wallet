@@ -60,7 +60,11 @@ function draft(overrides: Partial<ChildProposalPlanDraft> = {}): ChildProposalPl
     schemaVersion: 1,
     planTitle: '兩週閱讀挑戰',
     planSummary: '先用一週 4 次的節奏，每次讀一個不會太大的段落。',
-    completionDescription: '完成一次約定的閱讀時段',
+    // 模型寫什麼都不會成為正式的完成標準 —— 這裡刻意放一句不一樣的，
+    // 讓「canonical 不照抄」這件事在測試裡看得出來。
+    completionDescription: '模型自己寫的完成說明',
+    activityKind: 'reading',
+    nextStepSuggestion: '選一本想看的書，閱讀約 15 分鐘',
     cadence: { mode: 'weekly_frequency', weeklyFrequency: 4 },
     cadenceSource: 'child',
     estimatedMinutes: 15,
@@ -102,7 +106,10 @@ function makePort(overrides: Partial<PlanDraftPort> = {}, row = proposal()): Rec
     addPlanVersion: jest.fn(async (command: AddChildProposalPlanVersionCommand) => {
       commands.push(command);
       if (command.aiRequestId) existing.set(command.aiRequestId, 'v-1');
-      return { ok: true as const, planVersionId: 'v-1', versionNo: 1, isCurrent: true };
+      return {
+        ok: true as const, planVersionId: 'v-1', versionNo: 1,
+        isCurrent: true, duplicate: false,
+      };
     }),
     ...overrides,
   };
@@ -142,11 +149,15 @@ describe('A：模型正常回應 → 一版真實的 AI 計畫版本', () => {
     expect(commands[0].requiresChildReview).toBe(false);
   });
 
-  it('孩子選的一週 4 次原樣寫進版本', async () => {
+  it('孩子選的一週 4 次原樣寫進版本，而且**不會**被展開成星期幾', async () => {
     const { port, commands } = makePort();
     await generateChildProposalPlanDraft({ client: client(), port, now: NOW }, 'p-1');
 
+    // 「一週 4 次」＝ 一週完成 4 次、日期彈性。
+    // 帶 days 出去會被 RPC 以 WEEKLY_FREQUENCY_HAS_NO_DAYS 拒絕，
+    // 而且會讓 P0-7.1 開始對孩子說「星期三沒做到」——那天他從來沒答應過。
     expect(commands[0].cadence).toEqual({ mode: 'weekly_frequency', weeklyFrequency: 4 });
+    expect(commands[0].cadence?.days).toBeUndefined();
   });
 
   it('兩週 → durationDays 14 / long_term', async () => {
@@ -176,6 +187,73 @@ describe('A：模型正常回應 → 一版真實的 AI 計畫版本', () => {
     }
     expect('coinAmount' in commands[0]).toBe(false);
     expect(Object.keys(commands[0].reward ?? {})).not.toContain('coinAmount');
+  });
+
+  it('P0-5 要的四個值都是結構化欄位，不用解 ai_snapshot', async () => {
+    const { port, commands } = makePort();
+    await generateChildProposalPlanDraft({ client: client(), port, now: NOW }, 'p-1');
+
+    expect(commands[0].purposeCategory).toBe('D');
+    expect(commands[0].completionDescription).toBe('完成一次約定的閱讀時段');
+    expect(commands[0].progressModel).toBe('weekly_rhythm');
+    expect(commands[0].nextStep).toBe('選一本想看的書，閱讀約 15 分鐘');
+  });
+
+  it('正式的完成標準不照抄模型的自由文字', async () => {
+    const { port, commands } = makePort();
+    await generateChildProposalPlanDraft({ client: client(), port, now: NOW }, 'p-1');
+
+    // 模型寫的是「模型自己寫的完成說明」，但結構化欄位是我們的固定句型。
+    expect(commands[0].completionDescription).not.toBe('模型自己寫的完成說明');
+    expect(commands[0].completionDescription).toBe('完成一次約定的閱讀時段');
+  });
+
+  it('模型建議的下一步不合格時，欄位就是沒有 —— 不硬湊一句', async () => {
+    const { port, commands } = makePort();
+    await generateChildProposalPlanDraft(
+      {
+        client: client({
+          status: 'draft',
+          schemaVersion: 1,
+          draft: draft({ nextStepSuggestion: '兩週後把整本書讀完' }),
+        }),
+        port,
+        now: NOW,
+      },
+      'p-1',
+    );
+
+    expect(commands[0].nextStep).toBeUndefined();
+    // 但模型當時說了什麼仍然留在稽核紀錄裡。
+    const snapshot = commands[0].aiSnapshot as { plan: { aiNextStepSuggestion: string | null } };
+    expect(snapshot.plan.aiNextStepSuggestion).toBe('兩週後把整本書讀完');
+  });
+
+  it('證據不足時不寫 progress_model —— 不猜', async () => {
+    const { port, commands } = makePort();
+    await generateChildProposalPlanDraft(
+      {
+        client: client({
+          status: 'draft',
+          schemaVersion: 1,
+          // C 類、只做一次：沒有每週節奏可看。
+          draft: draft({
+            category: 'C',
+            durationType: 'one_time',
+            durationDays: null,
+            cadence: { mode: 'one_time' },
+          }),
+        }),
+        port,
+        now: NOW,
+      },
+      'p-1',
+    );
+
+    expect(commands[0].progressModel).toBeUndefined();
+    expect(commands[0].purposeCategory).toBe('C');
+    // 一次性的完成標準仍然是「一次投入」，不是結果。
+    expect(commands[0].completionDescription).toBe('完成這一次約定的閱讀');
   });
 
   it('命令碰不到孩子的原話 —— 那兩欄只在 proposal 上，而且 DB 有 trigger 擋', async () => {
@@ -216,7 +294,9 @@ describe('A：模型正常回應 → 一版真實的 AI 計畫版本', () => {
     const snapshot = commands[0].aiSnapshot as Record<string, Record<string, unknown>>;
     expect(snapshot.source).toBe('ai-proxy/childProposalPlanDraft');
     expect(snapshot.input.childOriginalGoal).toBe(DEMO_GOAL);
-    expect(snapshot.plan.completionDescription).toBe('完成一次約定的閱讀時段');
+    // 模型寫的那一句與我們最後用的那一句都留著，才比對得出差異。
+    expect(snapshot.plan.aiCompletionDescriptionCandidate).toBe('模型自己寫的完成說明');
+    expect(snapshot.plan.canonicalCompletionDescription).toBe('完成一次約定的閱讀時段');
     expect(snapshot.plan.cadenceSource).toBe('child');
     expect(snapshot.policy.rewardPolicyVersion).toBe('coin-policy-1.0.0');
     expect(snapshot.policy.pricingStatus).toBe('priced');
@@ -347,6 +427,35 @@ describe('重試不會產生第二版、第三版', () => {
     expect(commands).toHaveLength(1);
     // 省下來的不只是一列資料，是兩次模型配額。
     expect(stub.calls).toBe(1);
+  });
+
+  it('真的併發時由 DB 的 unique index 收尾 —— 回既有那一版，仍算成功', async () => {
+    // 兩個請求都通過了「呼叫前查重」（併發時都查不到），
+    // 第二個插入撞到 unique index → RPC 回既有那一版並標記 duplicate。
+    const { port } = makePort({
+      findPlanVersionIdByAiRequestId: jest.fn(async () => null),
+      addPlanVersion: jest.fn(async () => ({
+        ok: true as const, planVersionId: 'v-1', versionNo: 1,
+        isCurrent: true, duplicate: true,
+      })),
+    });
+
+    const outcome = await generateChildProposalPlanDraft(
+      { client: client(), port, now: NOW }, 'p-1',
+    );
+
+    // 「早就存好了」不是失敗 —— 當成 persist_failed 會讓背景一直重試。
+    expect(outcome).toMatchObject({
+      status: 'saved', planVersionId: 'v-1', duplicateSuppressed: true,
+    });
+  });
+
+  it('一次就寫成時 duplicateSuppressed 是 false', async () => {
+    const { port } = makePort();
+    const outcome = await generateChildProposalPlanDraft(
+      { client: client(), port, now: NOW }, 'p-1',
+    );
+    expect(outcome).toMatchObject({ status: 'saved', duplicateSuppressed: false });
   });
 
   it('查重發生在呼叫模型之前', async () => {
