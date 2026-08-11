@@ -170,6 +170,24 @@ describe('P0-5B child proposal review-flow migration', () => {
     expect(SQL).toContain('不代表家庭共同版本已生效');
   });
 
+  // 這一條是 staging acceptance 抓到的：原版在 accept 的 progress_model 比對寫了
+  //
+  //     IF v_plan.progress_model IS DISTINCT FROM CASE … THEN 'weekly_rhythm' … END THEN
+  //
+  // PL/pgSQL 讀 IF 的條件是讀到**第一個 paren depth 0 的 THEN** 為止，所以 CASE
+  // 內層那個 THEN 會把條件切斷，留下一個沒收尾的運算式 —— 函式在 CREATE 當下就以
+  // 42601「syntax error at end of input」失敗，整支 migration 套不上任何一個環境。
+  //
+  // 這是字串測試抓得到、而且只有字串測試擋得住的一類錯：它不是邏輯錯，是連建都建不
+  // 起來，所以任何「假設 RPC 存在」的測試都跑不到這裡。
+  it('IF 條件裡的 CASE 一定要加括號，否則函式根本建不起來', () => {
+    const offenders = SQL.split('\n')
+      .map((line, index) => ({ line: line.trim(), no: index + 1 }))
+      .filter(({ line }) => /^(ELSIF|IF)\b/.test(line) && /\bCASE\s*$/.test(line))
+      .filter(({ line }) => !/\(\s*CASE\s*$/.test(line));
+    expect(offenders).toEqual([]);
+  });
+
   it('review flow 零 wallet/completion side effect，也不碰 P0-6 functions', () => {
     expect(SQL).not.toMatch(/\b(INSERT|UPDATE|DELETE)\s+(INTO\s+|FROM\s+)?(wallets|transactions|task_completions)\b/i);
     expect(SQL).not.toContain('complete_task');

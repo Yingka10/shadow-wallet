@@ -515,13 +515,17 @@ BEGIN
         'reason', 'FIXED_DAYS_INVALID', 'message', '固定星期節奏資料不完整'
       );
     END IF;
-    IF v_plan.progress_model IS DISTINCT FROM CASE
+    -- The CASE must stay parenthesised. PL/pgSQL reads an IF condition up to the
+    -- first THEN at paren depth 0, so a bare CASE ends the condition on its own
+    -- inner THEN and leaves an unterminated expression — the function then fails
+    -- to create at all with 42601 "syntax error at end of input".
+    IF v_plan.progress_model IS DISTINCT FROM (CASE
       WHEN v_plan.purpose_category = 'D'
         AND v_plan.duration_type = 'long_term'
         AND v_plan.cadence_mode IN ('weekly_frequency', 'fixed_days')
         THEN 'weekly_rhythm'
       ELSE NULL
-    END THEN
+    END) THEN
       RETURN jsonb_build_object(
         'ok', false, 'code', 'VALIDATION_FAILED',
         'reason', 'WEEKLY_RHYTHM_INVALID', 'message', '長期節奏的進度模式與計畫證據不一致'
