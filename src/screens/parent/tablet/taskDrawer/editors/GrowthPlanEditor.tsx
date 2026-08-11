@@ -312,7 +312,7 @@ export function GrowthPlanEditor({
 
         <EditorField>
           <FieldLabel required>里程碑</FieldLabel>
-          <HelperText>可以改文字或關掉不需要的，至少保留一個。</HelperText>
+          <HelperText>可以改文字、關掉不需要的，或自己新增，至少保留一個。</HelperText>
           <View style={s.milestoneList}>
             {draft.milestones.map((milestone, index) => (
               <View key={milestone.id} style={s.milestoneRow}>
@@ -346,6 +346,26 @@ export function GrowthPlanEditor({
             ))}
           </View>
           <ValidationMessage>{err('milestones')}</ValidationMessage>
+
+          {draft.milestones.length < DRAFT_FALLBACKS.maxMilestones ? (
+            <SelectableChip
+              label="新增一個里程碑"
+              selected={false}
+              onPress={() =>
+                patch({
+                  milestones: [
+                    ...draft.milestones,
+                    {
+                      id: `custom-${Date.now()}`,
+                      title: '',
+                      isEditable: true,
+                      enabled: true,
+                    },
+                  ],
+                })
+              }
+            />
+          ) : null}
         </EditorField>
 
         <EditorField>

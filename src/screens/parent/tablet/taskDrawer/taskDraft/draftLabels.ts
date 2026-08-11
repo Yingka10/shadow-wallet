@@ -31,6 +31,8 @@ export const DRAFT_FALLBACKS = {
   minDurationDays: 3,
   maxDurationDays: 120,
   maxSupportSteps: 5,
+  /** 家長自己新增里程碑的上限，太多的話回顧起來反而失去重點。 */
+  maxMilestones: 8,
   /** 選超過這個數量就提示範圍可能太大（不禁止）。 */
   focusSoftLimit: 4,
 
