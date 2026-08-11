@@ -22,6 +22,9 @@ const tableRows: Record<string, unknown[]> = {
       is_long_term: true,
       is_active: true,
       allow_repeat: false,
+      schedule_mode: 'weekly_frequency',
+      weekly_frequency: 4,
+      recurrence_days: null,
     },
   ],
   task_completions: [],
@@ -74,7 +77,7 @@ describe('useTodayTasks long-term progress integrity', () => {
     mockApplyHabitResume.mockResolvedValue(undefined);
   });
 
-  it('does not roll back habit current_day when today tasks are loaded or refreshed', async () => {
+  it('does not mutate weekly-frequency habit progress when today tasks are loaded or refreshed', async () => {
     const { result } = renderHook(() => useTodayTasks('child-1'));
 
     await waitFor(() => expect(result.current.loading).toBe(false));

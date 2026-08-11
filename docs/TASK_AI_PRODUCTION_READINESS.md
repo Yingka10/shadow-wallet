@@ -251,3 +251,35 @@ deno run --allow-env --allow-net --allow-read --allow-write \
 
 在上面四項全部解決之前，production 的 `EXPO_PUBLIC_TASK_AI_MODE`
 **必須保持未設定或明確 off**。
+
+---
+
+## 追記（2026-08-11）：使用範圍擴大到全部四類——三個放寬前提均未成立
+
+第二節寫的三個放寬前提（A/B 類語料 red-team 且有量化攔截率、付費方案已開通、
+真實家長使用資料）**一個都不成立**。這次擴大是團隊在知情狀態下為了競賽
+Demo 做的決定，不是條件已經滿足——寫在這裡是為了不讓未來的人以為
+「一定是已經補齊了什麼才放寬」。
+
+**改了什麼：**
+
+- `contract.json` 的 `eligibility.allowedPurposeCategories` 加入
+  `life_routine`（A）、`family_participation`（B）
+- `customTaskAiAvailability.ts` 的 `AI_ENABLED_PURPOSE_CATEGORIES` 同步擴大
+- 新增獨立的 `AI_DENIED_EDITOR_KINDS`（目前只有 `family_role`），確保
+  「家庭角色任務不提供 AI 建議」這條**跟 purposeCategory 擴大無關**的
+  既有限制不會被這次改動意外連帶打開——這條的理由是任務形式
+  （家庭角色的內容就是一份家務清單），不是內容安全
+
+**沒改什麼、風險仍然原樣存在：**
+
+- `contentSafety.ts` 的關鍵字／片語掃描**沒有加強**，現在是 A/B 類任務
+  唯一的內容防線（原設計是 eligibility 先擋掉，掃描只是補充）。
+  它自己承認「這不是自然語言安全性的完整證明」
+- 沒有針對 A/B 類語料做過 red-team，不知道實際攔截率
+- 免費配額、限流數字（第三節）都還是「暫定值，未經產品驗證」——
+  範圍變大代表更多任務會打到 Gemini，配額耗盡的風險比之前更高
+
+如果之後要重新收斂使用範圍，改 `contract.json` 的 `eligibility.allowedPurposeCategories`
+跟 `customTaskAiAvailability.ts` 的 `AI_ENABLED_PURPOSE_CATEGORIES`（兩邊要同步）即可，
+`AI_DENIED_EDITOR_KINDS` 不受影響。

@@ -612,11 +612,14 @@ export function TaskCreationDrawer({
    * 這則任務現在能不能取得建議。
    *
    * 順序有意義：先問「有沒有 client」（環境層），再問「這種任務開不開放」
-   * （B2A.5 的第一版範圍）。A／B 類任務即使服務完全正常也不該出現按鈕。
+   * （分類與形式）。家庭角色任務即使服務完全正常也不該出現按鈕——
+   * 這跟 2026-08-11 把 purposeCategory 擴大到全部四類無關，是任務
+   * 形式本身的限制，見 customTaskAiAvailability.ts 的 AI_DENIED_EDITOR_KINDS。
    */
   const aiAvailability = draft
     ? resolveTaskAiAvailability({
         purposeCategory: draft.purposeCategory,
+        editorKind: draft.editorKind,
         serviceHealthy: true,
       })
     : null;

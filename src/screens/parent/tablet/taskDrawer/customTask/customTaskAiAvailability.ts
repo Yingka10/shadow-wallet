@@ -1,7 +1,6 @@
 // Shadow Wallet · Parent Tablet — AI 建議在自訂任務裡的可用狀態
 //
 // ─────────────────────────────────────────────────────────────────────────
-// AI recommendation 的第一版 eligibility 只開放 C／D 類（B2A.5 決定）。
 // 自訂任務接進來之後，家長會遇到三種完全不同的情況：
 //
 //   1. 這則任務可以取得建議
@@ -15,26 +14,32 @@
 //    那是我們的 log 詞彙。家長需要知道的是「這件事不影響你建立任務」，
 //    不是一個看起來像故障代碼的東西。
 //
-// ⚠️ 本輪**不接真服務**。這裡只有 deterministic 的狀態判斷與文案，
-//    沒有任何 Edge Function 呼叫。接線在 B2B。
-//
-// ── 兩個決策的分界（很容易被誤讀）─────────────────────────────────────
-//
-//   「B 類可以使用成長幣」          ← 這一輪修訂的
-//   「B 類目前不開放生成式 AI」      ← 沒有改，維持 B2A.5 的決定
-//
-// 兩者沒有關係。前者是回饋政策，後者是內容安全的使用範圍 ——
-// A／B 類任務的建議天然落在實體家務操作上，那是安全層最弱的地方。
-// 不要因為這一輪放寬了回饋政策就順手把 AI 也打開。
+// ⚠️ 2026-08-11：AI_ENABLED_PURPOSE_CATEGORIES 原本只開放 C／D 類
+//    （B2A.5 決定，A/B 類的建議天然落在實體家務操作上，是內容安全層
+//    最弱的地方）。團隊為了競賽 Demo 決定擴大到全部四類，明知
+//    docs/TASK_AI_PRODUCTION_READINESS.md 記錄的三個放寬前提均未成立——
+//    這是知情狀態下的決定。與 Edge Function 的 eligibility 契約
+//    （supabase/functions/task-ai-recommendation/contract.json）保持一致。
 // ─────────────────────────────────────────────────────────────────────────
 
 import type { PurposeCategory } from '../taskCatalog';
+import type { TaskEditorKind } from '../taskDraft';
 
-/** 第一版開放 AI 建議的任務目的。與 Edge Function 的 eligibility 契約一致。 */
+/** 目前開放 AI 建議的任務目的。與 Edge Function 的 eligibility 契約一致。 */
 const AI_ENABLED_PURPOSE_CATEGORIES: readonly PurposeCategory[] = [
   'autonomous_challenge',
   'learning_skill',
+  'life_routine',
+  'family_participation',
 ] as const;
+
+/**
+ * 家庭角色任務永遠不提供 AI 建議，跟 purposeCategory 的擴大無關——
+ * 這是任務**形式**的限制，不是內容安全的限制：家庭角色的內容就是一份
+ * 家務清單，「新增一項負責內容」正是我們最不希望 AI 做的事。與 Edge
+ * Function 的 eligibility 契約（contract.json 的 deniedEditorKinds）一致。
+ */
+const AI_DENIED_EDITOR_KINDS: readonly TaskEditorKind[] = ['family_role'] as const;
 
 export type TaskAiAvailabilityState =
   /** 可以按「取得調整建議」。 */
@@ -68,8 +73,10 @@ const COPY: Record<TaskAiAvailabilityState, Omit<TaskAiAvailabilityCopy, 'state'
     // 說出「為什麼」而不只是「不行」：家長會想知道是自己設定錯了，
     // 還是系統本來就不做這件事。也明確講「不影響建立」——
     // 那是家長此刻真正在意的事。
+    // 2026-08-11：不再點名 A/B 類——四個目的類別現在都開放，這句話
+    // 目前只會在 family_role（家庭角色）這種任務形式被排除時出現。
     message:
-      '生活自理與家庭參與的任務，我們還在確認 AI 的建議品質，先不提供。'
+      '這種任務形式，我們還在確認 AI 的建議品質，先不提供。'
       + '這不影響任務建立，你可以直接完成設定。',
     showActionButton: false,
     retryable: false,
@@ -85,6 +92,13 @@ const COPY: Record<TaskAiAvailabilityState, Omit<TaskAiAvailabilityCopy, 'state'
 export type ResolveAiAvailabilityInput = {
   purposeCategory: PurposeCategory;
   /**
+   * 任務形式。目前只用來擋 `family_role`——與 purposeCategory 是否開放
+   * 無關，即使四個目的類別都開放，家庭角色任務仍然不提供 AI 建議。
+   * 選填是為了不動到既有呼叫端／測試沒有傳這個欄位的情況；省略時
+   * 視為「不是家庭角色」，不會被這道檢查擋下。
+   */
+  editorKind?: TaskEditorKind;
+  /**
    * 服務層此刻的健康狀態。
    *
    * 由呼叫端提供而不是在這裡判斷：這個模組不該知道 Edge Function 存在。
@@ -96,14 +110,17 @@ export type ResolveAiAvailabilityInput = {
 /**
  * 這則任務現在能不能用 AI 建議。
  *
- * 純函式。**順序有意義**：先問「這種任務開不開放」，再問「服務活著嗎」。
- * 反過來的話，服務掛掉時連 A／B 類任務都會顯示「稍後再試」，
- * 而它們再試一百次也不會有建議。
+ * 純函式。**順序有意義**：先問「這種任務開不開放」（分類與形式），
+ * 再問「服務活著嗎」。反過來的話，服務掛掉時連永遠不開放的任務
+ * 都會顯示「稍後再試」，而它們再試一百次也不會有建議。
  */
 export function resolveTaskAiAvailability(
   input: ResolveAiAvailabilityInput,
 ): TaskAiAvailabilityCopy {
   if (!AI_ENABLED_PURPOSE_CATEGORIES.includes(input.purposeCategory)) {
+    return { state: 'not_offered_for_this_task', ...COPY.not_offered_for_this_task };
+  }
+  if (input.editorKind !== undefined && AI_DENIED_EDITOR_KINDS.includes(input.editorKind)) {
     return { state: 'not_offered_for_this_task', ...COPY.not_offered_for_this_task };
   }
   if (!input.serviceHealthy) {
