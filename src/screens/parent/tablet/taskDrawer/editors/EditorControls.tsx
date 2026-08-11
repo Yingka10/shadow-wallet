@@ -1201,19 +1201,20 @@ const s = StyleSheet.create({
     paddingTop: ParentSpacing[3],
   },
   /**
-   * 底線式，不是有邊框的方塊——用在夾在一般文字中間的短數字
-   * （例如「約第 __ 天」），要跟兩側文字的底線對齊，不能看起來像獨立的卡片。
+   * 沒有邊框、沒有底線——用在夾在一般文字中間的短數字
+   * （例如「約第 __ 天」），要跟旁邊的文字融成一行，不要看起來像獨立欄位。
    */
   inputCompact: {
     minHeight: 0,
     borderWidth: 0,
-    borderBottomWidth: 1,
     borderRadius: 0,
     backgroundColor: 'transparent',
     paddingHorizontal: 2,
     paddingVertical: 0,
+    fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.xs,
-    lineHeight: ParentFontSizes.xs + 4,
+    // 不強制 lineHeight——跟旁邊的 Text 一樣用字體原生行高，
+    // 兩者搭配 row 的 alignItems: 'baseline' 才會真的對齊。
     textAlign: 'center',
   },
   inputError: {

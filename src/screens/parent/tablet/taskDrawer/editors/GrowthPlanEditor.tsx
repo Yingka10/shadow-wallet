@@ -593,7 +593,9 @@ const s = StyleSheet.create({
   },
   milestoneDayRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    // 'center' 是對齊方框中點，不是對齊文字底線——數字看起來跟兩側文字
+    // 對不上就是這裡選錯了。'baseline' 才是「跟文字底線對齊」要用的。
+    alignItems: 'baseline',
     gap: ParentSpacing[1],
   },
   milestoneDayPrefix: {
