@@ -115,8 +115,17 @@ proposal / plan version / task / goal / child_task，比完整包回滾。
 > 彩排、錄影、教授測試、正式初選不一定在同一天。**請避開週一**，
 > 其餘任何一天 State B 都能穩定重建。
 
-完成日的推導只用「本週一」與「今天」，兩者都不可能是未來；接受日訂在上週五，
-所以「接受之後過了幾天」在週二到週日都成立。
+完成日的推導只用「本週一」與「今天」，兩者都不可能是未來。
+
+**State B 的計畫行事曆起始日設為上週五**；Proposal / Plan Version 的 lifecycle
+audit timestamps（`activated_at` / `effective_at` / `child_accepted_at` /
+`parent_confirmed_at` / `confirmed_at` / `created_at`）保留為**建立 State B 當下**。
+把行事曆起始日放在上週五，是為了讓「計畫已經開始了幾天」在週二到週日都成立。
+
+> ⚠️ 用語界線：影片段落可以說「幾天後」，但**文件與說明不得聲稱「資料庫顯示
+> 孩子在上週五接受」**。State B 是 **reproducible review snapshot**，
+> 不是 **historically exact audit replay** —— 它的行事曆是歷史的，
+> 建立軌跡則誠實記錄為現在。
 
 ### 週報與顧問
 

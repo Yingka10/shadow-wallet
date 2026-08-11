@@ -54,8 +54,13 @@ RETURNS jsonb LANGUAGE sql IMMUTABLE AS $fn$
     'today',       p_ref,
     'first_day',   m,
     'second_day',  p_ref,
-    -- 接受日訂在上週五：早於兩筆完成，而且讓「接受之後過了幾天」在任何
-    -- 星期幾都成立，不會變成「昨天才接受」。
+    -- 計畫**行事曆**的起始日訂在上週五：早於兩筆完成，而且讓「計畫已經開始
+    -- 了幾天」在週二到週日都成立，不會變成「昨天才開始」。
+    --
+    -- 這是行事曆日期，不是 audit 事實：Proposal / Plan Version 的 lifecycle
+    -- timestamps 保留為建立 State B 當下，所以資料庫**沒有**聲稱孩子在上週五
+    -- 按下接受。State B 是 reproducible review snapshot，不是 historically
+    -- exact audit replay。
     'accept_date', m - 3,
     'plan_end',    m - 3 + 13,
     'feasible',    p_ref > m
