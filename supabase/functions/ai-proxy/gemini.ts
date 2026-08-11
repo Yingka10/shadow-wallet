@@ -38,14 +38,21 @@ async function callGeminiOnce(prompt: string, model: string, jsonMode: boolean):
 }
 
 /**
- * 呼叫 Gemini，依 MODEL_CHAIN 逐一嘗試。
- * 遇到 429（配額）或 404（model 不存在）時換下一個 model；其他錯誤直接拋出。
+ * 呼叫 Gemini，依 MODEL_CHAIN 逐一嘗試，並回報**實際回答的那個 model**。
+ *
+ * model 名稱要帶回去的理由：MODEL_CHAIN 會 fallback，所以「這段文字是誰寫的」
+ * 不是固定的。要把它存進稽核紀錄（例如計畫版本的 ai_model）的呼叫端，
+ * 必須拿到真的那一個，不能寫死首選 —— 否則紀錄會說是 flash-latest 寫的，
+ * 而實際上那天首選掛了、答案來自 2.0-flash。
  */
-export async function callGemini(prompt: string, jsonMode = false): Promise<string> {
+export async function callGeminiWithModel(
+  prompt: string,
+  jsonMode = false,
+): Promise<{ text: string; model: string }> {
   let lastErr: unknown;
   for (const model of MODEL_CHAIN) {
     try {
-      return await callGeminiOnce(prompt, model, jsonMode);
+      return { text: await callGeminiOnce(prompt, model, jsonMode), model };
     } catch (err) {
       lastErr = err;
       const msg = String(err);
@@ -54,6 +61,15 @@ export async function callGemini(prompt: string, jsonMode = false): Promise<stri
     }
   }
   throw lastErr;
+}
+
+/**
+ * 呼叫 Gemini，依 MODEL_CHAIN 逐一嘗試。
+ * 遇到 429（配額）或 404（model 不存在）時換下一個 model；其他錯誤直接拋出。
+ */
+export async function callGemini(prompt: string, jsonMode = false): Promise<string> {
+  const { text } = await callGeminiWithModel(prompt, jsonMode);
+  return text;
 }
 
 export function parseJson<T>(raw: string): T {

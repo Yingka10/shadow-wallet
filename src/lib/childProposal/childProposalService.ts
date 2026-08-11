@@ -12,6 +12,7 @@
 import { supabase } from '../supabase';
 import { mapPostgresErrorCode } from '../parentTaskCreationService';
 import { CHILD_PROPOSAL_STATUSES } from './types';
+import type { AgeGroup } from '../../types/database';
 import type {
   AddChildProposalPlanVersionCommand,
   AddPlanVersionResult,
@@ -209,6 +210,69 @@ export class SupabaseChildProposalService {
 
     if (error) throw new Error(error.message || '讀取孩子提案失敗');
     return data ?? [];
+  }
+
+  /**
+   * 讀一筆提案。P0-3 的 AI 草稿以**資料庫這一列**為輸入，不是畫面上的草稿 ——
+   * 送出之後畫面的值就不再是權威（RPC 會 trim、預設值由 DB 決定）。
+   *
+   * 找不到就回 null，不丟例外：呼叫端是背景工作，「不存在」是它要處理的
+   * 正常結果之一，不是需要 catch 的意外。
+   */
+  async getProposal(proposalId: string): Promise<ChildProposal | null> {
+    const { data, error } = await supabase
+      .from('child_proposals')
+      .select('*')
+      .eq('id', proposalId)
+      .maybeSingle();
+
+    if (error) throw new Error(error.message || '讀取提案失敗');
+    return data ?? null;
+  }
+
+  /**
+   * 這個孩子的年齡段。
+   *
+   * 只取 age_group 一欄 —— AI 判斷需要的是分級，不是生日。少送一個欄位
+   * 就少一個外流面，而年齡段本來就是 children 上算好存著的值。
+   */
+  async getChildAgeGroup(childId: string): Promise<AgeGroup | null> {
+    const { data, error } = await supabase
+      .from('children')
+      .select('age_group')
+      .eq('id', childId)
+      .maybeSingle();
+
+    if (error) throw new Error(error.message || '讀取孩子年齡段失敗');
+    return data?.age_group ?? null;
+  }
+
+  /**
+   * 這一份輸入是不是已經整理過了。
+   *
+   * P0-3 的 idempotency 靠這一支：request key 是決定性的（同樣的提案內容
+   * 永遠算出同一把），所以查得到就代表「這次重試不需要再問一次模型」。
+   *
+   * ⚠️ 這**不是**資料庫層的唯一性保證 —— ai_request_id 沒有 unique index。
+   *    兩個同時發出的請求仍然可能都查不到、於是都寫入。實務上這條路徑是
+   *    孩子送出後的單一背景工作，不會併發；要根治需要動 schema。
+   */
+  async findPlanVersionIdByAiRequestId({
+    proposalId,
+    aiRequestId,
+  }: {
+    proposalId: string;
+    aiRequestId: string;
+  }): Promise<string | null> {
+    const { data, error } = await supabase
+      .from('child_proposal_plan_versions')
+      .select('id')
+      .eq('proposal_id', proposalId)
+      .eq('ai_request_id', aiRequestId)
+      .limit(1);
+
+    if (error) throw new Error(error.message || '讀取計畫版本失敗');
+    return data && data.length > 0 ? data[0].id : null;
   }
 
   /** 孩子提出一個想法。只會落在 draft 或 proposed。 */

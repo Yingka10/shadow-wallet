@@ -4,7 +4,8 @@
  *
  * Supported `type` values:
  *   classifyTask | suggestTaskCoin | analyzeTask | suggestRewardCoin |
- *   screenRedemptionRequest | suggestCoinWithAI | advisorChat | wishClarify
+ *   screenRedemptionRequest | suggestCoinWithAI | advisorChat | wishClarify |
+ *   childProposalPlanDraft
  */
 
 import {
@@ -17,6 +18,8 @@ import {
 import { calcCoins, defaultPayout, POLICY_VERSION, type AgeGroup, type Difficulty } from './coinPolicy.ts';
 import { callGemini, parseJson } from './gemini.ts';
 import { handleWishClarify, type WishClarifyHistoryTurn } from './wishClarify.ts';
+import { handleChildProposalPlanDraft } from './childProposalPlanDraft.ts';
+import type { ChildProposalPlanDraftInput } from './childProposalPlanDraftLogic.ts';
 import {
   formatWeekdaysZh,
   validateAdvisorSuggestedAction,
@@ -454,6 +457,11 @@ Deno.serve(async (req) => {
           ageGroup: string;
           history?: WishClarifyHistoryTurn[];
         });
+        break;
+      case 'childProposalPlanDraft':
+        result = await handleChildProposalPlanDraft(
+          payload as unknown as ChildProposalPlanDraftInput,
+        );
         break;
       default:
         return new Response(
