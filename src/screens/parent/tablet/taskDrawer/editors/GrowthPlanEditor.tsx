@@ -383,6 +383,7 @@ export function GrowthPlanEditor({
                         }}
                         placeholder="—"
                         keyboardNumeric
+                        compact
                         accessibilityLabel={`第 ${index + 1} 個里程碑的預估天數`}
                       />
                     </View>
@@ -601,6 +602,6 @@ const s = StyleSheet.create({
     color: ParentColors.fgMuted,
   },
   milestoneDayField: {
-    width: 56,
+    width: 40,
   },
 });

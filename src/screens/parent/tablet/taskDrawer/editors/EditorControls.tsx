@@ -182,6 +182,8 @@ export function DraftTextInput({
   hasError,
   errorText,
   keyboardNumeric,
+  /** 給短數字（例如「約第幾天」）用的窄版樣式，不是給一般文字欄位的。 */
+  compact,
   accessibilityLabel,
 }: {
   value: string;
@@ -190,12 +192,13 @@ export function DraftTextInput({
   hasError?: boolean;
   errorText?: string;
   keyboardNumeric?: boolean;
+  compact?: boolean;
   accessibilityLabel?: string;
 }) {
   const invalid = hasError || !!errorText;
   return (
     <TextInput
-      style={[s.input, invalid && s.inputError]}
+      style={[s.input, compact && s.inputCompact, invalid && s.inputError]}
       value={value}
       onChangeText={onChangeText}
       placeholder={placeholder}
@@ -1196,6 +1199,13 @@ const s = StyleSheet.create({
   },
   multiline: {
     paddingTop: ParentSpacing[3],
+  },
+  inputCompact: {
+    minHeight: 32,
+    paddingHorizontal: ParentSpacing[2],
+    paddingVertical: 4,
+    fontSize: ParentFontSizes.xs,
+    textAlign: 'center',
   },
   inputError: {
     borderColor: ParentColors.error,
