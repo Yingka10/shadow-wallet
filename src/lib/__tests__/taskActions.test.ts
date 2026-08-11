@@ -27,9 +27,13 @@ import {
   getPrevCheckpoint,
   isActiveDayForHabit,
   parentMarkTask,
+  pauseLongTermGoal,
   recordCompletionContext,
   skillCoinsAreValid,
+  updateTaskRecurrenceDays,
+  updateTaskSchedule,
 } from '../taskActions';
+import { SHARED_PLAN_GUARD_CODE, SHARED_PLAN_GUARD_MESSAGE } from '../sharedPlanIntegrity';
 import type { Task, CheckpointRewards } from '../../types/database';
 
 function makeTask(overrides: Partial<Task>): Task {
@@ -397,5 +401,60 @@ describe('recordCompletionContext', () => {
     await expect(
       recordCompletionContext('completion-1', 'before_bed', 'reminded'),
     ).rejects.toThrow('context failed');
+  });
+});
+
+describe('shared plan mutation guards', () => {
+  it('maps a typed schedule refusal to the approved product message', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: { error: SHARED_PLAN_GUARD_CODE },
+      error: null,
+    });
+
+    await expect(updateTaskSchedule('shared-task', 'week', 3))
+      .rejects.toThrow(SHARED_PLAN_GUARD_MESSAGE);
+  });
+
+  it('maps a typed recurrence refusal to the approved product message', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: { error: SHARED_PLAN_GUARD_CODE },
+      error: null,
+    });
+
+    await expect(updateTaskRecurrenceDays('shared-task', [1, 3, 5]))
+      .rejects.toThrow(SHARED_PLAN_GUARD_MESSAGE);
+  });
+
+  it('keeps ordinary schedule and recurrence results unchanged', async () => {
+    mockRpc
+      .mockResolvedValueOnce({
+        data: { taskId: 'task-1', claimPeriod: 'week', maxClaimsPerPeriod: 3 },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: { taskId: 'task-1', recurrenceDays: [1, 3, 5] },
+        error: null,
+      });
+
+    await expect(updateTaskSchedule('task-1', 'week', 3)).resolves.toEqual({
+      taskId: 'task-1',
+      claimPeriod: 'week',
+      maxClaimsPerPeriod: 3,
+    });
+    await expect(updateTaskRecurrenceDays('task-1', [1, 3, 5])).resolves.toEqual({
+      taskId: 'task-1',
+      recurrenceDays: [1, 3, 5],
+    });
+  });
+
+  it('maps a direct lifecycle trigger refusal without changing the goal', async () => {
+    mockFrom.mockReturnValueOnce({
+      update: () => ({
+        eq: () => Promise.resolve({ error: { message: SHARED_PLAN_GUARD_CODE } }),
+      }),
+    });
+
+    await expect(pauseLongTermGoal('shared-goal'))
+      .rejects.toThrow(SHARED_PLAN_GUARD_MESSAGE);
   });
 });
