@@ -132,7 +132,7 @@ describe('提案畫面的依賴邊界', () => {
     expect(code(SCREEN)).not.toContain("from '../../lib/supabase'");
   });
 
-  it('沒有任何 AI 呼叫（P0-3 才接）', () => {
+  it('畫面本身不認識任何模型細節（P0-3 的 AI 在 lib 那一層）', () => {
     for (const term of ['aiAgent', 'analyzeTask', 'gemini', 'Gemini', 'taskAi']) {
       expect({ term, present: code(SCREEN).includes(term) })
         .toEqual({ term, present: false });
@@ -141,5 +141,29 @@ describe('提案畫面的依賴邊界', () => {
 
   it('用的是 P0-1 的 service，不是自己組 RPC', () => {
     expect(code(SCREEN)).toContain('SupabaseChildProposalService');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P0-3：AI 草稿是背景加值，不是流程的一部分
+// ---------------------------------------------------------------------------
+
+describe('AI 草稿掛在成功之後', () => {
+  it('用背景版本，而且**沒有** await —— 孩子不等模型', () => {
+    expect(code(SCREEN)).toContain('generateChildProposalPlanDraftInBackground(');
+    expect(code(SCREEN)).not.toContain('await generateChildProposalPlanDraft');
+  });
+
+  it('成功頁先成立，才輪到背景工作', () => {
+    const body = code(SCREEN);
+    const success = body.indexOf("setPhase({ kind: 'success' })");
+    const draftCall = body.indexOf('generateChildProposalPlanDraftInBackground(');
+    expect(success).toBeGreaterThan(-1);
+    expect(draftCall).toBeGreaterThan(success);
+  });
+
+  it('AI 的成敗不影響畫面 —— 畫面沒有讀它的回傳值', () => {
+    expect(code(SCREEN)).not.toContain('planDraftOutcome');
+    expect(code(SCREEN)).not.toMatch(/=\s*generateChildProposalPlanDraftInBackground/);
   });
 });
