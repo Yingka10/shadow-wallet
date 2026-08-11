@@ -67,6 +67,14 @@ describe('P0-5B child proposal review-flow migration', () => {
     expect(revise).toContain('TRUE, NULL, v_now, NULL');
   });
 
+  it('cadence mode 改變時由 server 同步推導 canonical progress model，不產生無法接受的版本', () => {
+    const revise = body('revise_child_proposal_plan_v1');
+    expect(revise).toContain(
+      "CASE WHEN v_mode = 'weekly_frequency' THEN 'weekly_rhythm' ELSE NULL END",
+    );
+    expect(revise).not.toMatch(/v_source\.purpose_category, v_completion_description,\s*v_source\.progress_model/);
+  });
+
   it('lineage 只辨認 exact constraint，其他 unique violation 不會被吞', () => {
     const revise = body('revise_child_proposal_plan_v1');
     expect(revise).toContain('GET STACKED DIAGNOSTICS v_constraint_name = CONSTRAINT_NAME');
@@ -117,6 +125,7 @@ describe('P0-5B child proposal review-flow migration', () => {
     expect(request).toContain("from_status = 'needs_child_review'");
     expect(request).toContain("to_status = 'proposed'");
     expect(request).toContain("actor_role = 'child'");
+    expect(request).toContain('v_latest_event.reason IS NOT DISTINCT FROM v_reason');
     expect(request).toContain('ORDER BY created_at DESC');
     expect(request).toContain("'idempotentReplay', true");
     expect(request).toContain('public.transition_child_proposal_v1');

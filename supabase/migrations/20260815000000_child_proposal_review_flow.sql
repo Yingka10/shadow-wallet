@@ -231,7 +231,8 @@ BEGIN
       v_proposal.id, v_next_version, 'parent', auth.uid(),
       v_source.plan_title, v_source.plan_summary,
       v_source.purpose_category, v_completion_description,
-      v_source.progress_model, v_source.next_step,
+      CASE WHEN v_mode = 'weekly_frequency' THEN 'weekly_rhythm' ELSE NULL END,
+      v_source.next_step,
       v_mode, v_weekly_frequency, v_days,
       v_preferred_time, v_preferred_time_custom, v_source.estimated_minutes,
       v_source.duration_type, v_source.duration_days, NULL, NULL,
@@ -696,7 +697,8 @@ BEGIN
     IF v_latest_event.from_status = 'needs_child_review'
       AND v_latest_event.to_status = 'proposed'
       AND v_latest_event.actor_role = 'child'
-      AND v_latest_event.plan_version_id IS NOT DISTINCT FROM v_expected_plan_id THEN
+      AND v_latest_event.plan_version_id IS NOT DISTINCT FROM v_expected_plan_id
+      AND v_latest_event.reason IS NOT DISTINCT FROM v_reason THEN
       RETURN jsonb_build_object(
         'ok', true, 'proposalId', v_proposal.id,
         'planVersionId', v_expected_plan_id, 'status', 'proposed',

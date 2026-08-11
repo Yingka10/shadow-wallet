@@ -62,6 +62,8 @@ export function useParentProposals(
 
   useEffect(() => {
     actionRequestId.current += 1;
+    setProposals([]);
+    setLoading(Boolean(childId && familyId));
     setConfirmError(null);
     setActionError(null);
     setSuccessMessage(null);

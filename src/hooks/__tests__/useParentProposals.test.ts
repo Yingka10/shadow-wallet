@@ -221,6 +221,27 @@ describe('useParentProposals', () => {
     expect(result.current.proposals[0]?.proposal.id).toBe('p-b');
   });
 
+  it('切換孩子後立即清掉舊卡，不能在新 read 完成前操作上一個孩子', async () => {
+    const nextRead = deferred<ParentProposalCardData[]>();
+    const reader: ParentProposalReader = {
+      listProposedForParent: jest.fn(({ childId }) => childId === 'child-a'
+        ? Promise.resolve([card('p-a', 'child-a')])
+        : nextRead.promise),
+    };
+    const { result, rerender } = renderHook<
+      ReturnType<typeof useParentProposals>, { childId: string }
+    >(
+      ({ childId }) => useParentProposals(childId, 'family-1', reader),
+      { initialProps: { childId: 'child-a' } },
+    );
+    await waitFor(() => expect(result.current.proposals[0]?.proposal.id).toBe('p-a'));
+    rerender({ childId: 'child-b' });
+    expect(result.current.proposals).toEqual([]);
+    expect(result.current.loading).toBe(true);
+    await act(async () => { nextRead.resolve([card('p-b', 'child-b')]); });
+    await waitFor(() => expect(result.current.proposals[0]?.proposal.id).toBe('p-b'));
+  });
+
   it('缺 child 或 family 時不查詢並呈現空狀態', () => {
     const reader: ParentProposalReader = { listProposedForParent: jest.fn() };
     const { result } = renderHook(() => useParentProposals(null, null, reader));
