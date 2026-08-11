@@ -37,7 +37,8 @@ ALTER TABLE tasks
 
 COMMENT ON COLUMN tasks.creation_request_id IS
   '建立這筆任務的 client 請求識別碼。同一份草稿重試時不變，'
-  '用於保證「網路重送」不會產生第二筆任務。legacy 任務為 NULL。';
+  '用於保證「網路重送」不會產生第二筆任務。非預設建立的舊任務為 NULL；'
+  '預設建立但早於這支 migration 的舊任務，見下面的回填，值是隨機補上的，不代表真的收過那個請求。';
 
 -- 唯一性就是 idempotency 的全部依據。
 -- 部分索引：legacy 任務全部是 NULL，不需要佔索引空間。
@@ -45,6 +46,19 @@ COMMENT ON COLUMN tasks.creation_request_id IS
 CREATE UNIQUE INDEX IF NOT EXISTS tasks_creation_request_id_key
   ON tasks (creation_request_id)
   WHERE creation_request_id IS NOT NULL;
+
+-- 回填：下面的 CHECK 要求「凡是 created_from_preset 就要有 creation_request_id」，
+-- 但正式環境已經有幾筆預設任務是在這支 migration 之前建立的，那時候還沒有這個
+-- 欄位可以填。用隨機值補上——這裡只是為了滿足「獨一無二、非 NULL」，
+-- **不代表這幾筆真的收過某個 client 請求**，所以之後也不會有任何請求拿著
+-- 同一個編號來對到這幾筆、觸發 replay（那需要 client 主動送出一模一樣的
+-- uuid，而這幾筆的編號從沒被任何 client 知道過）。
+-- gen_random_uuid() 是 volatile function，UPDATE 逐列求值，每一筆會拿到不同的值，
+-- 不會撞上面的 unique index。
+UPDATE tasks
+SET creation_request_id = gen_random_uuid()
+WHERE created_from_preset = true
+  AND creation_request_id IS NULL;
 
 -- 預設任務一定要有識別碼。沒有它就沒有 idempotency ——
 -- 讓一筆「從抽屜建立、但無法防重複」的任務存在，等於留一個沒人會注意的破口。

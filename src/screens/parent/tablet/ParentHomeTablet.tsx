@@ -1819,14 +1819,17 @@ const WISH_REJECT_REASONS = [
 function WishApprovalCard({
   wish,
   onApprove,
+  onReject,
   childName,
 }: {
   wish: ChildWishItem;
-  onApprove: (id: string) => Promise<void>;
+  onApprove: (id: string, coinCost: number) => Promise<void>;
+  onReject: (id: string, note?: string) => Promise<void>;
   childName: string;
 }) {
   const [state, setState] = useState<'idle' | 'confirming' | 'approved' | 'rejected'>('idle');
   const [submitting, setSubmitting] = useState(false);
+  const suggestedCoins = wish.ai_suggested_coins ?? 40;
 
   const waitedHours = dayjs().diff(dayjs(wish.created_at), 'hour');
   const isLongWait = waitedHours >= 24;
@@ -1835,7 +1838,7 @@ function WishApprovalCard({
   const handleApprove = async () => {
     setSubmitting(true);
     try {
-      await onApprove(wish.id);
+      await onApprove(wish.id, suggestedCoins);
       setState('approved');
     } catch {
       // stay idle on error
@@ -1847,10 +1850,7 @@ function WishApprovalCard({
   const handleReject = async (reason: string) => {
     setSubmitting(true);
     try {
-      await supabase
-        .from('reward_items')
-        .update({ is_active: false, parent_note: reason } as any)
-        .eq('id', wish.id);
+      await onReject(wish.id, reason);
       setState('rejected');
     } catch {
       // stay idle on error
@@ -1867,7 +1867,7 @@ function WishApprovalCard({
           <Text style={[styles.proposalDoneTitle, { color: ParentColors.success }]}>
             已上架 · 「{wish.name}」
           </Text>
-          <Text style={styles.proposalDoneMeta}>{wish.coin_cost} 幣，孩子可以前往撲滿兌換。</Text>
+          <Text style={styles.proposalDoneMeta}>{suggestedCoins} 幣，孩子可以前往撲滿兌換。</Text>
         </View>
       </View>
     );
@@ -1897,8 +1897,11 @@ function WishApprovalCard({
           </Text>
           <View style={styles.reqSuggestRow}>
             <CoinSmIcon size={13} />
-            <Text style={styles.reqSuggestText}>建議兌換條件：{wish.coin_cost} 枚成長幣</Text>
+            <Text style={styles.reqSuggestText}>AI 建議：{suggestedCoins} 枚成長幣</Text>
           </View>
+          {wish.ai_summary ? (
+            <Text style={styles.reqMeta}>{wish.ai_summary}</Text>
+          ) : null}
           {isLongWait && (
             <Text style={styles.reqAiUrgent}>已等 {waitLabel}，孩子可能還在等回覆</Text>
           )}
@@ -1962,10 +1965,12 @@ function WishApprovalCard({
 function PendingItemsPanel({
   childWishes,
   approveChildWish,
+  rejectChildWish,
   childName,
 }: {
   childWishes: ChildWishItem[];
-  approveChildWish: (id: string) => Promise<void>;
+  approveChildWish: (id: string, coinCost: number) => Promise<void>;
+  rejectChildWish: (id: string, note?: string) => Promise<void>;
   childName: string;
 }) {
   const pendingWishes = childWishes.filter(w => !w.parent_approved);
@@ -1981,7 +1986,7 @@ function PendingItemsPanel({
   return (
     <View>
       {pendingWishes.map(w => (
-        <WishApprovalCard key={w.id} wish={w} onApprove={approveChildWish} childName={childName} />
+        <WishApprovalCard key={w.id} wish={w} onApprove={approveChildWish} onReject={rejectChildWish} childName={childName} />
       ))}
     </View>
   );
@@ -2653,6 +2658,7 @@ export default function ParentHomeTablet() {
   const {
     childWishes,
     approveChildWish,
+    rejectChildWish,
     fetchAll: refreshRedemption,
   } = useParentRedemption(familyId);
 
@@ -2948,6 +2954,7 @@ export default function ParentHomeTablet() {
               <PendingItemsPanel
                 childWishes={childPendingWishes}
                 approveChildWish={approveChildWish}
+                rejectChildWish={rejectChildWish}
                 childName={nickname}
               />
               <View style={styles.heroTipRow}>

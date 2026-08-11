@@ -245,6 +245,59 @@ function getWeekBounds(offset: number) {
   return { start, end };
 }
 
+/**
+ * Pure merge step behind patchSuggestionRecord: find the matching (taskId, action)
+ * entry and patch it, or append a freshly-seeded one if it isn't there yet
+ * (synthetic suggestions like pause_or_renegotiate aren't written to DB until the
+ * first time a parent interacts with them). Kept standalone so the find-vs-append
+ * decision is unit-testable without mocking supabase.
+ */
+export function mergeSuggestionPatch(
+  existing: WeeklySuggestion[],
+  taskId: string,
+  action: SuggestionAction,
+  patch: Partial<WeeklySuggestion>,
+  seed?: Pick<WeeklySuggestion, 'body' | 'actionLabel' | 'taskName'>,
+): WeeklySuggestion[] {
+  const matched = existing.some(sg => sg.taskId === taskId && sg.action === action);
+  return matched
+    ? existing.map(sg => (sg.taskId === taskId && sg.action === action ? { ...sg, ...patch } : sg))
+    : [
+        ...existing,
+        {
+          body: seed?.body ?? '',
+          actionLabel: seed?.actionLabel ?? '',
+          ...(seed?.taskName ? { taskName: seed.taskName } : null),
+          action,
+          taskId,
+          ...patch,
+        } as WeeklySuggestion,
+      ];
+}
+
+/**
+ * Pure decision behind revertSuggestion: only adjust_schedule/adjust_recurrence have
+ * an "applied value" to restore (from the pre-adoption snapshot kept on the
+ * suggestion itself); every other action kind — and a missing snapshot — is a no-op.
+ */
+export function computeRevertTarget(
+  action: SuggestionAction,
+  sg: Pick<WeeklySuggestion, 'currentClaimPeriod' | 'currentMaxClaimsPerPeriod' | 'currentRecurrenceDays'>,
+):
+  | { kind: 'adjust_schedule'; claimPeriod: ScheduleClaimPeriod; maxClaimsPerPeriod: number }
+  | { kind: 'adjust_recurrence'; recurrenceDays: number[] }
+  | null {
+  if (action === 'adjust_schedule') {
+    if (sg.currentClaimPeriod == null || sg.currentMaxClaimsPerPeriod == null) return null;
+    return { kind: 'adjust_schedule', claimPeriod: sg.currentClaimPeriod, maxClaimsPerPeriod: sg.currentMaxClaimsPerPeriod };
+  }
+  if (action === 'adjust_recurrence') {
+    if (sg.currentRecurrenceDays == null) return null;
+    return { kind: 'adjust_recurrence', recurrenceDays: sg.currentRecurrenceDays };
+  }
+  return null;
+}
+
 type RawLTG = {
   id: string;
   task_id: string;
@@ -781,20 +834,7 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
       dialogue?: string;
     };
     const existing = current.suggestions ?? [];
-    const matched = existing.some(sg => sg.taskId === taskId && sg.action === action);
-    const updated = matched
-      ? existing.map(sg => (sg.taskId === taskId && sg.action === action ? { ...sg, ...patch } : sg))
-      : [
-          ...existing,
-          {
-            body: seed?.body ?? '',
-            actionLabel: seed?.actionLabel ?? '',
-            ...(seed?.taskName ? { taskName: seed.taskName } : null),
-            action,
-            taskId,
-            ...patch,
-          } as WeeklySuggestion,
-        ];
+    const updated = mergeSuggestionPatch(existing, taskId, action, patch, seed);
 
     await supabase
       .from('weekly_reports')
@@ -876,14 +916,13 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     const sg = suggestions.find(s => s.taskId === taskId && s.action === action);
     if (!sg) return;
 
-    if (action === 'adjust_schedule') {
-      if (sg.currentClaimPeriod == null || sg.currentMaxClaimsPerPeriod == null) return;
-      await updateTaskSchedule(taskId, sg.currentClaimPeriod, sg.currentMaxClaimsPerPeriod);
-    } else if (action === 'adjust_recurrence') {
-      if (sg.currentRecurrenceDays == null) return;
-      await updateTaskRecurrenceDays(taskId, sg.currentRecurrenceDays);
+    const target = computeRevertTarget(action, sg);
+    if (target == null) return;
+
+    if (target.kind === 'adjust_schedule') {
+      await updateTaskSchedule(taskId, target.claimPeriod, target.maxClaimsPerPeriod);
     } else {
-      return;
+      await updateTaskRecurrenceDays(taskId, target.recurrenceDays);
     }
 
     await patchSuggestionRecord(taskId, action, {

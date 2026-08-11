@@ -262,6 +262,16 @@ export type RewardItem = {
   is_redeemed: boolean;
   redeemed_at: string | null;
   created_at: string;
+  /** 孩子在許願澄清問答裡選的原因／用途。只有走過澄清流程的願望才有值。 */
+  child_reason: string | null;
+  /** AI 整理後給家長看的一句話摘要。 */
+  ai_summary: string | null;
+  /** AI 建議幣值，僅供家長參考——最終 coin_cost 仍由家長核可時寫入。 */
+  ai_suggested_coins: number | null;
+  /** AI 認為家長可能需要另外確認的事（例如尺寸、預算），沒有就是空陣列。 */
+  confirm_needed: string[];
+  /** 家長判斷「現在不適合」時的簡短原因。 */
+  parent_note: string | null;
 };
 
 export type LongTermGoal = {
@@ -767,6 +777,11 @@ export interface Database {
           is_redeemed?: boolean;
           redeemed_at?: string | null;
           created_at?: string;
+          child_reason?: string | null;
+          ai_summary?: string | null;
+          ai_suggested_coins?: number | null;
+          confirm_needed?: string[];
+          parent_note?: string | null;
         };
         Update: Partial<RewardItem>;
         Relationships: [];

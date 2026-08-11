@@ -4,7 +4,7 @@
  *
  * Supported `type` values:
  *   classifyTask | suggestTaskCoin | analyzeTask | suggestRewardCoin |
- *   screenRedemptionRequest | suggestCoinWithAI
+ *   screenRedemptionRequest | suggestCoinWithAI | advisorChat | wishClarify
  */
 
 import {
@@ -15,67 +15,21 @@ import {
   type TaskSource,
 } from './rewardEligibility.ts';
 import { calcCoins, defaultPayout, POLICY_VERSION, type AgeGroup, type Difficulty } from './coinPolicy.ts';
+import { callGemini, parseJson } from './gemini.ts';
+import { handleWishClarify, type WishClarifyHistoryTurn } from './wishClarify.ts';
+import {
+  formatWeekdaysZh,
+  validateAdvisorSuggestedAction,
+  CLAIM_PERIOD_LABEL_ZH,
+  type AdvisorScheduleCandidate,
+  type AdvisorRecurrenceCandidate,
+  type AdvisorSuggestedAction,
+} from './validators.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-
-const GEMINI_KEY = Deno.env.get('GEMINI_API_KEY')!;
-const GEMINI_URL = (model: string) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`;
-
-// 依序嘗試的 model 鏈：某個配額用盡（429）或不存在（404）時自動換下一個。
-// 用 *-latest 別名當首選：它永遠指向 Google 當前可用的 flash，
-// 不會被「舊 model 對新用戶下架」咬到（gemini-2.5-flash 已對新 key 下架）。
-// 目前 gemini-flash-latest 實際指向 gemini-3.6-flash。
-const MODEL_CHAIN = ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-2.0-flash'];
-
-async function callGeminiOnce(prompt: string, model: string, jsonMode: boolean): Promise<string> {
-  const body: Record<string, unknown> = {
-    contents: [{ parts: [{ text: prompt }] }],
-  };
-  if (jsonMode) {
-    body.generationConfig = { responseMimeType: 'application/json' };
-  }
-
-  const res = await fetch(GEMINI_URL(model), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) throw new Error(`Gemini error ${res.status}: ${await res.text()}`);
-
-  const data = await res.json() as {
-    candidates: Array<{ content: { parts: Array<{ text: string }> } }>;
-  };
-  return data.candidates[0]?.content.parts[0]?.text ?? '';
-}
-
-/**
- * 呼叫 Gemini，依 MODEL_CHAIN 逐一嘗試。
- * 遇到 429（配額）或 404（model 不存在）時換下一個 model；其他錯誤直接拋出。
- */
-async function callGemini(prompt: string, jsonMode = false): Promise<string> {
-  let lastErr: unknown;
-  for (const model of MODEL_CHAIN) {
-    try {
-      return await callGeminiOnce(prompt, model, jsonMode);
-    } catch (err) {
-      lastErr = err;
-      const msg = String(err);
-      if (!msg.includes('429') && !msg.includes('404')) throw err;
-      console.warn(`[ai-proxy] model ${model} 失敗，改試下一個：${msg.slice(0, 100)}`);
-    }
-  }
-  throw lastErr;
-}
-
-function parseJson<T>(raw: string): T {
-  const cleaned = raw.trim().replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '');
-  return JSON.parse(cleaned) as T;
-}
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
@@ -278,111 +232,6 @@ reason 請在 60 字以內，直接說明。
     const suggestedCoins = Math.round((payload.coinCost * 0.65) / 5) * 5;
     return { verdict: 'high', reason: `幣值偏高，建議調整至 ${suggestedCoins} 幣左右。`, suggestedCoins };
   }
-}
-
-type ScheduleClaimPeriod = 'day' | 'week';
-
-/** A task that hit its claim-frequency cap this week — a candidate for a schedule-adjustment suggestion. */
-type AdvisorScheduleCandidate = {
-  taskId: string;
-  taskName: string;
-  claimPeriod: ScheduleClaimPeriod;
-  maxClaimsPerPeriod: number;
-  completedThisWeek: number;
-};
-
-/** A fixed-days task completed on fewer weekdays than it's scheduled for. */
-type AdvisorRecurrenceCandidate = {
-  taskId: string;
-  taskName: string;
-  recurrenceDays: number[];
-  completedWeekdays: number[];
-};
-
-export type AdvisorSuggestedAction =
-  | {
-      kind: 'adjust_schedule';
-      taskId: string;
-      taskName: string;
-      currentClaimPeriod: ScheduleClaimPeriod;
-      currentMaxClaimsPerPeriod: number;
-      suggestedClaimPeriod: ScheduleClaimPeriod;
-      suggestedMaxClaimsPerPeriod: number;
-      actionLabel: string;
-    }
-  | {
-      kind: 'adjust_recurrence';
-      taskId: string;
-      taskName: string;
-      currentRecurrenceDays: number[];
-      suggestedRecurrenceDays: number[];
-      actionLabel: string;
-    }
-  | { kind: 'create_task'; suggestedTitle: string; actionLabel: string };
-
-const CLAIM_PERIOD_LABEL_ZH: Record<ScheduleClaimPeriod, string> = { day: '每天', week: '每週' };
-const WEEKDAY_ZH: Record<number, string> = { 0: '日', 1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六' };
-const WEEKDAY_DISPLAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
-function formatWeekdaysZh(days: number[]): string {
-  const sorted = [...days].sort((a, b) => WEEKDAY_DISPLAY_ORDER.indexOf(a) - WEEKDAY_DISPLAY_ORDER.indexOf(b));
-  return `週${sorted.map(d => WEEKDAY_ZH[d]).join('、')}`;
-}
-
-/**
- * Gemini can only be trusted to pick a taskId from the candidate list we gave it —
- * never to invent one, and never to invent the actual weekdays for a recurrence
- * suggestion (those come straight from the matched candidate). Anything that
- * doesn't match, or is out of shape, is dropped — the chat reply still goes through.
- */
-function validateAdvisorSuggestedAction(
-  raw: unknown,
-  scheduleCandidates: AdvisorScheduleCandidate[],
-  recurrenceCandidates: AdvisorRecurrenceCandidate[],
-): AdvisorSuggestedAction | null {
-  if (raw == null || typeof raw !== 'object') return null;
-  const s = raw as Record<string, unknown>;
-
-  if (s.kind === 'adjust_schedule') {
-    if (typeof s.taskId !== 'string' || typeof s.actionLabel !== 'string') return null;
-    if (s.suggestedClaimPeriod !== 'day' && s.suggestedClaimPeriod !== 'week') return null;
-    if (typeof s.suggestedMaxClaimsPerPeriod !== 'number' || !Number.isInteger(s.suggestedMaxClaimsPerPeriod) || s.suggestedMaxClaimsPerPeriod <= 0) return null;
-    const candidate = scheduleCandidates.find(c => c.taskId === s.taskId);
-    if (!candidate) return null;
-    if (s.suggestedMaxClaimsPerPeriod <= candidate.maxClaimsPerPeriod) return null;
-    return {
-      kind: 'adjust_schedule',
-      taskId: candidate.taskId,
-      taskName: candidate.taskName,
-      currentClaimPeriod: candidate.claimPeriod,
-      currentMaxClaimsPerPeriod: candidate.maxClaimsPerPeriod,
-      suggestedClaimPeriod: s.suggestedClaimPeriod,
-      suggestedMaxClaimsPerPeriod: s.suggestedMaxClaimsPerPeriod,
-      actionLabel: s.actionLabel,
-    };
-  }
-
-  if (s.kind === 'adjust_recurrence') {
-    if (typeof s.taskId !== 'string' || typeof s.actionLabel !== 'string') return null;
-    const candidate = recurrenceCandidates.find(c => c.taskId === s.taskId);
-    if (!candidate) return null;
-    return {
-      kind: 'adjust_recurrence',
-      taskId: candidate.taskId,
-      taskName: candidate.taskName,
-      currentRecurrenceDays: candidate.recurrenceDays,
-      suggestedRecurrenceDays: candidate.completedWeekdays,
-      actionLabel: s.actionLabel,
-    };
-  }
-
-  if (s.kind === 'create_task') {
-    if (typeof s.suggestedTitle !== 'string' || typeof s.actionLabel !== 'string') return null;
-    const title = s.suggestedTitle.trim();
-    if (title.length === 0 || title.length > 40) return null;
-    return { kind: 'create_task', suggestedTitle: title, actionLabel: s.actionLabel };
-  }
-
-  return null;
 }
 
 /**
@@ -597,6 +446,13 @@ Deno.serve(async (req) => {
           history?: { role: 'parent' | 'ai'; text: string }[];
           scheduleCandidates?: AdvisorScheduleCandidate[];
           recurrenceCandidates?: AdvisorRecurrenceCandidate[];
+        });
+        break;
+      case 'wishClarify':
+        result = await handleWishClarify(payload as {
+          wishText: string;
+          ageGroup: string;
+          history?: WishClarifyHistoryTurn[];
         });
         break;
       default:

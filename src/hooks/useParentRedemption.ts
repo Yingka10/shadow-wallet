@@ -60,7 +60,8 @@ export type ParentProposal = {
 
 export type ChildWishItem = Pick<
   RewardItem,
-  'id' | 'family_id' | 'child_id' | 'name' | 'coin_cost' | 'added_by' | 'parent_approved' | 'is_active' | 'created_at'
+  | 'id' | 'family_id' | 'child_id' | 'name' | 'coin_cost' | 'added_by' | 'parent_approved' | 'is_active' | 'created_at'
+  | 'reward_type' | 'child_reason' | 'ai_summary' | 'ai_suggested_coins' | 'confirm_needed'
 >;
 
 export type RedemptionChildInfo = {
@@ -162,7 +163,7 @@ export function useParentRedemption(familyId: string | null) {
           .limit(50),
         supabase
           .from('reward_items')
-          .select('id, family_id, child_id, name, coin_cost, added_by, parent_approved, is_active, created_at')
+          .select('id, family_id, child_id, name, coin_cost, added_by, parent_approved, is_active, created_at, reward_type, child_reason, ai_summary, ai_suggested_coins, confirm_needed')
           .eq('family_id', familyId)
           .eq('added_by', 'child')
           .eq('is_active', true)
@@ -268,10 +269,27 @@ export function useParentRedemption(familyId: string | null) {
     if (err) throw err;
   }, []);
 
-  const approveChildWish = useCallback(async (id: string) => {
+  /**
+   * 家長核可願望時同一次寫入 parent_approved 與 coin_cost（P0-2 合約，
+   * 之前只設 parent_approved，coin_cost 永遠停在 0，兌換鏈斷在這一步）。
+   * coinCost 必須 > 0——0 或負值不算「已定價」，等同沒核可。
+   */
+  const approveChildWish = useCallback(async (id: string, coinCost: number) => {
+    if (!Number.isFinite(coinCost) || coinCost <= 0) {
+      throw new Error('幣值必須大於 0');
+    }
     const { error: err } = await supabase
       .from('reward_items')
-      .update({ parent_approved: true })
+      .update({ parent_approved: true, coin_cost: Math.round(coinCost) })
+      .eq('id', id);
+    if (err) throw err;
+  }, []);
+
+  /** 家長判斷「現在不適合」：下架願望並留一句簡短原因（選填）。 */
+  const rejectChildWish = useCallback(async (id: string, note?: string) => {
+    const { error: err } = await supabase
+      .from('reward_items')
+      .update({ is_active: false, parent_note: note?.trim() || null })
       .eq('id', id);
     if (err) throw err;
   }, []);
@@ -350,6 +368,7 @@ export function useParentRedemption(familyId: string | null) {
     approveRequest,
     rejectRequest,
     approveChildWish,
+    rejectChildWish,
     addParentProposal,
     removeParentProposal,
   };
