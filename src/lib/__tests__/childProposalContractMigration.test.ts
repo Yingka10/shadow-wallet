@@ -766,12 +766,21 @@ describe('權限與家庭邊界', () => {
 // 做的理由是：這個契約唯一會害人的方式，就是下一個人以為 RLS 已經
 // 擋住了 child identity。那不是程式錯誤，是敘述錯誤 ——
 // 而敘述錯誤沒有任何其他測試抓得到。
+//
+// ⚠️ 只讀 **tracked** 的來源（migration SQL、types.ts）。
+//
+// 這一段原本還讀 docs/CONTRACT_P0-1_child-proposal.md，而 `docs/` 在
+// .gitignore 裡（「local analysis & scratch docs」）—— 那份檔案從來沒有
+// 進過版本庫。結果是同一個 commit 在兩台機器上結果不同：手邊剛好有那份
+// 草稿的機器全套 pass，乾淨 clone 或新開的 worktree 直接 collection fail。
+// 而且 `readText` 在 describe 主體執行，所以少一份 scratch 檔案會讓
+// **整支測試檔**的一百多條斷言一起倒，看起來像 P0-1 契約壞了。
+//
+// 那兩句敘述本來就寫在 tracked 的 migration 裡（見下面的 ✅／❌ 斷言），
+// 所以這裡改讀真正的來源，不是把斷言刪掉。
 
 describe('child identity 的限制被誠實標示', () => {
   const TYPES = readText(join(process.cwd(), 'src', 'lib', 'childProposal', 'types.ts'));
-  const DOC = readText(
-    join(process.cwd(), 'docs', 'CONTRACT_P0-1_child-proposal.md'),
-  );
 
   it('SQL 明講 actor_role 不是身分證明', () => {
     expect(SQL).toContain('不是身分證明');
@@ -783,9 +792,17 @@ describe('child identity 的限制被誠實標示', () => {
     expect(TYPES).toContain('它**不可以**被當成安全控制');
   });
 
-  it('文件把「硬邊界」與「證明不了」分開列出', () => {
-    expect(DOC).toContain('跨家庭隔離');
-    expect(DOC).toContain('證明不了');
+  it('型別也講清楚真正成立的邊界是哪一個', () => {
+    // 只說「這個證明不了」而不說「那個成立」，讀的人會以為兩邊都不可靠，
+    // 然後在應用層另外做一套家庭過濾 —— 那才是真的會出事的地方。
+    expect(TYPES).toContain('真正成立的邊界是**家庭**');
+  });
+
+  it('契約把「硬邊界」與「證明不了」分開列出，而且分得出哪個是哪個', () => {
+    // 兩句都出現還不夠 —— 重點是下一個人看得出哪一個是保證、
+    // 哪一個不是。✅／❌ 的標記就是那個區分，所以連標記一起釘。
+    expect(SQL).toContain('✅ 跨家庭隔離是**硬邊界**');
+    expect(SQL).toContain('❌ 同一個家庭裡「現在操作的是哪一個孩子」**證明不了**');
   });
 
   it('沒有任何地方宣稱 RLS 擋得住孩子越權', () => {
