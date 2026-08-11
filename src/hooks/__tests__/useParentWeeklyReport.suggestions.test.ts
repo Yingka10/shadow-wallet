@@ -1,8 +1,32 @@
 import {
+  applySuggestionMutation,
   computeRevertTarget,
   mergeSuggestionPatch,
   type WeeklySuggestion,
 } from '../useParentWeeklyReport';
+
+describe('applySuggestionMutation', () => {
+  it('does not change suggestion evidence when the task mutation is guarded', async () => {
+    const mutateTask = jest.fn().mockRejectedValue(
+      new Error('這是一起確認的計畫，調整內容需要再一起確認。'),
+    );
+    const patchSuggestion = jest.fn();
+
+    await expect(applySuggestionMutation(mutateTask, patchSuggestion))
+      .rejects.toThrow('這是一起確認的計畫，調整內容需要再一起確認。');
+    expect(patchSuggestion).not.toHaveBeenCalled();
+  });
+
+  it('changes suggestion evidence only after an ordinary task mutation succeeds', async () => {
+    const calls: string[] = [];
+    const mutateTask = jest.fn(async () => { calls.push('task'); });
+    const patchSuggestion = jest.fn(async () => { calls.push('suggestion'); });
+
+    await applySuggestionMutation(mutateTask, patchSuggestion);
+
+    expect(calls).toEqual(['task', 'suggestion']);
+  });
+});
 
 describe('mergeSuggestionPatch', () => {
   const base: WeeklySuggestion = {

@@ -2,6 +2,11 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { supabase } from './supabase';
+import {
+  SharedPlanRequiresRenegotiationError,
+  isSharedPlanGuardFailure,
+  normalizeSharedPlanGuardError,
+} from './sharedPlanIntegrity';
 import { taipeiDayRange } from './taipeiDate';
 import type {
   CheckpointRewards,
@@ -380,7 +385,7 @@ export async function updateTaskSchedule(
     p_max_claims_per_period: maxClaimsPerPeriod,
   });
 
-  if (error) throw new Error(error.message);
+  if (error) throw normalizeSharedPlanGuardError(error);
 
   const result = data as {
     error?: string;
@@ -391,6 +396,7 @@ export async function updateTaskSchedule(
 
   if (result.error === 'invalid_claim_period') throw new Error('排程週期設定不合法');
   if (result.error === 'invalid_max_claims') throw new Error('次數上限設定不合法');
+  if (isSharedPlanGuardFailure(result)) throw new SharedPlanRequiresRenegotiationError();
 
   return {
     taskId: result.taskId!,
@@ -416,7 +422,7 @@ export async function updateTaskRecurrenceDays(
     p_recurrence_days: recurrenceDays,
   });
 
-  if (error) throw new Error(error.message);
+  if (error) throw normalizeSharedPlanGuardError(error);
 
   const result = data as {
     error?: string;
@@ -428,6 +434,7 @@ export async function updateTaskRecurrenceDays(
   if (result.error === 'invalid_day_value') throw new Error('星期幾的值不合法');
   if (result.error === 'duplicate_day_value') throw new Error('星期幾不能重複');
   if (result.error === 'not_fixed_days_task') throw new Error('這個任務不是固定星期執行，無法調整星期');
+  if (isSharedPlanGuardFailure(result)) throw new SharedPlanRequiresRenegotiationError();
 
   return {
     taskId: result.taskId!,
@@ -570,7 +577,7 @@ export async function pauseLongTermGoal(goalId: string): Promise<void> {
     .from('long_term_goals')
     .update({ status: 'paused' })
     .eq('id', goalId);
-  if (error) throw new Error(error.message);
+  if (error) throw normalizeSharedPlanGuardError(error);
 }
 
 /** 恢復一個已暫停的長期任務（status → 'active'）。 */
@@ -579,7 +586,7 @@ export async function resumeLongTermGoal(goalId: string): Promise<void> {
     .from('long_term_goals')
     .update({ status: 'active' })
     .eq('id', goalId);
-  if (error) throw new Error(error.message);
+  if (error) throw normalizeSharedPlanGuardError(error);
 }
 
 /**
@@ -592,7 +599,7 @@ export async function deleteLongTermGoal(goalId: string, taskId: string): Promis
     .from('long_term_goals')
     .delete()
     .eq('id', goalId);
-  if (goalErr) throw new Error(goalErr.message);
+  if (goalErr) throw normalizeSharedPlanGuardError(goalErr);
 
   await supabase.from('child_tasks').delete().eq('task_id', taskId);
   await supabase.from('tasks').update({ is_active: false }).eq('id', taskId);
