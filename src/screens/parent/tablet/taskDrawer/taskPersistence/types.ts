@@ -187,7 +187,7 @@ export type TaskSupportCommand = {
  * DB 端還有第三個值 `legacy`（抽屜上線前的舊資料），
  * 但**命令不接受它** —— 沒有任何新任務應該被標成 legacy。
  */
-export type TaskCreationSource = 'preset' | 'parent_custom';
+export type TaskCreationSource = 'preset' | 'parent_custom' | 'child_proposal';
 
 /**
  * 以成長幣回饋時，為什麼要用成長幣。

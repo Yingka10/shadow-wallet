@@ -4,6 +4,7 @@ import type {
   ChildProposalPlanVersion,
   ChildProposalStatusEvent,
   ChildProposalTrialEvent,
+  ConfirmChildProposalResult,
 } from '../lib/childProposal/types';
 
 // ── 通用 enum 型別 ───────────────────────────────────────────
@@ -190,6 +191,10 @@ export type Task = {
    * 有 unique index，是「網路重送不會建出第二筆」的唯一依據。legacy 任務為 null。
    */
   creation_request_id?: string | null;
+  creation_source?: 'preset' | 'parent_custom' | 'child_proposal' | 'legacy' | null;
+  /** P0 目前只有 weekly_rhythm；null 表示沒有可證實的 structured model。 */
+  progress_model?: 'weekly_rhythm' | null;
+  next_step?: string | null;
 };
 
 /** tasks.reward_policy 的允許值（migration 20260728000000 的 CHECK）。 */
@@ -502,7 +507,12 @@ export type TaskRoleResponsibility = {
 export type TaskChangeEvent = {
   id: string;
   task_id: string;
-  event_type: 'created_from_preset' | 'updated_from_preset' | 'archived';
+  event_type:
+    | 'created_from_preset'
+    | 'created_parent_custom'
+    | 'created_from_child_proposal'
+    | 'updated_from_preset'
+    | 'archived';
   actor_user_id: string | null;
   task_policy_version: string | null;
   reward_policy_version: string | null;
@@ -1168,6 +1178,10 @@ export interface Database {
         // 那是 domain contract，刻意不從 types/database.ts 反向 import。
         Args: { p_command: object };
         Returns: CreateParentTaskRpcResult;
+      };
+      confirm_child_proposal_v1: {
+        Args: { p_command: object };
+        Returns: ConfirmChildProposalResult;
       };
       // ── 孩子提案 / 版本契約（P0-1）────────────────────────────────
       //
