@@ -130,4 +130,62 @@ describe('presentParentProposal', () => {
     expect(presentParentProposal(card(plan({ authored_by: 'parent' })), '承恩').canConfirm)
       .toBe(false);
   });
+
+  it('fresh AI proposal 是可確認／可調整狀態', () => {
+    expect(presentParentProposal(card(plan()), '承恩')).toMatchObject({
+      state: 'fresh_ai',
+      statusLabel: 'GrowBook 已經整理好',
+      canConfirm: true,
+    });
+  });
+
+  it('needs review 顯示等孩子看看，不提供 direct confirm', () => {
+    const parentPlan = plan({
+      authored_by: 'parent', requires_child_review: true,
+      parent_confirmed_at: '2026-08-11T01:00:00Z',
+      cadence_weekly_frequency: 3,
+    });
+    const item = card(parentPlan);
+    item.proposal = proposal({
+      status: 'needs_child_review', current_plan_version_id: parentPlan.id,
+    });
+    expect(presentParentProposal(item, '承恩')).toMatchObject({
+      state: 'waiting_child',
+      statusLabel: '等孩子看看',
+      planCadence: '一週 3 次',
+      canConfirm: false,
+      waitingMessage: '等孩子看看新的安排是不是也想試試看',
+    });
+  });
+
+  it('child revisit 顯示想再聊，不把 parent version 誤當 direct confirm', () => {
+    const parentPlan = plan({
+      authored_by: 'parent', requires_child_review: true,
+      parent_confirmed_at: '2026-08-11T01:00:00Z', cadence_weekly_frequency: 3,
+    });
+    const item = card(parentPlan);
+    item.proposal = proposal({ status: 'proposed', current_plan_version_id: parentPlan.id });
+    expect(presentParentProposal(item, '承恩')).toMatchObject({
+      state: 'child_revisit',
+      statusLabel: '孩子想再一起聊聊',
+      canConfirm: false,
+      waitingMessage: '孩子想再一起聊聊',
+    });
+  });
+
+  it('parent revision 的 copied summary 不再作為目前安排 authority', () => {
+    const parentPlan = plan({
+      authored_by: 'parent', requires_child_review: true,
+      parent_confirmed_at: '2026-08-11T01:00:00Z',
+      plan_summary: '預計一週安排 4 天閱讀', cadence_weekly_frequency: 3,
+    });
+    const item = card(parentPlan);
+    item.proposal = proposal({
+      status: 'needs_child_review', current_plan_version_id: parentPlan.id,
+    });
+    const view = presentParentProposal(item, '承恩');
+    expect(view.planSummary).toBeNull();
+    expect(view.planCadence).toBe('一週 3 次');
+    expect(JSON.stringify(view)).not.toContain('一週安排 4 天');
+  });
 });

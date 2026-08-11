@@ -50,7 +50,7 @@ function queryResult<T>(result: { data: T[] | null; error: { message: string } |
 beforeEach(() => mockFrom.mockReset());
 
 describe('SupabaseChildProposalService.listProposedForParent', () => {
-  it('只查同家庭、目前孩子與 proposed，最新優先且最多三筆', async () => {
+  it('只查同家庭、目前孩子與 proposed/review，最新優先且最多三筆', async () => {
     const chain = queryResult({ data: [PROPOSAL], error: null });
     mockFrom.mockReturnValue(chain);
 
@@ -64,8 +64,8 @@ describe('SupabaseChildProposalService.listProposedForParent', () => {
     expect(chain.eq.mock.calls).toEqual([
       ['family_id', 'family-1'],
       ['child_id', 'child-a'],
-      ['status', 'proposed'],
     ]);
+    expect(chain.in).toHaveBeenCalledWith('status', ['proposed', 'needs_child_review']);
     expect(chain.order).toHaveBeenCalledWith('created_at', { ascending: false });
     expect(chain.limit).toHaveBeenCalledWith(3);
   });
@@ -111,7 +111,7 @@ describe('SupabaseChildProposalService.listProposedForParent', () => {
       familyId: 'family-1', childId: 'child-b', limit: 2,
     });
 
-    expect(chain.eq).toHaveBeenCalledWith('status', 'proposed');
+    expect(chain.in).toHaveBeenCalledWith('status', ['proposed', 'needs_child_review']);
     expect(chain.eq).not.toHaveBeenCalledWith('status', 'draft');
     expect(chain.eq).not.toHaveBeenCalledWith('status', 'active');
     expect(chain.eq).not.toHaveBeenCalledWith('status', 'closed_unsuitable');
@@ -124,5 +124,61 @@ describe('SupabaseChildProposalService.listProposedForParent', () => {
     await expect(new SupabaseChildProposalService().listProposedForParent({
       familyId: 'family-1', childId: 'child-a',
     })).rejects.toThrow('network down');
+  });
+});
+
+describe('SupabaseChildProposalService.listNeedsReviewForChild', () => {
+  it('讀 exact current parent version 與 adopted source，供 structured diff', async () => {
+    const proposal = {
+      ...PROPOSAL,
+      status: 'needs_child_review' as const,
+      current_plan_version_id: 'parent-version',
+    };
+    const current = {
+      id: 'parent-version', proposal_id: proposal.id, authored_by: 'parent',
+      requires_child_review: true, adopted_from_plan_version_id: 'ai-version',
+    } as ChildProposalPlanVersion;
+    const source = {
+      id: 'ai-version', proposal_id: proposal.id, authored_by: 'ai',
+    } as ChildProposalPlanVersion;
+    const proposalQuery = queryResult({ data: [proposal], error: null });
+    const currentQuery = queryResult({ data: [current], error: null });
+    const sourceQuery = queryResult({ data: [source], error: null });
+    mockFrom
+      .mockReturnValueOnce(proposalQuery)
+      .mockReturnValueOnce(currentQuery)
+      .mockReturnValueOnce(sourceQuery);
+
+    await expect(new SupabaseChildProposalService().listNeedsReviewForChild({
+      familyId: 'family-1', childId: 'child-a',
+    })).resolves.toEqual([{
+      proposal, currentPlanVersion: current, sourcePlanVersion: source,
+    }]);
+
+    expect(proposalQuery.eq.mock.calls).toEqual([
+      ['family_id', 'family-1'], ['child_id', 'child-a'], ['status', 'needs_child_review'],
+    ]);
+    expect(currentQuery.in).toHaveBeenCalledWith('id', ['parent-version']);
+    expect(sourceQuery.in).toHaveBeenCalledWith('id', ['ai-version']);
+  });
+
+  it('lineage 缺失或錯配時不猜 source，也不回傳不可 review 的卡', async () => {
+    const proposal = {
+      ...PROPOSAL,
+      status: 'needs_child_review' as const,
+      current_plan_version_id: 'parent-version',
+    };
+    const current = {
+      id: 'parent-version', proposal_id: proposal.id, authored_by: 'parent',
+      requires_child_review: true, adopted_from_plan_version_id: 'missing-source',
+    } as ChildProposalPlanVersion;
+    mockFrom
+      .mockReturnValueOnce(queryResult({ data: [proposal], error: null }))
+      .mockReturnValueOnce(queryResult({ data: [current], error: null }))
+      .mockReturnValueOnce(queryResult({ data: [], error: null }));
+
+    await expect(new SupabaseChildProposalService().listNeedsReviewForChild({
+      familyId: 'family-1', childId: 'child-a',
+    })).resolves.toEqual([]);
   });
 });

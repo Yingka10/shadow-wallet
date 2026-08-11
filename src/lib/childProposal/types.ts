@@ -333,6 +333,10 @@ export type ChildProposalPlanVersion = {
 
   requires_child_review: boolean;
   child_accepted_at: string | null;
+  /**
+   * 家長完成自己對這一版的決定；不代表家庭共同版本已生效。
+   * 共同成立看 proposal active + effective_at，走 child review 時另看 child_accepted_at。
+   */
   parent_confirmed_at: string | null;
   /** 成為 current 的時間。與 created_at 分開 —— 兩者真的會不一樣。 */
   effective_at: string | null;
@@ -400,8 +404,11 @@ export type ChildProposalStatusEvent = {
 export type ChildProposalFailureCode =
   | 'VALIDATION_FAILED'
   | 'POLICY_REJECTED'
+  | 'NO_MATERIAL_CHANGE'
   | 'STALE_PLAN_VERSION'
   | 'POLICY_CHANGED'
+  | 'PLAN_NOT_CONFIRMABLE'
+  | 'PROPOSAL_NOT_IN_REVIEW'
   | 'PERSISTENCE_FAILED'
   | 'UNKNOWN';
 
@@ -479,23 +486,42 @@ export type ParentProposalCardData = {
   currentPlanVersion: ChildProposalPlanVersion | null;
 };
 
+/** 孩子 review reader 的完整 lineage；source 由 DB 欄位讀取，不由 UI 猜。 */
+export type ChildProposalReviewData = {
+  proposal: ChildProposal;
+  currentPlanVersion: ChildProposalPlanVersion;
+  sourcePlanVersion: ChildProposalPlanVersion;
+};
+
+/** P0-5B 唯一可由家長修改的 structured material fields。 */
+export type ParentProposalMaterialEdits = {
+  cadenceMode: Extract<ChildProposalCadenceMode, 'weekly_frequency' | 'fixed_days'>;
+  cadenceWeeklyFrequency: number | null;
+  cadenceDays: number[] | null;
+  preferredTime: string | null;
+  preferredTimeCustom: string | null;
+  completionDescription: string;
+};
+
+export type ChildProposalRewardDecision = {
+  rewardPolicy: ChildProposalRewardPolicy;
+  eligibility: 'allowed';
+  coin: {
+    suggestedAmount: number;
+    finalAmount: number;
+    minAllowed: number;
+    maxAllowed: number;
+    calculationBasis: unknown;
+  } | null;
+  rewardPolicyVersion: string;
+  explanation: string;
+};
+
 export type ConfirmChildProposalCommand = {
   schemaVersion: typeof CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION;
   proposalId: string;
   expectedPlanVersionId: string;
-  rewardDecision: {
-    rewardPolicy: ChildProposalRewardPolicy;
-    eligibility: 'allowed';
-    coin: {
-      suggestedAmount: number;
-      finalAmount: number;
-      minAllowed: number;
-      maxAllowed: number;
-      calculationBasis: unknown;
-    } | null;
-    rewardPolicyVersion: string;
-    explanation: string;
-  };
+  rewardDecision: ChildProposalRewardDecision;
 };
 
 export type ConfirmChildProposalSuccess = {
@@ -509,6 +535,60 @@ export type ConfirmChildProposalSuccess = {
 };
 
 export type ConfirmChildProposalResult = ConfirmChildProposalSuccess | ChildProposalFailure;
+
+export type ReviseChildProposalPlanCommand = {
+  schemaVersion: typeof CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION;
+  proposalId: string;
+  expectedPlanVersionId: string;
+  materialEdits: ParentProposalMaterialEdits;
+};
+
+export type AcceptChildProposalPlanCommand = {
+  schemaVersion: typeof CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION;
+  proposalId: string;
+  expectedPlanVersionId: string;
+  rewardDecision: ChildProposalRewardDecision;
+};
+
+export type RequestChildProposalChangesCommand = {
+  schemaVersion: typeof CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION;
+  proposalId: string;
+  expectedPlanVersionId: string;
+  reason?: string;
+};
+
+export type CloseChildProposalUnsuitableCommand = {
+  schemaVersion: typeof CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION;
+  proposalId: string;
+  /** Explicit null 仍是 stale guard；undefined 不屬於合法 command。 */
+  expectedPlanVersionId: string | null;
+  reason: string;
+};
+
+export type ReviseChildProposalSuccess = {
+  ok: true;
+  proposalId: string;
+  planVersionId: string;
+  status: 'needs_child_review';
+  idempotentReplay: boolean;
+};
+
+export type ReviewProposalTransitionSuccess = {
+  ok: true;
+  proposalId: string;
+  planVersionId: string | null;
+  status: 'proposed' | 'closed_unsuitable';
+  idempotentReplay: boolean;
+};
+
+export type ReviseChildProposalResult = ReviseChildProposalSuccess | ChildProposalFailure;
+export type AcceptChildProposalResult = ConfirmChildProposalSuccess | ChildProposalFailure;
+export type RequestChildProposalChangesResult =
+  | (ReviewProposalTransitionSuccess & { status: 'proposed'; planVersionId: string })
+  | ChildProposalFailure;
+export type CloseChildProposalResult =
+  | (ReviewProposalTransitionSuccess & { status: 'closed_unsuitable' })
+  | ChildProposalFailure;
 
 // ---------------------------------------------------------------------------
 // 命令

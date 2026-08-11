@@ -4,7 +4,11 @@ import type {
   ChildProposalPlanVersion,
   ChildProposalStatusEvent,
   ChildProposalTrialEvent,
+  AcceptChildProposalResult,
+  CloseChildProposalResult,
   ConfirmChildProposalResult,
+  RequestChildProposalChangesResult,
+  ReviseChildProposalResult,
 } from '../lib/childProposal/types';
 
 // ── 通用 enum 型別 ───────────────────────────────────────────
@@ -1182,6 +1186,22 @@ export interface Database {
       confirm_child_proposal_v1: {
         Args: { p_command: object };
         Returns: ConfirmChildProposalResult;
+      };
+      revise_child_proposal_plan_v1: {
+        Args: { p_command: object };
+        Returns: ReviseChildProposalResult;
+      };
+      accept_child_proposal_plan_v1: {
+        Args: { p_command: object };
+        Returns: AcceptChildProposalResult;
+      };
+      request_child_proposal_changes_v1: {
+        Args: { p_command: object };
+        Returns: RequestChildProposalChangesResult;
+      };
+      close_child_proposal_unsuitable_v1: {
+        Args: { p_command: object };
+        Returns: CloseChildProposalResult;
       };
       // ── 孩子提案 / 版本契約（P0-1）────────────────────────────────
       //

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   StyleSheet,
@@ -7,6 +7,7 @@ import {
   View,
 } from 'react-native';
 import type { ParentProposalCardData } from '../../../../lib/childProposal/types';
+import type { ParentProposalMaterialEdits } from '../../../../lib/childProposal/types';
 import {
   ParentColors,
   ParentFonts,
@@ -17,6 +18,8 @@ import {
   ParentSpacing,
 } from '../../../../constants/parentTheme';
 import { presentParentProposal } from './parentProposalPresentation';
+import { ParentProposalEditSheet } from './ParentProposalEditSheet';
+import { ParentProposalUnsuitableSheet } from './ParentProposalUnsuitableSheet';
 
 type Props = {
   childName: string;
@@ -28,6 +31,10 @@ type Props = {
   confirmingProposalId: string | null;
   confirmError: string | null;
   successMessage: string | null;
+  onRevise?: (card: ParentProposalCardData, edits: ParentProposalMaterialEdits) => Promise<boolean> | boolean | void;
+  onCloseProposal?: (card: ParentProposalCardData, reason: string) => Promise<boolean> | boolean | void;
+  actingProposalId?: string | null;
+  actionError?: string | null;
 };
 
 export function ParentProposalSection({
@@ -40,7 +47,13 @@ export function ParentProposalSection({
   confirmingProposalId,
   confirmError,
   successMessage,
+  onRevise,
+  onCloseProposal,
+  actingProposalId = null,
+  actionError = null,
 }: Props) {
+  const [editCard, setEditCard] = useState<ParentProposalCardData | null>(null);
+  const [closeCard, setCloseCard] = useState<ParentProposalCardData | null>(null);
   const cards = useMemo(
     () => proposals.slice(0, 3).map(item => ({
       source: item,
@@ -60,6 +73,7 @@ export function ParentProposalSection({
 
       {successMessage && <Text style={styles.successText}>{successMessage}</Text>}
       {confirmError && <Text style={styles.errorText}>{confirmError}</Text>}
+      {actionError && <Text style={styles.errorText}>{actionError}</Text>}
 
       {loading && cards.length === 0 ? (
         <View style={styles.stateCard}>
@@ -114,7 +128,7 @@ export function ParentProposalSection({
                   <Text style={styles.planTitle}>{card.planTitle}</Text>
                   {card.planSummary && <Text style={styles.detailText}>{card.planSummary}</Text>}
                   <View style={styles.summaryRow}>
-                    {card.planCadence && (
+                  {card.planCadence && (
                       <View style={styles.summaryItem}>
                         <Text style={styles.detailLabel}>這份計畫的節奏</Text>
                         <Text style={styles.detailText}>{card.planCadence}</Text>
@@ -133,6 +147,12 @@ export function ParentProposalSection({
                       <Text style={styles.detailText}>{card.completionDescription}</Text>
                     </View>
                   )}
+                  {card.preferredTime && (
+                    <View style={styles.summaryItem}>
+                      <Text style={styles.detailLabel}>適合時間</Text>
+                      <Text style={styles.detailText}>{card.preferredTime}</Text>
+                    </View>
+                  )}
                   {card.nextStep && (
                     <View style={styles.detailBlock}>
                       <Text style={styles.detailLabel}>下一步</Text>
@@ -149,26 +169,59 @@ export function ParentProposalSection({
                 </View>
               ) : null}
 
-              {confirmingProposalId === card.id ? (
+              {confirmingProposalId === card.id || actingProposalId === card.id ? (
                 <View style={styles.confirmingRow}>
                   <ActivityIndicator size="small" color={ParentColors.accent} />
-                  <Text style={styles.detailText}>正在建立共同計畫…</Text>
+                  <Text style={styles.detailText}>{confirmingProposalId === card.id ? '正在建立共同計畫…' : '正在保存你們的決定…'}</Text>
                 </View>
-              ) : card.canConfirm ? (
-                <TouchableOpacity
-                  style={styles.confirmButton}
-                  onPress={() => onConfirm(source)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.confirmButtonText}>確認這個計畫</Text>
-                </TouchableOpacity>
-              ) : card.waitingMessage ? (
-                <Text style={styles.waitingText}>{card.waitingMessage}</Text>
-              ) : null}
+              ) : (
+                <View style={styles.actions}>
+                  {card.canConfirm && (
+                    <TouchableOpacity style={styles.confirmButton} onPress={() => onConfirm(source)} activeOpacity={0.8}>
+                      <Text style={styles.confirmButtonText}>確認這個計畫</Text>
+                    </TouchableOpacity>
+                  )}
+                  {(card.state === 'fresh_ai' || card.state === 'child_revisit') && onRevise && (
+                    <TouchableOpacity style={styles.secondaryButton} onPress={() => setEditCard(source)} activeOpacity={0.8}>
+                      <Text style={styles.secondaryButtonText}>{card.state === 'child_revisit' ? '再調整一下' : '調整一下'}</Text>
+                    </TouchableOpacity>
+                  )}
+                  {card.waitingMessage && <Text style={styles.waitingText}>{card.waitingMessage}</Text>}
+                  {onCloseProposal && (
+                    <TouchableOpacity style={styles.lowButton} onPress={() => setCloseCard(source)} activeOpacity={0.8}>
+                      <Text style={styles.lowButtonText}>目前不適合</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
             </View>
           ))}
         </View>
       )}
+      {editCard && (
+        <ParentProposalEditSheet
+          visible
+          card={editCard}
+          saving={actingProposalId === editCard.proposal.id}
+          error={actionError}
+          onClose={() => setEditCard(null)}
+          onSave={async edits => {
+            const completed = await onRevise?.(editCard, edits);
+            if (completed === true) setEditCard(null);
+          }}
+        />
+      )}
+      <ParentProposalUnsuitableSheet
+        visible={closeCard !== null}
+        saving={closeCard !== null && actingProposalId === closeCard.proposal.id}
+        error={actionError}
+        onClose={() => setCloseCard(null)}
+        onSubmit={async reason => {
+          if (!closeCard) return;
+          const completed = await onCloseProposal?.(closeCard, reason);
+          if (completed === true) setCloseCard(null);
+        }}
+      />
     </View>
   );
 }
@@ -339,6 +392,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: ParentSpacing[2],
   },
+  actions: { gap: ParentSpacing[2] },
+  secondaryButton: {
+    alignItems: 'center',
+    paddingHorizontal: ParentSpacing[4],
+    paddingVertical: ParentSpacing[3],
+    borderRadius: ParentRadii.pill,
+    borderWidth: 1,
+    borderColor: ParentColors.accent,
+  },
+  secondaryButtonText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.accent,
+  },
+  lowButton: { alignItems: 'center', paddingVertical: ParentSpacing[2] },
+  lowButtonText: { fontFamily: ParentFonts.body, fontSize: ParentFontSizes.sm, color: ParentColors.fgMuted },
   waitingText: {
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.sm,
