@@ -114,9 +114,10 @@ function weekStart(now: Dayjs): Dayjs {
   return taipeiNow.startOf('day').subtract((taipeiNow.day() + 6) % 7, 'day');
 }
 
-function validScheduledCompletions(
+function validRhythmCompletions(
   completions: GoalCompletionRecord[],
   activeDays: number[],
+  acceptsAnyPlanDay: boolean,
   planStart: Dayjs | null,
   planEnd: Dayjs | null,
 ): GoalCompletionRecord[] {
@@ -128,7 +129,7 @@ function validScheduledCompletions(
 
     const completionDate = completedAt.startOf('day');
     if (
-      !activeDays.includes(completedAt.day())
+      (!acceptsAnyPlanDay && !activeDays.includes(completedAt.day()))
       || (planStart !== null && completionDate.isBefore(planStart, 'day'))
       || (planEnd !== null && completionDate.isAfter(planEnd, 'day'))
     ) {
@@ -142,6 +143,33 @@ function validScheduledCompletions(
   }
 
   return Array.from(completionsByDate.values());
+}
+
+function getWeeklyFrequency(task: Task): number | null {
+  const frequency = Number(task.weekly_frequency);
+  return task.schedule_mode === 'weekly_frequency'
+    && Number.isInteger(frequency)
+    && frequency >= 1
+    && frequency <= 7
+    ? frequency
+    : null;
+}
+
+function buildFlexibleWeekSummary(
+  isReadingHabit: boolean,
+  completed: number,
+  target: number,
+): string {
+  const activity = isReadingHabit ? '閱讀' : '完成';
+  const remaining = Math.max(target - completed, 0);
+
+  if (remaining === 0) {
+    return `這週已${activity} ${completed} 次，這週的節奏完成了。`;
+  }
+  if (completed === 0) {
+    return `這週還差 ${remaining} 次，今天繼續就好。`;
+  }
+  return `這週已${activity} ${completed} 次，這週還差 ${remaining} 次，今天繼續就好。`;
 }
 
 function completionsThisWeek(
@@ -514,6 +542,11 @@ export function buildGoalPresentation(
     && Number.isFinite(goal.target_value)
     && Number(goal.target_value) > 0;
   const challengeUnit = hasChallengeValues ? goal.value_unit?.trim() ?? '' : '';
+  const weeklyFrequency = getWeeklyFrequency(task);
+  const isFlexibleWeeklyRhythm =
+    weeklyFrequency !== null
+    && !isSkill
+    && !isChallenge;
   const activeDays = getActiveDays(task, goal, isReadingHabit, isSkill, isChallenge);
   const planStart = getPlanStart(goal, task, now);
   const dueDateEnd = task.due_date
@@ -527,20 +560,23 @@ export function buildGoalPresentation(
       ? planStart.add(goal.total_days - 1, 'day')
       : null;
   const planEnd = goalEnd ?? dueDateEnd ?? challengeEnd;
-  const rhythmCompletions = validScheduledCompletions(
+  const rhythmCompletions = validRhythmCompletions(
     completions,
     activeDays,
+    isFlexibleWeeklyRhythm,
     planStart,
     planEnd,
   );
   const weeklyCompletions = completionsThisWeek(rhythmCompletions, now);
-  const weekDays = buildWeekDays(
-    activeDays,
-    rhythmCompletions,
-    now,
-    planStart,
-    planEnd,
-  );
+  const weekDays = isFlexibleWeeklyRhythm
+    ? []
+    : buildWeekDays(
+        activeDays,
+        rhythmCompletions,
+        now,
+        planStart,
+        planEnd,
+      );
   const completionCurrent = isSkill || isChallenge
     ? completions.length
     : rhythmCompletions.length;
@@ -557,11 +593,19 @@ export function buildGoalPresentation(
     : hasChallengeValues
       ? Math.max(Number(goal.target_value), 1)
       : completionTarget;
-  const weekTarget = weekDays.filter((day) => day.isScheduled).length;
-  const completionWeekSize = Math.max(activeDays.length, 1);
+  const weekTarget = isFlexibleWeeklyRhythm
+    ? weeklyFrequency ?? 0
+    : weekDays.filter((day) => day.isScheduled).length;
+  const weekCompleted = isFlexibleWeeklyRhythm
+    ? Math.min(weeklyCompletions.length, weekTarget)
+    : weeklyCompletions.length;
+  const completionWeekSize = isFlexibleWeeklyRhythm
+    ? weeklyFrequency ?? 1
+    : Math.max(activeDays.length, 1);
   const hasUnplannedCycle =
     planEnd === null
     && activeDays.length === 0
+    && !isFlexibleWeeklyRhythm
     && (goal.goal_type === 'habit' || goal.goal_type === 'responsibility');
   const fallbackTotalWeeks = (isSkill || isChallenge) && goal.total_days
     ? Math.max(Math.ceil(goal.total_days / 7), 1)
@@ -581,7 +625,9 @@ export function buildGoalPresentation(
   const todayIsInsidePlan =
     !today.isBefore(planStart, 'day')
     && (planEnd === null || !today.isAfter(planEnd, 'day'));
-  const todayIsActive = todayIsInsidePlan && activeDays.includes(today.day());
+  const todayIsActive =
+    todayIsInsidePlan
+    && (isFlexibleWeeklyRhythm || activeDays.includes(today.day()));
   const currentStage = getCurrentSkillStage(goal);
   const nextSkillLevel = goal.level_definitions?.[current];
   const nextReward = isSkill
@@ -594,6 +640,7 @@ export function buildGoalPresentation(
   const isExpired = planEnd !== null && today.isAfter(planEnd, 'day');
   const hasEmptyDailySchedule =
     activeDays.length === 0
+    && !isFlexibleWeeklyRhythm
     && (goal.goal_type === 'habit' || goal.goal_type === 'responsibility');
   const planState: GoalPlanState =
     goal.status === 'paused'
@@ -641,7 +688,9 @@ export function buildGoalPresentation(
   }
   const scheduledCapacity =
     planEnd !== null && (goal.goal_type === 'habit' || goal.goal_type === 'responsibility')
-      ? countScheduledDates(planStart, planEnd, activeDays)
+      ? isFlexibleWeeklyRhythm
+        ? getCoveredWeeks(planStart, planEnd) * weekTarget
+        : countScheduledDates(planStart, planEnd, activeDays)
       : null;
   const planNotice =
     (planState === 'active' || planState === 'unplanned')
@@ -690,10 +739,10 @@ export function buildGoalPresentation(
       ? '依自己的節奏練習'
       : isChallenge
         ? '累積進度由家長確認'
-        : activeDays.length === 0
+        : weekTarget === 0
           ? '本週尚未安排日期'
-          : `本週完成 ${weeklyCompletions.length}／${weekTarget} 次`,
-    weekCompleted: weeklyCompletions.length,
+          : `本週完成 ${weekCompleted}／${weekTarget} 次`,
+    weekCompleted,
     weekTarget,
     totalWeeks,
     goalKind,
@@ -754,7 +803,9 @@ export function buildGoalPresentation(
     canCompleteToday,
     isReadingPlan: isReadingHabit,
     weekDays,
-    weekSummary: isReadingHabit
+    weekSummary: isFlexibleWeeklyRhythm
+      ? buildFlexibleWeekSummary(isReadingHabit, weekCompleted, weekTarget)
+      : isReadingHabit
       ? `這週已閱讀 ${weeklyCompletions.length} 次。少一天沒有關係，找到適合自己的節奏更重要。`
       : isSkill
         ? '這週可以依自己的節奏，繼續目前的練習階段。'
