@@ -11,47 +11,51 @@ import {
 } from '../customTaskAiAvailability';
 
 describe('三種狀態', () => {
-  it('C／D 類且服務正常 → 可用', () => {
-    for (const purposeCategory of ['autonomous_challenge', 'learning_skill'] as const) {
+  it('四類任務且服務正常 → 可用', () => {
+    // 2026-08-11：eligibility 從 C／D 擴大到全部四類（見 customTaskAiAvailability.ts
+    // 檔頭的追記——這是知情狀態下的決定，docs/TASK_AI_PRODUCTION_READINESS.md
+    // 記錄的放寬前提並未成立）。resolveTaskAiAvailability 現在對任何合法
+    // purposeCategory 都不會回傳 not_offered_for_this_task。
+    for (const purposeCategory of [
+      'autonomous_challenge', 'learning_skill', 'life_routine', 'family_participation',
+    ] as const) {
       const copy = resolveTaskAiAvailability({ purposeCategory, serviceHealthy: true });
       expect({ purposeCategory, state: copy.state, button: copy.showActionButton })
         .toEqual({ purposeCategory, state: 'available', button: true });
     }
   });
 
-  it('A／B 類 → 這種任務不提供，而且不顯示按鈕', () => {
-    // 第一版 eligibility 只開放 C／D（B2A.5 的決定）。
-    // 顯示一個按不出結果的按鈕比不顯示更糟。
-    for (const purposeCategory of ['life_routine', 'family_participation'] as const) {
-      const copy = resolveTaskAiAvailability({ purposeCategory, serviceHealthy: true });
-      expect({ purposeCategory, state: copy.state, button: copy.showActionButton, retry: copy.retryable })
-        .toEqual({
-          purposeCategory,
-          state: 'not_offered_for_this_task',
-          button: false,
-          retry: false,
-        });
-    }
-  });
-
-  it('服務掛掉 → 可重試', () => {
-    const copy = resolveTaskAiAvailability({
-      purposeCategory: 'learning_skill',
-      serviceHealthy: false,
-    });
-    expect(copy.state).toBe('service_unavailable');
-    expect(copy.retryable).toBe(true);
-  });
-
-  it('順序有意義：A／B 類即使服務掛掉也不顯示「稍後再試」', () => {
-    // 反過來的話，服務掛掉時 A／B 類會被叫去重試 ——
-    // 而它們再試一百次也不會有建議。
+  it('家庭角色任務 → 不提供，且與 purposeCategory 無關', () => {
+    // family_role 的限制是任務形式本身的限制（見 AI_DENIED_EDITOR_KINDS 的
+    // 說明），不是 2026-08-11 那次 purposeCategory 擴大要處理的內容安全問題。
+    // 就算 purposeCategory 已經全部開放，這一種形式仍然不提供。
     const copy = resolveTaskAiAvailability({
       purposeCategory: 'family_participation',
+      editorKind: 'family_role',
+      serviceHealthy: true,
+    });
+    expect({ state: copy.state, button: copy.showActionButton, retry: copy.retryable })
+      .toEqual({ state: 'not_offered_for_this_task', button: false, retry: false });
+  });
+
+  it('順序有意義：家庭角色任務即使服務掛掉也不顯示「稍後再試」', () => {
+    const copy = resolveTaskAiAvailability({
+      purposeCategory: 'family_participation',
+      editorKind: 'family_role',
       serviceHealthy: false,
     });
     expect(copy.state).toBe('not_offered_for_this_task');
     expect(copy.retryable).toBe(false);
+  });
+
+  it('服務掛掉 → 非家庭角色的任何類別都可重試', () => {
+    for (const purposeCategory of [
+      'autonomous_challenge', 'learning_skill', 'life_routine', 'family_participation',
+    ] as const) {
+      const copy = resolveTaskAiAvailability({ purposeCategory, serviceHealthy: false });
+      expect({ purposeCategory, state: copy.state, retry: copy.retryable })
+        .toEqual({ purposeCategory, state: 'service_unavailable', retry: true });
+    }
   });
 });
 
@@ -78,10 +82,12 @@ describe('文案不洩漏內部代碼', () => {
     }
   });
 
-  it('不可用的兩種狀態都明講「不影響任務建立」', () => {
+  it('service_unavailable 明講「不影響任務建立」', () => {
     // 家長此刻真正在意的是這件事，不是 AI 為什麼壞掉。
+    // not_offered_for_this_task 現在無法透過 resolveTaskAiAvailability 產生
+    // （見上方「三種狀態」的說明），這裡只驗證仍然可觸發的那個狀態。
     for (const copy of [
-      resolveTaskAiAvailability({ purposeCategory: 'family_participation', serviceHealthy: true }),
+      resolveTaskAiAvailability({ purposeCategory: 'family_participation', serviceHealthy: false }),
       resolveTaskAiAvailability({ purposeCategory: 'learning_skill', serviceHealthy: false }),
     ]) {
       expect(copy.message).toContain('不影響任務建立');

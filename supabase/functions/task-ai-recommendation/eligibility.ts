@@ -12,15 +12,19 @@
 // (a) 是輸的一方 —— 自然語言的同義說法是無限的，而每加一個寬泛的詞
 // （「廚房」「爐子」）就會擋掉一批正當任務，直到有人把整層關掉。
 //
-// 這個檔案是 (b)。**第一版只對 C／D 類任務開放。**
+// 這個檔案原本是 (b)：**第一版只對 C／D 類任務開放。**
 //
 // A（生活常規）與 B（家庭參與）不是「比較危險的孩子」，
 // 而是它們的建議天然落在**實體家務操作**上 —— 那正好是安全層最弱的地方。
 // 閱讀計畫、運動練習、學校作業的建議則落在時間、範圍與文字表達上，
 // 就算模型胡說，最壞的結果是一句不合適的文案，不是一個危險的動作。
 //
-// 這不是永久政策，是第一版的收斂。放寬的前提寫在
-// docs/TASK_AI_PRODUCTION_READINESS.md。
+// ⚠️ 2026-08-11：團隊決策把 allowedPurposeCategories 擴大到全部四類，
+//    用於競賽 Demo。docs/TASK_AI_PRODUCTION_READINESS.md 記錄的三個放寬
+//    前提（A/B 類語料 red-team、付費方案、真實家長使用資料）**均未成立**——
+//    這是知情狀態下的決定，不是條件已經滿足。contentSafety.ts 的關鍵字/片語
+//    掃描因此變成 A/B 類任務唯一的內容防線，而它自己承認不是完整的語意安全。
+//    詳情與追記見 docs/TASK_AI_PRODUCTION_READINESS.md。
 //
 // ⚠️ 不符合資格**不是服務錯誤**。它是一個正常且預期的結果，
 // 而且完全不影響家長建立任務。
@@ -60,7 +64,7 @@ export function evaluateTaskAiRecommendationEligibility(
 ): TaskAiEligibilityResult {
   const { purposeCategory, editorKind } = input.taskContext;
 
-  // 1. 分類。第一版只有 C（自主挑戰）與 D（學習與技能）。
+  // 1. 分類。見檔頭 2026-08-11 追記：現已擴大到全部四類。
   if (!E.allowedPurposeCategories.includes(purposeCategory)) {
     return {
       eligible: false,

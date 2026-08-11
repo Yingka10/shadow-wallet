@@ -9,7 +9,9 @@
 //   · 進到預覽不會自動花錢
 //   · 重複點擊不會產生第二次付費呼叫
 //   · 家長離開之後，晚回來的那批建議不會蓋在新草稿上
-//   · A／B 類任務不會呼叫服務，而且不會被說成有問題
+//   · 家庭角色任務不會呼叫服務，而且不會被說成有問題
+//     （2026-08-11：A／B 類的 purposeCategory 已擴大開放，這條限制
+//     現在只剩 family_role 這種任務形式，見 customTaskAiAvailability.ts）
 //   · 採用建議之後幣值由規則引擎重算，不是 AI 決定
 
 import React from 'react';
@@ -145,7 +147,14 @@ function openCustomReview(
   return opened;
 }
 
-/** 走到預覽的家庭參與任務（A／B 類不提供建議）。 */
+/**
+ * 走到預覽的家庭參與任務（固定重複 → editorKind='recurring'）。
+ *
+ * 2026-08-11 前這是「A／B 類不提供建議」的範例；現在 purposeCategory
+ * 已擴大到全部四類，這則任務會看得到 AI 建議按鈕。真正還會被擋下來的
+ * 是 family_role 這種任務形式，不是這個 helper 走的路徑
+ * （見 customTask/__tests__/aiAvailability.test.ts 直接測 editorKind='family_role'）。
+ */
 function openFamilyReview(client: TaskAiRecommendationClient | null) {
   const opened = open(client);
   enterCustomFlow(opened.r);
@@ -239,16 +248,17 @@ describe('7-14. 哪些任務會呼叫服務', () => {
     }
   });
 
-  it('11-12. 家庭參與沒有按鈕，而且完全不呼叫服務', async () => {
+  it('11-12. 家庭參與（固定重複）現在看得到按鈕', () => {
+    // 2026-08-11：purposeCategory 擴大到全部四類，family_participation
+    // 不再是被擋下來的例子。
     const client = new ControllableAiClient();
     const { r } = openFamilyReview(client);
 
-    expect(r.queryByText('取得調整建議')).toBeNull();
-    expect(r.getByText('這類任務先由家長直接確認，不影響建立。')).toBeTruthy();
-    expect(client.callCount).toBe(0);
+    expect(r.getByText('取得調整建議')).toBeTruthy();
+    expect(client.callCount).toBe(0); // 還沒按下去，不會自動呼叫。
   });
 
-  it('11b. 不把 A／B 說成有問題，也不顯示內部代碼', () => {
+  it('11b. 不顯示內部代碼', () => {
     const client = new ControllableAiClient();
     const { r } = openFamilyReview(client);
     const tree = JSON.stringify(r.toJSON());
@@ -260,7 +270,7 @@ describe('7-14. 哪些任務會呼叫服務', () => {
     }
   });
 
-  it('A／B 任務照樣建得出來', async () => {
+  it('不點 AI 建議，家庭參與任務照樣建得出來', async () => {
     const client = new ControllableAiClient();
     const { r, service } = openFamilyReview(client);
     await act(async () => {
