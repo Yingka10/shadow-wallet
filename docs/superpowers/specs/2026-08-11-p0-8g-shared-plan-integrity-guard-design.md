@@ -45,6 +45,7 @@ The repeat-safe migration `20260816000000_shared_plan_integrity_guard.sql` adds:
 - status-specific `long_term_goals` update/delete triggers;
 - restrictive `child_tasks` update/delete RLS policies;
 - forward definitions of `update_task_schedule` and `update_task_recurrence_days` based on their latest master definitions.
+- a forward definition of the latest-master `child_proposal_plan_version_guard()` that adds only the five immutable content/lineage fields proven missing by P0-5B staging acceptance: `preferred_time`, `preferred_time_custom`, `estimated_minutes`, `adopted_from_plan_version_id`, and `requires_child_review`.
 
 The two Weekly Report RPCs check the active Proposal link before mutation and return:
 
@@ -72,8 +73,8 @@ Direct material table writes fail with the stable database message `SHARED_PLAN_
 
 - `complete_task`, reward minting, wallets, transactions, task completions, and weekly progress reads are unchanged.
 - P0-5A direct confirmation creates or updates the canonical task before the Proposal becomes active, so the guard does not block activation.
-- P0-5B acceptance follows the same ordering and must be revalidated after staging acceptance, but this package neither depends on nor edits its RPCs.
-- `child_proposal_plan_version_guard()` is audit-only in P0-8G. Missing immutable protection for `preferred_time`, `preferred_time_custom`, `estimated_minutes`, or other structured fields is reported as `NEEDS_P0_5B_ACCEPTANCE_FIX`; P0-8G does not modify the trigger.
+- P0-5B acceptance follows the same ordering. P0-8G does not edit any P0-5B orchestration RPC.
+- The Plan Version hardening preserves the existing transition lifecycle: `effective_at`, `child_accepted_at`, `parent_confirmed_at`, and the legal first write of `confirmed_*` are not content-frozen. Existing protection for `purpose_category`, `completion_description`, `progress_model`, and `next_step` remains unchanged.
 
 ## Verification
 
@@ -86,4 +87,6 @@ Tests must demonstrate:
 - Weekly Report adoption/revert leaves both task and suggestion evidence unchanged after the guard;
 - Parent Edit/Detail refuses Shared Plan material actions but preserves ordinary task behavior;
 - shared long-term pause/delete is rejected while ordinary long-term behavior remains;
+- direct updates to each of the five newly protected Plan Version fields are rejected, while activation lifecycle writes remain legal;
+- P0-5B 4→3→accept and P0-5A Direct Confirm regressions remain green;
 - P0-5A, P0-6 `complete_task`, P0-7.1 weekly rhythm, TypeScript, and diff checks remain green.

@@ -18,7 +18,7 @@
 
 - [ ] **Step 1: Write failing tests for exact guard scope**
 
-Add assertions that the migration defines `is_active_shared_plan_task_v1`, uses active `child_proposals.task_id`, protects the enumerated task fields, status/delete and assignment deactivation/delete, and does not mention `child_proposal_plan_version_guard`, wallets, transactions, or `complete_task`.
+Add assertions that the migration defines `is_active_shared_plan_task_v1`, uses active `child_proposals.task_id`, protects the enumerated task fields, status/delete and assignment deactivation/delete, and does not touch wallets, transactions, or `complete_task`. After merging P0-5B final integration, assert the latest Plan Version guard gains exactly the five staging-proven immutable gaps without freezing lifecycle writes.
 
 - [ ] **Step 2: Verify RED**
 
@@ -43,6 +43,8 @@ END IF;
 ```
 
 Add restrictive `child_tasks` policies whose update check permits active rows but rejects a resulting inactive shared assignment.
+
+After P0-5B final integration reaches master, merge master (do not rebase) and forward-redefine `child_proposal_plan_version_guard()` from that final version. Add `preferred_time`, `preferred_time_custom`, `estimated_minutes`, `adopted_from_plan_version_id`, and `requires_child_review`; retain the accepted write-once activation and confirmed reward evidence semantics.
 
 - [ ] **Step 4: Verify GREEN**
 

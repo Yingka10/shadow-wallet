@@ -28,9 +28,15 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_task_id uuid := CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END;
+  v_task_id uuid;
   v_material_changed boolean := false;
 BEGIN
+  IF TG_OP = 'DELETE' THEN
+    v_task_id := OLD.id;
+  ELSE
+    v_task_id := NEW.id;
+  END IF;
+
   IF NOT public.is_active_shared_plan_task_v1(v_task_id) THEN
     IF TG_OP = 'DELETE' THEN
       RETURN OLD;
@@ -111,8 +117,14 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_task_id uuid := CASE WHEN TG_OP = 'DELETE' THEN OLD.task_id ELSE NEW.task_id END;
+  v_task_id uuid;
 BEGIN
+  IF TG_OP = 'DELETE' THEN
+    v_task_id := OLD.task_id;
+  ELSE
+    v_task_id := NEW.task_id;
+  END IF;
+
   IF NOT public.is_active_shared_plan_task_v1(v_task_id) THEN
     IF TG_OP = 'DELETE' THEN
       RETURN OLD;
@@ -139,7 +151,7 @@ CREATE TRIGGER long_term_goals_active_shared_plan_guard
   BEFORE UPDATE OR DELETE ON long_term_goals
   FOR EACH ROW EXECUTE FUNCTION public.guard_active_shared_plan_goal_v1();
 
-CREATE OR REPLACE FUNCTION public.guard_active_shared_plan_assignment_delete_v1()
+CREATE OR REPLACE FUNCTION public.guard_active_shared_plan_assignment_v1()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -147,17 +159,28 @@ SET search_path = public
 AS $$
 BEGIN
   IF public.is_active_shared_plan_task_v1(OLD.task_id) THEN
-    RAISE EXCEPTION 'SHARED_PLAN_REQUIRES_RENEGOTIATION'
-      USING ERRCODE = 'P0001';
+    IF TG_OP = 'DELETE' THEN
+      RAISE EXCEPTION 'SHARED_PLAN_REQUIRES_RENEGOTIATION'
+        USING ERRCODE = 'P0001';
+    END IF;
+
+    IF OLD.is_active = true AND NEW.is_active = false THEN
+      RAISE EXCEPTION 'SHARED_PLAN_REQUIRES_RENEGOTIATION'
+        USING ERRCODE = 'P0001';
+    END IF;
   END IF;
-  RETURN OLD;
+
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  RETURN NEW;
 END;
 $$;
 
-DROP TRIGGER IF EXISTS child_tasks_active_shared_plan_delete_guard ON child_tasks;
-CREATE TRIGGER child_tasks_active_shared_plan_delete_guard
-  BEFORE DELETE ON child_tasks
-  FOR EACH ROW EXECUTE FUNCTION public.guard_active_shared_plan_assignment_delete_v1();
+DROP TRIGGER IF EXISTS child_tasks_active_shared_plan_guard ON child_tasks;
+CREATE TRIGGER child_tasks_active_shared_plan_guard
+  BEFORE UPDATE OR DELETE ON child_tasks
+  FOR EACH ROW EXECUTE FUNCTION public.guard_active_shared_plan_assignment_v1();
 
 ALTER TABLE child_tasks ENABLE ROW LEVEL SECURITY;
 
@@ -363,5 +386,64 @@ GRANT EXECUTE ON FUNCTION public.update_task_schedule(uuid, text, integer) TO au
 
 REVOKE ALL ON FUNCTION public.update_task_recurrence_days(uuid, integer[]) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.update_task_recurrence_days(uuid, integer[]) TO authenticated;
+
+-- P0-5B staging acceptance found five structured content/lineage fields that
+-- were missing from the append-only invariant. Keep the accepted lifecycle
+-- behavior unchanged: activation timestamps remain mutable, and confirmed_*
+-- evidence remains writable once and immutable after confirmed_at is present.
+CREATE OR REPLACE FUNCTION public.child_proposal_plan_version_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.proposal_id IS DISTINCT FROM OLD.proposal_id
+    OR NEW.version_no IS DISTINCT FROM OLD.version_no
+    OR NEW.authored_by IS DISTINCT FROM OLD.authored_by
+    OR NEW.plan_title IS DISTINCT FROM OLD.plan_title
+    OR NEW.plan_summary IS DISTINCT FROM OLD.plan_summary
+    OR NEW.purpose_category IS DISTINCT FROM OLD.purpose_category
+    OR NEW.completion_description IS DISTINCT FROM OLD.completion_description
+    OR NEW.progress_model IS DISTINCT FROM OLD.progress_model
+    OR NEW.next_step IS DISTINCT FROM OLD.next_step
+    OR NEW.cadence_mode IS DISTINCT FROM OLD.cadence_mode
+    OR NEW.cadence_weekly_frequency IS DISTINCT FROM OLD.cadence_weekly_frequency
+    OR NEW.cadence_days IS DISTINCT FROM OLD.cadence_days
+    OR NEW.preferred_time IS DISTINCT FROM OLD.preferred_time
+    OR NEW.preferred_time_custom IS DISTINCT FROM OLD.preferred_time_custom
+    OR NEW.estimated_minutes IS DISTINCT FROM OLD.estimated_minutes
+    OR NEW.duration_type IS DISTINCT FROM OLD.duration_type
+    OR NEW.duration_days IS DISTINCT FROM OLD.duration_days
+    OR NEW.reward_policy IS DISTINCT FROM OLD.reward_policy
+    OR NEW.ai_snapshot IS DISTINCT FROM OLD.ai_snapshot
+    OR NEW.ai_suggested_coin_amount IS DISTINCT FROM OLD.ai_suggested_coin_amount
+    OR NEW.adopted_from_plan_version_id IS DISTINCT FROM OLD.adopted_from_plan_version_id
+    OR NEW.requires_child_review IS DISTINCT FROM OLD.requires_child_review THEN
+    RAISE EXCEPTION
+      'plan version immutable content or lineage cannot be changed (version %)', OLD.id
+      USING ERRCODE = '23514';
+  END IF;
+
+  -- Lifecycle fields effective_at, child_accepted_at, and parent_confirmed_at
+  -- retain their existing legal transition paths. Confirmed reward evidence is
+  -- write-once: transition may fill it while confirmed_at is NULL, never later.
+  IF OLD.confirmed_at IS NOT NULL AND (
+       NEW.confirmed_at                    IS DISTINCT FROM OLD.confirmed_at
+    OR NEW.confirmed_reward_policy         IS DISTINCT FROM OLD.confirmed_reward_policy
+    OR NEW.confirmed_coin_amount           IS DISTINCT FROM OLD.confirmed_coin_amount
+    OR NEW.confirmed_payout_basis          IS DISTINCT FROM OLD.confirmed_payout_basis
+    OR NEW.confirmed_claim_period          IS DISTINCT FROM OLD.confirmed_claim_period
+    OR NEW.confirmed_max_claims_per_period IS DISTINCT FROM OLD.confirmed_max_claims_per_period
+    OR NEW.confirmed_reward_policy_version IS DISTINCT FROM OLD.confirmed_reward_policy_version
+    OR NEW.confirmed_task_policy_version   IS DISTINCT FROM OLD.confirmed_task_policy_version
+    OR NEW.confirmed_source_task_id        IS DISTINCT FROM OLD.confirmed_source_task_id
+  ) THEN
+    RAISE EXCEPTION
+      'confirmed plan version evidence cannot be changed (version %)', OLD.id
+      USING ERRCODE = '23514';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
 
 COMMIT;

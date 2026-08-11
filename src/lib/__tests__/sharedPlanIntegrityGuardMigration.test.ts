@@ -76,7 +76,12 @@ describe('P0-8G shared plan integrity guard migration', () => {
 
   it('blocks assignment deactivation/delete without blocking active runtime updates', () => {
     const source = sql();
+    const guard = functionBody(source, 'guard_active_shared_plan_assignment_v1');
 
+    expect(guard).toContain('OLD.task_id');
+    expect(guard).toContain("TG_OP = 'DELETE'");
+    expect(guard).toContain('OLD.is_active = true AND NEW.is_active = false');
+    expect(guard).not.toMatch(/NEW\.(?!is_active\b)[a-z_]+\s+IS DISTINCT FROM OLD\./);
     expect(source).toContain('CREATE POLICY child_tasks_shared_plan_update_guard');
     expect(source).toMatch(/WITH CHECK \([\s\S]*is_active = true[\s\S]*NOT public\.is_active_shared_plan_task_v1\(task_id\)/);
     expect(source).toContain('CREATE POLICY child_tasks_shared_plan_delete_guard');
@@ -98,10 +103,51 @@ describe('P0-8G shared plan integrity guard migration', () => {
     expect(refusal).toBeLessThan(eventWrite);
   });
 
-  it('does not absorb P0-5B, completion, or wallet domains', () => {
+  it('completes the append-only guard for the five accepted Plan Version gaps', () => {
+    const source = sql();
+    const guard = functionBody(source, 'child_proposal_plan_version_guard');
+    const immutableCheck = guard.slice(guard.indexOf('BEGIN'), guard.indexOf('-- Lifecycle fields'));
+
+    for (const column of [
+      'preferred_time',
+      'preferred_time_custom',
+      'estimated_minutes',
+      'adopted_from_plan_version_id',
+      'requires_child_review',
+    ]) {
+      expect(immutableCheck).toMatch(
+        new RegExp(`NEW\\.${column}\\s+IS DISTINCT FROM OLD\\.${column}`),
+      );
+    }
+
+    for (const alreadyProtected of [
+      'purpose_category',
+      'completion_description',
+      'progress_model',
+      'next_step',
+    ]) {
+      expect(immutableCheck).toMatch(
+        new RegExp(`NEW\\.${alreadyProtected}\\s+IS DISTINCT FROM OLD\\.${alreadyProtected}`),
+      );
+    }
+  });
+
+  it('keeps activation evidence on the existing legal write-once lifecycle path', () => {
+    const source = sql();
+    const guard = functionBody(source, 'child_proposal_plan_version_guard');
+    const immutableCheck = guard.slice(guard.indexOf('BEGIN'), guard.indexOf('-- Lifecycle fields'));
+
+    expect(immutableCheck).not.toContain('NEW.effective_at');
+    expect(immutableCheck).not.toContain('NEW.child_accepted_at');
+    expect(immutableCheck).not.toContain('NEW.parent_confirmed_at');
+    expect(guard).toContain('IF OLD.confirmed_at IS NOT NULL');
+    expect(guard).toContain('NEW.confirmed_reward_policy');
+    expect(guard).toContain('NEW.confirmed_source_task_id');
+  });
+
+  it('does not create versions or absorb completion, wallet, or adjustment domains', () => {
     const source = sql();
 
-    expect(source).not.toContain('child_proposal_plan_version_guard');
     expect(source).not.toContain('complete_task');
     expect(source).not.toMatch(/\b(wallets|transactions|task_completions)\b/);
     expect(source).not.toContain('create_child_proposal_adjustment_request_v1');
