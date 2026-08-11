@@ -15,6 +15,11 @@ const GEMINI_URL = (model: string) =>
 // 目前 gemini-flash-latest 實際指向 gemini-3.6-flash。
 const MODEL_CHAIN = ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-2.0-flash'];
 
+// 沒有這個限制的話，Gemini 端網路卡住時 fetch 可能懸著不回應很久（遠超正常
+// TCP timeout），家長會看著顧問聊天/週報轉圈轉很久才等到 fallback。硬性中斷
+// 比等待「自然失敗」快得多、也更可預期——尤其是 Demo 現場網路不穩的時候。
+const GEMINI_TIMEOUT_MS = 8000;
+
 async function callGeminiOnce(prompt: string, model: string, jsonMode: boolean): Promise<string> {
   const body: Record<string, unknown> = {
     contents: [{ parts: [{ text: prompt }] }],
@@ -23,11 +28,24 @@ async function callGeminiOnce(prompt: string, model: string, jsonMode: boolean):
     body.generationConfig = { responseMimeType: 'application/json' };
   }
 
-  const res = await fetch(GEMINI_URL(model), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(GEMINI_URL(model), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error(`Gemini timed out after ${GEMINI_TIMEOUT_MS}ms (model ${model})`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) throw new Error(`Gemini error ${res.status}: ${await res.text()}`);
 
@@ -40,15 +58,31 @@ async function callGeminiOnce(prompt: string, model: string, jsonMode: boolean):
 /**
  * 呼叫 Gemini，依 MODEL_CHAIN 逐一嘗試，並回報**實際回答的那個 model**。
  *
+ * 這是這個模組唯一真正做事的 public API。`callGemini` 只是它的薄包裝 ——
+ * 兩支各自跑一次 MODEL_CHAIN 的話，重試策略會分岔，而
+ * `FORCE_AI_FALLBACK` 這種「一定要對所有呼叫端生效」的開關就會漏掉一半。
+ *
+ * 遇到 429（配額）或 404（model 不存在）時換下一個 model；其他錯誤直接拋出。
+ *
  * model 名稱要帶回去的理由：MODEL_CHAIN 會 fallback，所以「這段文字是誰寫的」
  * 不是固定的。要把它存進稽核紀錄（例如計畫版本的 ai_model）的呼叫端，
  * 必須拿到真的那一個，不能寫死首選 —— 否則紀錄會說是 flash-latest 寫的，
  * 而實際上那天首選掛了、答案來自 2.0-flash。
+ *
+ * 設 Edge Function secret `FORCE_AI_FALLBACK=true` 可以直接跳過 Gemini、
+ * 立刻進入呼叫端既有的 fallback 路徑——排練 Demo Q&A、或想在沒有網路的
+ * 環境下確認降級畫面長什麼樣子時用，正式環境不要設這個變數。
  */
 export async function callGeminiWithModel(
   prompt: string,
   jsonMode = false,
 ): Promise<{ text: string; model: string }> {
+  // guard 放在這裡（而不是 callGemini），因為這裡是所有呼叫端最後會經過的
+  // 同一個點。放在包裝層的話，直接用 callGeminiWithModel 的呼叫端
+  // （P0-3 的計畫草稿）會繞過這個開關，而排練 Demo 時沒有人會發現。
+  if (Deno.env.get('FORCE_AI_FALLBACK') === 'true') {
+    throw new Error('FORCE_AI_FALLBACK enabled — skipping Gemini call');
+  }
   let lastErr: unknown;
   for (const model of MODEL_CHAIN) {
     try {
@@ -64,8 +98,11 @@ export async function callGeminiWithModel(
 }
 
 /**
- * 呼叫 Gemini，依 MODEL_CHAIN 逐一嘗試。
- * 遇到 429（配額）或 404（model 不存在）時換下一個 model；其他錯誤直接拋出。
+ * 只要文字的呼叫端用這一支（週報、顧問聊天、許願澄清、既有 analyzeTask）。
+ *
+ * 行為與加上 model 回報之前**完全相同**：同一條 MODEL_CHAIN、同一個 8 秒
+ * timeout、同一個 FORCE_AI_FALLBACK 開關、同樣把錯誤往外拋讓各自的
+ * fallback 接住。差別只有它把 model 名稱丟掉。
  */
 export async function callGemini(prompt: string, jsonMode = false): Promise<string> {
   const { text } = await callGeminiWithModel(prompt, jsonMode);

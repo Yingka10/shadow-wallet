@@ -62,6 +62,18 @@ export function formatWeekdaysZh(days: number[]): string {
 }
 
 /**
+ * motivation_observation／dialogue／affirmations 是 AI 自由生成的敘述文字，
+ * 家長看到的數字（幾項、幾次、幾天）一律要跟畫面上其他地方（由 DB 算出來的
+ * 統計）一致——AI 生成的數字沒有這個保證，寧可讓這段文字完全不提數字，
+ * 也不要冒著跟畫面對不上的風險。schedule_suggestion／recurrence_suggestion
+ * 的 body 不用（也不能）套這個檢查：那兩個是唯一被明確要求要寫出具體數字
+ * 的欄位，且數字最終會被 validateScheduleSuggestion 換成候選清單裡的真值。
+ */
+export function containsArabicDigit(text: string): boolean {
+  return /[0-9]/.test(text);
+}
+
+/**
  * Gemini can only be trusted to pick a taskId from the candidate list we gave it —
  * never to invent one. Anything that doesn't match a real candidate, or proposes a
  * cap that isn't actually larger than today's, is dropped rather than written to DB.
