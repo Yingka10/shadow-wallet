@@ -1,17 +1,30 @@
--- P0-6 staging verification (transactional; all fixtures are rolled back).
+-- P0-6 staging verification (self-rolling-back; every fixture write is discarded).
 --
 -- Run only after explicitly targeting the staging project. Do not rely on the
--- linked project from supabase/config.toml:
---   supabase db ... --project-ref <STAGING_PROJECT_REF>
+-- linked project from supabase/config.toml — it points at production:
+--   supabase db query --linked -f supabase/verify/staging/p0_6_reward_guard.sql
+--   (after `supabase projects list` shows growbook-staging as LINKED)
 --
--- This asset requires an administrative SQL session because it creates
--- rollback-only fixtures and sets request.jwt.claims to emulate an
--- authenticated parent. It must never be run against production.
-
-\set ON_ERROR_STOP on
-BEGIN;
-
-DO $$
+-- HOW TO READ THE RESULT
+--   This file is one DO block that ALWAYS ends in RAISE EXCEPTION. That is the
+--   rollback mechanism: `supabase db query` sends the file as a single
+--   statement and cannot process psql meta-commands (\set, \echo) or a bare
+--   BEGIN/ROLLBACK pair, so the only portable way to guarantee that no fixture
+--   survives is to abort the transaction ourselves.
+--
+--   PASS  => the error message is exactly 'P0-6 REWARD GUARD VERIFY PASS ...'
+--   FAIL  => any other error message; it names the case that failed.
+--
+--   A non-zero exit code therefore does NOT mean failure here. Read the message.
+--
+-- This asset needs an administrative SQL session: it creates fixtures and sets
+-- request.jwt.claims to emulate an authenticated parent. Never run it against
+-- production.
+--
+-- NOTE: the fixtures include a row in auth.users. parents.user_id is a foreign
+-- key into auth.users, so a fabricated uuid cannot be used — an earlier version
+-- of this file did exactly that and could not run at all.
+DO $p0_6$
 DECLARE
   v_family_a uuid := gen_random_uuid();
   v_family_b uuid := gen_random_uuid();
@@ -32,6 +45,7 @@ DECLARE
   v_task_fixed uuid := gen_random_uuid();
   v_task_out_of_range uuid := gen_random_uuid();
   v_task_other uuid := gen_random_uuid();
+  v_task_twice uuid := gen_random_uuid();
   v_task_family_b uuid := gen_random_uuid();
   v_goal_record uuid := gen_random_uuid();
   v_goal_progress uuid := gen_random_uuid();
@@ -40,6 +54,7 @@ DECLARE
   v_goal_out_of_range uuid := gen_random_uuid();
   v_goal_other_task uuid := gen_random_uuid();
   v_goal_family_b uuid := gen_random_uuid();
+  v_goal_forged uuid := gen_random_uuid();
   v_result jsonb;
   v_before int;
   v_after int;
@@ -47,6 +62,9 @@ DECLARE
   v_count_after int;
   v_day int;
 BEGIN
+  -- parents.user_id references auth.users(id); only id is mandatory there.
+  INSERT INTO auth.users (id) VALUES (v_user_a);
+
   INSERT INTO families (id, family_name) VALUES
     (v_family_a, 'P0-6 rollback family A'),
     (v_family_b, 'P0-6 rollback family B');
@@ -89,6 +107,12 @@ BEGIN
       'coin_eligible', 5, 1, 5, 'p0-6', 'fixed_days'),
     (v_task_other, v_family_a, 'other task', 'D', 'both', true, 'day', 1,
       'record_only', NULL, NULL, NULL, NULL, 'fixed_days'),
+    -- max_claims_per_period = 2 lets the second same-day attempt past the claim
+    -- counter, so it reaches the INSERT and collides with idx_unique_task_per_day.
+    -- Every other task here has max_claims 1 and is stopped before the insert,
+    -- which means they never exercise the constraint-name shaping at all.
+    (v_task_twice, v_family_a, 'twice per day', 'C', 'both', true, 'day', 2,
+      'record_only', NULL, NULL, NULL, NULL, 'fixed_days'),
     (v_task_family_b, v_family_b, 'family B task', 'D', 'both', true, 'day', 1,
       'record_only', NULL, NULL, NULL, NULL, 'fixed_days');
 
@@ -110,6 +134,7 @@ BEGIN
     (v_child_a, v_task_fixed, true),
     (v_child_a, v_task_out_of_range, true),
     (v_child_a, v_task_other, true),
+    (v_child_a, v_task_twice, true),
     (v_child_b, v_task_family_b, true);
 
   INSERT INTO long_term_goals (
@@ -146,6 +171,21 @@ BEGIN
     OR v_count_after <> v_count_before
   THEN
     RAISE EXCEPTION 'P0-6 verify: same-day retry was not side-effect-free: %', v_result;
+  END IF;
+
+  -- The duplicate check above returns before any INSERT. This one gets past the
+  -- claim counter and actually hits idx_unique_task_per_day, which is the only
+  -- unique violation complete_task is allowed to reshape into already_completed
+  -- (any other constraint is re-raised).
+  v_result := complete_task(v_task_twice, v_child_a, '2026-08-11 09:00+08', true, NULL);
+  IF v_result ? 'error' THEN
+    RAISE EXCEPTION 'P0-6 verify: first claim of a twice-per-day task failed: %', v_result;
+  END IF;
+  SELECT count(*) INTO v_count_before FROM task_completions WHERE task_id = v_task_twice;
+  v_result := complete_task(v_task_twice, v_child_a, '2026-08-11 21:00+08', true, NULL);
+  SELECT count(*) INTO v_count_after FROM task_completions WHERE task_id = v_task_twice;
+  IF v_result->>'error' <> 'already_completed' OR v_count_after <> v_count_before THEN
+    RAISE EXCEPTION 'P0-6 verify: idx_unique_task_per_day was not shaped into already_completed: %', v_result;
   END IF;
 
   -- Same-family sibling is not implicitly assigned.
@@ -187,6 +227,13 @@ BEGIN
   v_result := complete_task(v_task_other, v_child_a, '2026-08-12 09:00+08', true, v_goal_family_b);
   IF v_result->>'error' <> 'invalid_goal' THEN
     RAISE EXCEPTION 'P0-6 verify: cross-family goal was accepted: %', v_result;
+  END IF;
+
+  -- A goal id that does not exist at all must be rejected the same way, so the
+  -- RPC cannot be used to probe which goal ids are real.
+  v_result := complete_task(v_task_record, v_child_a, '2026-08-12 09:00+08', true, v_goal_forged);
+  IF v_result->>'error' <> 'invalid_goal' THEN
+    RAISE EXCEPTION 'P0-6 verify: forged goal id was accepted: %', v_result;
   END IF;
 
   SELECT count(*) INTO v_count_after FROM task_completions;
@@ -261,11 +308,8 @@ BEGIN
   THEN
     RAISE EXCEPTION 'P0-6 verify: complete_task exposes a client coin argument';
   END IF;
-END;
-$$;
 
-DO $$
-BEGIN
+  -- Live ACL on the reward-mutating RPCs.
   IF has_function_privilege('anon', 'public.complete_task(uuid,uuid,timestamptz,boolean,uuid)', 'EXECUTE')
     OR has_function_privilege('anon', 'public.mark_task_atomic(uuid,uuid,text,integer,text)', 'EXECUTE')
     OR has_function_privilege('anon', 'public.settle_weekly_interest()', 'EXECUTE')
@@ -276,7 +320,10 @@ BEGIN
       CROSS JOIN LATERAL aclexplode(
         COALESCE(p.proacl, acldefault('f', p.proowner))
       ) acl
-      WHERE p.oid = 'public.settle_weekly_interest()'::regprocedure
+      WHERE p.oid IN (
+          'public.complete_task(uuid,uuid,timestamptz,boolean,uuid)'::regprocedure,
+          'public.mark_task_atomic(uuid,uuid,text,integer,text)'::regprocedure,
+          'public.settle_weekly_interest()'::regprocedure)
         AND acl.grantee = 0
         AND acl.privilege_type = 'EXECUTE'
     )
@@ -290,8 +337,8 @@ BEGIN
   THEN
     RAISE EXCEPTION 'P0-6 verify: required RPC execute privilege is missing';
   END IF;
-END;
-$$;
 
-ROLLBACK;
-\echo 'P0-6 reward guard staging verification PASS (all fixture writes rolled back)'
+  -- Deliberate abort: this is how the fixtures are discarded. See the header.
+  RAISE EXCEPTION 'P0-6 REWARD GUARD VERIFY PASS (all fixture writes rolled back)';
+END
+$p0_6$;
