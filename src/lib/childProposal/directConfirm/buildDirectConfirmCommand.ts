@@ -4,6 +4,7 @@ import type { CreateParentTaskCommandBase } from '../../../screens/parent/tablet
 import type {
   ChildProposalFailure,
   ChildProposalPlanVersion,
+  ChildProposalRewardDecision,
   ConfirmChildProposalCommand,
   ParentProposalCardData,
 } from '../types';
@@ -134,6 +135,52 @@ export type BuildDirectConfirmCommandResult =
   | { ok: true; command: ConfirmChildProposalCommand }
   | ChildProposalFailure;
 
+export type BuildProposalRewardDecisionResult =
+  | { ok: true; rewardDecision: ChildProposalRewardDecision }
+  | ChildProposalFailure;
+
+/**
+ * 以 App 既有 canonical evaluator 產生 fresh decision，再與 version evidence 比對。
+ * SQL 端只驗證這份 evidence；這裡不會寫 DB，也不是第二套 pricing engine。
+ */
+export function buildProposalRewardDecision(
+  card: ParentProposalCardData,
+  childAgeGroup: string,
+): BuildProposalRewardDecisionResult {
+  const plan = card.currentPlanVersion;
+  if (!plan || !plan.purpose_category || !plan.duration_type || !plan.reward_policy
+    || !text(plan.plan_title) || !text(plan.completion_description)
+    || !text(plan.reward_policy_version) || !text(plan.task_policy_version)) {
+    return {
+      ok: false,
+      code: 'PLAN_NOT_CONFIRMABLE',
+      reason: 'PLAN_NOT_CONFIRMABLE',
+      message: 'GrowBook 還沒有可確認的完整計畫，請重新整理後再試。',
+    };
+  }
+
+  const base = evaluationCommand(card);
+  const decision = evaluateTaskReward({ command: base, childAgeGroup });
+
+  if (decision.eligibility !== 'allowed') return policyChanged(decision.explanation);
+  if (plan.task_policy_version !== TASK_POLICY_VERSION) {
+    return policyChanged('任務政策已更新，請重新整理 GrowBook 建議。');
+  }
+  if (plan.reward_policy !== decision.rewardPolicy
+    || plan.reward_policy_version !== decision.rewardPolicyVersion) {
+    return policyChanged('回饋政策已更新，請重新整理 GrowBook 建議。');
+  }
+  if (decision.rewardPolicy === 'coin_eligible') {
+    if (plan.ai_suggested_coin_amount !== decision.coin.suggestedAmount) {
+      return policyChanged('成長幣建議已更新，請重新整理後再確認。');
+    }
+  } else if (plan.ai_suggested_coin_amount !== null) {
+    return policyChanged('這份不發幣的計畫帶有過期幣值，請重新整理。');
+  }
+
+  return { ok: true, rewardDecision: decision };
+}
+
 export function buildDirectConfirmCommand(
   card: ParentProposalCardData,
   childAgeGroup: string,
@@ -148,27 +195,8 @@ export function buildDirectConfirmCommand(
   }
 
   const plan = card.currentPlanVersion!;
-  const base = evaluationCommand(card);
-  const decision = evaluateTaskReward({ command: base, childAgeGroup });
-
-  if (decision.eligibility !== 'allowed') {
-    return policyChanged(decision.explanation);
-  }
-  if (plan.task_policy_version !== TASK_POLICY_VERSION) {
-    return policyChanged('任務政策已更新，請重新整理 GrowBook 建議。');
-  }
-  if (plan.reward_policy !== decision.rewardPolicy
-    || plan.reward_policy_version !== decision.rewardPolicyVersion) {
-    return policyChanged('回饋政策已更新，請重新整理 GrowBook 建議。');
-  }
-
-  if (decision.rewardPolicy === 'coin_eligible') {
-    if (plan.ai_suggested_coin_amount !== decision.coin.suggestedAmount) {
-      return policyChanged('成長幣建議已更新，請重新整理後再確認。');
-    }
-  } else if (plan.ai_suggested_coin_amount !== null) {
-    return policyChanged('這份不發幣的計畫帶有過期幣值，請重新整理。');
-  }
+  const reward = buildProposalRewardDecision(card, childAgeGroup);
+  if (reward.ok !== true) return reward;
 
   return {
     ok: true,
@@ -176,7 +204,7 @@ export function buildDirectConfirmCommand(
       schemaVersion: CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION,
       proposalId: card.proposal.id,
       expectedPlanVersionId: plan.id,
-      rewardDecision: decision,
+      rewardDecision: reward.rewardDecision,
     },
   };
 }
