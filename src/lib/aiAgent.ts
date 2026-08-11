@@ -286,15 +286,24 @@ function stripWishFillerPrefix(text: string): string {
   return (stripped || text.trim()).slice(0, 24);
 }
 
-function wishClarifyFallback(wishText: string): WishClarifyResult {
+/**
+ * 保底整理。**不能因為連不上 ai-proxy 就把孩子已經回答過的內容丟掉**——
+ * 跟 supabase/functions/ai-proxy/wishClarify.ts 的 wishClarifyFallback
+ * 是同一套邏輯（各自維護一份，理由見 aiAgent.ts 檔頭：client 端不能
+ * import Deno 專用的檔案）。
+ */
+function wishClarifyFallback(wishText: string, history: WishClarifyHistoryTurn[] = []): WishClarifyResult {
+  const shortTitle = stripWishFillerPrefix(wishText);
+  const answerText = history.map(h => h.answer.trim()).filter(Boolean).join('、');
+  const hasDurationOrFrequencyAnswer = history.some(h => /分鐘|小時|次|天/.test(h.answer));
   return {
     done: true,
-    shortTitle: stripWishFillerPrefix(wishText),
-    wishType: 'item',
-    reason: wishText,
-    summary: wishText,
+    shortTitle,
+    wishType: hasDurationOrFrequencyAnswer ? 'privilege' : 'item',
+    reason: (answerText ? `${wishText}（${answerText}）` : wishText).slice(0, 60),
+    summary: (answerText ? `${shortTitle}，${answerText}` : wishText).slice(0, 80),
     suggestedCoins: 40,
-    confirmNeeded: [],
+    confirmNeeded: answerText ? ['請家長確認詳細內容並輸入金額'] : [],
   };
 }
 
@@ -316,15 +325,15 @@ export async function clarifyWish(
       if (typeof result.question === 'string' && result.question.trim() && Array.isArray(result.options) && result.options.length >= 2) {
         return result;
       }
-      return wishClarifyFallback(wishText);
+      return wishClarifyFallback(wishText, history);
     }
     if (result.done === true && result.summary) {
       return { ...result, shortTitle: result.shortTitle?.trim() || stripWishFillerPrefix(wishText) };
     }
-    return wishClarifyFallback(wishText);
+    return wishClarifyFallback(wishText, history);
   } catch (err) {
     console.warn('[aiAgent.clarifyWish] fallback due to error:', err);
-    return wishClarifyFallback(wishText);
+    return wishClarifyFallback(wishText, history);
   }
 }
 
