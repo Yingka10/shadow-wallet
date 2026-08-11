@@ -1,5 +1,9 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
-import type { ChildProposal, ParentProposalCardData } from '../../lib/childProposal';
+import type {
+  ChildProposal,
+  ParentProposalCardData,
+  ParentProposalMaterialEdits,
+} from '../../lib/childProposal';
 import { useParentProposals, type ParentProposalReader } from '../useParentProposals';
 
 jest.mock('../../lib/supabase', () => ({ supabase: {} }));
@@ -27,6 +31,12 @@ function deferred<T>() {
   const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
   return { promise, resolve, reject };
 }
+
+const edits: ParentProposalMaterialEdits = {
+  cadenceMode: 'weekly_frequency', cadenceWeeklyFrequency: 3, cadenceDays: null,
+  preferredTime: 'after_dinner', preferredTimeCustom: null,
+  completionDescription: '完成一次閱讀時段',
+};
 
 describe('useParentProposals', () => {
   it('提供 loading、資料與手動 refresh', async () => {
@@ -139,6 +149,97 @@ describe('useParentProposals', () => {
     await act(async () => { await result.current.confirmProposal(item); });
     expect(result.current.confirmError).toBe('計畫已更新，請重新整理');
     expect(result.current.proposals).toHaveLength(1);
+  });
+
+  it('revise 提供 pending/typed error，成功才 refresh', async () => {
+    const item = card('p-a', 'child-a');
+    const save = deferred<{ ok: true; planVersionId: string }>();
+    const reader: ParentProposalReader = {
+      listProposedForParent: jest.fn()
+        .mockResolvedValueOnce([item])
+        .mockResolvedValueOnce([]),
+      revisePlan: jest.fn(() => save.promise as never),
+    };
+    const { result } = renderHook(() =>
+      useParentProposals('child-a', 'family-1', reader, '6-9'));
+    await waitFor(() => expect(result.current.proposals).toHaveLength(1));
+
+    let pending!: Promise<boolean>;
+    act(() => { pending = result.current.reviseProposal(item, edits); });
+    expect(result.current.actingProposalId).toBe('p-a');
+    await act(async () => {
+      save.resolve({ ok: true, planVersionId: 'parent-v' });
+      await pending;
+    });
+    expect(reader.revisePlan).toHaveBeenCalledWith(item, edits);
+    expect(result.current.proposals).toEqual([]);
+    expect(result.current.successMessage).toBe('已存下來，等孩子看看');
+    expect(result.current.actingProposalId).toBeNull();
+  });
+
+  it('NO_MATERIAL_CHANGE 顯示 typed message，不假裝 refresh 成功', async () => {
+    const item = card('p-a', 'child-a');
+    const reader: ParentProposalReader = {
+      listProposedForParent: jest.fn().mockResolvedValue([item]),
+      revisePlan: jest.fn().mockResolvedValue({
+        ok: false, code: 'NO_MATERIAL_CHANGE', message: '這些安排和目前計畫一樣',
+      }),
+    };
+    const { result } = renderHook(() =>
+      useParentProposals('child-a', 'family-1', reader, '6-9'));
+    await waitFor(() => expect(result.current.proposals).toHaveLength(1));
+    await act(async () => { await result.current.reviseProposal(item, edits); });
+    expect(result.current.actionError).toBe('這些安排和目前計畫一樣');
+    expect(reader.listProposedForParent).toHaveBeenCalledTimes(1);
+  });
+
+  it('close 成功 refresh；切換孩子後舊 action completion 不覆蓋新畫面', async () => {
+    const a = card('p-a', 'child-a');
+    const close = deferred<{ ok: true; proposalId: string }>();
+    const reader: ParentProposalReader = {
+      listProposedForParent: jest.fn(({ childId }) => Promise.resolve(
+        childId === 'child-a' ? [a] : [card('p-b', 'child-b')],
+      )),
+      closeUnsuitable: jest.fn(() => close.promise as never),
+    };
+    const { result, rerender } = renderHook<
+      ReturnType<typeof useParentProposals>, { childId: string }
+    >(
+      ({ childId }) => useParentProposals(childId, 'family-1', reader, '6-9'),
+      { initialProps: { childId: 'child-a' } },
+    );
+    await waitFor(() => expect(result.current.proposals[0]?.proposal.id).toBe('p-a'));
+    let pending!: Promise<boolean>;
+    act(() => { pending = result.current.closeProposal(a, '最近安排比較滿'); });
+    rerender({ childId: 'child-b' });
+    await waitFor(() => expect(result.current.proposals[0]?.proposal.id).toBe('p-b'));
+    await act(async () => {
+      close.resolve({ ok: true, proposalId: 'p-a' });
+      await pending;
+    });
+    expect(result.current.successMessage).toBeNull();
+    expect(result.current.proposals[0]?.proposal.id).toBe('p-b');
+  });
+
+  it('切換孩子後立即清掉舊卡，不能在新 read 完成前操作上一個孩子', async () => {
+    const nextRead = deferred<ParentProposalCardData[]>();
+    const reader: ParentProposalReader = {
+      listProposedForParent: jest.fn(({ childId }) => childId === 'child-a'
+        ? Promise.resolve([card('p-a', 'child-a')])
+        : nextRead.promise),
+    };
+    const { result, rerender } = renderHook<
+      ReturnType<typeof useParentProposals>, { childId: string }
+    >(
+      ({ childId }) => useParentProposals(childId, 'family-1', reader),
+      { initialProps: { childId: 'child-a' } },
+    );
+    await waitFor(() => expect(result.current.proposals[0]?.proposal.id).toBe('p-a'));
+    rerender({ childId: 'child-b' });
+    expect(result.current.proposals).toEqual([]);
+    expect(result.current.loading).toBe(true);
+    await act(async () => { nextRead.resolve([card('p-b', 'child-b')]); });
+    await waitFor(() => expect(result.current.proposals[0]?.proposal.id).toBe('p-b'));
   });
 
   it('缺 child 或 family 時不查詢並呈現空狀態', () => {

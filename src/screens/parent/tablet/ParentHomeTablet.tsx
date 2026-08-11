@@ -2681,6 +2681,10 @@ export default function ParentHomeTablet() {
     confirmProposal,
     confirmingProposalId,
     confirmError: proposalConfirmError,
+    reviseProposal,
+    closeProposal,
+    actingProposalId,
+    actionError: proposalActionError,
     successMessage: proposalSuccessMessage,
   } = useParentProposals(childId, familyId, undefined, child?.age_group ?? null);
 
@@ -2951,6 +2955,10 @@ export default function ParentHomeTablet() {
             }}
             confirmingProposalId={confirmingProposalId}
             confirmError={proposalConfirmError}
+            onRevise={reviseProposal}
+            onCloseProposal={closeProposal}
+            actingProposalId={actingProposalId}
+            actionError={proposalActionError}
             successMessage={proposalSuccessMessage}
           />
 

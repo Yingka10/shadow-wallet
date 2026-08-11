@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet } from 'react-native';
-import { render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen } from '@testing-library/react-native';
+import type { ChildProposalReviewData } from '../../../lib/childProposal';
 import type { TodayTask, UseTodayTasksResult } from '../../../hooks/useTodayTasks';
 
 function buildTodayTasksResult(overrides: Partial<UseTodayTasksResult> = {}): UseTodayTasksResult {
@@ -76,6 +77,24 @@ const skillLongTermTask: TodayTask = {
 };
 
 let mockWalletBalance = 42;
+const mockAcceptReview = jest.fn();
+const mockRequestChanges = jest.fn();
+const mockReviewRefresh = jest.fn();
+let mockReviewState: any;
+
+const proposalReview = {
+  proposal: { id: 'proposal-1', status: 'needs_child_review', child_original_goal: '我想讀完這本書' },
+  sourcePlanVersion: {
+    id: 'version-ai', proposal_id: 'proposal-1', cadence_mode: 'weekly_frequency',
+    cadence_weekly_frequency: 4, cadence_days: null, preferred_time: 'after_dinner',
+    preferred_time_custom: null, completion_description: '完成一次閱讀時段',
+  },
+  currentPlanVersion: {
+    id: 'version-parent', proposal_id: 'proposal-1', cadence_mode: 'weekly_frequency',
+    cadence_weekly_frequency: 3, cadence_days: null, preferred_time: 'after_dinner',
+    preferred_time_custom: null, completion_description: '完成一次閱讀時段',
+  },
+} as ChildProposalReviewData;
 
 jest.mock('../../../hooks/useTodayTasks', () => ({
   useTodayTasks: () => mockTodayTasksResult,
@@ -88,6 +107,10 @@ jest.mock('../../../hooks/useWallet', () => ({
     loading: false,
     refresh: jest.fn(),
   }),
+}));
+
+jest.mock('../../../hooks/useChildProposalReview', () => ({
+  useChildProposalReview: () => mockReviewState,
 }));
 
 jest.mock('@react-navigation/native', () => ({
@@ -153,6 +176,16 @@ describe('HomeScreen', () => {
   beforeEach(() => {
     mockWalletBalance = 42;
     mockTodayTasksResult = buildTodayTasksResult();
+    mockAcceptReview.mockReset();
+    mockAcceptReview.mockResolvedValue(false);
+    mockRequestChanges.mockReset();
+    mockRequestChanges.mockResolvedValue(false);
+    mockReviewRefresh.mockReset();
+    mockReviewState = {
+      reviews: [], loading: false, error: null, refresh: mockReviewRefresh,
+      accept: mockAcceptReview, requestChanges: mockRequestChanges,
+      actingProposalId: null, actionError: null, successMessage: null,
+    };
   });
 
   it('renders greeting', () => {
@@ -199,5 +232,26 @@ describe('HomeScreen', () => {
     expect(growthCardStyle.paddingRight).toBeGreaterThanOrEqual(72);
     expect(wateringStyle.position).toBe('absolute');
     expect(wateringStyle.right).toBeLessThanOrEqual(0);
+  });
+
+  it('在原本提案入口附近顯示孩子 review，兩個 action 走 typed hook', () => {
+    mockReviewState = { ...mockReviewState, reviews: [proposalReview] };
+    render(<HomeScreen />);
+    expect(screen.getByTestId('child-plan-review-card')).toBeTruthy();
+    expect(screen.getByTestId('child-proposal-entry')).toBeTruthy();
+    fireEvent.press(screen.getByText('好，我也想這樣試試看'));
+    fireEvent.press(screen.getByText('我想再聊聊'));
+    expect(mockAcceptReview).toHaveBeenCalledWith(proposalReview);
+    expect(mockRequestChanges).toHaveBeenCalledWith(proposalReview);
+  });
+
+  it('review loading/error 不會藏掉原本提案入口', () => {
+    mockReviewState = { ...mockReviewState, loading: true, error: '讀取失敗' };
+    const { rerender } = render(<HomeScreen />);
+    expect(screen.getByTestId('child-proposal-entry')).toBeTruthy();
+    rerender(<HomeScreen />);
+    expect(screen.getByText('讀取要一起看的安排失敗')).toBeTruthy();
+    fireEvent.press(screen.getByText('重新看看'));
+    expect(mockReviewRefresh).toHaveBeenCalledTimes(1);
   });
 });
