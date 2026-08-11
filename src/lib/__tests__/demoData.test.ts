@@ -402,10 +402,14 @@ describe('P0-10A. runner 的防護', () => {
     expect(RUNNER).toMatch(/STATE='a'/);
   });
 
-  it('收到 --state=b 明確拒絕，不會偷偷退回 a', () => {
-    expect(RUNNER).toContain('STATE_B_NOT_AVAILABLE_YET');
-    const b = RUNNER.slice(RUNNER.indexOf('STATE_B_NOT_AVAILABLE_YET'));
-    expect(b.slice(0, 200)).toMatch(/exit 2/);
+  // P0-10B 之後 --state=b 是真的可以跑的，所以這裡從「一定要拒絕」改成
+  // 「不認得的 state 一定要拒絕」—— 守的還是同一件事：不准偷偷退回 a。
+  it('不認得的 state 明確拒絕，不會偷偷退回 a', () => {
+    expect(RUNNER).toMatch(/不認得的 state/);
+    const arm = RUNNER.slice(RUNNER.indexOf('不認得的 state'));
+    expect(arm.slice(0, 120)).toMatch(/exit 1/);
+    // 唯一會靜默決定 state 的地方只有預設值。
+    expect(RUNNER.match(/STATE=(['"])a\1/g) ?? []).toHaveLength(1);
   });
 
   it('runner 永遠不設 FORCE_AI_FALLBACK —— 那會把提案 AI 一起關掉', () => {
@@ -420,3 +424,148 @@ describe('編碼守門', () => {
     expect(DEMO_SEED).toMatch(/RAISE EXCEPTION[^;]*位元組/);
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// P0-10B — State B（共同閱讀計畫 4→3→接受→本週 2/3）
+//
+// State B 唯一無法由「今天重播」得到的東西是**行事曆**：P0-5B 的 accept 會把
+// start_date 定成台北的今天，而 buildGoalPresentation 會丟掉 planStart 以前的
+// 完成紀錄，所以「本週兩個不同日期各一次」在當天接受的計畫上不存在。
+//
+// 下面這組測的就是這條界線有沒有被守住：資料語意全部走正式 RPC，只有行事曆
+// 被往前移，而且沒有任何未來日期、沒有手寫 completion/transaction/wallet。
+// ───────────────────────────────────────────────────────────────────────────
+
+const DEMO_STORY = read('demo_seed_story.sql');
+
+describe('P0-10B. State B 的資料語意由正式 RPC 產生', () => {
+  const story = statementsOf(DEMO_STORY);
+
+  it('提案、版本、家長調整、孩子接受全部走正式 RPC', () => {
+    for (const rpc of [
+      'create_child_proposal_v1',
+      'transition_child_proposal_v1',
+      'add_child_proposal_plan_version_v1',
+      'revise_child_proposal_plan_v1',
+      'accept_child_proposal_plan_v1',
+    ]) {
+      expect(story).toContain(rpc);
+    }
+  });
+
+  it('完成紀錄走 complete_task ＋ record_completion_context，不手寫任何一列', () => {
+    expect(story).toContain('complete_task(');
+    expect(story).toContain('record_completion_context(');
+    expect(story).not.toMatch(/INSERT\s+INTO\s+task_completions/i);
+    expect(story).not.toMatch(/INSERT\s+INTO\s+transactions/i);
+    expect(story).not.toMatch(/UPDATE\s+wallets/i);
+  });
+
+  it('用真正的家長身分呼叫，不是繞過 assert_child_in_caller_family', () => {
+    // auth.uid() 讀的是 request.jwt.claims，所以設定它等於「以這個人的身分呼叫」，
+    // 而不是把授權檢查關掉。
+    expect(story).toContain("set_config('request.jwt.claims'");
+    expect(story).toContain('FROM parents WHERE family_id');
+    // 真的切到 authenticated 角色會讓後面的行事曆 UPDATE 撞 RLS，不可以有。
+    expect(story).not.toMatch(/set_config\(\s*'role'/);
+  });
+
+  it('AI 版本是一週 4 次，家長版本是一週 3 次', () => {
+    expect(story).toMatch(/'weeklyFrequency',\s*4/);
+    expect(story).toMatch(/'cadenceWeeklyFrequency',\s*3/);
+  });
+
+  it('只位移行事曆欄位，不動任何建立時間戳', () => {
+    const updates = story.match(/UPDATE\s+\w+[\s\S]*?WHERE/g) ?? [];
+    const updated = updates.join(' ');
+    // 允許動的：plan window。
+    expect(updated).toMatch(/started_at\s*=/);
+    expect(updated).toMatch(/start_date\s*=/);
+    // 不允許動的：建立與生效的時間戳。移了它們就是在編一條假時間線，
+    // 而且 confirmed_at 被 guard 保護成 write-once，一定會留下破口。
+    for (const forbidden of [
+      'activated_at', 'effective_at', 'child_accepted_at',
+      'parent_confirmed_at', 'confirmed_at',
+    ]) {
+      expect(updated).not.toContain(`${forbidden} =`);
+    }
+  });
+
+  it('明確拒絕未來日期', () => {
+    expect(story).toContain('拒絕建立未來的完成紀錄');
+    expect(story).toMatch(/>\s*timezone\('Asia\/Taipei',\s*now\(\)\)::date/);
+  });
+
+  it('自我驗證釘住 2 個不同日期與 weekly_frequency=3 的正式任務', () => {
+    expect(story).toContain('count(DISTINCT timezone(');
+    expect(story).toContain('weekly_frequency = 3');
+    expect(story).toContain('recurrence_days IS NULL');
+    expect(story).toContain("progress_model = 'weekly_rhythm'");
+  });
+
+  it('故事層不寫死任何日曆日，全部由執行當下推導', () => {
+    const literals = story.match(/'20\d\d-\d\d-\d\d'/g) ?? [];
+    expect(literals).toEqual([]);
+  });
+});
+
+describe('P0-10B. 行事曆可行性', () => {
+  // 「本週 2/3」需要本週兩個不同日期。週一時本週只過了一天 —— 那個畫面在現實
+  // 上不存在，而 App 的孩子端只呈現當週（completionsThisWeek 沒有 offset 參數，
+  // 全域也找不到任何 previous-week 的呈現路徑），所以沒有「顯示上一週」這個
+  // 退路。唯一誠實的做法是明確拒絕，不是補第二個日期出來。
+  it('週一明確拒絕，而且是在任何破壞性動作之前', () => {
+    expect(RUNNER).toContain('STATE_B_2_OF_3_NOT_CALENDAR_FEASIBLE');
+    expect(DEMO_STORY).toContain('STATE_B_2_OF_3_NOT_CALENDAR_FEASIBLE');
+
+    // reseed 會先 reset。可行性檢查必須排在 reset 前面，否則週一執行的結果是
+    // State A 被清掉、State B 又建不起來，兩個 state 都沒有。
+    const reseed = RUNNER.slice(RUNNER.indexOf('reseed)'));
+    const feasibleAt = reseed.indexOf('assert_state_b_feasible');
+    const resetAt = reseed.indexOf('demo_reset.sql');
+    expect(feasibleAt).toBeGreaterThanOrEqual(0);
+    expect(resetAt).toBeGreaterThanOrEqual(0);
+    expect(feasibleAt).toBeLessThan(resetAt);
+  });
+
+  it('日期推導只用「本週一」與「今天」，兩者都不可能是未來', () => {
+    expect(DEMO_STORY).toContain("date_trunc('week', p_ref::timestamp)::date");
+    expect(DEMO_STORY).toMatch(/'feasible',\s*p_ref > m/);
+  });
+});
+
+describe('P0-10B. runner 的 state 切換', () => {
+  it('--state=b 不再回 NOT_AVAILABLE_YET，而且 a/b 都是合法 state', () => {
+    expect(RUNNER).not.toContain('STATE_B_NOT_AVAILABLE_YET');
+    const arms = RUNNER.slice(RUNNER.indexOf('case "$STATE" in'));
+    expect(arms).toMatch(/^\s*a\)/m);
+    expect(arms).toMatch(/^\s*b\)/m);
+  });
+
+  it('State B 是 State A 再加一層，不是另一份 seed', () => {
+    expect(RUNNER).toContain('demo_seed.sql');
+    expect(RUNNER).toContain('demo_seed_story.sql');
+    const seedFn = RUNNER.slice(RUNNER.indexOf('run_seed()'));
+    // 故事層一定排在背景 seed 之後。
+    expect(seedFn.indexOf('demo_seed.sql'))
+      .toBeLessThan(seedFn.indexOf('demo_seed_story.sql'));
+    // 而且只有 state b 才跑。
+    expect(seedFn).toMatch(/if \[ "\$STATE" = 'b' \]; then\s*\n\s*run_sql "\$HERE\/demo_seed_story\.sql"/);
+  });
+
+  it('兩個 state 的預期產出寫在同一處，dry-run 與文件不會各說各話', () => {
+    expect(RUNNER).toMatch(/a\)\s*B_TASKS=6;.*B_PROPOSALS=0/s);
+    expect(RUNNER).toMatch(/b\)\s*B_TASKS=7;.*B_PROPOSALS=1/s);
+  });
+
+  it('State A 仍然是零提案 —— B 的提案不能滲進 A', () => {
+    // reset 會清掉整個家庭，而故事層只在 state b 執行，所以 A 的提案數
+    // 必然是 0。這條釘住的是「不要為了省事把故事層併進 demo_seed.sql」。
+    expect(DEMO_SEED).not.toContain('create_child_proposal_v1');
+    expect(DEMO_SEED).not.toContain('accept_child_proposal_plan_v1');
+  });
+});
+
+// reset 清得掉 State B 的關鍵是「child_proposals 排在 tasks 之前」，
+// 而那條已經由上面「P0-10A. reset 的刪除順序」釘住了 —— State B 只是讓那條
+// 順序第一次真的有 canonical task 要清，不需要再寫一條一樣的斷言。

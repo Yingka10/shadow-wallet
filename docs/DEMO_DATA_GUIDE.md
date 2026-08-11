@@ -26,7 +26,7 @@ Demo 資料分成兩個狀態。**Reset Point 是 State A。**
 | | 內容 | 狀態 |
 |---|---|---|
 | **State A**｜Demo Start | 家庭身分 + 六筆背景任務 + 上週與本週的背景生活紀錄 + 兩份週報 | **現在可用** |
-| **State B**｜Review Snapshot | State A + 閱讀提案（媽媽 4→3 → 孩子接受）+ 執行紀錄 | `WAITING_FOR_P0_5B` |
+| **State B**｜Review Snapshot | State A + 閱讀提案（媽媽 4→3 → 孩子接受）+ 執行紀錄，最終畫面「本週 2/3」 | **現在可用**（週一除外，見下） |
 
 State A 的定義是：**「核心閱讀故事還沒開始，但這個家庭已經有一段真實生活歷史。」**
 
@@ -43,19 +43,95 @@ reset 之後 `child_proposals` 在 Demo family 範圍內是 0。
 > 「本週」的定義會整個換掉，前一天 seed 的資料會全部被算進「上一週」，
 > 週報看起來會是空的。
 
-### State B 之後要長什麼樣（P0-10B 再實作）
+### State B｜Review Snapshot
 
-State A ＋ 閱讀提案 ＋ 媽媽把一週 4 次改成 3 次 ＋ 孩子接受
-＋ canonical task `weekly_frequency = 3` ＋ 本週不同日期的完成紀錄。
+State A ＋ 一條已經成立並執行了幾天的共同閱讀計畫。孩子提「一週 4 次」→
+AI 整理成結構化計畫 → 媽媽改成「一週 3 次」→ 孩子接受 → 幾天後 **本週 2/3**。
 
-⚠️ **這裡有一個產品一致性問題，P0-10B 要先拍板：**
-故事是「4 → 3」，所以孩子接受之後正式計畫的 `weekly_frequency` 就是 **3**，
-不是 4。那麼執行畫面正確的顯示是「本週 2/3」或「本週 3/3」，
-**不會是「本週 3/4」** —— 3/4 只有在計畫仍是 4 次的情況下才成立，
-而那和「媽媽調整成 3 次」互相矛盾。
+```
+./run_demo.sh reseed --state=b     # 需要 DEMO_PASSWORD
+```
 
-建議展示 **本週 2/3**：還有進行中的感覺，週報也比較好談
-「已經開始穩定進行，但仍有空間」。
+State B 的內容（相對 State A 的增量）：
+
+| | State A | State B |
+|---|---|---|
+| tasks / active 指派 | 6 / 6 | 7 / 7 |
+| long_term_goals | 3 | 4 |
+| task_completions | 9 | 11 |
+| transactions | 3 | 5 |
+| wallet | 36 | 56 |
+| child_proposals | **0** | **1（active）** |
+| plan versions | 0 | 2（AI 4 次 → 家長 3 次） |
+
+正式任務：`creation_source=child_proposal`、`schedule_mode=weekly_frequency`、
+`weekly_frequency=3`、`recurrence_days=NULL`、`progress_model=weekly_rhythm`。
+
+### State B 為什麼需要「行事曆位移」，位移到哪裡為止
+
+P0-5B 的 `accept_child_proposal_plan_v1` 會把 `start_date` 定成**台北的今天**。
+這是正確的產品語意（計畫從答應的那天開始），但也代表：**今天才接受的計畫，
+「本週 2/3」在物理上不可能成立** —— `buildGoalPresentation` 的
+`validRhythmCompletions` 會丟掉 `planStart` 以前的完成紀錄，而 2/3 需要本週
+兩個不同日期各一次。
+
+`demo_seed_story.sql` 的處理方式是把兩件事分開：
+
+* **資料語意** 完全由正式程式碼產生。提案、AI 版本、家長調整、孩子接受、
+  兩筆完成紀錄，全部走正式 RPC，而且是用**真正的 Demo 家長身分**呼叫
+  （`set_config('request.jwt.claims', …)` 讓 `auth.uid()` 回傳真實 user id，
+  所以 `assert_child_in_caller_family` 是真的通過，不是被繞過）。
+  沒有任何一列是手寫 INSERT，沒有放寬任何驗證，沒有改動 production code。
+* **行事曆** 只把計畫的起訖日往前移：`long_term_goals.started_at / end_date`、
+  `tasks.start_date / due_date`、current plan version 的 `start_date / end_date`。
+
+**刻意不動任何建立時間戳**（`activated_at` / `effective_at` /
+`child_accepted_at` / `parent_confirmed_at` / `confirmed_at` / `created_at`）。
+理由是 `confirmed_at` 被 `child_proposal_plan_version_guard` 保護成 write-once，
+改不動；只把其他時間戳往前移，會做出一條看起來一致、實際上在 `confirmed_at`
+破口的假時間線。與其留一個藏起來的矛盾，不如留一道說得清楚的接縫：
+**行事曆是歷史的，建立軌跡是誠實的。**
+
+這條界線由 `p0_10b_equivalence.sql` 守著：它在臨時家庭用完全相同的 RPC 走一次
+今天的 live accept，扣掉 id／建立時間／刻意位移的日期之後，**逐欄比對**兩邊的
+proposal / plan version / task / goal / child_task，比完整包回滾。
+
+### State B 的 2/3 擷取窗口（重要）
+
+`weekStart` 是台北時間的**週一**，而孩子端只呈現當週 ——
+`completionsThisWeek` 沒有 offset 參數，全域也找不到任何 previous-week 的
+呈現路徑。所以「顯示上一個完整週期的 2/3」**目前的 App 做不到**。
+
+| 執行日 | State B |
+|---|---|
+| 週二 ～ 週日 | 可以，本週 2/3 |
+| **週一** | **不行** |
+
+週一時本週只過了一天，「本週兩個不同日期各完成一次」在現實上不存在。
+這時 runner 回 `STATE_B_2_OF_3_NOT_CALENDAR_FEASIBLE` 並 exit 3，
+**而且這道檢查排在 reset 之前** —— 否則 `reseed --state=b` 會先把 State A
+清掉再失敗，兩個 state 都沒有。不會補第二個日期出來。
+
+> 彩排、錄影、教授測試、正式初選不一定在同一天。**請避開週一**，
+> 其餘任何一天 State B 都能穩定重建。
+
+完成日的推導只用「本週一」與「今天」，兩者都不可能是未來；接受日訂在上週五，
+所以「接受之後過了幾天」在週二到週日都成立。
+
+### 週報與顧問
+
+State B 的週報要在 seed 之後重新產生（走已部署的 `generate-weekly-report`，
+staging 的 `FORCE_WEEKLY_REPORT_FALLBACK=true` 讓內容 deterministic）。
+產生後本週那份會寫「這週完成了 **5/7** 項任務」—— 閱讀計畫已被算進去。
+
+⚠️ **永遠不要在 staging 設 `FORCE_AI_FALLBACK`**：那是 ai-proxy 也讀的旗標，
+會把孩子提案的 live AI 一起關掉，而那是 Demo 唯一必須 live 的 AI。
+
+### 影片剪輯的語意
+
+State A 錄前半（孩子提出 → AI 整理 → 家長看到 → 媽媽 4→3 → 孩子看到差異 →
+孩子接受），State B 錄後半（正式計畫 → 本週 2/3 → 週報 → 顧問）。
+**不要在影片裡假裝這兩段是同一分鐘即時發生的**，剪輯語意是「幾天後」。
 
 ---
 

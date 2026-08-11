@@ -46,14 +46,12 @@ for arg in "$@"; do
   esac
 done
 
+# 每個 state 的預期產出。dry-run 印這組數字，demoData.test.ts 也釘住它，
+# 所以「文件說會建幾筆」與「腳本真的建幾筆」不會各說各話。
 case "$STATE" in
-  a) ;;
-  b)
-    echo "STATE_B_NOT_AVAILABLE_YET" >&2
-    echo "State B（閱讀提案 → 媽媽 4→3 → 孩子接受）等 P0-5B merge 後由 P0-10B 實作。" >&2
-    exit 2
-    ;;
-  *) echo "!! 不認得的 state：$STATE（目前只有 a）" >&2; exit 1 ;;
+  a) B_TASKS=6; B_GOALS=3; B_DONE=9;  B_TX=3; B_PROPOSALS=0; B_VERSIONS=0 ;;
+  b) B_TASKS=7; B_GOALS=4; B_DONE=11; B_TX=5; B_PROPOSALS=1; B_VERSIONS=2 ;;
+  *) echo "!! 不認得的 state：$STATE（只有 a 與 b）" >&2; exit 1 ;;
 esac
 
 # ── 目標必須被證明，而不是被假設 ────────────────────────────────────────────
@@ -170,11 +168,36 @@ SELECT 'WILL DELETE' AS phase, x.tbl, x.n FROM (
 UNION ALL
 SELECT 'WILL CREATE (state $STATE)', y.tbl, y.n FROM (
   VALUES ('families', 1), ('parents', 1), ('children', 1), ('wallets', 1),
-         ('tasks', 6), ('child_tasks', 6), ('long_term_goals', 3),
-         ('task_completions', 9), ('transactions', 3)
+         ('tasks', $B_TASKS), ('child_tasks', $B_TASKS),
+         ('long_term_goals', $B_GOALS), ('task_completions', $B_DONE),
+         ('transactions', $B_TX),
+         ('child_proposals', $B_PROPOSALS),
+         ('child_proposal_plan_versions', $B_VERSIONS)
 ) y(tbl, n)
+WHERE y.n > 0
 ORDER BY 1 DESC, 2;
 SQL
+}
+
+# ── State B 的行事曆可行性：一定要在任何破壞性動作之前跑 ────────────────────
+#
+# 「本週 2/3」需要本週兩個不同日期。今天是週一時本週只過了一天，那個畫面在
+# 現實上不存在。如果等到 seed 才發現，`reseed --state=b` 已經先把 State A
+# 清掉了，結果是兩個 state 都沒有 —— 所以這道檢查排在 reset 前面。
+assert_state_b_feasible() {
+  RESULT="$(printf '%s\n' "
+SELECT CASE WHEN timezone('Asia/Taipei', now())::date
+              > date_trunc('week', timezone('Asia/Taipei', now()))::date
+            THEN 'FEASIBLE' ELSE 'MONDAY' END AS verdict;" | run_sql_stdin)"
+  case "$RESULT" in
+    *FEASIBLE*) ;;
+    *)
+      echo "STATE_B_2_OF_3_NOT_CALENDAR_FEASIBLE" >&2
+      echo "今天是週一，本週只過了一天，「本週兩個不同日期各完成一次」不存在。" >&2
+      echo "沒有動任何資料。請在週二到週日之間重建 State B。" >&2
+      exit 3
+      ;;
+  esac
 }
 
 run_seed() {
@@ -193,12 +216,21 @@ import os, sys
 sql = open(sys.argv[1], encoding='utf-8').read()
 sys.stdout.buffer.write(sql.replace('__DEMO_PASSWORD__', os.environ['DEMO_PASSWORD']).encode('utf-8'))
 " "$HERE/demo_seed.sql" | npx supabase db query --linked )
+
+  # State B 是 State A 再加一層故事，不是另一份 seed。共用背景資料代表
+  # 兩個 state 的差別**只有**核心閱讀提案這一條，不會各自漂移。
+  if [ "$STATE" = 'b' ]; then
+    run_sql "$HERE/demo_seed_story.sql"
+  fi
 }
 
 case "$CMD" in
   reset)   run_sql "$HERE/demo_reset.sql" ;;
-  seed)    run_seed ;;
-  reseed)  run_sql "$HERE/demo_reset.sql"; run_seed ;;
+  seed)    if [ "$STATE" = 'b' ]; then assert_state_b_feasible; fi
+           run_seed ;;
+  reseed)  if [ "$STATE" = 'b' ]; then assert_state_b_feasible; fi
+           run_sql "$HERE/demo_reset.sql"
+           run_seed ;;
   dry-run) run_dry ;;
-  *) echo "用法：$0 {reset|seed|reseed|dry-run} [--state=a]" >&2; exit 1 ;;
+  *) echo "用法：$0 {reset|seed|reseed|dry-run} [--state=a|--state=b]" >&2; exit 1 ;;
 esac
