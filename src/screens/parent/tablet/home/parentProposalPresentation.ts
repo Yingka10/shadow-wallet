@@ -1,4 +1,5 @@
 import { isDirectConfirmablePlan } from '../../../../lib/childProposal/directConfirm';
+import { formatPreferredTime } from '../../../../lib/childProposal/materialDiff';
 import type {
   ChildProposal,
   ChildProposalPlanVersion,
@@ -20,6 +21,7 @@ const REWARD_HOPE_COPY: Record<ChildRewardPreference, string> = {
 };
 
 export type ParentProposalViewModel = {
+  state: 'fresh_ai' | 'waiting_child' | 'child_revisit' | 'unready';
   id: string;
   title: string;
   statusLabel: string;
@@ -32,6 +34,7 @@ export type ParentProposalViewModel = {
   planCadence: string | null;
   estimatedTime: string | null;
   completionDescription: string | null;
+  preferredTime: string | null;
   nextStep: string | null;
   rhythmCopy: string | null;
   rewardSuggestion: string | null;
@@ -68,21 +71,43 @@ export function presentParentProposal(
   const { proposal, currentPlanVersion: plan } = card;
   const motivation = proposal.child_original_motivation?.trim();
   const canConfirm = isDirectConfirmablePlan(card);
+  const isParentReview = plan?.authored_by === 'parent' && plan.requires_child_review === true;
+  const state: ParentProposalViewModel['state'] =
+    proposal.status === 'needs_child_review' && isParentReview
+      ? 'waiting_child'
+      : proposal.status === 'proposed' && isParentReview
+        ? 'child_revisit'
+        : canConfirm
+          ? 'fresh_ai'
+          : 'unready';
+  const statusLabel = state === 'waiting_child'
+    ? '等孩子看看'
+    : state === 'child_revisit'
+      ? '孩子想再一起聊聊'
+      : plan ? 'GrowBook 已經整理好' : '等你們一起看看';
+  const waitingMessage = state === 'waiting_child'
+    ? '等孩子看看新的安排是不是也想試試看'
+    : state === 'child_revisit'
+      ? '孩子想再一起聊聊'
+      : canConfirm ? null : 'GrowBook 還在整理，目前先看看孩子的原始想法';
   return {
+    state,
     id: proposal.id,
     title: `${childName}有一個新的挑戰想法`,
-    statusLabel: plan ? 'GrowBook 已經整理好' : '等你們一起看看',
+    statusLabel,
     goal: proposal.child_original_goal,
     motivation: motivation ? motivation : null,
     cadence: formatProposalCadence(proposal),
     rewardHope: REWARD_HOPE_COPY[proposal.child_reward_preference],
     planTitle: plan?.plan_title ?? null,
-    planSummary: plan?.plan_summary ?? null,
+    // Parent revision 保留 summary 作 provenance，但 current authority 只看 structured fields。
+    planSummary: state === 'fresh_ai' ? plan?.plan_summary ?? null : null,
     planCadence: plan ? formatPlanCadence(plan) : null,
     estimatedTime: plan?.estimated_minutes
       ? `每次約 ${plan.estimated_minutes} 分鐘`
       : null,
     completionDescription: plan?.completion_description ?? null,
+    preferredTime: plan ? formatPreferredTime(plan) : null,
     nextStep: plan?.next_step ?? null,
     rhythmCopy: plan?.progress_model === 'weekly_rhythm'
       ? '以每週節奏累積，不會因漏一天重新開始'
@@ -99,9 +124,7 @@ export function presentParentProposal(
       ? 'GrowBook 建議'
       : null,
     canConfirm,
-    waitingMessage: canConfirm
-      ? null
-      : 'GrowBook 還在整理，目前先看看孩子的原始想法',
+    waitingMessage,
   };
 }
 
