@@ -39,6 +39,11 @@ import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { supabase } from '../../lib/supabase';
 import {
+  SHARED_PLAN_GUARD_MESSAGE,
+  assertSharedPlanMutationAllowed,
+  isActiveSharedPlanTask,
+} from '../../lib/sharedPlanIntegrity';
+import {
   ParentColors,
   ParentFontSizes,
   ParentFontWeights,
@@ -766,6 +771,7 @@ export default function ParentTaskDetailScreen() {
   const [editVisible, setEditVisible] = useState(false);
   const [deleteVisible, setDeleteVisible] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [isSharedPlan, setIsSharedPlan] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -775,7 +781,7 @@ export default function ParentTaskDetailScreen() {
       const weekAgo = dayjs().tz(TZ).subtract(6, 'day').format('YYYY-MM-DD');
 
       const tomorrow = dayjs().tz(TZ).add(1, 'day').format('YYYY-MM-DD');
-      const [taskRes, completionsRes, childRes, todayObsRes] = await Promise.all([
+      const [taskRes, completionsRes, childRes, todayObsRes, sharedPlan] = await Promise.all([
         supabase.from('tasks').select('*').eq('id', taskId).single(),
         supabase.from('task_completions')
           .select('*')
@@ -793,6 +799,7 @@ export default function ParentTaskDetailScreen() {
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle(),
+        isActiveSharedPlanTask(taskId),
       ]);
 
       if (taskRes.error) throw taskRes.error;
@@ -800,6 +807,7 @@ export default function ParentTaskDetailScreen() {
       if (childRes.data) setChildName(childRes.data.nickname);
       setDayRecords(buildDayRecords(completionsRes.data ?? []));
       setTodayObs(todayObsRes.data ?? null);
+      setIsSharedPlan(sharedPlan);
 
       if (taskRes.data.is_long_term) {
         const { data: goalData } = await supabase
@@ -893,6 +901,7 @@ export default function ParentTaskDetailScreen() {
   };
 
   const handleEditSave = async (name: string, dayType: DayType, difficulty: number) => {
+    assertSharedPlanMutationAllowed(isSharedPlan);
     const { error: err } = await supabase
       .from('tasks')
       .update({ name, day_type: dayType, difficulty })
@@ -905,6 +914,12 @@ export default function ParentTaskDetailScreen() {
   };
 
   const handleDelete = async () => {
+    try {
+      assertSharedPlanMutationAllowed(isSharedPlan);
+    } catch {
+      Alert.alert('共同計畫', SHARED_PLAN_GUARD_MESSAGE);
+      return;
+    }
     setDeleting(true);
     try {
       const { error: err } = await supabase
@@ -982,6 +997,12 @@ export default function ParentTaskDetailScreen() {
           </View>
           <Text style={styles.heroTitle}>{task.name}</Text>
         </View>
+
+        {isSharedPlan && (
+          <View style={styles.sharedPlanNotice}>
+            <Text style={styles.sharedPlanNoticeText}>{SHARED_PLAN_GUARD_MESSAGE}</Text>
+          </View>
+        )}
 
         {/* ── Info grid ────────────────────────────────────────── */}
         <View style={styles.infoCard}>
@@ -1135,7 +1156,7 @@ export default function ParentTaskDetailScreen() {
             task={task}
           />
         )}
-        {editVisible && (
+        {editVisible && !isSharedPlan && (
           <EditPanel
             task={task}
             onClose={() => setEditVisible(false)}
@@ -1192,7 +1213,14 @@ export default function ParentTaskDetailScreen() {
                 ? { backgroundColor: ParentColors.ink700, borderColor: ParentColors.ink700 }
                 : styles.actionBtnInk,
             ]}
-            onPress={() => { setObserveVisible(false); setEditVisible(v => !v); }}
+            onPress={() => {
+              if (isSharedPlan) {
+                Alert.alert('共同計畫', SHARED_PLAN_GUARD_MESSAGE);
+                return;
+              }
+              setObserveVisible(false);
+              setEditVisible(v => !v);
+            }}
             activeOpacity={0.7}
           >
             <PencilIcon size={15} color={editVisible ? '#FFFFFF' : ParentColors.ink700} />
@@ -1203,7 +1231,13 @@ export default function ParentTaskDetailScreen() {
 
           <TouchableOpacity
             style={[styles.actionBtn, styles.actionBtnDanger]}
-            onPress={() => setDeleteVisible(true)}
+            onPress={() => {
+              if (isSharedPlan) {
+                Alert.alert('共同計畫', SHARED_PLAN_GUARD_MESSAGE);
+                return;
+              }
+              setDeleteVisible(true);
+            }}
             activeOpacity={0.7}
           >
             <TrashIcon size={15} color="#B5483A" />
@@ -1374,6 +1408,20 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     paddingBottom: 14,
     paddingHorizontal: 4,
+  },
+  sharedPlanNotice: {
+    padding: 12,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.md,
+    backgroundColor: ParentColors.bgSurfaceWarm,
+  },
+  sharedPlanNoticeText: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: ParentColors.fgSecondary,
+    fontFamily: ParentFonts.body,
   },
   catBadge: {
     flexDirection: 'row',

@@ -18,6 +18,11 @@ import type { RouteProp } from '@react-navigation/native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { supabase } from '../../lib/supabase';
 import {
+  SHARED_PLAN_GUARD_MESSAGE,
+  assertSharedPlanMutationAllowed,
+  isActiveSharedPlanTask,
+} from '../../lib/sharedPlanIntegrity';
+import {
   ParentColors,
   ParentFontWeights,
   ParentSpacing,
@@ -170,6 +175,7 @@ export default function ParentTaskEditScreen() {
   const [saving, setSaving] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [taskData, setTaskData] = useState<Task | null>(null);
+  const [isSharedPlan, setIsSharedPlan] = useState(false);
 
   const [name, setName] = useState('');
   const [taskMode, setTaskMode] = useState<'recurring' | 'deadline'>('recurring');
@@ -184,14 +190,14 @@ export default function ParentTaskEditScreen() {
     async function loadTask() {
       setLoading(true);
       try {
-        const { data, error } = await supabase
-          .from('tasks')
-          .select('*')
-          .eq('id', taskId)
-          .single();
+        const [{ data, error }, sharedPlan] = await Promise.all([
+          supabase.from('tasks').select('*').eq('id', taskId).single(),
+          isActiveSharedPlanTask(taskId),
+        ]);
         if (error) throw error;
 
         setTaskData(data);
+        setIsSharedPlan(sharedPlan);
         setName(data.name);
 
         if (data.day_type === 'once') {
@@ -220,6 +226,13 @@ export default function ParentTaskEditScreen() {
   }, [taskId]);
 
   async function handleSave() {
+    try {
+      assertSharedPlanMutationAllowed(isSharedPlan);
+    } catch {
+      Alert.alert('共同計畫', SHARED_PLAN_GUARD_MESSAGE);
+      return;
+    }
+
     if (!name.trim()) {
       Alert.alert('提示', '請輸入任務名稱');
       return;
@@ -272,6 +285,13 @@ export default function ParentTaskEditScreen() {
   }
 
   async function handleToggleActive() {
+    try {
+      assertSharedPlanMutationAllowed(isSharedPlan);
+    } catch {
+      Alert.alert('共同計畫', SHARED_PLAN_GUARD_MESSAGE);
+      return;
+    }
+
     setToggling(true);
     try {
       const { error } = await supabase
@@ -330,6 +350,12 @@ export default function ParentTaskEditScreen() {
             <Text style={styles.heroEyebrow}>{childName}</Text>
             <Text style={styles.heroTitle}>修改任務設定</Text>
           </View>
+
+          {isSharedPlan && (
+            <View style={styles.sharedPlanNotice}>
+              <Text style={styles.sharedPlanNoticeText}>{SHARED_PLAN_GUARD_MESSAGE}</Text>
+            </View>
+          )}
 
           {/* Name */}
           <FormGroup label="任務名稱">
@@ -446,7 +472,7 @@ export default function ParentTaskEditScreen() {
           <TouchableOpacity
             style={[styles.toggleBtn, isActive ? styles.deactivateBtn : styles.activateBtn]}
             onPress={handleToggleActive}
-            disabled={toggling}
+            disabled={toggling || isSharedPlan}
             activeOpacity={0.8}
           >
             {toggling
@@ -456,9 +482,9 @@ export default function ParentTaskEditScreen() {
                 </Text>}
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.submitBtn, saving && styles.submitBtnDisabled]}
+            style={[styles.submitBtn, (saving || isSharedPlan) && styles.submitBtnDisabled]}
             onPress={handleSave}
-            disabled={saving}
+            disabled={saving || isSharedPlan}
             activeOpacity={0.8}
           >
             {saving
@@ -532,6 +558,20 @@ const styles = StyleSheet.create({
     fontWeight: ParentFontWeights.bold,
     color: ParentColors.ink900,
     fontFamily: ParentFonts.display,
+  },
+  sharedPlanNotice: {
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.md,
+    backgroundColor: ParentColors.bgSurfaceWarm,
+  },
+  sharedPlanNoticeText: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: ParentColors.fgSecondary,
+    fontFamily: ParentFonts.body,
   },
 
   formGroup: { marginBottom: 22 },

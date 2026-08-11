@@ -221,6 +221,15 @@ export type ParentWeeklyReportData = {
   revertSuggestion: (taskId: string, action: SuggestionAction) => Promise<void>;
 };
 
+/** Keep task state and Weekly Report decision evidence in causal order. */
+export async function applySuggestionMutation(
+  mutateTask: () => Promise<unknown>,
+  patchSuggestion: () => Promise<unknown>,
+): Promise<void> {
+  await mutateTask();
+  await patchSuggestion();
+}
+
 // ---------------------------------------------------------------------------
 // Fallback content (shown while AI report hasn't been generated yet)
 // ---------------------------------------------------------------------------
@@ -847,15 +856,17 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     claimPeriod: ScheduleClaimPeriod,
     maxClaimsPerPeriod: number,
   ) => {
-    await updateTaskSchedule(taskId, claimPeriod, maxClaimsPerPeriod);
-    await patchSuggestionRecord(taskId, 'adjust_schedule', {
-      adopted: true,
-      deferred: false,
-      decidedAt: new Date().toISOString(),
-      // 家長編輯過就跟 AI 原始建議不一樣了——兩者分開存，suggestedX 永遠是原始建議。
-      adoptedClaimPeriod: claimPeriod,
-      adoptedMaxClaimsPerPeriod: maxClaimsPerPeriod,
-    });
+    await applySuggestionMutation(
+      () => updateTaskSchedule(taskId, claimPeriod, maxClaimsPerPeriod),
+      () => patchSuggestionRecord(taskId, 'adjust_schedule', {
+        adopted: true,
+        deferred: false,
+        decidedAt: new Date().toISOString(),
+        // 家長編輯過就跟 AI 原始建議不一樣了——兩者分開存，suggestedX 永遠是原始建議。
+        adoptedClaimPeriod: claimPeriod,
+        adoptedMaxClaimsPerPeriod: maxClaimsPerPeriod,
+      }),
+    );
     await fetchAll();
   }, [patchSuggestionRecord, fetchAll]);
 
@@ -863,13 +874,15 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     taskId: string,
     recurrenceDays: number[],
   ) => {
-    await updateTaskRecurrenceDays(taskId, recurrenceDays);
-    await patchSuggestionRecord(taskId, 'adjust_recurrence', {
-      adopted: true,
-      deferred: false,
-      decidedAt: new Date().toISOString(),
-      adoptedRecurrenceDays: recurrenceDays,
-    });
+    await applySuggestionMutation(
+      () => updateTaskRecurrenceDays(taskId, recurrenceDays),
+      () => patchSuggestionRecord(taskId, 'adjust_recurrence', {
+        adopted: true,
+        deferred: false,
+        decidedAt: new Date().toISOString(),
+        adoptedRecurrenceDays: recurrenceDays,
+      }),
+    );
     await fetchAll();
   }, [patchSuggestionRecord, fetchAll]);
 
@@ -919,19 +932,18 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     const target = computeRevertTarget(action, sg);
     if (target == null) return;
 
-    if (target.kind === 'adjust_schedule') {
-      await updateTaskSchedule(taskId, target.claimPeriod, target.maxClaimsPerPeriod);
-    } else {
-      await updateTaskRecurrenceDays(taskId, target.recurrenceDays);
-    }
-
-    await patchSuggestionRecord(taskId, action, {
-      adopted: false,
-      decidedAt: undefined,
-      adoptedClaimPeriod: undefined,
-      adoptedMaxClaimsPerPeriod: undefined,
-      adoptedRecurrenceDays: undefined,
-    });
+    await applySuggestionMutation(
+      () => target.kind === 'adjust_schedule'
+        ? updateTaskSchedule(taskId, target.claimPeriod, target.maxClaimsPerPeriod)
+        : updateTaskRecurrenceDays(taskId, target.recurrenceDays),
+      () => patchSuggestionRecord(taskId, action, {
+        adopted: false,
+        decidedAt: undefined,
+        adoptedClaimPeriod: undefined,
+        adoptedMaxClaimsPerPeriod: undefined,
+        adoptedRecurrenceDays: undefined,
+      }),
+    );
     await fetchAll();
   }, [suggestions, patchSuggestionRecord, fetchAll]);
 
