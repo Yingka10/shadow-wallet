@@ -51,6 +51,7 @@ describe('P0-5B child proposal review-flow migration', () => {
     expect(revise).toContain('v_weekly_frequency NOT BETWEEN 1 AND 7');
     expect(revise).toContain("v_mode = 'fixed_days'");
     expect(revise).toContain('unnest(v_days)');
+    expect(revise).toContain("v_preferred_time IS DISTINCT FROM 'custom'");
   });
 
   it('parent version 只採 editable patch，readonly/server evidence 從 source 複製', () => {
@@ -70,8 +71,11 @@ describe('P0-5B child proposal review-flow migration', () => {
   it('cadence mode 改變時由 server 同步推導 canonical progress model，不產生無法接受的版本', () => {
     const revise = body('revise_child_proposal_plan_v1');
     expect(revise).toContain(
-      "CASE WHEN v_mode = 'weekly_frequency' THEN 'weekly_rhythm' ELSE NULL END",
+      "WHEN v_source.purpose_category = 'D'",
     );
+    expect(revise).toContain("AND v_source.duration_type = 'long_term'");
+    expect(revise).toContain("AND v_mode IN ('weekly_frequency', 'fixed_days')");
+    expect(revise).toContain("THEN 'weekly_rhythm'");
     expect(revise).not.toMatch(/v_source\.purpose_category, v_completion_description,\s*v_source\.progress_model/);
   });
 
@@ -94,6 +98,18 @@ describe('P0-5B child proposal review-flow migration', () => {
     expect(accept).toContain('public.transition_child_proposal_v1');
     expect(accept).toContain("'actorRole', 'child'");
     expect(accept).not.toMatch(/SET\s+(effective_at|child_accepted_at|confirmed_reward_policy)/);
+  });
+
+  it('accept preserves canonical weekly rhythm for fixed-day D long-term plans', () => {
+    const accept = body('accept_child_proposal_plan_v1');
+    expect(accept).toContain("v_plan.purpose_category = 'D'");
+    expect(accept).toContain("v_plan.duration_type = 'long_term'");
+    expect(accept).toContain("v_plan.cadence_mode IN ('weekly_frequency', 'fixed_days')");
+    expect(accept).toContain("v_plan.cadence_mode = 'fixed_days'");
+    expect(accept).toContain("v_task_command - 'progressModel'");
+    expect(accept).toMatch(/UPDATE tasks[\s\S]*progress_model = 'weekly_rhythm'/);
+    expect(accept).toMatch(/UPDATE long_term_goals[\s\S]*goal_type = 'habit'/);
+    expect(SQL).not.toContain('CREATE OR REPLACE FUNCTION public.create_parent_task_v1');
   });
 
   it('accept 比對 fresh application decision 與 version evidence，不另建 pricing engine', () => {

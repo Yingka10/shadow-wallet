@@ -74,7 +74,7 @@ describe('ParentProposalEditSheet', () => {
     fireEvent.press(screen.getByText('存下來，讓孩子看看'));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       cadenceWeeklyFrequency: 3,
-      preferredTime: 'when_needed',
+      preferredTime: null,
       preferredTimeCustom: null,
     }));
   });

@@ -498,7 +498,7 @@ export type ParentProposalMaterialEdits = {
   cadenceMode: Extract<ChildProposalCadenceMode, 'weekly_frequency' | 'fixed_days'>;
   cadenceWeeklyFrequency: number | null;
   cadenceDays: number[] | null;
-  preferredTime: string;
+  preferredTime: string | null;
   preferredTimeCustom: string | null;
   completionDescription: string;
 };

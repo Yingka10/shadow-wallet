@@ -32,6 +32,7 @@ type Props = {
 
 const DAYS = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'] as const;
 const TIMES = [
+  { value: null, label: '尚未決定' },
   { value: 'before_school', label: '上學前' },
   { value: 'after_school', label: '放學後' },
   { value: 'after_dinner', label: '晚餐後' },
@@ -46,7 +47,7 @@ export function ParentProposalEditSheet({ visible, card, saving, error, onClose,
   const [mode, setMode] = useState<'weekly_frequency' | 'fixed_days'>('weekly_frequency');
   const [frequency, setFrequency] = useState('1');
   const [days, setDays] = useState<number[]>([]);
-  const [preferredTime, setPreferredTime] = useState('when_needed');
+  const [preferredTime, setPreferredTime] = useState<string | null>(null);
   const [preferredTimeCustom, setPreferredTimeCustom] = useState('');
   const [completionDescription, setCompletionDescription] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
@@ -56,7 +57,7 @@ export function ParentProposalEditSheet({ visible, card, saving, error, onClose,
     setMode(plan.cadence_mode === 'fixed_days' ? 'fixed_days' : 'weekly_frequency');
     setFrequency(String(plan.cadence_weekly_frequency ?? 1));
     setDays(plan.cadence_days ?? []);
-    setPreferredTime(plan.preferred_time ?? 'when_needed');
+    setPreferredTime(plan.preferred_time);
     setPreferredTimeCustom(plan.preferred_time_custom ?? '');
     setCompletionDescription(plan.completion_description ?? '');
     setLocalError(null);
@@ -133,7 +134,7 @@ export function ParentProposalEditSheet({ visible, card, saving, error, onClose,
             <View style={styles.wrap}>
               {TIMES.map(option => (
                 <Choice
-                  key={option.value}
+                  key={option.value ?? 'not_decided'}
                   label={option.label}
                   selected={preferredTime === option.value}
                   onPress={() => setPreferredTime(option.value)}

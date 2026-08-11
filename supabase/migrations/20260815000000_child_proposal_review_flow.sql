@@ -110,11 +110,11 @@ BEGIN
     );
   END IF;
 
-  IF v_preferred_time NOT IN (
+  IF (v_preferred_time IS NOT NULL AND v_preferred_time NOT IN (
     'before_school', 'after_school', 'after_dinner', 'before_bed',
     'weekend', 'when_needed', 'custom'
-  ) OR (v_preferred_time = 'custom' AND v_preferred_time_custom IS NULL)
-    OR (v_preferred_time <> 'custom' AND v_preferred_time_custom IS NOT NULL)
+  )) OR (v_preferred_time = 'custom' AND v_preferred_time_custom IS NULL)
+    OR (v_preferred_time IS DISTINCT FROM 'custom' AND v_preferred_time_custom IS NOT NULL)
     OR length(COALESCE(v_preferred_time_custom, '')) > 60 THEN
     RETURN jsonb_build_object(
       'ok', false, 'code', 'VALIDATION_FAILED',
@@ -231,7 +231,13 @@ BEGIN
       v_proposal.id, v_next_version, 'parent', auth.uid(),
       v_source.plan_title, v_source.plan_summary,
       v_source.purpose_category, v_completion_description,
-      CASE WHEN v_mode = 'weekly_frequency' THEN 'weekly_rhythm' ELSE NULL END,
+      CASE
+        WHEN v_source.purpose_category = 'D'
+          AND v_source.duration_type = 'long_term'
+          AND v_mode IN ('weekly_frequency', 'fixed_days')
+          THEN 'weekly_rhythm'
+        ELSE NULL
+      END,
       v_source.next_step,
       v_mode, v_weekly_frequency, v_days,
       v_preferred_time, v_preferred_time_custom, v_source.estimated_minutes,
@@ -463,13 +469,37 @@ BEGIN
       );
     END IF;
     IF v_plan.cadence_mode = 'weekly_frequency' AND (
-      v_plan.progress_model IS DISTINCT FROM 'weekly_rhythm'
-      OR v_plan.cadence_weekly_frequency NOT BETWEEN 1 AND 7
+      v_plan.cadence_weekly_frequency NOT BETWEEN 1 AND 7
       OR v_plan.cadence_days IS NOT NULL
     ) THEN
       RETURN jsonb_build_object(
         'ok', false, 'code', 'VALIDATION_FAILED',
         'reason', 'WEEKLY_RHYTHM_INVALID', 'message', '彈性每週節奏資料不完整'
+      );
+    ELSIF v_plan.cadence_mode = 'fixed_days' AND (
+      v_plan.cadence_weekly_frequency IS NOT NULL
+      OR v_plan.cadence_days IS NULL
+      OR cardinality(v_plan.cadence_days) = 0
+      OR EXISTS (
+        SELECT 1 FROM unnest(v_plan.cadence_days) AS day
+         WHERE day NOT BETWEEN 0 AND 6
+      )
+    ) THEN
+      RETURN jsonb_build_object(
+        'ok', false, 'code', 'VALIDATION_FAILED',
+        'reason', 'FIXED_DAYS_INVALID', 'message', '固定星期節奏資料不完整'
+      );
+    END IF;
+    IF v_plan.progress_model IS DISTINCT FROM CASE
+      WHEN v_plan.purpose_category = 'D'
+        AND v_plan.duration_type = 'long_term'
+        AND v_plan.cadence_mode IN ('weekly_frequency', 'fixed_days')
+        THEN 'weekly_rhythm'
+      ELSE NULL
+    END THEN
+      RETURN jsonb_build_object(
+        'ok', false, 'code', 'VALIDATION_FAILED',
+        'reason', 'WEEKLY_RHYTHM_INVALID', 'message', '長期節奏的進度模式與計畫證據不一致'
       );
     END IF;
 
@@ -591,12 +621,39 @@ BEGIN
       'reward', jsonb_build_object('decision', v_decision)
     ));
 
-    v_create_result := public.create_parent_task_v1(v_task_command);
+    -- P0-5A's live wrapper originally admitted weekly_rhythm only for
+    -- weekly_frequency. For a canonical fixed-days D/long-term review plan,
+    -- create the same canonical rows without that wrapper-only flag, then apply
+    -- the deterministic P0-3 rhythm mapping inside this transaction.
+    v_create_result := public.create_parent_task_v1(
+      CASE
+        WHEN v_plan.cadence_mode = 'fixed_days'
+          AND v_plan.progress_model = 'weekly_rhythm'
+          THEN v_task_command - 'progressModel'
+        ELSE v_task_command
+      END
+    );
     IF COALESCE((v_create_result ->> 'ok')::boolean, false) IS NOT TRUE THEN
       RAISE EXCEPTION USING ERRCODE = 'P0001',
         MESSAGE = 'canonical task creation failed', DETAIL = v_create_result::text;
     END IF;
     v_task_id := NULLIF(v_create_result ->> 'taskId', '')::uuid;
+
+    IF v_plan.cadence_mode = 'fixed_days'
+      AND v_plan.progress_model = 'weekly_rhythm' THEN
+      UPDATE tasks
+         SET progress_model = 'weekly_rhythm', long_term_type = 'habit'
+       WHERE id = v_task_id;
+      UPDATE long_term_goals
+         SET goal_type = 'habit'
+       WHERE task_id = v_task_id;
+      UPDATE task_change_events
+         SET snapshot = jsonb_set(
+           snapshot, '{command,progressModel}', to_jsonb('weekly_rhythm'::text), true
+         )
+       WHERE task_id = v_task_id
+         AND event_type = 'created_from_child_proposal';
+    END IF;
 
     v_transition_result := public.transition_child_proposal_v1(jsonb_build_object(
       'schemaVersion', 1,
@@ -620,7 +677,20 @@ BEGIN
       OR v_plan.end_date IS DISTINCT FROM v_end_date
       OR v_plan.effective_at IS NULL
       OR v_plan.child_accepted_at IS NULL
-      OR v_plan.confirmed_source_task_id IS DISTINCT FROM v_task_id THEN
+      OR v_plan.confirmed_source_task_id IS DISTINCT FROM v_task_id
+      OR (
+        v_plan.cadence_mode = 'fixed_days'
+        AND v_plan.progress_model = 'weekly_rhythm'
+        AND NOT EXISTS (
+          SELECT 1
+            FROM tasks t
+            JOIN long_term_goals g ON g.task_id = t.id
+           WHERE t.id = v_task_id
+             AND t.progress_model = 'weekly_rhythm'
+             AND t.long_term_type = 'habit'
+             AND g.goal_type = 'habit'
+        )
+      ) THEN
       RAISE EXCEPTION USING ERRCODE = 'P0001',
         MESSAGE = 'accept verification failed',
         DETAIL = jsonb_build_object(
