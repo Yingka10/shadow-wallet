@@ -5,6 +5,7 @@
 
 export * from './types';
 export * from './transitions';
+export * from './planDraft';
 export {
   SupabaseChildProposalService,
   CREATE_CHILD_PROPOSAL_RPC,

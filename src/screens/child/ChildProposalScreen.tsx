@@ -36,7 +36,11 @@ import type { RootStackParamList } from '../../../App';
 import GradientBackground from '../../components/child/GradientBackground';
 import { Colors } from '../../constants/colors';
 import { webMouseDraggableScroll, webScreen } from '../../constants/webStyles';
-import { SupabaseChildProposalService } from '../../lib/childProposal';
+import {
+  SupabaseChildProposalService,
+  generateChildProposalPlanDraftInBackground,
+  planDraftClientSetup,
+} from '../../lib/childProposal';
 import {
   CADENCE_OPTIONS,
   DAY_LABELS,
@@ -135,7 +139,17 @@ export default function ChildProposalScreen() {
       );
 
       if (result.ok) {
+        // 成功頁**立刻**成立。孩子不等模型。
         setPhase({ kind: 'success' });
+
+        // 之後才在背景請 GrowBook 幫忙整理成一份可以跟爸媽討論的草稿。
+        // 不 await、不看結果：AI 關著、逾時、回亂碼、Edge Function 掛掉，
+        // 最壞的情況都只是「這筆提案目前還沒有整理過的版本」——
+        // 提案本身已經存好了，孩子這一頁不會因此變成失敗。
+        generateChildProposalPlanDraftInBackground(
+          { client: planDraftClientSetup.client, port: serviceRef.current },
+          result.proposalId,
+        );
         return;
       }
 

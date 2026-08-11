@@ -12,6 +12,7 @@
 import { supabase } from '../supabase';
 import { mapPostgresErrorCode } from '../parentTaskCreationService';
 import { CHILD_PROPOSAL_STATUSES } from './types';
+import type { AgeGroup } from '../../types/database';
 import type {
   AddChildProposalPlanVersionCommand,
   AddPlanVersionResult,
@@ -211,6 +212,71 @@ export class SupabaseChildProposalService {
     return data ?? [];
   }
 
+  /**
+   * 讀一筆提案。P0-3 的 AI 草稿以**資料庫這一列**為輸入，不是畫面上的草稿 ——
+   * 送出之後畫面的值就不再是權威（RPC 會 trim、預設值由 DB 決定）。
+   *
+   * 找不到就回 null，不丟例外：呼叫端是背景工作，「不存在」是它要處理的
+   * 正常結果之一，不是需要 catch 的意外。
+   */
+  async getProposal(proposalId: string): Promise<ChildProposal | null> {
+    const { data, error } = await supabase
+      .from('child_proposals')
+      .select('*')
+      .eq('id', proposalId)
+      .maybeSingle();
+
+    if (error) throw new Error(error.message || '讀取提案失敗');
+    return data ?? null;
+  }
+
+  /**
+   * 這個孩子的年齡段。
+   *
+   * 只取 age_group 一欄 —— AI 判斷需要的是分級，不是生日。少送一個欄位
+   * 就少一個外流面，而年齡段本來就是 children 上算好存著的值。
+   */
+  async getChildAgeGroup(childId: string): Promise<AgeGroup | null> {
+    const { data, error } = await supabase
+      .from('children')
+      .select('age_group')
+      .eq('id', childId)
+      .maybeSingle();
+
+    if (error) throw new Error(error.message || '讀取孩子年齡段失敗');
+    return data?.age_group ?? null;
+  }
+
+  /**
+   * 這一份輸入是不是已經整理過了。
+   *
+   * P0-3 的 idempotency 靠這一支：request key 是決定性的（同樣的提案內容
+   * 永遠算出同一把），所以查得到就代表「這次重試不需要再問一次模型」。
+   *
+   * 這是**省配額**的那一層，不是唯一性保證那一層：兩個同時發出的請求仍然
+   * 可能都查不到、於是都往下走。真正的唯一性由 migration 20260812000000 的
+   * partial unique index `(proposal_id, ai_request_id)` 保證，RPC 用
+   * ON CONFLICT DO NOTHING 接住並回既有那一版（duplicate: true）。
+   * 兩層各有各的用處：這一層省掉一次模型呼叫，那一層保證資料庫裡只有一份。
+   */
+  async findPlanVersionIdByAiRequestId({
+    proposalId,
+    aiRequestId,
+  }: {
+    proposalId: string;
+    aiRequestId: string;
+  }): Promise<string | null> {
+    const { data, error } = await supabase
+      .from('child_proposal_plan_versions')
+      .select('id')
+      .eq('proposal_id', proposalId)
+      .eq('ai_request_id', aiRequestId)
+      .limit(1);
+
+    if (error) throw new Error(error.message || '讀取計畫版本失敗');
+    return data && data.length > 0 ? data[0].id : null;
+  }
+
   /** 孩子提出一個想法。只會落在 draft 或 proposed。 */
   async create(command: CreateChildProposalCommand): Promise<CreateChildProposalResult> {
     const fallback = '建立提案失敗';
@@ -247,6 +313,9 @@ export class SupabaseChildProposalService {
       planVersionId: id,
       versionNo,
       isCurrent: result.payload.isCurrent === true,
+      // 舊版 RPC 不回這個鍵 —— 沒有就當成「這是新的一版」，
+      // 而不是把 undefined 當成 true 讓呼叫端以為什麼都沒發生。
+      duplicate: result.payload.duplicate === true,
     };
   }
 
