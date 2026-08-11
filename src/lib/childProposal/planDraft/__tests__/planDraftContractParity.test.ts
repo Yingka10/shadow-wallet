@@ -17,6 +17,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 import { PLAN_DRAFT_LIMITS, CHILD_PROPOSAL_PLAN_DRAFT_REQUEST_TYPE } from '../types';
+import { PLAN_DRAFT_TIMEOUT_MS } from '../planDraftClient';
 import { validatePlanDraftResult } from '../validatePlanDraftResult';
 
 const FUNCTION_DIR = join(
@@ -89,6 +90,29 @@ describe('列舉兩邊一致', () => {
     // prompt 也必須真的要求它們，否則模型不會給。
     expect(LOGIC).toContain('"activityKind":"reading"');
     expect(LOGIC).toContain('"nextStepSuggestion"');
+  });
+});
+
+describe('兩端的 timeout 預算對得上', () => {
+  // 2026-08-11 staging：Function 端沿用 gemini.ts 的 8 秒預設，而這一支
+  // 穩定要 9-11 秒 —— 於是每一次都逾時，回的是 SERVICE_ERROR。
+  // 症狀看起來像服務壞掉，實際上只是預算給錯了，所以把數字釘在測試裡。
+  const budget = Number(
+    /PLAN_DRAFT_GEMINI_TIMEOUT_MS = ([\d_]+)/.exec(LOGIC)?.[1]?.replace(/_/g, ''),
+  );
+
+  it('Function 端有自己的預算，沒有沿用 8 秒預設', () => {
+    expect(budget).toBeGreaterThan(8000);
+  });
+
+  it('而且比 App 端放棄的時間短 —— 否則拿不到結構化的 reason', () => {
+    // client 先 abort 的話，「模型太慢」與「模型亂寫」會一起變成 TIMEOUT，
+    // 兩種完全不同的問題就分不出來了。
+    expect(budget).toBeLessThan(PLAN_DRAFT_TIMEOUT_MS);
+  });
+
+  it('Function 端真的把預算傳進 callGeminiWithModel', () => {
+    expect(HANDLER).toContain('PLAN_DRAFT_GEMINI_TIMEOUT_MS');
   });
 });
 

@@ -8,8 +8,9 @@
 // estimatedMinutes 只塞進 JSON，等於讓 P0-5 之後必須解 JSON 才查得到,
 // 而週報想統計「這個月 AI 建議了幾個長期計畫」就得掃全表。
 //
-// 反過來，completionDescription 目前**沒有**欄位（正式任務才有），
-// 所以它留在 snapshot 等 P0-5 取用。不為一個還沒有人讀的欄位改 schema。
+// completionDescription 有兩份，而它們是不同的東西：模型寫的那一句是
+// **候選／稽核證據**，只進 snapshot；正式欄位寫的是 canonicalPlanFields
+// 依 activityKind 組出來的固定句型。正式的完成標準不照抄模型的自由文字。
 //
 // ⚠️ 命令裡永遠不會出現 coinAmount / finalAmount / confirmedCoinAmount ——
 //    RPC 收到任何一個都會以 REWARD_NOT_CLIENT_DECIDED 整筆拒絕。

@@ -196,6 +196,84 @@ describe('硬性 timeout 仍然在', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// 2026-08-11 staging 驗收發現的真實 bug：計畫草稿要模型回一整包結構化 JSON，
+// 穩定超過 8 秒，於是**每一次**都逾時，而症狀是 SERVICE_ERROR ——
+// 看起來像服務壞掉，實際上只是預算給錯了。
+//
+// 修法是讓預算變成每次呼叫的參數，預設仍是 8 秒。所以這裡要同時釘住
+// 「新的呼叫端拿得到更長的預算」與「既有呼叫端一秒都沒有變」。
+// ---------------------------------------------------------------------------
+
+describe('timeout 預算由呼叫端決定，預設不變', () => {
+  /** 攔 setTimeout，看實際掛上去的毫秒數。比操作假時鐘直接。 */
+  function captureBudgets(): number[] {
+    const budgets: number[] = [];
+    const real = globalThis.setTimeout;
+    jest.spyOn(globalThis, 'setTimeout').mockImplementation(((
+      fn: () => void, ms?: number, ...rest: unknown[]
+    ) => {
+      if (typeof ms === 'number') budgets.push(ms);
+      return (real as unknown as (...a: unknown[]) => unknown)(fn, ms, ...rest);
+    }) as unknown as typeof globalThis.setTimeout);
+    return budgets;
+  }
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('callGemini 仍然是 8 秒 —— 週報、顧問、許願澄清一秒都沒變', async () => {
+    const budgets = captureBudgets();
+    const { callGemini } = load();
+    await callGemini('prompt');
+
+    expect(budgets).toEqual([8000]);
+  });
+
+  it('callGeminiWithModel 不給參數時也是 8 秒', async () => {
+    const budgets = captureBudgets();
+    const { callGeminiWithModel } = load();
+    await callGeminiWithModel('prompt');
+
+    expect(budgets).toEqual([8000]);
+  });
+
+  it('呼叫端給得起更長的預算', async () => {
+    const budgets = captureBudgets();
+    const { callGeminiWithModel } = load();
+    await callGeminiWithModel('prompt', true, 15_000);
+
+    expect(budgets).toEqual([15_000]);
+  });
+
+  it('換 model 重試時每一次都用同一個預算，不是只有第一次', async () => {
+    let calls = 0;
+    fetchImpl = async () => {
+      calls += 1;
+      return calls === 1 ? errorResponse(429) : geminiResponse('hi');
+    };
+
+    const budgets = captureBudgets();
+    const { callGeminiWithModel } = load();
+    await callGeminiWithModel('prompt', false, 15_000);
+
+    expect(budgets).toEqual([15_000, 15_000]);
+  });
+
+  it('逾時訊息帶的是實際用的預算，不是寫死的 8000', async () => {
+    fetchImpl = async () => {
+      const err = new Error('aborted');
+      err.name = 'AbortError';
+      throw err;
+    };
+
+    const { callGeminiWithModel } = load();
+    await expect(callGeminiWithModel('prompt', true, 15_000))
+      .rejects.toThrow(/timed out after 15000ms/);
+  });
+});
+
 describe('沒有第二份 MODEL_CHAIN', () => {
   it('整支檔案只宣告一次', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires

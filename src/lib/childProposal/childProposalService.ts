@@ -253,9 +253,11 @@ export class SupabaseChildProposalService {
    * P0-3 的 idempotency 靠這一支：request key 是決定性的（同樣的提案內容
    * 永遠算出同一把），所以查得到就代表「這次重試不需要再問一次模型」。
    *
-   * ⚠️ 這**不是**資料庫層的唯一性保證 —— ai_request_id 沒有 unique index。
-   *    兩個同時發出的請求仍然可能都查不到、於是都寫入。實務上這條路徑是
-   *    孩子送出後的單一背景工作，不會併發；要根治需要動 schema。
+   * 這是**省配額**的那一層，不是唯一性保證那一層：兩個同時發出的請求仍然
+   * 可能都查不到、於是都往下走。真正的唯一性由 migration 20260812000000 的
+   * partial unique index `(proposal_id, ai_request_id)` 保證，RPC 用
+   * ON CONFLICT DO NOTHING 接住並回既有那一版（duplicate: true）。
+   * 兩層各有各的用處：這一層省掉一次模型呼叫，那一層保證資料庫裡只有一份。
    */
   async findPlanVersionIdByAiRequestId({
     proposalId,

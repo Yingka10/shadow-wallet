@@ -33,6 +33,7 @@ import {
   resolveDurationType,
   toEligibilityDurationType,
   CHILD_PROPOSAL_PLAN_DRAFT_SCHEMA_VERSION,
+  PLAN_DRAFT_GEMINI_TIMEOUT_MS,
   type ChildProposalPlanDraftInput,
   type ChildProposalPlanDraftResponse,
   type PlanDraftPricing,
@@ -56,7 +57,12 @@ export async function handleChildProposalPlanDraft(
   let raw: string;
   let model: string;
   try {
-    ({ text: raw, model } = await callGeminiWithModel(buildPlanDraftPrompt(payload), true));
+    ({ text: raw, model } = await callGeminiWithModel(
+      buildPlanDraftPrompt(payload),
+      true,
+      // 這一支要一整包結構化 JSON，8 秒的預設不夠（見常數本身的說明）。
+      PLAN_DRAFT_GEMINI_TIMEOUT_MS,
+    ));
   } catch (err) {
     console.warn('[ai-proxy] handleChildProposalPlanDraft gemini error:', err);
     return unavailable('SERVICE_ERROR');
@@ -98,9 +104,9 @@ export async function handleChildProposalPlanDraft(
 /**
  * 幣值：只有 C/D 且閘門放行才進入 calcCoins。
  *
- * coin-policy.json 目前的 bandBaseCoins 全是 placeholder（null），
- * 所以 calcCoins 會誠實地回 unpriced —— 那不是壞掉，是「數字還沒定案」。
+ * calcCoins 回 unpriced 時（該年齡段／類別的 bandBaseCoins 還沒定案）
  * 這裡照實傳出去，不補一個看起來合理的數字。
+ * 2026-08-11 staging 實測：6-9 歲 D 類的數字是有的，示範案例拿到 priced=10。
  */
 function resolvePricing(
   gate: ReturnType<typeof runEligibilityGate>,
