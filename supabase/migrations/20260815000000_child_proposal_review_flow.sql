@@ -66,6 +66,31 @@ BEGIN
     );
   END IF;
 
+  IF jsonb_typeof(v_material -> 'cadenceMode') IS DISTINCT FROM 'string'
+    OR (
+      jsonb_typeof(v_material -> 'cadenceWeeklyFrequency') IS DISTINCT FROM 'number'
+      AND jsonb_typeof(v_material -> 'cadenceWeeklyFrequency') IS DISTINCT FROM 'null'
+    )
+    OR (
+      jsonb_typeof(v_material -> 'cadenceDays') IS DISTINCT FROM 'array'
+      AND jsonb_typeof(v_material -> 'cadenceDays') IS DISTINCT FROM 'null'
+    )
+    OR (
+      jsonb_typeof(v_material -> 'preferredTime') IS DISTINCT FROM 'string'
+      AND jsonb_typeof(v_material -> 'preferredTime') IS DISTINCT FROM 'null'
+    )
+    OR (
+      jsonb_typeof(v_material -> 'preferredTimeCustom') IS DISTINCT FROM 'string'
+      AND jsonb_typeof(v_material -> 'preferredTimeCustom') IS DISTINCT FROM 'null'
+    )
+    OR jsonb_typeof(v_material -> 'completionDescription') IS DISTINCT FROM 'string' THEN
+    RETURN jsonb_build_object(
+      'ok', false, 'code', 'VALIDATION_FAILED',
+      'reason', 'MATERIAL_FIELD_TYPE_INVALID',
+      'message', '調整欄位的格式不正確'
+    );
+  END IF;
+
   v_mode := NULLIF(btrim(COALESCE(v_material ->> 'cadenceMode', '')), '');
   v_weekly_frequency := NULLIF(v_material ->> 'cadenceWeeklyFrequency', '')::int;
   v_preferred_time := NULLIF(btrim(COALESCE(v_material ->> 'preferredTime', '')), '');

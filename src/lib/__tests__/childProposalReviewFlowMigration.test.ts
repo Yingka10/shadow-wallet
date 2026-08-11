@@ -52,6 +52,9 @@ describe('P0-5B child proposal review-flow migration', () => {
     expect(revise).toContain("v_mode = 'fixed_days'");
     expect(revise).toContain('unnest(v_days)');
     expect(revise).toContain("v_preferred_time IS DISTINCT FROM 'custom'");
+    expect(revise).toContain("jsonb_typeof(v_material -> 'preferredTime')");
+    expect(revise).toContain("jsonb_typeof(v_material -> 'preferredTimeCustom')");
+    expect(revise).toContain("IS DISTINCT FROM 'string'");
   });
 
   it('parent version 只採 editable patch，readonly/server evidence 從 source 複製', () => {
