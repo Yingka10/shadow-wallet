@@ -56,6 +56,16 @@ Phase 2 打開 creation path 後，同一個 cadence 仍可經正式共同版本
 * 不因為走 per_period 就偷偷把 `progress_model` 蓋成 `weekly_rhythm`。
   那一欄有自己的語意與 guard，結算不該回頭改它。
 
+**⚠️ Implementation gap（非 blocker，但要記著）：**
+家長自建的長期任務目前 `progress_model` 是 NULL —— 它只在孩子提案那條路徑上被寫入。
+所以上表第二列（無 weekly_rhythm 但 cadence 推得出週目標）是一條 **fallback**，
+存在的理由是不讓這些任務退回 `per_completion`。
+
+這條 fallback **不是把 NULL 重新定義成一個正式的產品語意**。
+`progress_model IS NULL` 現在的意思仍然只是「這條路徑沒有寫入它」，不是「一種進度模型」。
+正確的收斂是讓家長自建路徑也顯式決定 progress model，**那是另一輪的事**；
+本輪不為了 payout 去覆寫或重新定義它。
+
 ### 2.2 `period_target_count` 是約定，不是現況 **[實作]**
 
 `period_target_count` 持久化在 `tasks`，代表**建立該共同版本當下約定的次數**。
@@ -139,7 +149,20 @@ v_use_new := v_task.payout_basis IS NOT NULL
 * 為 true → 走 settlement 路徑。
 
 新建立的任務：`effective_from` = 起始日所屬 period 的 period_start（等於立即生效）。
-既有任務遷移：見 §7.2。
+既有任務切換：見 §7.2。
+
+**這一欄是 technical rollout metadata，不是家庭的共同約定內容。**
+
+它存在的唯一理由是避免 mid-period double-pay，家庭從來沒有對「哪一天開始用新結算方式」
+表示過意見。因此：
+
+* ✅ DB immutable / guarded / auditable：寫入後不可任意改，變更留稽核。
+* ❌ **不進 shared-plan material diff**、不進共同版本快照的 material 欄位、
+  **不因為它變動而觸發孩子重新確認**。把 rollout 時間當成 material change，
+  會讓孩子收到一則他無法理解也無法決定的確認請求。
+* 未來若真的需要「新的家庭約定從某日開始生效」，那是 **agreement-level effective time**，
+  另建欄位（plan version 已經有 `effective_at` 這個層級的語意），
+  **不與本欄混用**。兩者混用之後就再也分不出「約定從哪天開始」與「程式從哪天換算法」。
 
 ---
 
@@ -186,9 +209,11 @@ Phase 2 需要建立的最低真實資料：`milestone_id / completed_at / compl
 2. **`reward_coin_amount` 只有兩條寫入路徑**：建立任務、以及走完整 plan version 流程的重新協商。
    review point 到達只產生 suggestion / review state，不寫 tasks。
 3. **shared-plan integrity guard**（`20260816`）已經把幣值與節奏欄位列為 active shared plan 的凍結欄位。
-   **`payout_basis`、`period_target_count`、`payout_basis_effective_from` 一併加入**
-   凍結清單、material diff、共同版本快照與重新協商流程 ——
-   它們現在是共同約定的一部分，active shared agreement 不得 silent mutation。
+   **`payout_basis` 與 `period_target_count` 一併加入**凍結清單、material diff、
+   共同版本快照與重新協商流程 —— 它們是共同約定的內容，active shared agreement 不得 silent mutation。
+
+   **`payout_basis_effective_from` 不在此列。** 它受 DB guard 保護且可稽核，
+   但屬於 technical rollout metadata，不進 material diff、不觸發孩子重新確認（理由見 §3.2）。
 
 Review 到期時系統只能問：「這段計畫最近已經比較穩定，要不要一起看看下一階段還需要什麼支持？」
 可選項目依序是**降低支持頻率**，不是降低單價：
@@ -202,14 +227,50 @@ material change 一律走既有 plan version 機制：保留舊版本 → 建立
 
 ---
 
-## 7. 既有任務：evidence-based migration **[實作]**
+## 7. 既有任務：evidence-based migration **[結論：Phase 1 遷移零列]**
 
 原則：**有 authoritative 共同約定證據的才遷移，沒有的一律不猜。**
 無論哪一種，**都不追回、不扣除任何 historical transaction。**
 
-### 7.1 遷移條件
+證據要同時通過兩道閘門。**兩道都過才算「家庭已知情共同確認」。**
 
-只有同時滿足以下每一條的任務才會被寫入 `payout_basis = 'per_period'`：
+### 7.0 閘門 B：confirmation presentation（決定性，且目前不成立）
+
+`confirmed_payout_basis` 這一欄在歷史上是由 `claim_period` 推導出來的
+（`child_proposal_payout_basis()`）。**欄位存在於 immutable snapshot，不等於家庭知道自己同意了什麼。**
+因此必須回去看：家長／孩子確認當下，畫面到底說了什麼。
+
+**Audit 結果（2026-08-12，master@47a7521）：閘門 B 不成立。**
+
+家長確認時，回饋語意的唯一一句文案是
+[parentProposalPresentation.ts:120](shadow-wallet/src/screens/parent/tablet/home/parentProposalPresentation.ts#L120)：
+
+```ts
+? `建議：每次完成 ${plan.ai_suggested_coin_amount} 成長幣`
+```
+
+* 它不只是「沒有揭露 per-period」——它**明確講的是 per-completion**，
+  而且對 `weekly_frequency` 的計畫也是同一句（該檔沒有任何依 cadence 分支的回饋文案）。
+* 兩支測試把這句話釘住：`parentProposalPresentation.test.ts:112`、`ParentProposalSection.test.tsx:92`。
+* 全 repo 沒有任何「以週結算」「達標後才發一筆」「本週達標回饋」的確認文案
+  （`每次完成 / 本週達標 / 以週.*結算 / 達標後` 全掃過，命中的都是時間存摺與測試）。
+* 孩子端更徹底：確認流程從頭到尾**不出現任何幣值數字**
+  （`childProposal/copy.ts` 的三個選項刻意不含數字，孩子不決定幣值）。
+
+**結論：目前沒有任何一筆既有任務具備 authoritative per-period payout agreement。**
+家庭在畫面上看到並同意的是「每次完成 N 成長幣」，
+那麼「每次完成就發」很可能正是他們同意的事 —— 動它就是靜默改約。
+
+因此 **Phase 1 不執行任何自動遷移，遷移零列**：所有既有任務
+（含 `confirmed_payout_basis='per_period'` 的那些）一律維持 `payout_basis = NULL`，legacy 行為原封不動。
+既有任務要進新制，只能透過**正式重新協商**：新版本 + 揭露 per-period 語意的確認畫面 + 孩子重新接受。
+
+下面 7.1 的 DB 條件仍然保留在文件裡 —— 它是閘門 A，等未來確認畫面真的揭露 per-period 語意之後，
+它就是那時候的遷移條件。**在那之前它不會被寫成 migration script。**
+
+### 7.1 閘門 A：DB 證據條件（保留備用，Phase 1 不執行）
+
+只有同時滿足以下每一條的任務才**具備遷移的 DB 條件**（仍需通過閘門 B）：
 
 ```sql
 FROM child_proposals cp
@@ -220,7 +281,7 @@ WHERE cp.status              = 'active'
   AND v.confirmed_at         IS NOT NULL          -- 這一版真的被確認過
   AND v.superseded_at        IS NULL              -- 而且還是現行版本
   AND v.confirmed_source_task_id = t.id           -- 快照確實指回這筆任務
-  AND v.confirmed_payout_basis   = 'per_period'   -- ← 唯一的 authoritative 證據
+  AND v.confirmed_payout_basis   = 'per_period'   -- 必要但**不充分**，見 7.0 閘門 B
   AND v.confirmed_reward_policy  = 'coin_eligible'
   AND v.confirmed_coin_amount    > 0
   AND t.reward_policy            = 'coin_eligible'
@@ -238,18 +299,17 @@ WHERE cp.status              = 'active'
 不滿足任一條 → `payout_basis` 留 NULL，legacy 行為原封不動。
 **「看得到舊任務、UI 曖昧、但沒有 authoritative payout agreement」一律屬於這一類。**
 
-理由：`confirmed_payout_basis = 'per_period'` 是家庭確認過的快照，
-它明說了「以週為結算單位」，而錢包卻按每次完成發 —— 那是 implementation bug，該修。
-沒有這份快照時，「每完成一次得到 X 幣」可能才是家庭實際同意的事，動它就是 §14 禁止的靜默改約。
-
-migration 冪等（`payout_basis IS NULL` 這一條就是 guard），可重複套用。
+未來真的執行時，migration 必須冪等（`payout_basis IS NULL` 這一條就是 guard），可重複套用。
 
 ### 7.2 Mid-period transition：不得在 period 中途切換
 
-**風險：** 任務在週三遷移，本週前三次已按 legacy 每次 mint 過；
+閘門 B 不成立讓 Phase 1 沒有 bulk migration，
+但**這個機制仍然必要**：既有任務經**重新協商**進新制時，風險一模一樣。
+
+**風險：** 任務在週三切換到新制，本週前三次已按 legacy 每次 mint 過；
 若新語意立刻生效，第 4 次會再形成一次 period settlement —— 本週被付兩次。
 
-**機制：** 遷移時寫入
+**機制：** 切換時寫入
 
 ```
 payout_basis_effective_from = date_trunc('week', now() AT TIME ZONE 'Asia/Taipei')::date + 7
@@ -259,7 +319,8 @@ payout_basis_effective_from = date_trunc('week', now() AT TIME ZONE 'Asia/Taipei
 
 **不會 double-pay 的證明：**
 
-設 M 為 migration 時間，P(M) 為 M 所屬 period 的 period_start，`effective_from = P(M) + 7`。
+設 M 為切換時間（遷移或重新協商生效），P(M) 為 M 所屬 period 的 period_start，
+`effective_from = P(M) + 7`。
 
 1. 任一 completion 的 `period_start = P(M)` → `period_start < effective_from` → 閘門為 false
    → 走 legacy 路徑（每次完成即結算），與遷移前**逐字相同**。
@@ -278,14 +339,33 @@ payout_basis_effective_from = date_trunc('week', now() AT TIME ZONE 'Asia/Taipei
 **新建立的任務不受此機制影響**：`effective_from` = 起始日所屬 period，立即生效，
 因為它從來沒有 legacy 付款歷史。
 
-### 7.3 誠恩閱讀 Demo
+### 7.3 Demo **[待拍板 —— 觸發停止條件]**
+
+Demo 有兩筆不同的東西，處置不同：
+
+**(1) P0-10 Demo Story 的週節奏任務**（`supabase/verify/staging/demo_seed_story.sql`）
+是 `coin_eligible` + `weekly_frequency = 3` + `coin = 10`，
+它的 explanation 字串是「6-9 歲 D 類、每次約 15 分鐘，GrowBook 建議 10 幣。」——
+**session pricing、per-completion 語意**。
+
+它符合 7.1 的每一條 DB 條件，但和所有既有任務一樣**卡在閘門 B**。
+要把它改成「本週達標 +10」，就是**改動 Demo Story 共同版本的語意**（從每次 10 幣變成一週 10 幣，
+孩子端的可得幣值從一週 30 降為 10），
+這超出「修 bug」的範圍，**需要產品拍板，不由本工單自行決定。**
+
+**(2) 誠恩閱讀 Demo（legacy seed）**
 
 Demo 的 `第 5 天 +10 幣` 目前是死的：那筆任務是 legacy（`reward_policy IS NULL`、`coin_override = 0`），
 P0-6 的 checkpoint guard 要求 `reward_policy = 'coin_eligible'`，NULL 比較不成立。
 
-**處置：不重新打開 legacy checkpoint mint 路徑。** 改為把 demo seed / story 對齊新制：
-以 per_period settlement 呈現「本週達標 +10」，並加入 staging acceptance 驗證。
-Legacy baseline 以 P0-6 之後的行為為準。
+**已定案的部分：不重新打開 legacy checkpoint mint 路徑**，legacy baseline 以 P0-6 之後的行為為準。
+
+**待拍板的部分：** 要把它改成「本週達標 +10」，做法是**新建一筆走新制的 demo 任務**
+（`payout_basis='per_period'`、`period_target_count`、`reward_coin_amount=10`），
+而不是遷移那筆 legacy seed。這同樣改動了 Demo 呈現的語意，與 (1) 綁在一起一起決定。
+
+`+10` 若採用，是 **Demo agreed fixture**，
+**不是通用的 weekly pricing formula，不得被任何程式路徑或政策文件當成推導依據**（見 §8.3）。
 
 **10 這個數字的地位見 §8.3 —— 它是 Demo 既有的 agreed fixture，不是通用 weekly pricing。**
 
