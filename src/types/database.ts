@@ -173,11 +173,30 @@ export type Task = {
   support_level?: string | null;
 
   // 成長幣
-  /** 完成一次可獲得的成長幣。新任務的 canonical 來源。 */
+  /**
+   * 一次 reward event 的成長幣金額。**不一定是「完成一次」** ——
+   * 它的單位由 payout_basis 決定：per_completion 是每次完成，
+   * per_period 是本期達標一次。新任務的 canonical 來源。
+   */
   reward_coin_amount?: number | null;
   reward_coin_suggested_amount?: number | null;
   reward_coin_min?: number | null;
   reward_coin_max?: number | null;
+
+  // 結算語意
+  /**
+   * 什麼事件才結算。null = legacy（每次完成即結算）。
+   * **不得由 claim_period 推導** —— claim_period 是「每期可以 claim 幾次」的
+   * 頻率上限，兩者是不同維度。見 docs/CLAIM_PERIOD_VS_PAYOUT_BASIS.md。
+   */
+  payout_basis?: PayoutBasisValue | null;
+  /** per_period 專用：一期內達成幾次才形成一次 reward event（建立當下的約定值）。 */
+  period_target_count?: number | null;
+  /**
+   * 新結算語意從哪一天起適用。technical rollout metadata，不是共同約定內容 ——
+   * 不進 material diff、不觸發孩子重新確認。
+   */
+  payout_basis_effective_from?: string | null;
 
   // 四種版本
   /** 任務政策（分類／來源／回饋資格／結束規則）的版本。 */
@@ -210,6 +229,20 @@ export type RewardPolicyValue =
   | 'progress_only'
   | 'coin_eligible'
   | 'time_saving_eligible';
+
+/**
+ * tasks.payout_basis 的允許值（migration 20260818000000 的 CHECK）。
+ *
+ * ⚠️ `per_milestone` / `final_completion` 在值域裡但**沒有執行路徑**（Phase 2）：
+ * 建立路徑會回 PAYOUT_BASIS_NOT_IMPLEMENTED，complete_task 遇到則只記 progress、
+ * 不 mint。它們現在存在的理由只是讓 Phase 2 不必再改一次 CHECK ——
+ * 不代表已經支援。
+ */
+export type PayoutBasisValue =
+  | 'per_completion'
+  | 'per_period'
+  | 'per_milestone'
+  | 'final_completion';
 
 export type TaskCompletion = {
   id: string;
@@ -1151,9 +1184,38 @@ export interface Database {
         Returns: {
           error?: string;
           completionId?: string;
+          /** 這一次完成**實際 mint** 的成長幣。只記 progress 時是 0。 */
           coinEarned?: number;
           timeSavedMin?: number;
+          payoutBasis?: PayoutBasisValue | null;
+          /** 遇到 Phase 2 才實作的 basis：只記了 progress，沒有發幣。 */
+          payoutBasisUnsupported?: boolean;
+          /** per_period 任務的本期進度。null = 不是 per_period 或還沒生效。 */
+          period?: {
+            start: string;
+            done: number;
+            target: number | null;
+            settled: boolean;
+          } | null;
+          /** 這一次完成有沒有形成 reward event。null = 只是 progress。 */
+          settlement?: { basis: PayoutBasisValue; coinAmount: number } | null;
           milestone?: { goalId: string; day: number; coinReward: number } | null;
+        };
+      };
+      parent_complete_task_for_child_v1: {
+        Args: {
+          p_task_id: string;
+          p_child_id: string;
+          p_completed_at: string;
+          p_coin_amount: number;
+          p_time_saved_min: number;
+        };
+        Returns: {
+          error?: string;
+          completionId?: string;
+          coinEarned?: number;
+          /** 新語意任務：家長輸入的金額被忽略，幣值由 payout_basis 結算。 */
+          coinInputIgnored?: boolean;
         };
       };
       redeem_wish: {

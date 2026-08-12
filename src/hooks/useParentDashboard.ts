@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase';
 import { calcCoin } from '../lib/taskActions';
 import { taipeiDayRange } from '../lib/taipeiDate';
 import { isTaskDueToday } from '../lib/taskSchedule';
-import type { Child, Task, TaskCategory } from '../types/database';
+import type { Child, PayoutBasisValue, Task, TaskCategory } from '../types/database';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -26,6 +26,13 @@ export type DashboardTask = {
   status: DashboardTaskStatus;
   completedAt?: string;
   reward: { kind: 'coins'; amount: number } | { kind: 'time'; amount: number } | null;
+  /**
+   * null = legacy 任務（每次完成即結算，家長可以在標記時調整金額）。
+   * 有值 = 幣值由伺服器依結算語意決定，家長端不得再輸入金額。
+   */
+  payoutBasis: PayoutBasisValue | null;
+  /** per_period 任務約定的每期達標次數。 */
+  periodTargetCount: number | null;
 };
 
 export type DashboardGoal = {
@@ -87,6 +94,8 @@ function deriveDashboardTasks(
         status,
         completedAt: dayjs(completion.completed_at).tz(TZ).format('HH:mm'),
         reward,
+        payoutBasis: task.payout_basis ?? null,
+        periodTargetCount: task.period_target_count ?? null,
       };
     }
 
@@ -99,7 +108,15 @@ function deriveDashboardTasks(
         ? null
         : { kind: 'coins' as const, amount: calcCoin(task, isPrerequisiteMet) };
 
-    return { id: task.id, name: task.name, cat: task.category, status, reward };
+    return {
+      id: task.id,
+      name: task.name,
+      cat: task.category,
+      status,
+      reward,
+      payoutBasis: task.payout_basis ?? null,
+      periodTargetCount: task.period_target_count ?? null,
+    };
   });
 }
 

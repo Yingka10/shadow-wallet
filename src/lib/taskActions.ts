@@ -13,6 +13,7 @@ import type {
   CompletionStartMode,
   CreateFamilyGoalInput,
   OverrideType,
+  PayoutBasisValue,
   PreferredTimeWindow,
   SkillMilestone,
   Task,
@@ -161,64 +162,60 @@ export async function parentMarkTask(
   if (updateError != null) throw new Error(updateError.message);
 }
 
+export type ParentCompletionResult = {
+  completionId: string;
+  /** 伺服器實際 mint 的金額。 */
+  coinEarned: number;
+  /**
+   * true = 這是新結算語意的任務，家長輸入的金額被忽略，
+   * 幣值由 payout_basis 決定。畫面要據此說明，而不是假裝有發。
+   */
+  coinInputIgnored: boolean;
+};
+
 /**
  * Creates a parent-initiated task completion on behalf of the child.
- * Used when the parent marks a pending task as done directly from the home screen.
- * Writes task_completions (reported_by='parent') and credits the spending wallet.
+ *
+ * 走 `parent_complete_task_for_child_v1` RPC，不再在 client 端直接寫
+ * task_completions / wallets / transactions。
+ *
+ * 這不只是搬家：原本那條路是一個發幣後門 —— 金額直接來自家長的輸入框，
+ * 不經過 reward_policy、不經過幣值範圍、沒有 idempotency，三個寫入也不是原子的。
+ * 新語意的任務現在**完全忽略傳入的 coinAmount**，由伺服器依 payout_basis 結算。
+ * legacy 任務維持原本的家長輸入行為（不改既有共同約定）。
  */
 export async function parentCompleteTaskForChild(
   taskId: string,
   childId: string,
   coinAmount: number,
   timeSavedMin: number,
-): Promise<void> {
-  const safeAmount = Math.round(Math.max(0, coinAmount));
-  const nowIso = dayjs().tz(TZ).toISOString();
+): Promise<ParentCompletionResult> {
+  const { data, error } = await supabase.rpc('parent_complete_task_for_child_v1', {
+    p_task_id:        taskId,
+    p_child_id:       childId,
+    p_completed_at:   dayjs().tz(TZ).toISOString(),
+    p_coin_amount:    Math.round(Math.max(0, coinAmount)),
+    p_time_saved_min: Math.round(Math.max(0, timeSavedMin)),
+  });
 
-  const { data: completion, error: insertError } = await supabase
-    .from('task_completions')
-    .insert({
-      task_id:         taskId,
-      child_id:        childId,
-      completed_at:    nowIso,
-      reported_at:     nowIso,
-      reported_by:     'parent' as const,
-      status:          'completed' as const,
-      coin_earned:     safeAmount,
-      time_saved_min:  timeSavedMin,
-      mentor_child_id: null,
-    })
-    .select('id')
-    .single();
+  if (error) throw normalizeSharedPlanGuardError(error);
 
-  if (insertError != null || completion == null) throw new Error('標記完成失敗');
+  const result = data as {
+    error?: string;
+    completionId?: string;
+    coinEarned?: number;
+    coinInputIgnored?: boolean;
+  };
 
-  if (safeAmount > 0) {
-    const { data: wallet, error: walletError } = await supabase
-      .from('wallets')
-      .select('id, balance')
-      .eq('child_id', childId)
-      .eq('wallet_type', 'spending')
-      .single();
+  if (result.error === 'already_completed') throw new Error('今天已經完成過這個任務了');
+  if (result.error === 'task_inactive') throw new Error('這個任務已經停用了');
+  if (result.error != null) throw new Error('標記完成失敗');
 
-    if (walletError != null || wallet == null) throw new Error('找不到錢包');
-
-    const { error: updateError } = await supabase
-      .from('wallets')
-      .update({ balance: wallet.balance + safeAmount })
-      .eq('id', wallet.id);
-
-    if (updateError != null) throw new Error(updateError.message);
-
-    await supabase.from('transactions').insert({
-      wallet_id:      wallet.id,
-      amount:         safeAmount,
-      type:           'earn' as const,
-      reference_type: 'task_completion',
-      reference_id:   completion.id,
-      note:           null,
-    });
-  }
+  return {
+    completionId:     result.completionId!,
+    coinEarned:       result.coinEarned ?? 0,
+    coinInputIgnored: result.coinInputIgnored === true,
+  };
 }
 
 type CreateChildTaskInput = {
@@ -285,10 +282,40 @@ export function getPrevCheckpoint(
   const prev = days.filter(d => d < currentDay);
   return prev.length > 0 ? prev[prev.length - 1] : 0;
 }
+/** per_period 任務的本期節奏。只有新結算語意生效後才有值。 */
+export type PeriodProgress = {
+  /** 本期起日（Asia/Taipei 週一），YYYY-MM-DD。 */
+  start: string;
+  /** 含這一次在內，本期已完成幾次。 */
+  done: number;
+  /** 約定的達標次數。 */
+  target: number | null;
+  /** 本期是否已經結算過。 */
+  settled: boolean;
+};
+
+/** 這一次完成真的形成了一次 reward event。 */
+export type SettlementResult = {
+  basis: PayoutBasisValue;
+  coinAmount: number;
+};
+
 export type CompletionResult = {
   completionId: string;
+  /**
+   * 這一次完成**實際 mint** 的成長幣。
+   *
+   * ⚠️ 不是「這個任務值多少」。per_period 任務在本期達標之前一律是 0 ——
+   * 畫面要顯示幣值回饋，判斷依據是 `settlement`，不是這個數字大於零。
+   */
   coinEarned: number;
   timeSavedMin: number;
+  /** null = legacy 任務（每次完成即結算）。 */
+  payoutBasis: PayoutBasisValue | null;
+  /** 遇到 Phase 2 才實作的結算方式：只記了 progress，沒有發幣。 */
+  payoutBasisUnsupported: boolean;
+  period: PeriodProgress | null;
+  settlement: SettlementResult | null;
   milestone: MilestoneResult | null;
 };
 
@@ -338,6 +365,10 @@ export async function completeTask(
     completionId?: string;
     coinEarned?: number;
     timeSavedMin?: number;
+    payoutBasis?: PayoutBasisValue | null;
+    payoutBasisUnsupported?: boolean;
+    period?: { start: string; done: number; target: number | null; settled: boolean } | null;
+    settlement?: { basis: PayoutBasisValue; coinAmount: number } | null;
     milestone?: { goalId: string; day: number; coinReward: number } | null;
   };
 
@@ -349,6 +380,10 @@ export async function completeTask(
     completionId: result.completionId!,
     coinEarned:   result.coinEarned!,
     timeSavedMin: result.timeSavedMin!,
+    payoutBasis:  result.payoutBasis ?? null,
+    payoutBasisUnsupported: result.payoutBasisUnsupported === true,
+    period:       result.period ?? null,
+    settlement:   result.settlement ?? null,
     milestone:    result.milestone ?? null,
   };
 }

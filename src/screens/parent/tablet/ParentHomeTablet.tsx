@@ -299,6 +299,18 @@ function MarkPanel({
   const taskCoin     = hasCoin ? (task.reward as { kind: 'coins'; amount: number }).amount : 0;
   const timeSavedMin = task.reward?.kind === 'time' ? (task.reward as { kind: 'time'; amount: number }).amount : 0;
 
+  // 新結算語意的任務：幣值由伺服器依 payout_basis 決定，家長在這裡輸入的數字
+  // 會被忽略。與其顯示一個沒有作用的欄位，不如說清楚什麼時候才會發。
+  const serverDecidesCoin = task.payoutBasis != null;
+  const payoutExplanation =
+    task.payoutBasis === 'per_period'
+      ? task.periodTargetCount != null
+        ? `這個計畫每完成一次都會留下紀錄；本週完成 ${task.periodTargetCount} 次後才結算回饋。`
+        : '這個計畫每完成一次都會留下紀錄；本週達標後才結算回饋。'
+      : task.payoutBasis === 'per_completion'
+      ? '這個任務每完成一次結算一次，金額依共同版本，不在這裡調整。'
+      : null;
+
   const defaultCoin = (opt: ExtendedOpt): number => {
     if (!hasCoin) return 0;
     if (!isDone) return opt === 'complete' ? taskCoin : 0;
@@ -321,7 +333,7 @@ function MarkPanel({
   };
 
   // For pending tasks, only show coin stepper when "幫他標記完成" is selected
-  const showCoin = hasCoin && selectedOption != null &&
+  const showCoin = hasCoin && !serverDecidesCoin && selectedOption != null &&
     (isDone ? true : selectedOption === 'complete');
 
   const isConfirmDisabled =
@@ -380,6 +392,11 @@ function MarkPanel({
           );
         })}
       </View>
+
+      {/* 新結算語意的任務不給調整欄位，改說明什麼時候才會結算 */}
+      {serverDecidesCoin && payoutExplanation != null && selectedOption != null && (
+        <Text style={styles.markPayoutNote}>{payoutExplanation}</Text>
+      )}
 
       {/* Coin adjustment input */}
       {showCoin && (
@@ -3520,6 +3537,13 @@ const styles = StyleSheet.create({
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.sm,
     color: ParentColors.fgSecondary,
+  },
+  markPayoutNote: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.sm,
+    color: ParentColors.fgSecondary,
+    lineHeight: 20,
+    marginTop: 4,
   },
   markCoinInput: {
     borderWidth: 1,
