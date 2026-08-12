@@ -33,7 +33,14 @@ import type {
   CloseChildProposalResult,
   ConfirmChildProposalResult,
   CreateAdjustmentRequestResult,
+  CreateAdjustmentRequestSuccess,
   CreateChildProposalAdjustmentRequestCommand,
+  AcceptChildProposalAdjustmentCommand,
+  DeclineChildProposalAdjustmentCommand,
+  AcceptAdjustmentResult,
+  DeclineAdjustmentResult,
+  ChildProposalAdjustmentCardData,
+  ChildProposalAdjustmentRequest,
   CreateChildProposalCommand,
   CreateChildProposalResult,
   RecordChildProposalTrialCommand,
@@ -58,6 +65,8 @@ export const REVISE_CHILD_PROPOSAL_PLAN_RPC = 'revise_child_proposal_plan_v1';
 export const ACCEPT_CHILD_PROPOSAL_PLAN_RPC = 'accept_child_proposal_plan_v1';
 export const REQUEST_CHILD_PROPOSAL_CHANGES_RPC = 'request_child_proposal_changes_v1';
 export const CLOSE_CHILD_PROPOSAL_UNSUITABLE_RPC = 'close_child_proposal_unsuitable_v1';
+export const ACCEPT_CHILD_PROPOSAL_ADJUSTMENT_RPC = 'accept_child_proposal_adjustment_v1';
+export const DECLINE_CHILD_PROPOSAL_ADJUSTMENT_RPC = 'decline_child_proposal_adjustment_v1';
 
 /**
  * 只有這六支。型別上就不接受任意字串 —— 打錯名字要在編譯期就被抓到，
@@ -73,7 +82,9 @@ type ChildProposalRpcName =
   | typeof REVISE_CHILD_PROPOSAL_PLAN_RPC
   | typeof ACCEPT_CHILD_PROPOSAL_PLAN_RPC
   | typeof REQUEST_CHILD_PROPOSAL_CHANGES_RPC
-  | typeof CLOSE_CHILD_PROPOSAL_UNSUITABLE_RPC;
+  | typeof CLOSE_CHILD_PROPOSAL_UNSUITABLE_RPC
+  | typeof ACCEPT_CHILD_PROPOSAL_ADJUSTMENT_RPC
+  | typeof DECLINE_CHILD_PROPOSAL_ADJUSTMENT_RPC;
 
 const FAILURE_CODES: ChildProposalFailureCode[] = [
   'VALIDATION_FAILED',
@@ -693,6 +704,120 @@ export class SupabaseChildProposalService {
     const id = requireId(result.payload, 'adjustmentRequestId', fallback);
     if (isFailure(id)) return id;
 
-    return { ok: true, adjustmentRequestId: id, status: 'open' };
+    const status = result.payload.status;
+    return {
+      ok: true,
+      adjustmentRequestId: id,
+      status: typeof status === 'string'
+        ? (status as CreateAdjustmentRequestSuccess['status'])
+        : 'open',
+      idempotentReplay: result.payload.idempotentReplay === true,
+    };
+  }
+
+  /**
+   * 家長首頁的 response-needed 區塊要用的資料。
+   *
+   * 只讀 open 的時段調整 —— 其他 kind 目前沒有 workflow 接得住，撈出來只會
+   * 變成一張按了沒反應的卡。
+   */
+  async listOpenAdjustmentsForParent({
+    familyId,
+    childId,
+  }: {
+    familyId: string;
+    childId: string;
+  }): Promise<ChildProposalAdjustmentCardData[]> {
+    const { data: requests, error } = await supabase
+      .from('child_proposal_adjustment_requests')
+      .select('*')
+      .eq('family_id', familyId)
+      .eq('status', 'open')
+      .eq('adjustment_kind', 'preferred_time')
+      .order('created_at', { ascending: false })
+      .limit(3);
+    if (error) throw new Error(error.message || '讀取調整請求失敗');
+    if (!requests?.length) return [];
+
+    const { data: proposals, error: proposalError } = await supabase
+      .from('child_proposals')
+      .select('*')
+      .in('id', [...new Set(requests.map(r => r.proposal_id))])
+      .eq('child_id', childId);
+    if (proposalError) throw new Error(proposalError.message || '讀取提案失敗');
+
+    const byId = new Map((proposals ?? []).map(p => [p.id, p]));
+    const versionIds = requests
+      .map(r => r.based_on_plan_version_id)
+      .filter((id): id is string => typeof id === 'string');
+    if (versionIds.length === 0) return [];
+
+    const { data: versions, error: versionError } = await supabase
+      .from('child_proposal_plan_versions')
+      .select('*')
+      .in('id', versionIds);
+    if (versionError) throw new Error(versionError.message || '讀取計畫版本失敗');
+    const versionById = new Map((versions ?? []).map(v => [v.id, v]));
+
+    return requests.flatMap(request => {
+      const proposal = byId.get(request.proposal_id);
+      const basedOn = request.based_on_plan_version_id
+        ? versionById.get(request.based_on_plan_version_id)
+        : undefined;
+      // 提案已經前進到別的版本時，這張卡代表的差異已經不是現況 ——
+      // 與其顯示一個過期的「睡前 → 晚餐後」，不如不顯示。
+      if (!proposal || !basedOn
+        || proposal.status !== 'active'
+        || proposal.current_plan_version_id !== basedOn.id) return [];
+      return [{ request, proposal, basedOnPlanVersion: basedOn }];
+    });
+  }
+
+  async acceptAdjustment(
+    command: AcceptChildProposalAdjustmentCommand,
+  ): Promise<AcceptAdjustmentResult> {
+    const fallback = '確認調整失敗';
+    const result = await callProposalRpc(
+      ACCEPT_CHILD_PROPOSAL_ADJUSTMENT_RPC, command, fallback,
+    );
+    if (result.ok !== true) return result;
+
+    const requestId = requireId(result.payload, 'adjustmentRequestId', fallback);
+    if (isFailure(requestId)) return requestId;
+    const proposalId = requireId(result.payload, 'proposalId', fallback);
+    if (isFailure(proposalId)) return proposalId;
+    const planVersionId = requireId(result.payload, 'planVersionId', fallback);
+    if (isFailure(planVersionId)) return planVersionId;
+    const taskId = requireId(result.payload, 'taskId', fallback);
+    if (isFailure(taskId)) return taskId;
+
+    return {
+      ok: true,
+      adjustmentRequestId: requestId,
+      proposalId,
+      planVersionId,
+      taskId,
+      idempotentReplay: result.payload.idempotentReplay === true,
+    };
+  }
+
+  async declineAdjustment(
+    command: DeclineChildProposalAdjustmentCommand,
+  ): Promise<DeclineAdjustmentResult> {
+    const fallback = '保留原本安排失敗';
+    const result = await callProposalRpc(
+      DECLINE_CHILD_PROPOSAL_ADJUSTMENT_RPC, command, fallback,
+    );
+    if (result.ok !== true) return result;
+
+    const requestId = requireId(result.payload, 'adjustmentRequestId', fallback);
+    if (isFailure(requestId)) return requestId;
+
+    return {
+      ok: true,
+      adjustmentRequestId: requestId,
+      status: 'declined',
+      idempotentReplay: result.payload.idempotentReplay === true,
+    };
   }
 }
