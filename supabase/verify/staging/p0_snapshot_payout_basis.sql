@@ -45,6 +45,9 @@ DECLARE
   v_c2_version  uuid;
   v_request     uuid;
   v_new_version uuid;
+
+  v_snap_target smallint;
+  v_snap_claims integer;
 BEGIN
   -- ── 共用 fixture ──────────────────────────────────────────────────────────
   INSERT INTO auth.users (id) VALUES (v_user);
@@ -76,8 +79,10 @@ BEGIN
     reward_coin_min, reward_coin_max, reward_policy_version,
     duration_type, schedule_mode, weekly_frequency, progress_model
   ) VALUES (
+    -- max_claims_per_period 刻意給 5 而 weekly_frequency 給 3：兩個數字不一樣，
+    -- 「拿 claim 上限當達標次數」才驗得出來。
     v_task, v_family, 'P0 snapshot weekly', 'D', 'both', true, true, 'habit',
-    'week', 3, 'coin_eligible', v_amount, 1, 30, 'p0-snapshot-fixture',
+    'week', 5, 'coin_eligible', v_amount, 1, 30, 'p0-snapshot-fixture',
     'long_term', 'weekly_frequency', 3, 'weekly_rhythm'
   );
   -- child_proposal_guard_linked_task：共同版本的任務必須真的指派給這個孩子。
@@ -107,10 +112,19 @@ BEGIN
     RAISE EXCEPTION 'CASE 1 轉換失敗：%', v_result;
   END IF;
 
-  SELECT confirmed_payout_basis INTO v_snapshot
+  SELECT confirmed_payout_basis, confirmed_period_target_count, confirmed_max_claims_per_period
+    INTO v_snapshot, v_snap_target, v_snap_claims
     FROM child_proposal_plan_versions WHERE id = v_version;
   IF v_snapshot IS DISTINCT FROM 'per_period' THEN
     RAISE EXCEPTION 'CASE 1 失敗：weekly_frequency 的快照是 %，預期 per_period', v_snapshot;
+  END IF;
+  -- 達標次數要跟著被記下來，而且必須是 3（cadence），不是 5（claim 上限）。
+  IF v_snap_target IS DISTINCT FROM 3 THEN
+    RAISE EXCEPTION 'CASE 1 失敗：快照的達標次數是 %，預期 3（claim 上限是 %）',
+      v_snap_target, v_snap_claims;
+  END IF;
+  IF v_snap_claims IS DISTINCT FROM 5 THEN
+    RAISE EXCEPTION 'CASE 1 前提失敗：confirmed_max_claims_per_period 是 %，預期 5', v_snap_claims;
   END IF;
 
   -- ═══════════════════════════════════════════════════════════════════════
@@ -188,11 +202,16 @@ BEGIN
     RAISE EXCEPTION 'CASE 2 轉換失敗：%', v_result;
   END IF;
 
-  SELECT confirmed_payout_basis, confirmed_claim_period INTO v_snapshot, v_period
+  SELECT confirmed_payout_basis, confirmed_claim_period, confirmed_period_target_count
+    INTO v_snapshot, v_period, v_snap_target
     FROM child_proposal_plan_versions WHERE id = v_version;
   IF v_snapshot IS DISTINCT FROM 'per_period' THEN
     RAISE EXCEPTION 'CASE 2 失敗：fixed_days 的快照是 %，預期 per_period（claim_period=%）',
       v_snapshot, v_period;
+  END IF;
+  -- 三個固定日 → 達標次數 3；claim 上限是 1，兩者不能混。
+  IF v_snap_target IS DISTINCT FROM 3 THEN
+    RAISE EXCEPTION 'CASE 2 失敗：fixed_days 的達標次數是 %，預期 3', v_snap_target;
   END IF;
   -- claim_period 本身仍然照抄，它是另一個維度，不該被連帶改掉。
   IF v_period IS DISTINCT FROM 'day' THEN
@@ -247,11 +266,16 @@ BEGIN
     RAISE EXCEPTION 'CASE 3 轉換失敗：%', v_result;
   END IF;
 
-  SELECT confirmed_payout_basis INTO v_snapshot
+  SELECT confirmed_payout_basis, confirmed_period_target_count
+    INTO v_snapshot, v_snap_target
     FROM child_proposal_plan_versions WHERE id = v_version;
   IF v_snapshot IS DISTINCT FROM 'per_completion' THEN
     RAISE EXCEPTION 'CASE 3 失敗：per_completion 任務的快照是 %（claim_period=week 的推導值贏了）',
       v_snapshot;
+  END IF;
+  -- 達標次數只屬於 per_period。這裡有值就代表憑空多了一個數字。
+  IF v_snap_target IS NOT NULL THEN
+    RAISE EXCEPTION 'CASE 3 失敗：per_completion 快照帶了達標次數 %', v_snap_target;
   END IF;
 
   -- ═════════════════════════════════════════════════════════════════════════
@@ -294,11 +318,17 @@ BEGIN
     RAISE EXCEPTION 'CASE 4 轉換失敗：%', v_result;
   END IF;
 
-  SELECT confirmed_payout_basis INTO v_snapshot
+  SELECT confirmed_payout_basis, confirmed_period_target_count
+    INTO v_snapshot, v_snap_target
     FROM child_proposal_plan_versions WHERE id = v_version;
   -- claim_period = 'week' → legacy 推導 = per_period。逐字不變。
   IF v_snapshot IS DISTINCT FROM 'per_period' THEN
     RAISE EXCEPTION 'CASE 4 失敗：legacy 任務的快照是 %，預期沿用推導值 per_period', v_snapshot;
+  END IF;
+  -- legacy 的 per_period 是推導出來的，家庭從來沒有確認過任何達標次數。
+  -- 這裡塞一個數字進去就是替他們補簽一份沒發生過的約定。
+  IF v_snap_target IS NOT NULL THEN
+    RAISE EXCEPTION 'CASE 4 失敗：legacy 快照被 backfill 了達標次數 %', v_snap_target;
   END IF;
 
   -- ═════════════════════════════════════════════════════════════════════════
@@ -348,11 +378,19 @@ BEGIN
     RAISE EXCEPTION 'CASE 5 轉換失敗：%', v_result;
   END IF;
 
-  SELECT confirmed_payout_basis, confirmed_claim_period INTO v_snapshot, v_period
+  SELECT confirmed_payout_basis, confirmed_claim_period,
+         confirmed_period_target_count, confirmed_max_claims_per_period
+    INTO v_snapshot, v_period, v_snap_target, v_snap_claims
     FROM child_proposal_plan_versions WHERE id = v_version;
   IF v_snapshot IS DISTINCT FROM 'per_period' OR v_period IS DISTINCT FROM 'day' THEN
     RAISE EXCEPTION 'CASE 5 失敗：快照 payout=% claim=%（預期 per_period / day）',
       v_snapshot, v_period;
+  END IF;
+  -- claim 上限已經被改成 1，達標次數必須仍然是 4。
+  -- 這一條是「不得用 max_claims_per_period 代替」最直接的證據。
+  IF v_snap_target IS DISTINCT FROM 4 OR v_snap_claims IS DISTINCT FROM 1 THEN
+    RAISE EXCEPTION 'CASE 5 失敗：達標次數 % / claim 上限 %（預期 4 / 1）',
+      v_snap_target, v_snap_claims;
   END IF;
 
   -- ═════════════════════════════════════════════════════════════════════════
@@ -414,12 +452,17 @@ BEGIN
     RAISE EXCEPTION 'CASE 8 前提失敗：沒有產生新的版本列（%）', v_new_version;
   END IF;
 
-  SELECT confirmed_payout_basis, confirmed_claim_period INTO v_snapshot, v_period
+  SELECT confirmed_payout_basis, confirmed_claim_period, confirmed_period_target_count
+    INTO v_snapshot, v_period, v_snap_target
     FROM child_proposal_plan_versions WHERE id = v_new_version;
   IF v_snapshot IS DISTINCT FROM 'per_period' THEN
     RAISE EXCEPTION
       'CASE 8 失敗：換時段產生的新版本快照是 %（claim_period=% 的推導值贏了，INSERT 路徑沒被涵蓋）',
       v_snapshot, v_period;
+  END IF;
+  -- 換時段不動回饋，達標次數要原樣帶到新版本。
+  IF v_snap_target IS DISTINCT FROM 3 THEN
+    RAISE EXCEPTION 'CASE 8 失敗：新版本的達標次數是 %，預期 3', v_snap_target;
   END IF;
 
   -- 舊版本仍然是原來那個值，沒有被這次 INSERT 連帶改寫。
@@ -429,12 +472,68 @@ BEGIN
     RAISE EXCEPTION 'CASE 8 失敗：上一版的快照被動到了（%）', v_snapshot;
   END IF;
 
+  -- ═════════════════════════════════════════════════════════════════════════
+  -- CASE 9｜達標次數與其他 confirmed 證據一樣是 write-once
+  --
+  -- 「當初講好一週幾次」被事後改掉，跟幣值被事後改掉是同一件事。
+  -- ═════════════════════════════════════════════════════════════════════════
+  v_blocked := NULL;
+  BEGIN
+    UPDATE child_proposal_plan_versions
+       SET confirmed_period_target_count = 1
+     WHERE id = v_new_version;
+  EXCEPTION WHEN OTHERS THEN
+    v_blocked := SQLERRM;
+  END;
+  IF v_blocked IS NULL THEN
+    RAISE EXCEPTION 'CASE 9 失敗：已確認版本的達標次數被改掉了';
+  END IF;
+
+  SELECT confirmed_period_target_count INTO v_snap_target
+    FROM child_proposal_plan_versions WHERE id = v_new_version;
+  IF v_snap_target IS DISTINCT FROM 3 THEN
+    RAISE EXCEPTION 'CASE 9 失敗：達標次數變成了 %', v_snap_target;
+  END IF;
+
+  -- ═════════════════════════════════════════════════════════════════════════
+  -- CASE 10｜P0-8M 本身的結果沒有被這幾支 migration 影響
+  --
+  -- CASE 8 證的是「新版本的快照對」，這裡證的是「換時段這件事真的成立了」：
+  -- 任務的時段有移動、請求收斂成 accepted、current 指標指到新版本。
+  -- P0-8G 的 guard 若把 preferred_time 當成 material change，accept 會整個失敗
+  -- （那正是 20260818 差點造成的回歸），所以這一組斷言同時是那道 guard 的回歸測試。
+  -- ═════════════════════════════════════════════════════════════════════════
+  SELECT preferred_time INTO v_period FROM tasks WHERE id = v_c2_task;
+  IF v_period IS DISTINCT FROM 'after_dinner' THEN
+    RAISE EXCEPTION 'CASE 10 失敗：任務的時段沒有移動（%）', v_period;
+  END IF;
+
+  SELECT status INTO v_period FROM child_proposal_adjustment_requests WHERE id = v_request;
+  IF v_period IS DISTINCT FROM 'accepted' THEN
+    RAISE EXCEPTION 'CASE 10 失敗：調整請求的狀態是 %，預期 accepted', v_period;
+  END IF;
+
+  IF (SELECT current_plan_version_id FROM child_proposals WHERE id = v_c2_proposal)
+     IS DISTINCT FROM v_new_version THEN
+    RAISE EXCEPTION 'CASE 10 失敗：current 指標沒有移到新版本';
+  END IF;
+
+  -- 上一版被收掉了 —— 而那個 superseded_at 的 UPDATE 正好會經過本輪新加的
+  -- 兩支 trigger。它沒炸，就是 CASE 7 / CASE 9 的 guard 沒有波及無關寫入的證據。
+  IF (SELECT superseded_at FROM child_proposal_plan_versions WHERE id = v_c2_version)
+     IS NULL THEN
+    RAISE EXCEPTION 'CASE 10 失敗：上一版沒有被標記 superseded';
+  END IF;
+
   RAISE EXCEPTION
     'P0 SNAPSHOT PAYOUT BASIS VERIFY PASS — 1 weekly_frequency→per_period / '
     '2 fixed_days→per_period(claim=day) / 3 recurring→per_completion(claim=week) / '
     '4 legacy→推導值不變 / 5 claim_period 單獨變動不改語意 / '
     '6 payout_basis 與 period_target_count 仍受 renegotiation guard / '
     '7 既有 confirmed 快照不被改寫 / '
-    '8 P0-8M 換時段的 INSERT 路徑也拿到 canonical per_period。所有 fixture 已回滾。';
+    '8 P0-8M 換時段的 INSERT 路徑也拿到 canonical per_period / '
+    '9 達標次數 write-once / 10 P0-8M 換時段的結果本身不受影響。'
+    'period target 快照：case 1 = 3（claim 上限 5）、case 2 = 3、case 5 = 4（claim 上限 1）、'
+    'case 8 = 3；per_completion 與 legacy 皆為 NULL。所有 fixture 已回滾。';
 END
 $p0_snapshot$;

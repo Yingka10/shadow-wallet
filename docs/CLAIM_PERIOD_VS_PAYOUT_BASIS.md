@@ -89,6 +89,7 @@ END;
 1. **`claim_period` 只負責頻率上限**，只影響 `task_completions` 能不能再寫一列。
 2. **`payout_basis` 只負責結算事件**，只影響 settlement 與錢包。
 3. **兩者不得互相推導，也不得互為預設值。** 新任務兩個都要顯式決定並各自持久化。
+   * 同理，`max_claims_per_period`（每期 claim 上限）**不得**當成 `period_target_count`（達標次數）。上限與目標會不一樣：「每週 4 次算達標、允許做 5 次」是合法設定。共同版本快照自 `20260820000000` 起有自己的 `confirmed_period_target_count`，不從任何 claim 欄位推導。
 4. `child_proposal_payout_basis(claim_period)` **不再是 canonical truth**。**已落地**：
    * `20260818000000`：`tasks.payout_basis` 成為 canonical。
    * `20260819000000`：快照改以 `tasks.payout_basis` 為準。做法不是改那兩個呼叫點（`20260810000000` / `20260817000000` 各自都在數百行的函式裡，其中一支剛驗收進 master），而是在 `child_proposal_plan_versions` 掛 `snapshot_canonical_payout_basis_v1` trigger，在快照第一次成立時覆寫。兩條寫入路徑（UPDATE 與 INSERT）都涵蓋，既有函式一個字都沒動。

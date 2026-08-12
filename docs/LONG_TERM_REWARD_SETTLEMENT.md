@@ -510,13 +510,55 @@ Case 8 是後來補的。前七個 case 走的都是 UPDATE 路徑，若就此�
 `accept_child_proposal_adjustment_v1` 會在「孩子提出換時段、家長按下同意」
 這個最日常的操作上繼續產生錯的快照，而驗收會顯示全綠。
 
-#### 仍然留著的相關缺口
+### 9.5 per_period 快照的達標次數 **[已收掉 — `20260820000000`]**
 
-快照**沒有**記 `period_target_count`。一筆 `per_period` 的快照說得出「按週結算」，
-說不出「講好一週幾次算達標」。`confirmed_max_claims_per_period` 不是它 ——
-那是每期 claim 次數上限，見 `docs/CLAIM_PERIOD_VS_PAYOUT_BASIS.md`。
-沒有一起做是因為那要動 `child_proposal_plan_versions_confirmed_atomic` CHECK，
-屬於另一輪的範圍。
+`20260819000000` 之後，一筆 `per_period` 快照說得出「按週結算」，說不出
+「講好一週幾次算達標」。**這兩個都不能代替它**：
+
+| 欄位 | 它是什麼 | 為什麼不是達標次數 |
+|---|---|---|
+| `confirmed_claim_period` | 結算視窗（day / week / once） | 只說週期，不說次數 |
+| `confirmed_max_claims_per_period` | 每期最多 claim 幾次 | 上限 ≠ 目標。「每週 4 次算達標、允許做 5 次」是合法設定，拿上限當目標會讓孩子端的「還差幾次」直接算錯 |
+
+`20260820000000_shared_plan_period_target_snapshot.sql` 加上
+`child_proposal_plan_versions.confirmed_period_target_count`，由
+`20260819` 那支同一個 trigger 一併從 `tasks.period_target_count` 複製
+（不拆第二支 trigger —— 「這一列的 payout semantics 怎麼決定」有兩個地方要對照著讀，
+遲早會不同步）。
+
+| 決定 | 理由 |
+|---|---|
+| legacy 不 backfill | 那些家庭確認的畫面上從來沒出現過這個數字（§7.0 gate B），寫進去等於替他們補簽 |
+| `per_period` 缺 target 直接 RAISE | fail closed，不塞預設值。`tasks_period_target_scope_check` 保證正常路徑不會觸發，它擋的是繞過該 CHECK 的任務 |
+| 「`per_period` ⇒ 一定有 target」**不寫成 CHECK** | 既有 legacy 快照裡就有 `per_period` + NULL target 的列（`claim_period='week'` 推導的）。直接 ADD 會在既有資料上失敗；`NOT VALID` 也不行 —— 它仍會在 UPDATE 時檢查，而 P0-8M 每次接受換時段都會 UPDATE 舊版本的 `superseded_at`，那一刻就會炸在一列與該次改動無關的歷史資料上 |
+| 反方向（有 target ⇒ 必為 `per_period`）寫成 CHECK | 欄位是新加的，既有列全是 NULL，可以直接 VALIDATE |
+| write-once 用獨立 trigger | 不 forward-derive `child_proposal_plan_version_guard` —— 那份清單屬於 P0-8 系列 |
+
+staging 十個 case 全綠。針對「不得代用」最直接的兩個證據：case 1 的達標次數是
+**3**（cadence）而 claim 上限是 **5**；case 5 把 claim 上限改成 **1** 之後，
+達標次數仍然是 **4**。
+
+### 9.6 `confirmedReward` 回傳值仍是推導值 **[已知缺口，本輪未處理]**
+
+`transition_child_proposal_v1` 的 `RETURN` 裡，`confirmedReward.payoutBasis`
+用的是函式內先算好的 `v_payout_basis`（`claim_period` 推導值），而**不是**
+trigger 寫進資料列的 canonical 值。同一次呼叫因此可能出現：
+
+* 資料列：`confirmed_payout_basis = 'per_period'`（正確）
+* 回傳值：`payoutBasis = 'per_completion'`（`fixed_days` 的推導值，錯誤）
+
+`confirmedReward` 也沒有 `periodTargetCount`。
+
+**紀錄是對的，回應是錯的。** 目前沒有畫面直接渲染這個鍵（`childProposalService`
+的 `isConfirmedReward` 會驗它的形狀並原樣往上傳），所以是潛在缺口而非線上錯誤。
+
+沒有在本輪一起修的原因：它在 `RETURN jsonb_build_object` 裡，trigger 改不到，
+唯一的修法是 forward-derive 整支 `transition_child_proposal_v1`（約 230 行）。
+該函式自 `20260810000000` 起只定義過一次、之後沒有任何 migration 動過它，
+所以衍生風險比 `20260817` 那次低得多 —— 但那仍是一次整段複製，超出本輪授權範圍。
+
+建議的收法：獨立一支 forward migration，把 `confirmedReward` 改成 UPDATE 之後
+從版本列讀回來（順帶帶上 `periodTargetCount`），而不是沿用先算好的區域變數。
 
 ---
 
