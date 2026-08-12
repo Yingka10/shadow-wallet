@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import {
   computeFallbackRecurrenceSuggestion,
   computeFallbackScheduleSuggestion,
@@ -5,9 +7,63 @@ import {
   formatWeekdaysZh,
   validateRecurrenceSuggestion,
   validateScheduleSuggestion,
+  weeklyFallbackForced,
+  WEEKLY_FALLBACK_FLAG,
+  LEGACY_FALLBACK_FLAG,
   type RecurrenceCandidate,
   type ScheduleCandidate,
 } from '../validators';
+
+// ---------------------------------------------------------------------------
+// 週報專用的降級開關
+//
+// 這一組測的是一件很容易被「共用一個 env 就好」想法弄壞的事：
+// ai-proxy 讀 FORCE_AI_FALLBACK，而 Supabase 的 secret 是 project 層級的。
+// 如果週報也讀同一個名字，那麼為了讓 Demo 的週報 deterministic 而打開它，
+// 就會把孩子提案的 AI 計畫一起關掉 —— 那是 Demo 唯一必須 live 的 AI。
+// ---------------------------------------------------------------------------
+
+describe('週報降級開關是專屬的', () => {
+  const env = (vars: Record<string, string>) => (name: string) => vars[name];
+
+  it('新旗標打開就降級', () => {
+    expect(weeklyFallbackForced(env({ [WEEKLY_FALLBACK_FLAG]: 'true' }))).toBe(true);
+  });
+
+  it('什麼都沒設就不降級', () => {
+    expect(weeklyFallbackForced(env({}))).toBe(false);
+  });
+
+  it('只有字串 true 算數，其他值不算', () => {
+    for (const v of ['false', 'TRUE', '1', 'yes', '']) {
+      expect(weeklyFallbackForced(env({ [WEEKLY_FALLBACK_FLAG]: v }))).toBe(false);
+    }
+  });
+
+  it('舊旗標仍然相容 —— 既有 dev workflow 不會突然壞掉', () => {
+    expect(weeklyFallbackForced(env({ [LEGACY_FALLBACK_FLAG]: 'true' }))).toBe(true);
+  });
+
+  it('新旗標的名字和舊的不同', () => {
+    expect(WEEKLY_FALLBACK_FLAG).toBe('FORCE_WEEKLY_REPORT_FALLBACK');
+    expect(LEGACY_FALLBACK_FLAG).toBe('FORCE_AI_FALLBACK');
+    expect(WEEKLY_FALLBACK_FLAG).not.toBe(LEGACY_FALLBACK_FLAG);
+  });
+
+  it('ai-proxy 完全不讀新旗標 —— 設它不可能關掉提案 AI', () => {
+    const dir = join(__dirname, '..', '..', 'ai-proxy');
+    for (const file of ['gemini.ts', 'index.ts']) {
+      expect(readFileSync(join(dir, file), 'utf8')).not.toContain(WEEKLY_FALLBACK_FLAG);
+    }
+  });
+
+  it('週報 Function 用的是這支純函式，不是自己讀一次 env', () => {
+    const index = readFileSync(join(__dirname, '..', 'index.ts'), 'utf8');
+    expect(index).toContain('weeklyFallbackForced');
+    // 只有 validators.ts 可以出現旗標字面值；index.ts 透過 import 拿。
+    expect(index).not.toContain(`'${WEEKLY_FALLBACK_FLAG}'`);
+  });
+});
 
 const scheduleCandidate: ScheduleCandidate = {
   taskId: 'task-1',

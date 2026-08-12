@@ -23,6 +23,11 @@ import {
   ADD_CHILD_PROPOSAL_PLAN_VERSION_RPC,
   CREATE_CHILD_PROPOSAL_RPC,
   RECORD_CHILD_PROPOSAL_TRIAL_RPC,
+  CONFIRM_CHILD_PROPOSAL_RPC,
+  REVISE_CHILD_PROPOSAL_PLAN_RPC,
+  ACCEPT_CHILD_PROPOSAL_PLAN_RPC,
+  REQUEST_CHILD_PROPOSAL_CHANGES_RPC,
+  CLOSE_CHILD_PROPOSAL_UNSUITABLE_RPC,
   SupabaseChildProposalService,
   TRANSITION_CHILD_PROPOSAL_RPC,
 } from '../childProposalService';
@@ -31,6 +36,9 @@ import type {
   CreateChildProposalCommand,
   RecordChildProposalTrialCommand,
   TransitionChildProposalCommand,
+  ParentProposalCardData,
+  ChildProposalReviewData,
+  ParentProposalMaterialEdits,
 } from '../types';
 
 function service() {
@@ -84,6 +92,157 @@ describe('呼叫 RPC', () => {
 
     expect(mockRpc).toHaveBeenCalledTimes(1);
     expect(mockRpc.mock.calls[0][0]).toBe(ADD_CHILD_PROPOSAL_PLAN_VERSION_RPC);
+  });
+
+  it('Direct Confirm 只打一支 orchestration RPC', async () => {
+    const card = {
+      proposal: {
+        id: '11111111-1111-4111-8111-111111111111', family_id: 'family-1',
+        child_id: 'child-1', status: 'proposed', child_original_goal: '讀完一本書',
+        proposal_source: 'child',
+        current_plan_version_id: '44444444-4444-4444-8444-444444444444',
+      },
+      currentPlanVersion: {
+        id: '44444444-4444-4444-8444-444444444444',
+        proposal_id: '11111111-1111-4111-8111-111111111111', authored_by: 'ai',
+        plan_title: '兩週閱讀挑戰', purpose_category: 'D',
+        completion_description: '完成一次閱讀時段', progress_model: 'weekly_rhythm',
+        next_step: '先讀 15 分鐘', cadence_mode: 'weekly_frequency',
+        cadence_weekly_frequency: 4, cadence_days: null, preferred_time: null,
+        preferred_time_custom: null, estimated_minutes: 15, duration_type: 'long_term',
+        duration_days: 14, reward_policy: 'coin_eligible', reward_eligibility: 'allowed',
+        reward_policy_version: 'coin-policy-1.0.0', task_policy_version: 'task-taxonomy-2026-07',
+        ai_suggested_coin_amount: 10,
+      },
+    } as ParentProposalCardData;
+    mockRpc.mockResolvedValue({
+      data: {
+        ok: true, proposalId: card.proposal.id, planVersionId: 'parent-v', taskId: 'task-1',
+        relatedIds: ['child-task-1', 'goal-1'], idempotentReplay: false,
+        confirmedReward: {
+          rewardPolicy: 'coin_eligible', coinAmount: 10, payoutBasis: 'per_session',
+          claimPeriod: 'week', maxClaimsPerPeriod: 4,
+          rewardPolicyVersion: 'coin-policy-1.0.0', taskPolicyVersion: 'task-taxonomy-2026-07',
+          sourceTaskId: 'task-1',
+        },
+      },
+      error: null,
+    });
+
+    await expect(service().confirmDirect(card, '6-9')).resolves.toMatchObject({
+      ok: true, taskId: 'task-1', planVersionId: 'parent-v', idempotentReplay: false,
+    });
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+    expect(mockRpc).toHaveBeenCalledWith(CONFIRM_CHILD_PROPOSAL_RPC, {
+      p_command: expect.objectContaining({
+        proposalId: card.proposal.id,
+        expectedPlanVersionId: card.currentPlanVersion!.id,
+        rewardDecision: expect.objectContaining({
+          rewardPolicy: 'coin_eligible', coin: expect.objectContaining({ finalAmount: 10 }),
+        }),
+      }),
+    });
+  });
+});
+
+describe('P0-5B review orchestration calls', () => {
+  const reviewProposal = {
+    id: '11111111-1111-4111-8111-111111111111', family_id: 'family-1',
+    child_id: 'child-1', status: 'needs_child_review', child_original_goal: '讀完一本書',
+    proposal_source: 'child', current_plan_version_id: '55555555-5555-4555-8555-555555555555',
+    task_id: null,
+  } as ChildProposalReviewData['proposal'];
+  const source = {
+    id: '44444444-4444-4444-8444-444444444444', proposal_id: reviewProposal.id,
+    authored_by: 'ai',
+  } as ChildProposalReviewData['sourcePlanVersion'];
+  const current = {
+    ...source,
+    id: reviewProposal.current_plan_version_id!, authored_by: 'parent',
+    plan_title: '兩週閱讀挑戰', purpose_category: 'D',
+    completion_description: '完成一次閱讀時段', progress_model: 'weekly_rhythm',
+    next_step: '先讀 15 分鐘', cadence_mode: 'weekly_frequency',
+    cadence_weekly_frequency: 3, cadence_days: null, preferred_time: 'after_dinner',
+    preferred_time_custom: null, estimated_minutes: 15, duration_type: 'long_term',
+    duration_days: 14, reward_policy: 'coin_eligible', reward_eligibility: 'allowed',
+    reward_policy_version: 'coin-policy-1.0.0', task_policy_version: 'task-taxonomy-2026-07',
+    ai_suggested_coin_amount: 10, adopted_from_plan_version_id: source.id,
+    requires_child_review: true, parent_confirmed_at: '2026-08-11T01:00:00Z',
+    effective_at: null, child_accepted_at: null,
+  } as ChildProposalReviewData['currentPlanVersion'];
+  const review: ChildProposalReviewData = {
+    proposal: reviewProposal, currentPlanVersion: current, sourcePlanVersion: source,
+  };
+  const edits: ParentProposalMaterialEdits = {
+    cadenceMode: 'weekly_frequency', cadenceWeeklyFrequency: 3, cadenceDays: null,
+    preferredTime: 'after_dinner', preferredTimeCustom: null,
+    completionDescription: '完成一次閱讀時段',
+  };
+
+  it('revise 只打一支 RPC，NO_MATERIAL_CHANGE 保持 typed failure', async () => {
+    mockRpc.mockResolvedValue({
+      data: { ok: false, code: 'NO_MATERIAL_CHANGE', reason: 'NO_MATERIAL_CHANGE', message: '沒有改變' },
+      error: null,
+    });
+    const card: ParentProposalCardData = {
+      proposal: { ...reviewProposal, status: 'proposed' }, currentPlanVersion: current,
+    };
+    await expect(service().revisePlan(card, edits)).resolves.toMatchObject({
+      ok: false, code: 'NO_MATERIAL_CHANGE',
+    });
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+    expect(mockRpc).toHaveBeenCalledWith(REVISE_CHILD_PROPOSAL_PLAN_RPC, {
+      p_command: expect.objectContaining({ materialEdits: edits }),
+    });
+  });
+
+  it('accept 使用 fresh decision 且解析 transition-owned reward snapshot', async () => {
+    mockRpc.mockResolvedValue({
+      data: {
+        ok: true, proposalId: reviewProposal.id, planVersionId: current.id,
+        taskId: 'task-1', relatedIds: ['assignment-1'], idempotentReplay: true,
+        confirmedReward: {
+          rewardPolicy: 'coin_eligible', coinAmount: 10, payoutBasis: 'per_session',
+          claimPeriod: 'week', maxClaimsPerPeriod: 3,
+          rewardPolicyVersion: 'coin-policy-1.0.0', taskPolicyVersion: 'task-taxonomy-2026-07',
+          sourceTaskId: 'task-1',
+        },
+      },
+      error: null,
+    });
+    await expect(service().acceptReview(review, '6-9')).resolves.toMatchObject({
+      ok: true, taskId: 'task-1', idempotentReplay: true,
+    });
+    expect(mockRpc).toHaveBeenCalledWith(ACCEPT_CHILD_PROPOSAL_PLAN_RPC, {
+      p_command: expect.objectContaining({
+        expectedPlanVersionId: current.id,
+        rewardDecision: expect.objectContaining({
+          rewardPolicy: 'coin_eligible', coin: expect.objectContaining({ finalAmount: 10 }),
+        }),
+      }),
+    });
+  });
+
+  it('request changes 與 close 都只送 typed command', async () => {
+    mockRpc
+      .mockResolvedValueOnce({
+        data: { ok: true, proposalId: reviewProposal.id, planVersionId: current.id,
+          status: 'proposed', idempotentReplay: false }, error: null,
+      })
+      .mockResolvedValueOnce({
+        data: { ok: true, proposalId: reviewProposal.id, planVersionId: current.id,
+          status: 'closed_unsuitable', idempotentReplay: false }, error: null,
+      });
+
+    await expect(service().requestChanges(review, '想再聊聊')).resolves.toMatchObject({
+      ok: true, status: 'proposed',
+    });
+    await expect(service().closeUnsuitable({
+      proposal: { ...reviewProposal, status: 'proposed' }, currentPlanVersion: current,
+    }, '最近比較忙')).resolves.toMatchObject({ ok: true, status: 'closed_unsuitable' });
+
+    expect(mockRpc.mock.calls[0][0]).toBe(REQUEST_CHILD_PROPOSAL_CHANGES_RPC);
+    expect(mockRpc.mock.calls[1][0]).toBe(CLOSE_CHILD_PROPOSAL_UNSUITABLE_RPC);
   });
 });
 

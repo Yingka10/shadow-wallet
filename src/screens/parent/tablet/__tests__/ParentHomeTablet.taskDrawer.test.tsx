@@ -53,8 +53,10 @@ jest.mock('react-native-safe-area-context', () => ({
 
 const mockSetSelectedChild = jest.fn();
 const mockProposalRefresh = jest.fn();
+const mockConfirmProposal = jest.fn();
 const mockUseParentProposals = jest.fn((_childId: string, _familyId: string | null) => ({
   proposals: [{
+    proposal: {
     id: 'proposal-1', family_id: 'family-1', child_id: 'child-1', status: 'proposed',
     child_original_goal: '我想兩週把這本書讀完',
     child_original_motivation: '因為同學說這本書很好看', proposal_source: 'child',
@@ -63,10 +65,16 @@ const mockUseParentProposals = jest.fn((_childId: string, _familyId: string | nu
     child_reward_preference: 'hopes_for_coin', child_note: null, current_plan_version_id: null,
     task_id: null, closed_reason: null, closed_at: null, proposed_at: null, activated_at: null,
     created_at: '2026-08-11T00:00:00Z', updated_at: '2026-08-11T00:00:00Z',
+    },
+    currentPlanVersion: null,
   }],
   loading: false,
   error: null,
   refresh: mockProposalRefresh,
+  confirmProposal: mockConfirmProposal,
+  confirmingProposalId: null,
+  confirmError: null,
+  successMessage: null,
 }));
 jest.mock('../../../../context/SelectedChildContext', () => ({
   useSelectedChild: () => ({

@@ -12,15 +12,26 @@
 import { supabase } from '../supabase';
 import { mapPostgresErrorCode } from '../parentTaskCreationService';
 import { CHILD_PROPOSAL_STATUSES } from './types';
+import { buildDirectConfirmCommand } from './directConfirm';
+import {
+  buildAcceptReviewCommand,
+  buildCloseUnsuitableCommand,
+  buildRequestChangesCommand,
+  buildRevisionCommand,
+} from './reviewCommands';
 import type { AgeGroup } from '../../types/database';
 import type {
   AddChildProposalPlanVersionCommand,
   AddPlanVersionResult,
+  AcceptChildProposalResult,
   ChildProposalFailure,
   ChildProposal,
   ChildProposalConfirmedReward,
   ChildProposalFailureCode,
   ChildProposalStatus,
+  ChildProposalReviewData,
+  CloseChildProposalResult,
+  ConfirmChildProposalResult,
   CreateAdjustmentRequestResult,
   CreateChildProposalAdjustmentRequestCommand,
   CreateChildProposalCommand,
@@ -29,6 +40,10 @@ import type {
   RecordTrialResult,
   TransitionChildProposalCommand,
   TransitionProposalResult,
+  ParentProposalCardData,
+  ParentProposalMaterialEdits,
+  RequestChildProposalChangesResult,
+  ReviseChildProposalResult,
 } from './types';
 
 /** RPC 名稱。改版時會是 _v2，舊版仍留著給尚未更新的 client。 */
@@ -38,9 +53,14 @@ export const TRANSITION_CHILD_PROPOSAL_RPC = 'transition_child_proposal_v1';
 export const RECORD_CHILD_PROPOSAL_TRIAL_RPC = 'record_child_proposal_trial_v1';
 export const CREATE_CHILD_PROPOSAL_ADJUSTMENT_RPC =
   'create_child_proposal_adjustment_request_v1';
+export const CONFIRM_CHILD_PROPOSAL_RPC = 'confirm_child_proposal_v1';
+export const REVISE_CHILD_PROPOSAL_PLAN_RPC = 'revise_child_proposal_plan_v1';
+export const ACCEPT_CHILD_PROPOSAL_PLAN_RPC = 'accept_child_proposal_plan_v1';
+export const REQUEST_CHILD_PROPOSAL_CHANGES_RPC = 'request_child_proposal_changes_v1';
+export const CLOSE_CHILD_PROPOSAL_UNSUITABLE_RPC = 'close_child_proposal_unsuitable_v1';
 
 /**
- * 只有這五支。型別上就不接受任意字串 —— 打錯名字要在編譯期就被抓到，
+ * 只有這六支。型別上就不接受任意字串 —— 打錯名字要在編譯期就被抓到，
  * 不是等到 PostgREST 回 PGRST202 才發現 migration「沒套用」。
  */
 type ChildProposalRpcName =
@@ -48,11 +68,21 @@ type ChildProposalRpcName =
   | typeof ADD_CHILD_PROPOSAL_PLAN_VERSION_RPC
   | typeof TRANSITION_CHILD_PROPOSAL_RPC
   | typeof RECORD_CHILD_PROPOSAL_TRIAL_RPC
-  | typeof CREATE_CHILD_PROPOSAL_ADJUSTMENT_RPC;
+  | typeof CREATE_CHILD_PROPOSAL_ADJUSTMENT_RPC
+  | typeof CONFIRM_CHILD_PROPOSAL_RPC
+  | typeof REVISE_CHILD_PROPOSAL_PLAN_RPC
+  | typeof ACCEPT_CHILD_PROPOSAL_PLAN_RPC
+  | typeof REQUEST_CHILD_PROPOSAL_CHANGES_RPC
+  | typeof CLOSE_CHILD_PROPOSAL_UNSUITABLE_RPC;
 
 const FAILURE_CODES: ChildProposalFailureCode[] = [
   'VALIDATION_FAILED',
   'POLICY_REJECTED',
+  'NO_MATERIAL_CHANGE',
+  'STALE_PLAN_VERSION',
+  'POLICY_CHANGED',
+  'PLAN_NOT_CONFIRMABLE',
+  'PROPOSAL_NOT_IN_REVIEW',
   'PERSISTENCE_FAILED',
   'UNKNOWN',
 ];
@@ -197,19 +227,269 @@ export class SupabaseChildProposalService {
     familyId: string;
     childId: string;
     limit?: number;
-  }): Promise<ChildProposal[]> {
+  }): Promise<ParentProposalCardData[]> {
     const safeLimit = Math.max(1, Math.min(3, Math.trunc(limit)));
     const { data, error } = await supabase
       .from('child_proposals')
       .select('*')
       .eq('family_id', familyId)
       .eq('child_id', childId)
-      .eq('status', 'proposed')
+      .in('status', ['proposed', 'needs_child_review'])
       .order('created_at', { ascending: false })
       .limit(safeLimit);
 
     if (error) throw new Error(error.message || '讀取孩子提案失敗');
-    return data ?? [];
+    const proposals = data ?? [];
+    const currentIds = proposals
+      .map(proposal => proposal.current_plan_version_id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+
+    if (currentIds.length === 0) {
+      return proposals.map(proposal => ({ proposal, currentPlanVersion: null }));
+    }
+
+    const { data: versions, error: versionError } = await supabase
+      .from('child_proposal_plan_versions')
+      .select('*')
+      .in('id', currentIds);
+    if (versionError) throw new Error(versionError.message || '讀取 GrowBook 計畫失敗');
+
+    const byId = new Map((versions ?? []).map(version => [version.id, version]));
+    return proposals.map(proposal => {
+      const version = proposal.current_plan_version_id
+        ? byId.get(proposal.current_plan_version_id) ?? null
+        : null;
+      return {
+        proposal,
+        // Exact id plus proposal ownership: a mismatched row is not a usable plan.
+        currentPlanVersion: version?.proposal_id === proposal.id ? version : null,
+      };
+    });
+  }
+
+  /**
+   * 孩子端正式 review reader。Current 與 adopted source 都用 exact ids 查回，
+   * lineage 不完整就不猜、不顯示一張無法解釋的 diff card。
+   */
+  async listNeedsReviewForChild({
+    familyId,
+    childId,
+    limit = 3,
+  }: {
+    familyId: string;
+    childId: string;
+    limit?: number;
+  }): Promise<ChildProposalReviewData[]> {
+    const safeLimit = Math.max(1, Math.min(3, Math.trunc(limit)));
+    const { data, error } = await supabase
+      .from('child_proposals')
+      .select('*')
+      .eq('family_id', familyId)
+      .eq('child_id', childId)
+      .eq('status', 'needs_child_review')
+      .order('created_at', { ascending: false })
+      .limit(safeLimit);
+    if (error) throw new Error(error.message || '讀取要一起看的計畫失敗');
+
+    const proposals = data ?? [];
+    const currentIds = proposals
+      .map(proposal => proposal.current_plan_version_id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+    if (currentIds.length === 0) return [];
+
+    const { data: currents, error: currentError } = await supabase
+      .from('child_proposal_plan_versions')
+      .select('*')
+      .in('id', currentIds);
+    if (currentError) throw new Error(currentError.message || '讀取家長調整版本失敗');
+
+    const currentById = new Map((currents ?? []).map(version => [version.id, version]));
+    const validCurrents = proposals.flatMap(proposal => {
+      const current = proposal.current_plan_version_id
+        ? currentById.get(proposal.current_plan_version_id)
+        : undefined;
+      if (!current
+        || current.proposal_id !== proposal.id
+        || current.authored_by !== 'parent'
+        || current.requires_child_review !== true
+        || !current.adopted_from_plan_version_id) return [];
+      return [{ proposal, current }];
+    });
+    if (validCurrents.length === 0) return [];
+
+    const sourceIds = [...new Set(validCurrents.map(item => item.current.adopted_from_plan_version_id!))];
+    const { data: sources, error: sourceError } = await supabase
+      .from('child_proposal_plan_versions')
+      .select('*')
+      .in('id', sourceIds);
+    if (sourceError) throw new Error(sourceError.message || '讀取調整前版本失敗');
+
+    const sourceById = new Map((sources ?? []).map(version => [version.id, version]));
+    return validCurrents.flatMap(({ proposal, current }) => {
+      const source = sourceById.get(current.adopted_from_plan_version_id!);
+      if (!source || source.proposal_id !== proposal.id) return [];
+      return [{ proposal, currentPlanVersion: current, sourcePlanVersion: source }];
+    });
+  }
+
+  /** One UI action, one orchestration RPC. The UI never assembles a task command. */
+  async confirmDirect(
+    card: ParentProposalCardData,
+    childAgeGroup: string,
+  ): Promise<ConfirmChildProposalResult> {
+    const built = buildDirectConfirmCommand(card, childAgeGroup);
+    if (built.ok !== true) return built;
+
+    const fallback = '建立共同計畫失敗';
+    const result = await callProposalRpc(CONFIRM_CHILD_PROPOSAL_RPC, built.command, fallback);
+    if (result.ok !== true) return result;
+
+    const proposalId = requireId(result.payload, 'proposalId', fallback);
+    if (isFailure(proposalId)) return proposalId;
+    const planVersionId = requireId(result.payload, 'planVersionId', fallback);
+    if (isFailure(planVersionId)) return planVersionId;
+    const taskId = requireId(result.payload, 'taskId', fallback);
+    if (isFailure(taskId)) return taskId;
+    if (!isConfirmedReward(result.payload.confirmedReward)) {
+      return {
+        ok: false, code: 'UNKNOWN', reason: 'CONFIRMED_REWARD_MISSING',
+        message: `${fallback}：共同版本缺少確認的回饋紀錄`,
+      };
+    }
+
+    return {
+      ok: true,
+      proposalId,
+      planVersionId,
+      taskId,
+      relatedIds: Array.isArray(result.payload.relatedIds)
+        ? result.payload.relatedIds.filter((id): id is string => typeof id === 'string')
+        : [],
+      confirmedReward: result.payload.confirmedReward,
+      idempotentReplay: result.payload.idempotentReplay === true,
+    };
+  }
+
+  async revisePlan(
+    card: ParentProposalCardData,
+    edits: ParentProposalMaterialEdits,
+  ): Promise<ReviseChildProposalResult> {
+    const built = buildRevisionCommand(card, edits);
+    if (built.ok !== true) return built;
+    const fallback = '儲存調整失敗';
+    const result = await callProposalRpc(REVISE_CHILD_PROPOSAL_PLAN_RPC, built.command, fallback);
+    if (result.ok !== true) return result;
+    const proposalId = requireId(result.payload, 'proposalId', fallback);
+    if (isFailure(proposalId)) return proposalId;
+    const planVersionId = requireId(result.payload, 'planVersionId', fallback);
+    if (isFailure(planVersionId)) return planVersionId;
+    if (result.payload.status !== 'needs_child_review') {
+      return { ok: false, code: 'UNKNOWN', message: `${fallback}：回應狀態無法辨識` };
+    }
+    return {
+      ok: true,
+      proposalId,
+      planVersionId,
+      status: 'needs_child_review',
+      idempotentReplay: result.payload.idempotentReplay === true,
+    };
+  }
+
+  async acceptReview(
+    review: ChildProposalReviewData,
+    childAgeGroup: string,
+  ): Promise<AcceptChildProposalResult> {
+    const built = buildAcceptReviewCommand(review, childAgeGroup);
+    if (built.ok !== true) return built;
+    const fallback = '建立共同計畫失敗';
+    const result = await callProposalRpc(ACCEPT_CHILD_PROPOSAL_PLAN_RPC, built.command, fallback);
+    if (result.ok !== true) return result;
+    const proposalId = requireId(result.payload, 'proposalId', fallback);
+    if (isFailure(proposalId)) return proposalId;
+    const planVersionId = requireId(result.payload, 'planVersionId', fallback);
+    if (isFailure(planVersionId)) return planVersionId;
+    const taskId = requireId(result.payload, 'taskId', fallback);
+    if (isFailure(taskId)) return taskId;
+    if (!isConfirmedReward(result.payload.confirmedReward)) {
+      return {
+        ok: false, code: 'UNKNOWN', reason: 'CONFIRMED_REWARD_MISSING',
+        message: `${fallback}：共同版本缺少確認的回饋紀錄`,
+      };
+    }
+    return {
+      ok: true,
+      proposalId,
+      planVersionId,
+      taskId,
+      relatedIds: Array.isArray(result.payload.relatedIds)
+        ? result.payload.relatedIds.filter((id): id is string => typeof id === 'string')
+        : [],
+      confirmedReward: result.payload.confirmedReward,
+      idempotentReplay: result.payload.idempotentReplay === true,
+    };
+  }
+
+  async requestChanges(
+    review: ChildProposalReviewData,
+    reason?: string,
+  ): Promise<RequestChildProposalChangesResult> {
+    const fallback = '暫時保留討論失敗';
+    const command = buildRequestChangesCommand(review, reason);
+    const result = await callProposalRpc(
+      REQUEST_CHILD_PROPOSAL_CHANGES_RPC,
+      command,
+      fallback,
+    );
+    if (result.ok !== true) return result;
+    const proposalId = requireId(result.payload, 'proposalId', fallback);
+    if (isFailure(proposalId)) return proposalId;
+    const planVersionId = requireId(result.payload, 'planVersionId', fallback);
+    if (isFailure(planVersionId)) return planVersionId;
+    if (result.payload.status !== 'proposed') {
+      return { ok: false, code: 'UNKNOWN', message: `${fallback}：回應狀態無法辨識` };
+    }
+    return {
+      ok: true,
+      proposalId,
+      planVersionId,
+      status: 'proposed',
+      idempotentReplay: result.payload.idempotentReplay === true,
+    };
+  }
+
+  async closeUnsuitable(
+    card: ParentProposalCardData,
+    reason: string,
+  ): Promise<CloseChildProposalResult> {
+    if (!reason.trim()) {
+      return {
+        ok: false, code: 'VALIDATION_FAILED',
+        reason: 'CLOSE_REQUIRES_REASON', message: '請留一句話給孩子',
+      };
+    }
+    const fallback = '關閉提案失敗';
+    const command = buildCloseUnsuitableCommand(card, reason);
+    const result = await callProposalRpc(
+      CLOSE_CHILD_PROPOSAL_UNSUITABLE_RPC,
+      command,
+      fallback,
+    );
+    if (result.ok !== true) return result;
+    const proposalId = requireId(result.payload, 'proposalId', fallback);
+    if (isFailure(proposalId)) return proposalId;
+    const planVersionId = typeof result.payload.planVersionId === 'string'
+      ? result.payload.planVersionId
+      : null;
+    if (result.payload.status !== 'closed_unsuitable') {
+      return { ok: false, code: 'UNKNOWN', message: `${fallback}：回應狀態無法辨識` };
+    }
+    return {
+      ok: true,
+      proposalId,
+      planVersionId,
+      status: 'closed_unsuitable',
+      idempotentReplay: result.payload.idempotentReplay === true,
+    };
   }
 
   /**

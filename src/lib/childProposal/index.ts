@@ -6,6 +6,9 @@
 export * from './types';
 export * from './transitions';
 export * from './planDraft';
+export * from './directConfirm';
+export * from './materialDiff';
+export * from './reviewCommands';
 export {
   SupabaseChildProposalService,
   CREATE_CHILD_PROPOSAL_RPC,
@@ -13,4 +16,5 @@ export {
   TRANSITION_CHILD_PROPOSAL_RPC,
   RECORD_CHILD_PROPOSAL_TRIAL_RPC,
   CREATE_CHILD_PROPOSAL_ADJUSTMENT_RPC,
+  CONFIRM_CHILD_PROPOSAL_RPC,
 } from './childProposalService';

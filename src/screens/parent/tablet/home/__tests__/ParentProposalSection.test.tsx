@@ -1,6 +1,10 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react-native';
-import type { ChildProposal } from '../../../../../lib/childProposal';
+import type {
+  ChildProposal,
+  ChildProposalPlanVersion,
+  ParentProposalCardData,
+} from '../../../../../lib/childProposal';
 import { ParentProposalSection } from '../ParentProposalSection';
 
 function proposal(id: string, overrides: Partial<ChildProposal> = {}): ChildProposal {
@@ -16,56 +20,155 @@ function proposal(id: string, overrides: Partial<ChildProposal> = {}): ChildProp
   };
 }
 
+function plan(proposalId: string, overrides: Partial<ChildProposalPlanVersion> = {}) {
+  return {
+    id: `version-${proposalId}`, proposal_id: proposalId, authored_by: 'ai',
+    plan_title: '兩週閱讀挑戰', plan_summary: '用每週節奏完成一本書',
+    purpose_category: 'D', completion_description: '完成一次約定的閱讀時段',
+    progress_model: 'weekly_rhythm', next_step: '拿出想讀的書，先閱讀約 15 分鐘',
+    cadence_mode: 'weekly_frequency', cadence_weekly_frequency: 4, cadence_days: null,
+    preferred_time: null, preferred_time_custom: null, estimated_minutes: 15,
+    duration_type: 'long_term', duration_days: 14,
+    reward_policy: 'coin_eligible', reward_eligibility: 'allowed',
+    reward_policy_version: 'coin-policy-1.0.0', task_policy_version: 'task-taxonomy-2026-07',
+    ai_suggested_coin_amount: 10, ...overrides,
+  } as ChildProposalPlanVersion;
+}
+
+function card(id: string, withPlan = false): ParentProposalCardData {
+  const version = withPlan ? plan(id) : null;
+  return {
+    proposal: proposal(id, { current_plan_version_id: version?.id ?? null }),
+    currentPlanVersion: version,
+  };
+}
+
+const base = {
+  childName: '承恩', loading: false, error: null, onRetry: jest.fn(),
+  onConfirm: jest.fn(), confirmingProposalId: null,
+  confirmError: null, successMessage: null,
+  onRevise: jest.fn(), onCloseProposal: jest.fn(), actingProposalId: null,
+  actionError: null,
+};
+
 describe('ParentProposalSection', () => {
   it('空資料時整個 section 不佔首頁位置', () => {
-    render(<ParentProposalSection childName="承恩" proposals={[]} loading={false} error={null} onRetry={jest.fn()} />);
+    render(<ParentProposalSection {...base} proposals={[]} />);
     expect(screen.queryByTestId('parent-proposal-section')).toBeNull();
   });
 
   it('顯示 loading，讀取失敗時可以重試但不阻斷首頁', () => {
     const onRetry = jest.fn();
     const { rerender } = render(
-      <ParentProposalSection childName="承恩" proposals={[]} loading error={null} onRetry={onRetry} />,
+      <ParentProposalSection {...base} proposals={[]} loading onRetry={onRetry} />,
     );
     expect(screen.getByText('正在看看孩子的新想法…')).toBeTruthy();
-
-    rerender(<ParentProposalSection childName="承恩" proposals={[]} loading={false} error="讀取失敗" onRetry={onRetry} />);
-    expect(screen.getByText('孩子的新想法暫時讀不到')).toBeTruthy();
+    rerender(<ParentProposalSection {...base} proposals={[]} error="讀取失敗" onRetry={onRetry} />);
     fireEvent.press(screen.getByText('再試一次'));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
-  it('最多顯示三張，保留原文、可選動機、節奏與孩子希望的回饋', () => {
-    render(
-      <ParentProposalSection
-        childName="承恩"
-        proposals={[
-          proposal('p1', {
-            child_original_goal: '我想兩週把這本書讀完',
-            child_original_motivation: '因為同學說這本書很好看',
-            cadence_mode: 'weekly_frequency', cadence_weekly_frequency: 4,
-            child_reward_preference: 'hopes_for_coin',
-          }),
-          proposal('p2'), proposal('p3'), proposal('p4'),
-        ]}
-        loading={false}
-        error={null}
-        onRetry={jest.fn()}
-      />,
-    );
+  it('real structured plan 顯示整理內容與 GrowBook 建議，CTA 是共同確認語言', () => {
+    const item = card('p1', true);
+    item.proposal = proposal('p1', {
+      current_plan_version_id: item.currentPlanVersion!.id,
+      child_original_goal: '我想兩週把這本書讀完',
+      child_original_motivation: '因為同學說這本書很好看',
+      child_reward_preference: 'hopes_for_coin',
+    });
+    const onConfirm = jest.fn();
+    render(<ParentProposalSection {...base} proposals={[item]} onConfirm={onConfirm} />);
 
-    expect(screen.getAllByText('承恩有一個新的挑戰想法')).toHaveLength(3);
+    expect(screen.getByText('孩子原本怎麼說')).toBeTruthy();
     expect(screen.getByText('我想兩週把這本書讀完')).toBeTruthy();
-    expect(screen.getByText('因為同學說這本書很好看')).toBeTruthy();
+    expect(screen.getByText('GrowBook 幫忙整理')).toBeTruthy();
+    expect(screen.getByText('兩週閱讀挑戰')).toBeTruthy();
     expect(screen.getByText('一週 4 次')).toBeTruthy();
-    expect(screen.getByText('希望如果適合，可以有成長幣鼓勵')).toBeTruthy();
+    expect(screen.getByText('每次約 15 分鐘')).toBeTruthy();
+    expect(screen.getByText('完成一次約定的閱讀時段')).toBeTruthy();
+    expect(screen.getByText('拿出想讀的書，先閱讀約 15 分鐘')).toBeTruthy();
+    expect(screen.getByText('以每週節奏累積，不會因漏一天重新開始')).toBeTruthy();
+    expect(screen.getByText('GrowBook 建議')).toBeTruthy();
+    expect(screen.getByText('建議：每次完成 10 成長幣')).toBeTruthy();
+    fireEvent.press(screen.getByText('確認這個計畫'));
+    expect(onConfirm).toHaveBeenCalledWith(item);
+    expect(screen.queryByText(/核准|批准|審核通過|已核定/)).toBeNull();
+  });
+
+  it('沒有完整 AI plan 時保留原話但不顯示 confirm CTA 或 fake plan', () => {
+    render(<ParentProposalSection {...base} proposals={[card('p1')]} />);
+    expect(screen.getByText('想法 p1')).toBeTruthy();
+    expect(screen.getByText('GrowBook 還在整理，目前先看看孩子的原始想法')).toBeTruthy();
+    expect(screen.queryByText('確認這個計畫')).toBeNull();
+    expect(screen.queryByText('GrowBook 幫忙整理')).toBeNull();
+  });
+
+  it('confirm loading、success 與 typed error 都使用自然文案', () => {
+    const item = card('p1', true);
+    const { rerender } = render(
+      <ParentProposalSection {...base} proposals={[item]} confirmingProposalId="p1" />,
+    );
+    expect(screen.getByText('正在建立共同計畫…')).toBeTruthy();
+    expect(screen.queryByText('確認這個計畫')).toBeNull();
+
+    rerender(<ParentProposalSection {...base} proposals={[item]} successMessage="已經一起確認好了" />);
+    expect(screen.getByText('已經一起確認好了')).toBeTruthy();
+
+    rerender(<ParentProposalSection {...base} proposals={[item]} confirmError="計畫已更新，請重新整理" />);
+    expect(screen.getByText('計畫已更新，請重新整理')).toBeTruthy();
+  });
+
+  it('最多顯示三張', () => {
+    render(<ParentProposalSection {...base} proposals={[
+      card('p1'), card('p2'), card('p3'), card('p4'),
+    ]} />);
+    expect(screen.getAllByText('承恩有一個新的挑戰想法')).toHaveLength(3);
     expect(screen.queryByText('想法 p4')).toBeNull();
   });
 
-  it('沒有 motivation 時不顯示原因空欄，也沒有審核、mutation 或 AI 假操作', () => {
-    render(<ParentProposalSection childName="承恩" proposals={[proposal('p1')]} loading={false} error={null} onRetry={jest.fn()} />);
-    expect(screen.queryByText('孩子為什麼想做')).toBeNull();
-    expect(screen.queryByText(/核准|駁回|確認|建立任務|AI 建議/)).toBeNull();
-    expect(screen.getByText('等你們一起看看')).toBeTruthy();
+  it('fresh AI plan 提供確認、調整與目前不適合三條窄路徑', () => {
+    const item = card('p1', true);
+    render(<ParentProposalSection {...base} proposals={[item]} />);
+    expect(screen.getByText('確認這個計畫')).toBeTruthy();
+    expect(screen.getByText('調整一下')).toBeTruthy();
+    expect(screen.getByText('目前不適合')).toBeTruthy();
+    fireEvent.press(screen.getByText('調整一下'));
+    expect(screen.getByTestId('proposal-weekly-frequency-input')).toBeTruthy();
+  });
+
+  it('parent revision 等孩子時不再顯示 confirm/edit，也不把舊 summary 當現況', () => {
+    const item = card('p1', true);
+    item.proposal = proposal('p1', {
+      status: 'needs_child_review', current_plan_version_id: item.currentPlanVersion!.id,
+    });
+    item.currentPlanVersion = plan('p1', {
+      authored_by: 'parent', requires_child_review: true,
+      plan_summary: '舊文字仍寫一週 4 次', cadence_weekly_frequency: 3,
+    });
+    render(<ParentProposalSection {...base} proposals={[item]} />);
+    expect(screen.getByText('等孩子看看新的安排是不是也想試試看')).toBeTruthy();
+    expect(screen.getByText('一週 3 次')).toBeTruthy();
+    expect(screen.queryByText('舊文字仍寫一週 4 次')).toBeNull();
+    expect(screen.queryByText('確認這個計畫')).toBeNull();
+    expect(screen.queryByText('調整一下')).toBeNull();
+  });
+
+  it('孩子想再聊聊時可重新調整，並把 typed action error 留在卡區', () => {
+    const item = card('p1', true);
+    item.currentPlanVersion = plan('p1', { authored_by: 'parent', requires_child_review: true });
+    render(<ParentProposalSection {...base} proposals={[item]} actionError="計畫已更新，請重新整理" />);
+    expect(screen.getAllByText('孩子想再一起聊聊')).toHaveLength(2);
+    expect(screen.getByText('再調整一下')).toBeTruthy();
+    expect(screen.getByText('計畫已更新，請重新整理')).toBeTruthy();
+  });
+
+  it('目前不適合 sheet 將 reason 與 exact card 傳給 callback', () => {
+    const item = card('p1', true);
+    const onCloseProposal = jest.fn();
+    render(<ParentProposalSection {...base} proposals={[item]} onCloseProposal={onCloseProposal} />);
+    fireEvent.press(screen.getByText('目前不適合'));
+    fireEvent.press(screen.getByText('這個做法現在可能不太適合'));
+    fireEvent.press(screen.getByText('先把這個想法收好'));
+    expect(onCloseProposal).toHaveBeenCalledWith(item, '這個做法現在可能不太適合');
   });
 });
