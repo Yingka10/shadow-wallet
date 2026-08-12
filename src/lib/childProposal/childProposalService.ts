@@ -41,6 +41,8 @@ import type {
   DeclineAdjustmentResult,
   ChildProposalAdjustmentCardData,
   ChildProposalAdjustmentRequest,
+  ChildProposalPlanVersion,
+  ChildSharedPlanContext,
   CreateChildProposalCommand,
   CreateChildProposalResult,
   RecordChildProposalTrialCommand,
@@ -686,6 +688,73 @@ export class SupabaseChildProposalService {
       trialEventId: id,
       duplicate: result.payload.duplicate === true,
       walletEffect: 'none',
+    };
+  }
+
+  /**
+   * 孩子端長期詳情的 Shared Plan 判定。
+   *
+   * 從任務往回找提案 —— 因為畫面手上只有 goalId / taskId，而共同計畫的身分
+   * 記在 plan version 的 `confirmed_source_task_id`。找到提案後**不沿用**那一版
+   * 當 current，改用 `proposal.current_plan_version_id` 重新查：家長確認過一次
+   * 調整之後，current 已經是新的一版，拿舊版當 expectedPlanVersionId 會讓
+   * RPC 直接以 STALE_PLAN_VERSION 退回。
+   *
+   * 任何一段對不上就回 null。回 null 的意思是「這不是可協商的共同計畫」，
+   * 畫面因此維持原本的 local draft 行為 —— 一般家長建立的長期任務走的正是這條。
+   */
+  async getActiveSharedPlanForTask({
+    taskId,
+    childId,
+  }: {
+    taskId: string;
+    childId: string;
+  }): Promise<ChildSharedPlanContext | null> {
+    const { data: linkedVersions, error: linkError } = await supabase
+      .from('child_proposal_plan_versions')
+      .select('proposal_id')
+      .eq('confirmed_source_task_id', taskId)
+      .limit(20);
+    if (linkError) throw new Error(linkError.message || '讀取共同計畫失敗');
+
+    const proposalIds = [...new Set((linkedVersions ?? []).map(row => row.proposal_id))];
+    if (proposalIds.length === 0) return null;
+
+    const { data: proposals, error: proposalError } = await supabase
+      .from('child_proposals')
+      .select('*')
+      .in('id', proposalIds)
+      .eq('child_id', childId)
+      .eq('status', 'active')
+      .limit(2);
+    if (proposalError) throw new Error(proposalError.message || '讀取共同計畫失敗');
+
+    // 一個任務對到兩個 active 提案是資料矛盾，不是可以挑一個的選擇題。
+    const proposal = proposals?.length === 1 ? proposals[0] : null;
+    if (!proposal?.current_plan_version_id) return null;
+
+    const { data: current, error: currentError } = await supabase
+      .from('child_proposal_plan_versions')
+      .select('*')
+      .eq('id', proposal.current_plan_version_id)
+      .maybeSingle();
+    if (currentError) throw new Error(currentError.message || '讀取目前版本失敗');
+    if (!current || current.proposal_id !== proposal.id) return null;
+
+    const { data: openRequests, error: requestError } = await supabase
+      .from('child_proposal_adjustment_requests')
+      .select('*')
+      .eq('proposal_id', proposal.id)
+      .eq('status', 'open')
+      .eq('adjustment_kind', 'preferred_time')
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (requestError) throw new Error(requestError.message || '讀取調整請求失敗');
+
+    return {
+      proposal,
+      currentPlanVersion: current as ChildProposalPlanVersion,
+      openPreferredTimeRequest: openRequests?.[0] ?? null,
     };
   }
 

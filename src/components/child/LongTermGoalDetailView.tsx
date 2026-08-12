@@ -28,6 +28,13 @@ type Props = {
   onOpenRecord?: (completionId?: string) => void;
   onOpenReview?: () => void;
   onOpenDetails?: () => void;
+  /**
+   * 已經送出、還等家長確認的時段調整（P0-8M）。
+   *
+   * 有值時只顯示一句話，**不**改變目前的時段顯示 —— 計畫要等雙方確認才更新，
+   * 提前把畫面改成新時段等於替家長答應了。
+   */
+  pendingTimeAdjustmentNotice?: string | null;
 };
 
 type IconName =
@@ -832,9 +839,11 @@ function MilestoneTimeline({
 function ReviewCard({
   presentation,
   onOpenReview,
+  pendingTimeAdjustmentNotice,
 }: {
   presentation: GoalPresentation;
   onOpenReview?: Props['onOpenReview'];
+  pendingTimeAdjustmentNotice?: string | null;
 }) {
   const content = (
     <>
@@ -872,6 +881,11 @@ function ReviewCard({
           {content}
         </View>
       )}
+      {pendingTimeAdjustmentNotice ? (
+        <Text testID="pending-time-adjustment" style={styles.pendingNoticeText}>
+          {pendingTimeAdjustmentNotice}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -980,6 +994,7 @@ export default function LongTermGoalDetailView({
   onOpenRecord,
   onOpenReview,
   onOpenDetails,
+  pendingTimeAdjustmentNotice = null,
 }: Props) {
   const recentRecords = useMemo(
     () => presentation.recentRecords.slice(0, 3),
@@ -1017,6 +1032,7 @@ export default function LongTermGoalDetailView({
       <ReviewCard
         presentation={presentation}
         onOpenReview={onOpenReview}
+        pendingTimeAdjustmentNotice={pendingTimeAdjustmentNotice}
       />
       <RecentRecords
         records={recentRecords}
@@ -1606,6 +1622,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     fontWeight: '900',
+  },
+  pendingNoticeText: {
+    marginTop: 8,
+    paddingHorizontal: 2,
+    color: Colors.fgMuted,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '700',
   },
   recordList: {
     borderTopWidth: 1,

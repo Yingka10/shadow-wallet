@@ -14,7 +14,11 @@ import {
   View,
 } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import {
+  useFocusEffect,
+  useNavigation,
+  useRoute,
+} from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,6 +41,7 @@ import type {
   PreferredTimeWindow,
   Task,
 } from '../../types/database';
+import { useChildSharedPlanTimeAdjustment } from '../../hooks/useChildSharedPlanTimeAdjustment';
 import {
   buildGoalPresentation,
   type GoalCompletionRecord,
@@ -120,6 +125,43 @@ function normalizeGoalStartIso(
   ).toISOString();
 }
 
+/**
+ * 閱讀畫面要顯示的時段，決策順序：
+ *
+ *   1. 今天那筆完成紀錄實際填的 planned_time_window（發生過的事最權威）
+ *   2. long_term_goals.preferred_time_window（閱讀畫面的 runtime mirror）
+ *   3. tasks.preferred_time —— 只在它剛好是閱讀畫面認得的兩個值時
+ *   4. null
+ *
+ * 第 3 步是 P0-8M 的窄相容修補。共同約定的權威一直是 Plan Version，
+ * canonical task 也一直有正確的 mirror，但 `create_parent_task_v1` 建立
+ * long-term goal 時**從來沒有**把時段同步到 goal 的 mirror（見
+ * FOLLOW_UP_PREFERRED_TIME_WINDOW_CREATION_MIRROR）。少了這一段，一份
+ * 正式談定「睡前」的共同計畫在孩子端會顯示成「尚未選擇時段」。
+ *
+ * 這不是新增第三個真相來源 —— 只是在既有 mirror 還沒補齊時，讀 canonical
+ * task 已經有的值。task 上其他的 preferred_time enum（上學前、放學後…）
+ * 刻意**不**接受：閱讀 UI 只認得這兩個時段，硬塞進來只會顯示錯的字。
+ */
+function readingWindowFromTask(
+  preferredTime: string | null | undefined,
+): PreferredTimeWindow | null {
+  return preferredTime === 'after_dinner' || preferredTime === 'before_bed'
+    ? preferredTime
+    : null;
+}
+
+function resolvePreferredWindow(
+  todayCompletion: GoalCompletionRecord | undefined,
+  goal: LongTermGoal,
+  task: Task,
+): PreferredTimeWindow | null {
+  return todayCompletion?.planned_time_window
+    ?? goal.preferred_time_window
+    ?? readingWindowFromTask(task.preferred_time)
+    ?? null;
+}
+
 function BackIcon() {
   return (
     <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
@@ -173,26 +215,29 @@ export default function LongTermDetailScreen() {
     useState<AdjustmentDraft | null>(null);
   const [correctingTimeWindow, setCorrectingTimeWindow] = useState(false);
 
-  useEffect(() => {
+  /*
+    孩子的身分來自已載入的 goal，不從 route params 猜。goal 還沒回來之前
+    hook 拿到 null，什麼也不做 —— 共同計畫的判定晚一拍沒有副作用，
+    但用錯 childId 去查別人家的提案有。
+  */
+  const {
+    sharedPlan,
+    currentPreferredTime: sharedPreferredTime,
+    hasOpenRequest,
+    submit: submitTimeAdjustment,
+    submitting: submittingTimeAdjustment,
+    submitError: timeAdjustmentError,
+    justSubmitted: timeAdjustmentSubmitted,
+    refresh: refreshSharedPlan,
+  } = useChildSharedPlanTimeAdjustment(taskId, goal?.child_id ?? null);
+
+  const load = useCallback(async () => {
     const loadGeneration = generationRef.current + 1;
     generationRef.current = loadGeneration;
     const isCurrentGeneration = () =>
       generationRef.current === loadGeneration;
 
-    setActiveSheet(null);
-    setSelectedCompletionId(null);
-    setReviewDraft(EMPTY_REVIEW_DRAFT);
-    setAdjustmentDraft(null);
-    setGoal(null);
-    setTask(null);
-    setCompletions([]);
-    setSelectedTimeWindow(null);
-    setChecking(false);
-    setCorrectingTimeWindow(false);
-    setLoading(true);
-    setError(null);
-
-    const load = async () => {
+    {
       const [goalRes, taskRes] = await Promise.all([
         supabase.from('long_term_goals').select('*').eq('id', goalId).single(),
         supabase.from('tasks').select('*').eq('id', taskId).single(),
@@ -268,21 +313,54 @@ export default function LongTermDetailScreen() {
       setGoal(loadedGoal);
       setTask(loadedTask);
       setCompletions(loadedCompletions);
+      // 重新載入時一律從伺服器資料重新推導時段 —— 家長剛確認完調整，
+      // 孩子回到這個畫面看到的必須是新的共同時段，不是上一輪算出來的值。
       setSelectedTimeWindow(
-        todayCompletion?.planned_time_window
-          ?? loadedGoal.preferred_time_window
-          ?? null,
+        resolvePreferredWindow(todayCompletion, loadedGoal, loadedTask),
       );
+      setError(null);
       setLoading(false);
-    };
-
-    void load();
-    return () => {
-      if (generationRef.current === loadGeneration) {
-        generationRef.current += 1;
-      }
-    };
+    }
   }, [goalId, taskId]);
+
+  // 換計畫時把畫面上屬於「上一個計畫」的東西全部清掉。載入本身交給下面的
+  // focus effect —— load 的識別碼會跟著 goalId / taskId 變，所以它會跟著重跑。
+  useEffect(() => {
+    setActiveSheet(null);
+    setSelectedCompletionId(null);
+    setReviewDraft(EMPTY_REVIEW_DRAFT);
+    setAdjustmentDraft(null);
+    setGoal(null);
+    setTask(null);
+    setCompletions([]);
+    setSelectedTimeWindow(null);
+    setChecking(false);
+    setCorrectingTimeWindow(false);
+    setLoading(true);
+    setError(null);
+  }, [goalId, taskId]);
+
+  /*
+    每次畫面重新取得焦點就重讀。
+
+    這是 P0-8M 的關鍵一環：家長在自己的裝置上確認了換時段之後，孩子回到這個
+    詳情頁必須看到新的時段，而不是要重開 App 或重跑 seed。stack screen 在
+    push 別的畫面時不會 unmount，所以只靠 mount 時的載入是不夠的。
+
+    卸載時把 generation 往前推一格，飛在路上的回應就不會再寫進已經走掉的畫面。
+  */
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+      return () => { generationRef.current += 1; };
+    }, [load]),
+  );
+
+  // 共同計畫的狀態（是不是可協商、有沒有還沒回應的請求）也要跟著 focus 更新，
+  // 否則家長回應完之後孩子端還會停在「等一起確認」。
+  useFocusEffect(
+    useCallback(() => { void refreshSharedPlan(); }, [refreshSharedPlan]),
+  );
 
   const isCompletedToday = useMemo(
     () => completions.some((completion) =>
@@ -462,6 +540,31 @@ export default function LongTermDetailScreen() {
     }
   }, [correctingTimeWindow, selectedCompletion]);
 
+  /*
+    只有真的讀到一份進行中的共同計畫，才把這條通道交給回顧表單。
+    sharedPlan 是 null（一般家長建立的長期任務）時整個 prop 是 undefined，
+    回顧維持原本的 local draft 行為。
+  */
+  const sharedPlanTimeAdjustment = useMemo(() => {
+    if (!sharedPlan) return undefined;
+    return {
+      currentPreferredTime: readingWindowFromTask(sharedPreferredTime),
+      pending: hasOpenRequest,
+      submitting: submittingTimeAdjustment,
+      error: timeAdjustmentError,
+      submitted: timeAdjustmentSubmitted,
+      onSubmit: submitTimeAdjustment,
+    };
+  }, [
+    hasOpenRequest,
+    sharedPlan,
+    sharedPreferredTime,
+    submitTimeAdjustment,
+    submittingTimeAdjustment,
+    timeAdjustmentError,
+    timeAdjustmentSubmitted,
+  ]);
+
   return (
     <View style={webScreen}>
       <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -510,6 +613,9 @@ export default function LongTermDetailScreen() {
             onOpenRecord={handleOpenRecord}
             onOpenReview={() => setActiveSheet('review')}
             onOpenDetails={() => setActiveSheet('details')}
+            pendingTimeAdjustmentNotice={
+              hasOpenRequest ? '已送給爸媽，等一起確認。' : null
+            }
           />
         ) : null}
 
@@ -527,6 +633,7 @@ export default function LongTermDetailScreen() {
             onSaveAdjustmentDraft={setAdjustmentDraft}
             onCorrectTimeWindow={handleCorrectTimeWindow}
             correctingTimeWindow={correctingTimeWindow}
+            sharedPlanTimeAdjustment={sharedPlanTimeAdjustment}
           />
         ) : null}
       </SafeAreaView>

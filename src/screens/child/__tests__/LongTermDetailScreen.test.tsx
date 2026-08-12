@@ -41,6 +41,12 @@ jest.mock('@react-navigation/native', () => ({
     goBack: mockGoBack,
     navigate: jest.fn(),
   }),
+  // 這一組測試裡畫面永遠是 focused，所以 useFocusEffect 等同於一個
+  // 依賴 callback 本身的 useEffect —— 和 react-navigation 的真實語意一致。
+  useFocusEffect: (callback: () => void | (() => void)) => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, react-hooks/exhaustive-deps
+    (require('react') as typeof import('react')).useEffect(callback, [callback]);
+  },
 }));
 
 jest.mock('react-native-safe-area-context', () => ({

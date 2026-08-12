@@ -770,3 +770,20 @@ export type ChildProposalAdjustmentCardData = {
   proposal: ChildProposal;
   basedOnPlanVersion: ChildProposalPlanVersion;
 };
+
+/**
+ * 孩子端長期詳情要判斷「這是不是一份可以重新協商的共同計畫」所需的全部資料。
+ *
+ * 三個欄位都是必要的：沒有 proposal 就沒有協商對象；沒有 current version 就
+ * 不知道要 append 在哪一版之後（也就湊不出 expectedPlanVersionId）；
+ * 沒有 openRequest 的資訊，畫面就會讓孩子重複送出同一件事。
+ *
+ * 讀不到任何一項時整個回 null —— 半套的 context 會讓 UI 開始猜，
+ * 而猜錯的代價是把一般家長任務送進 Shared Plan 的協商 RPC。
+ */
+export type ChildSharedPlanContext = {
+  proposal: ChildProposal;
+  currentPlanVersion: ChildProposalPlanVersion;
+  /** 已經送出、家長還沒回應的換時段請求。沒有就是 null。 */
+  openPreferredTimeRequest: ChildProposalAdjustmentRequest | null;
+};
