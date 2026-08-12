@@ -42,19 +42,36 @@
 
 -- ── 日期推導：獨立成 function 才能對任意 reference day 測試 ─────────────────
 --
--- d1 = 本週一，d2 = 今天。兩者都保證落在當週（weekStart 是台北時間的週一），
--- 而且只要今天不是週一就是兩個不同日期。
+-- d1 = 本週一，d2 = 本週二。兩者都保證落在當週（weekStart 是台北時間的週一），
+-- 而且一定是兩個不同日期。
+--
+-- **為什麼 d2 是週二而不是「今天」**（P0-8M staging 驗收發現）：
+--
+-- 孩子端「今天預計」的第一順位是**今天那筆 completion 的 planned_time_window**
+-- （見 LongTermDetailScreen 的 resolvePreferredWindow），而那是正確的產品語意 ——
+-- 今天實際發生的事，優先於一份往後看的計畫。
+--
+-- d2 = 今天的話，State B 一定有一筆今天的完成、而且記著 before_bed。於是
+-- 「家長確認換成晚餐後 → 回孩子端」這個 Demo 橋段永遠看不到晚餐後，
+-- 因為今天的歷史證據壓過新計畫。把 d2 固定成週二之後，週三～週日錄影時
+-- 今天沒有完成紀錄，卡片就會照新的共同版本顯示。
+--
+-- 這是改 Demo 的編排，**不是**改 production precedence。今天已完成時仍然
+-- 顯示當天實際的時段，那條語意刻意保留（見 §4 的語意測試）。
 --
 -- 今天是週一時本週只過了一天，「本週兩個不同日期」在現實上不存在。那時回
 -- feasible = false，由 runner 明確報 STATE_B_2_OF_3_NOT_CALENDAR_FEASIBLE，
--- 不編第二個日期出來。
+-- 不編第二個日期出來。週二可以建立 State B（d2 = 今天），但 P0-8M 的
+-- 「accept 後今天卡片直接換時段」要週三～週日才看得到。
 CREATE OR REPLACE FUNCTION pg_temp.demo_state_b_dates(p_ref date)
 RETURNS jsonb LANGUAGE sql IMMUTABLE AS $fn$
   SELECT jsonb_build_object(
     'monday',      m,
     'today',       p_ref,
     'first_day',   m,
-    'second_day',  p_ref,
+    'second_day',  m + 1,
+    -- 週三以後今天才沒有完成紀錄，P0-8M 的 accept 才看得出畫面變化。
+    'p0_8m_capture_ready', p_ref > m + 1,
     -- 計畫**行事曆**的起始日訂在上週五：早於兩筆完成，而且讓「計畫已經開始
     -- 了幾天」在週二到週日都成立，不會變成「昨天才開始」。
     --

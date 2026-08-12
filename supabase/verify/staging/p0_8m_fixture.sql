@@ -1,95 +1,80 @@
--- P0-8M staging 驗收 — 隔離用的「另一個家庭」。
+-- P0-8M staging acceptance — 隔離 fixture。
 --
--- 只為了證明一件事：DB/RPC 的 family boundary 是活的，不是只有 UI 的
--- selected-child filter 在擋。所以這個家庭裡要有一張**別人家的** open
--- adjustment request，讓 Demo 家長拿真憑證去踩。
+-- 為什麼要自己開一個家庭，而不是沿用既有的孩子：
+-- P0-8M 的驗收本身是破壞性的（會建立 / 關閉 / 重放大量提案與正式任務），
+-- 而 staging 上唯一的正式資料是 P0-10A 的 Demo State A。拿 Demo Family 來跑
+-- 等於用簡報用的資料當測試場，跑完就算「清乾淨」也已經動過 activated_at、
+-- version_no 這類單調遞增的東西。所以這裡開一個只屬於這次驗收的家庭。
 --
--- 刻意不建 auth user：要證明的是「A 家的家長動不了 B 家的請求」，
--- 用 Demo 家長的真 JWT 去踩 B 家的資料就足夠，而且更接近真實攻擊面。
+-- 密碼由執行端以 __P0_8M_PASSWORD__ 佔位符替換，不進 git。
 --
--- 全部 id 以 f0e80000 開頭，cleanup 靠這個前綴一次刪乾淨。
+-- 跑法：
+--   python -c "…替換佔位符…" > run.sql && supabase db query --linked -f run.sql
+--   驗完務必跑 p0_8m_cleanup.sql。
+
 DO $fixture$
 DECLARE
-  v_family   uuid := 'f0e80000-0000-4000-8000-000000000001';
-  v_child    uuid := 'f0e80000-0000-4000-8000-000000000021';
-  v_task     uuid := 'f0e80000-0000-4000-8000-000000000041';
-  v_proposal uuid := 'f0e80000-0000-4000-8000-000000000051';
-  v_v1       uuid := 'f0e80000-0000-4000-8000-000000000061';
-  v_v2       uuid := 'f0e80000-0000-4000-8000-000000000062';
-  v_request  uuid := 'f0e80000-0000-4000-8000-000000000071';
-  v_now      timestamptz := now();
+  v_pw       text := '__P0_8M_PASSWORD__';
+  v_email    text := 'p0-8m-verify@example.invalid';
+  v_user     uuid;
+  v_family   uuid;
+  v_child    uuid;
 BEGIN
-  INSERT INTO families (id, family_name) VALUES (v_family, 'P0-8M Boundary Family')
-    ON CONFLICT (id) DO NOTHING;
-  INSERT INTO children (id, family_id, nickname, birth_date, age_group)
-    VALUES (v_child, v_family, '隔壁小孩', '2018-05-01', '6-9')
-    ON CONFLICT (id) DO NOTHING;
+  IF v_pw = '__P0_8M_' || 'PASSWORD__' OR length(btrim(v_pw)) < 6 THEN
+    RAISE EXCEPTION '密碼佔位符沒有被替換，或密碼太短';
+  END IF;
 
-  INSERT INTO tasks (
-    id, family_id, name, category, day_type, is_long_term, long_term_type,
-    base_time_min, difficulty, is_active, schedule_mode, weekly_frequency,
-    preferred_time, progress_model, creation_source, start_date
+  IF EXISTS (SELECT 1 FROM auth.users WHERE email = v_email) THEN
+    RAISE EXCEPTION 'P0-8M fixture 已存在，先跑 p0_8m_cleanup.sql';
+  END IF;
+
+  INSERT INTO auth.users (
+    instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+    raw_app_meta_data, raw_user_meta_data, created_at, updated_at
   ) VALUES (
-    v_task, v_family, '隔壁家的閱讀計畫', 'D', 'custom', true, 'habit',
-    15, 1, true, 'weekly_frequency', 3,
-    'before_bed', 'weekly_rhythm', 'child_proposal', current_date
-  ) ON CONFLICT (id) DO NOTHING;
+    '00000000-0000-0000-0000-000000000000', gen_random_uuid(),
+    'authenticated', 'authenticated', v_email,
+    extensions.crypt(v_pw, extensions.gen_salt('bf')), now(),
+    '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb, now(), now()
+  ) RETURNING id INTO v_user;
 
-  -- child_proposal_guard_linked_task 要求提案的任務真的指派給那個孩子。
-  INSERT INTO child_tasks (task_id, child_id, is_active)
-    VALUES (v_task, v_child, true)
-    ON CONFLICT DO NOTHING;
+  -- GoTrue 以非 nullable 的 Go 字串掃這幾欄，NULL 會讓登入回
+  -- 「Database error querying schema」。手建 user 一定要補成空字串。
+  UPDATE auth.users SET
+    confirmation_token         = coalesce(confirmation_token, ''),
+    recovery_token             = coalesce(recovery_token, ''),
+    email_change_token_new     = coalesce(email_change_token_new, ''),
+    email_change               = coalesce(email_change, ''),
+    email_change_token_current = coalesce(email_change_token_current, ''),
+    phone_change               = coalesce(phone_change, ''),
+    phone_change_token         = coalesce(phone_change_token, ''),
+    reauthentication_token     = coalesce(reauthentication_token, '')
+  WHERE id = v_user;
 
-  INSERT INTO child_proposals (
-    id, family_id, child_id, task_id, status, child_original_goal,
-    current_plan_version_id
+  INSERT INTO auth.identities (
+    id, provider_id, user_id, identity_data, provider,
+    last_sign_in_at, created_at, updated_at
   ) VALUES (
-    v_proposal, v_family, v_child, NULL, 'draft', '我想每週讀三次', NULL
-  ) ON CONFLICT (id) DO NOTHING;
+    gen_random_uuid(), v_user::text, v_user,
+    jsonb_build_object('sub', v_user::text, 'email', v_email,
+                       'email_verified', true, 'phone_verified', false),
+    'email', now(), now(), now()
+  );
 
-  INSERT INTO child_proposal_plan_versions (
-    id, proposal_id, version_no, authored_by, cadence_mode,
-    cadence_weekly_frequency, preferred_time, requires_child_review
-  ) VALUES
-    (v_v1, v_proposal, 1, 'ai', 'weekly_frequency', 3, NULL, false)
-  ON CONFLICT (id) DO NOTHING;
+  INSERT INTO families (family_name, created_by)
+    VALUES ('P0-8M Verify Family', v_user) RETURNING id INTO v_family;
 
-  INSERT INTO child_proposal_plan_versions (
-    id, proposal_id, version_no, authored_by, cadence_mode,
-    cadence_weekly_frequency, preferred_time, requires_child_review,
-    adopted_from_plan_version_id, parent_confirmed_at, effective_at,
-    confirmed_source_task_id, confirmed_at, confirmed_reward_policy,
-    -- child_proposal_plan_versions_confirmed_atomic：confirmed_at 一有值，
-    -- 整組 confirmed_* 就必須齊全。
-    confirmed_by_user_id, confirmed_payout_basis, confirmed_claim_period,
-    confirmed_max_claims_per_period, confirmed_reward_policy_version,
-    confirmed_task_policy_version
-  ) VALUES (
-    v_v2, v_proposal, 2, 'parent', 'weekly_frequency', 3, 'before_bed', false,
-    v_v1, v_now, v_now, v_task, v_now, 'record_only',
-    (SELECT user_id FROM parents WHERE family_id = 'd0e70000-0000-4000-8000-000000000001' LIMIT 1),
-    'per_completion', 'day', 1, 'p0-8m-fixture', 'p0-8m-fixture'
-  ) ON CONFLICT (id) DO NOTHING;
+  INSERT INTO parents (family_id, user_id, name, email)
+    VALUES (v_family, v_user, 'P0-8M Verify Parent', v_email);
 
-  -- 狀態機不允許 draft → active 直接跳，照正式路徑先到 proposed。
-  UPDATE child_proposals SET status = 'proposed' WHERE id = v_proposal;
+  INSERT INTO children (family_id, nickname, birth_date, age_group)
+    VALUES (v_family, 'P0-8M Kid',
+            (current_date - INTERVAL '8 years 2 months')::date, '6-9')
+    RETURNING id INTO v_child;
 
-  -- child_proposals_task_requires_active：task_id 只能在 active 時存在，
-  -- 所以三個欄位一起設。
-  UPDATE child_proposals
-     SET current_plan_version_id = v_v2, status = 'active', task_id = v_task
-   WHERE id = v_proposal;
+  INSERT INTO wallets (child_id, wallet_type, balance)
+    VALUES (v_child, 'spending', 0);
 
-  INSERT INTO child_proposal_adjustment_requests (
-    id, proposal_id, family_id, requested_by, based_on_plan_version_id,
-    adjustment_kind, reason, requested_changes, status
-  ) VALUES (
-    v_request, v_proposal, v_family, 'child', v_v2,
-    'preferred_time', '隔壁小孩想改成晚餐後',
-    jsonb_build_object('preferredTime', 'after_dinner', 'preferredTimeCustom', NULL),
-    'open'
-  ) ON CONFLICT (id) DO NOTHING;
-
-  RAISE NOTICE 'P0-8M boundary fixture ready: request=%', v_request;
+  RAISE NOTICE 'P0-8M family = %  child = %  user = %', v_family, v_child, v_user;
 END
 $fixture$;
