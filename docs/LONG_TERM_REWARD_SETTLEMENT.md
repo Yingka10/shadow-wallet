@@ -395,10 +395,18 @@ P0-6 的 checkpoint guard 要求 `reward_policy = 'coin_eligible'`，NULL 比較
 沒有合法金額時回 blocked / unpriced，不猜。
 正式的 per-period pricing policy（含它自己的 range）標記為 **PRODUCT_POLICY_GAP，待產品拍板**。
 
-### 8.3 Demo fixture
+### 8.3 Demo 與測試 fixture
 
-誠恩 Demo 的 `+10` 沿用該 story 既有的 agreed 金額，作為 **Demo fixture** 使用。
-**它不是通用的 weekly pricing formula，不得被任何程式路徑或政策文件當成推導依據。**
+**Demo 決策（已拍板）：Phase 1 不修改 P0-10 Demo Story 的 reward semantics。**
+它維持 weekly frequency = 3、每次完成 10 幣、legacy / current shared semantics，
+既不改成「本週達標 +10」，也不推導成「本週達標 +30」。
+
+新制改由一筆專用的 staging fixture 驗證（`supabase/verify/staging/p0_payout_settlement.sql`）：
+long_term + weekly_rhythm + per_period，走完 1/4 → 4/4 → 第 5 次 → 重試 → 併發 →
+下一期歸零的完整序列。
+
+**該 fixture 裡的金額純粹是測試資料，不代表 GrowBook 已有正式的 per-period pricing policy。**
+任何程式路徑或政策文件都不得引用它作為推導依據。
 
 ### 8.4 其他 gap
 
@@ -408,7 +416,44 @@ P0-6 的 checkpoint guard 要求 `reward_policy = 'coin_eligible'`，NULL 比較
 
 ---
 
-## 9. 明確不在本輪範圍
+## 9. Canon / Known Gaps
+
+本輪確認存在、但**刻意不擴大處理**的問題。寫在這裡是為了它們不會被遺忘成「沒人發現」。
+
+### 9.1 Shared Agreement Reward Disclosure Gap **[已知缺口]**
+
+**孩子端從頭到尾看不到自己正在接受的共同約定裡的回饋內容。**
+
+* 家長確認畫面唯一的回饋文案是「建議：每次完成 N 成長幣」
+  （`parentProposalPresentation.ts`），而且對週節奏計畫也是同一句。
+* 孩子端的確認流程**完全不出現幣值數字**（`childProposal/copy.ts` 的三個選項刻意不含數字）。
+
+「孩子不決定幣值」是對的 —— 但它**不等於**孩子不需要知道自己正在接受什麼。
+一份孩子看不到內容的共同約定，很難說是共同的。
+
+這個缺口有兩個直接後果，一個已經發生、一個還在：
+
+1. **已發生：** 它讓歷史上的 `confirmed_payout_basis = 'per_period'` 不能當成
+   informed agreement 的證據 —— 這正是本輪遷移零列的原因（§7.0）。
+2. **還在：** 新制的 per_period 任務上線後，孩子仍然只會在達標當下看到
+   「+N 成長幣」，而不是在**接受計畫時**就知道「本週做滿 4 次會有 N 幣」。
+
+處理方向（另一輪）：適齡的 reward disclosure —— 讓孩子在接受共同版本前，
+用他看得懂的語言看到「什麼時候、因為什麼、會得到什麼」。
+在那之前，**不要把任何既有 snapshot 當成孩子已知情的證據**。
+
+### 9.2 progress_model = NULL 的 fallback **[implementation gap]**
+
+見 §2.1。家長自建路徑不寫 `progress_model`，per_period 因此靠 cadence fallback 推導。
+不是把 NULL 重新定義成一種進度模型，正確收斂是讓家長自建路徑也顯式決定。
+
+### 9.3 per-period pricing **[PRODUCT_POLICY_GAP]**
+
+見 §8.2。機制已完成，定價沒有政策來源。
+
+---
+
+## 10. 明確不在本輪範圍
 
 新 B 類幣值表、A 類發幣放寬、C/D coin policy 改動、時間儲蓄、3C、動機診斷、
 自動判斷「孩子已內化」、自動降低 reward、streak gamification、排行榜／徽章、

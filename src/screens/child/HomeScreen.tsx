@@ -53,6 +53,7 @@ import { ChildPlanReviewCard } from '../../components/child/ChildPlanReviewCard'
 import { Moon, Star, Firefly, NightHills } from '../../components/child/NightAssets';
 import TaskCompleteModal from '../../components/TaskCompleteModal';
 import FeedbackAnimation, { type FeedbackType } from '../../components/FeedbackAnimation';
+import { decideCompletionFeedback } from './completionFeedback';
 import { CoinIcon } from '../../components/icons/TaskIcons';
 import { completeTask, createChildTask } from '../../lib/taskActions';
 import { PROPOSAL_COPY } from './childProposal/copy';
@@ -65,7 +66,13 @@ type HomeRoute = RouteProp<RootStackParamList, 'Home'>;
 type Nav = StackNavigationProp<RootStackParamList, 'Home'>;
 
 type ModalState = { task: TodayTask | null; visible: boolean };
-type FeedbackState = { visible: boolean; type: FeedbackType; value: number };
+type FeedbackState = {
+  visible: boolean;
+  type: FeedbackType;
+  value: number;
+  periodDone?: number;
+  periodTarget?: number | null;
+};
 type ChildMeta = {
   familyId: string;
   ageGroup: AgeGroup;
@@ -436,15 +443,9 @@ export default function HomeScreen() {
         withTiming(0.99, { duration: 140 }),
         withTiming(1, { duration: 180 }),
       );
-      if (result.milestone) {
-        setFeedback({ visible: true, type: 'milestone', value: result.milestone.coinReward });
-      } else if (task.category === 'A') {
-        setFeedback({ visible: true, type: 'task-a', value: 0 });
-      } else if (task.category === 'B') {
-        setFeedback({ visible: true, type: 'task-b', value: result.timeSavedMin });
-      } else {
-        setFeedback({ visible: true, type: 'task-c', value: result.coinEarned });
-      }
+      // 「這一次有沒有發幣」的判斷在 decideCompletionFeedback 裡，有自己的測試。
+      // 規則只有一條：有 settlement 才出現幣值畫面。
+      setFeedback({ visible: true, ...decideCompletionFeedback(result, task.category) });
     },
     [modal.task, childId, isPrerequisiteMet, closeModal, treePulse],
   );
@@ -777,6 +778,8 @@ export default function HomeScreen() {
           visible={feedback.visible}
           type={feedback.type}
           value={feedback.value}
+          periodDone={feedback.periodDone}
+          periodTarget={feedback.periodTarget}
           onComplete={handleFeedbackComplete}
         />
 

@@ -11,12 +11,27 @@ import { Colors } from '../constants/colors';
 
 const { width: SW } = Dimensions.get('window');
 
-export type FeedbackType = 'task-a' | 'task-b' | 'task-c' | 'milestone';
+export type FeedbackType =
+  | 'task-a'
+  | 'task-b'
+  | 'task-c'
+  | 'milestone'
+  /**
+   * 完成了一次，但這一次**不是** reward event。
+   *
+   * per_period 任務在本期達標之前走這一種：留下投入紀錄、講清楚離達標還差幾次，
+   * 但一個幣值數字都不出現。用 task-c 代替會憑空發明一次沒有發生的發幣。
+   */
+  | 'period-progress';
 
 interface FeedbackAnimationProps {
   visible: boolean;
   type: FeedbackType;
   value?: number; // coins for task-c/milestone, minutes for task-b
+  /** period-progress 專用：含這一次在內，本期已完成幾次。 */
+  periodDone?: number;
+  /** period-progress 專用：約定的達標次數。 */
+  periodTarget?: number | null;
   onComplete: () => void;
 }
 
@@ -132,10 +147,62 @@ function MilestoneFeedback({ value, onComplete }: { value: number; onComplete: (
   );
 }
 
+/**
+ * 「這次記錄下來了，本週還差幾次」。
+ *
+ * 刻意不做的事：不畫火焰、不講連續幾天、不因為漏一天就說挑戰失敗，
+ * 也不顯示任何幣值 —— 這一次真的沒有發幣。
+ */
+function PeriodProgressFeedback({
+  done,
+  target,
+  onComplete,
+}: {
+  done: number;
+  target: number | null;
+  onComplete: () => void;
+}) {
+  const translateY = useRef(new Animated.Value(40)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(translateY, { toValue: 0, duration: 400, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+      ]),
+      Animated.delay(1400),
+      Animated.timing(opacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start(() => onComplete());
+  }, []);
+
+  const remaining = target != null ? Math.max(0, target - done) : null;
+
+  return (
+    <View style={styles.centeredOverlay}>
+      <Animated.View
+        style={[styles.periodCard, { opacity, transform: [{ translateY }] }]}
+      >
+        <Text style={styles.periodTitle}>這次記錄下來了</Text>
+        {target != null && (
+          <Text style={styles.periodCount}>
+            本週 {done} / {target} 次
+          </Text>
+        )}
+        {remaining != null && remaining > 0 && (
+          <Text style={styles.periodHint}>再完成 {remaining} 次，就完成本週的穩定投入</Text>
+        )}
+      </Animated.View>
+    </View>
+  );
+}
+
 export default function FeedbackAnimation({
   visible,
   type,
   value = 0,
+  periodDone = 0,
+  periodTarget = null,
   onComplete,
 }: FeedbackAnimationProps) {
   if (!visible) return null;
@@ -153,6 +220,13 @@ export default function FeedbackAnimation({
       {type === 'task-a' && <CheckmarkFeedback onComplete={onComplete} />}
       {type === 'task-b' && <TimeSavingFeedback value={value} onComplete={onComplete} />}
       {type === 'task-c' && <CoinFeedback value={value} onComplete={onComplete} />}
+      {type === 'period-progress' && (
+        <PeriodProgressFeedback
+          done={periodDone}
+          target={periodTarget}
+          onComplete={onComplete}
+        />
+      )}
     </Modal>
   );
 }
@@ -163,6 +237,31 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.3)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  periodCard: {
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 22,
+    paddingHorizontal: 28,
+    borderRadius: 20,
+    alignItems: 'center',
+    maxWidth: SW * 0.8,
+  },
+  periodTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  periodCount: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: Colors.text,
+    marginTop: 10,
+  },
+  periodHint: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    marginTop: 8,
+    textAlign: 'center',
   },
   checkBox: {
     backgroundColor: Colors.success,
