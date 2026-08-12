@@ -218,6 +218,92 @@ describe('回饋方式的名稱', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 11b. 幣值調整欄位（onCoinOverrideChange）
+// ---------------------------------------------------------------------------
+
+describe('幣值調整欄位', () => {
+  it('沒有傳 onCoinOverrideChange 時維持唯讀，不出現輸入框或可調整範圍', () => {
+    const r = renderBlock('demo');
+    expect(r.queryByLabelText('調整成長幣金額')).toBeNull();
+    expect(r.queryByText(/可調整範圍/)).toBeNull();
+    expect(r.getByText('10')).toBeTruthy();
+  });
+
+  it('傳了 onCoinOverrideChange 才出現輸入框與可調整範圍', () => {
+    const onChange = jest.fn();
+    const r = render(
+      <DisplayModeProvider mode="demo">
+        <RewardDecisionBlock decision={COIN_DECISION} onCoinOverrideChange={onChange} />
+      </DisplayModeProvider>,
+    );
+    expect(r.getByLabelText('調整成長幣金額')).toBeTruthy();
+    expect(r.getByText('可調整範圍 5–25 枚')).toBeTruthy();
+  });
+
+  it('在範圍內打字會即時送出新的值', () => {
+    const onChange = jest.fn();
+    const r = render(
+      <DisplayModeProvider mode="demo">
+        <RewardDecisionBlock decision={COIN_DECISION} onCoinOverrideChange={onChange} />
+      </DisplayModeProvider>,
+    );
+    fireEvent.changeText(r.getByLabelText('調整成長幣金額'), '15');
+    expect(onChange).toHaveBeenCalledWith(15);
+  });
+
+  it('打字打到範圍外時先不送出，離開欄位才收斂到上限', () => {
+    const onChange = jest.fn();
+    const r = render(
+      <DisplayModeProvider mode="demo">
+        <RewardDecisionBlock decision={COIN_DECISION} onCoinOverrideChange={onChange} />
+      </DisplayModeProvider>,
+    );
+    const input = r.getByLabelText('調整成長幣金額');
+    fireEvent.changeText(input, '99');
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent(input, 'blur');
+    expect(onChange).toHaveBeenCalledWith(25);
+  });
+
+  it('清空後離開欄位，會退回目前的 finalAmount，不會送出 0', () => {
+    const onChange = jest.fn();
+    const r = render(
+      <DisplayModeProvider mode="demo">
+        <RewardDecisionBlock decision={COIN_DECISION} onCoinOverrideChange={onChange} />
+      </DisplayModeProvider>,
+    );
+    const input = r.getByLabelText('調整成長幣金額');
+    fireEvent.changeText(input, '');
+    fireEvent(input, 'blur');
+    expect(onChange).not.toHaveBeenCalled();
+    expect(r.getByLabelText('調整成長幣金額').props.value).toBe('10');
+  });
+
+  it('調整過建議值之後才出現「重設為建議值」，按下去會呼叫 onChange(undefined)', () => {
+    const onChange = jest.fn();
+    const adjusted: TaskRewardDecision = {
+      ...COIN_DECISION,
+      coin: { ...COIN_DECISION.coin!, finalAmount: 18 },
+    };
+    const r = render(
+      <DisplayModeProvider mode="demo">
+        <RewardDecisionBlock decision={COIN_DECISION} onCoinOverrideChange={onChange} />
+      </DisplayModeProvider>,
+    );
+    expect(r.queryByText(/重設為建議值/)).toBeNull();
+
+    r.rerender(
+      <DisplayModeProvider mode="demo">
+        <RewardDecisionBlock decision={adjusted} onCoinOverrideChange={onChange} />
+      </DisplayModeProvider>,
+    );
+    const resetLink = r.getByText('重設為建議值（10 枚）');
+    fireEvent.press(resetLink);
+    expect(onChange).toHaveBeenCalledWith(undefined);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 12. 回顧期間文案
 // ---------------------------------------------------------------------------
 

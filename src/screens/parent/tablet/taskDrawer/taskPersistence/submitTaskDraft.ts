@@ -49,6 +49,11 @@ export type SubmitTaskDraftArgs = {
   /** 整份草稿共用同一個，重試不變。 */
   clientRequestId: string;
   service: ParentTaskCreationService;
+  /**
+   * 家長在預覽卡上調整過的幣值。undefined = 採用政策建議值。
+   * 原封不動轉給 evaluateTaskReward —— clamp 只在那一層做一次。
+   */
+  coinOverride?: number;
 };
 
 /**
@@ -82,7 +87,7 @@ export type SubmitTaskDraftOutcome =
 export async function submitTaskDraft(
   args: SubmitTaskDraftArgs,
 ): Promise<SubmitTaskDraftOutcome> {
-  const { draft, family, variant, child, taskPolicyVersion, clientRequestId, service } = args;
+  const { draft, family, variant, child, taskPolicyVersion, clientRequestId, service, coinOverride } = args;
 
   // ── 1. 驗證 ──────────────────────────────────────────────────────────────
   const errors = validateTaskDraft(draft, variant, child.ageGroup);
@@ -107,7 +112,7 @@ export async function submitTaskDraft(
   });
 
   // ── 3. 回饋決策 ──────────────────────────────────────────────────────────
-  const decision = evaluateTaskReward({ command: base, childAgeGroup: child.ageGroup });
+  const decision = evaluateTaskReward({ command: base, childAgeGroup: child.ageGroup, coinOverride });
 
   // ── 4. 合成 ──────────────────────────────────────────────────────────────
   const finalized = finalizeCreateParentTaskCommand(base, decision);
@@ -154,12 +159,12 @@ export async function submitTaskDraft(
 export function previewTaskRewardDecision(
   args: Omit<SubmitTaskDraftArgs, 'service'>,
 ): TaskRewardDecision | null {
-  const { draft, family, variant, child, taskPolicyVersion, clientRequestId } = args;
+  const { draft, family, variant, child, taskPolicyVersion, clientRequestId, coinOverride } = args;
 
   if (hasErrors(validateTaskDraft(draft, variant, child.ageGroup))) return null;
 
   const base = mapTaskDraftToCommand({
     draft, family, variant, child, taskPolicyVersion, clientRequestId,
   });
-  return evaluateTaskReward({ command: base, childAgeGroup: child.ageGroup });
+  return evaluateTaskReward({ command: base, childAgeGroup: child.ageGroup, coinOverride });
 }

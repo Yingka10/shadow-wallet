@@ -6,8 +6,8 @@
 // 「回饋方式：可獲得成長幣」只說了政策名稱，沒說會拿到幾枚 ——
 // 家長在按下建立之前看不到金額，等於在確認一份自己沒看過的內容。
 
-import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   ParentColors,
   ParentFonts,
@@ -55,6 +55,7 @@ import { useShowsImplementationNotes } from '../displayMode';
 import { AGE_GROUP_LABEL, BROWSE_LABEL } from '../taskCatalog';
 import type {
   TaskRewardCalculationBasis,
+  TaskRewardCoin,
   TaskRewardDecision,
 } from '../taskReward/types';
 import { CUSTOM_TASK_BADGE, CUSTOM_TASK_ICON_KEY } from '../customTask/customTaskCopy';
@@ -207,7 +208,72 @@ function CalculationBasis({ decision }: { decision: TaskRewardDecision }) {
   );
 }
 
-export function RewardDecisionBlock({ decision }: { decision: TaskRewardDecision }) {
+/**
+ * 幣值調整欄位。
+ *
+ * 只在打字過程中即時送出「已經在範圍內」的值 —— 提早 clamp 的話，
+ * 家長打「15」的第一個字「1」會先被拉高成 minAllowed，「5」接上去就變成
+ * 「51」而不是「15」。真正的收斂（空字串、超出範圍）留到 onBlur 才做，
+ * 這時候家長已經打完了，收斂不會打斷輸入。
+ */
+function CoinAmountEditor({
+  coin,
+  onChange,
+}: {
+  coin: TaskRewardCoin;
+  onChange: (value: number) => void;
+}) {
+  const [text, setText] = useState(String(coin.finalAmount));
+
+  // 外部值變了（家長改了時間、難度，決策跟著重算）就跟著同步 ——
+  // 不然畫面上打著的數字會跟真正會送出的 finalAmount 對不上。
+  useEffect(() => {
+    setText(String(coin.finalAmount));
+  }, [coin.finalAmount]);
+
+  return (
+    <View style={s.rewardAmountRow}>
+      <TextInput
+        style={s.rewardAmountInput}
+        value={text}
+        onChangeText={next => {
+          const digitsOnly = next.replace(/[^0-9]/g, '');
+          setText(digitsOnly);
+          if (digitsOnly === '') return;
+          const parsed = Number.parseInt(digitsOnly, 10);
+          if (parsed >= coin.minAllowed && parsed <= coin.maxAllowed) {
+            onChange(parsed);
+          }
+        }}
+        onBlur={() => {
+          if (text === '') {
+            setText(String(coin.finalAmount));
+            return;
+          }
+          const parsed = Number.parseInt(text, 10);
+          const clamped = Math.min(Math.max(parsed, coin.minAllowed), coin.maxAllowed);
+          setText(String(clamped));
+          onChange(clamped);
+        }}
+        keyboardType="number-pad"
+        accessibilityLabel="調整成長幣金額"
+      />
+      <Text style={s.rewardAmountUnit}>枚</Text>
+    </View>
+  );
+}
+
+export function RewardDecisionBlock({
+  decision,
+  onCoinOverrideChange,
+}: {
+  decision: TaskRewardDecision;
+  /**
+   * 家長調整幣值。省略 = 唯讀顯示（沿用原本的靜態卡片，例如其他地方單純
+   * 拿決策來做摘要展示的場合）。傳了才會出現可編輯欄位與可調整範圍提示。
+   */
+  onCoinOverrideChange?: (value: number | undefined) => void;
+}) {
   const showsImplementationNotes = useShowsImplementationNotes();
 
   // 正常流程走不到這裡（能力閘門讓家長根本選不到用不了的政策）。
@@ -224,19 +290,40 @@ export function RewardDecisionBlock({ decision }: { decision: TaskRewardDecision
   }
 
   if (decision.rewardPolicy === 'coin_eligible') {
+    const editable = !!onCoinOverrideChange;
+    const adjusted = decision.coin.finalAmount !== decision.coin.suggestedAmount;
     return (
       <View style={s.rewardCard}>
         <Text style={s.rewardTitle}>{REWARD_POLICY_SHORT_LABEL.coin_eligible}</Text>
-        <View style={s.rewardAmountRow}>
-          <Text style={s.rewardAmount}>{decision.coin.finalAmount}</Text>
-          <Text style={s.rewardAmountUnit}>枚</Text>
-        </View>
+        {editable ? (
+          <CoinAmountEditor coin={decision.coin} onChange={onCoinOverrideChange} />
+        ) : (
+          <View style={s.rewardAmountRow}>
+            <Text style={s.rewardAmount}>{decision.coin.finalAmount}</Text>
+            <Text style={s.rewardAmountUnit}>枚</Text>
+          </View>
+        )}
         {/*
-          demo 只有這一句。可調整範圍、時間分級、難度、政策版本都收進
-          development 的「查看估算依據」——在沒有幣值調整 UI 之前，
-          把範圍寫在正式畫面上，家長會去找一個不存在的滑桿。
+          唯讀模式只有這一句：時間分級、難度、政策版本都收進 development 的
+          「查看估算依據」。可編輯模式多印「可調整範圍」——這是欄位本身的
+          使用說明，不是實作細節，兩種模式都該看得到。
         */}
         <Text style={s.rewardBody}>{demoExplanation(decision.coin.calculationBasis)}</Text>
+        {editable ? (
+          <Text style={s.rewardRangeHint}>
+            可調整範圍 {decision.coin.minAllowed}–{decision.coin.maxAllowed} 枚
+          </Text>
+        ) : null}
+        {editable && adjusted ? (
+          <Pressable
+            onPress={() => onCoinOverrideChange?.(undefined)}
+            accessibilityRole="button"
+          >
+            <Text style={s.rewardResetLink}>
+              重設為建議值（{decision.coin.suggestedAmount} 枚）
+            </Text>
+          </Pressable>
+        ) : null}
         {showsImplementationNotes ? <CalculationBasis decision={decision} /> : null}
       </View>
     );
@@ -262,6 +349,7 @@ export function DraftReview({
   decision,
   ruleFindings = [],
   ai,
+  onCoinOverrideChange,
 }: {
   /**
    * preset 的家族與版本。**自訂任務兩者都是 undefined。**
@@ -283,6 +371,8 @@ export function DraftReview({
   ruleFindings?: readonly TaskRuleFinding[];
   /** 省略 = 不顯示 AI 區塊（例如尚未注入服務）。 */
   ai?: TaskAiSectionProps;
+  /** 省略 = 幣值卡唯讀（見 RewardDecisionBlock）。 */
+  onCoinOverrideChange?: (value: number | undefined) => void;
 }) {
   const growth = isGrowthPlanDraft(draft) ? draft : null;
   const support = isShortSupportDraft(draft) ? draft : null;
@@ -464,7 +554,9 @@ export function DraftReview({
       <RuleFindingsSection findings={ruleFindings} />
       {ai ? <TaskAiSection {...ai} /> : null}
 
-      {decision ? <RewardDecisionBlock decision={decision} /> : null}
+      {decision ? (
+        <RewardDecisionBlock decision={decision} onCoinOverrideChange={onCoinOverrideChange} />
+      ) : null}
 
       <Block title="回饋與結束">
         <Row
@@ -650,6 +742,32 @@ const s = StyleSheet.create({
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.pMeta,
     color: ParentColors.fgSecondary,
+  },
+  rewardAmountInput: {
+    width: 46,
+    textAlign: 'center',
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.h2,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgPrimary,
+    lineHeight: 34,
+    paddingVertical: 2,
+    paddingHorizontal: ParentSpacing[1],
+    borderWidth: 1,
+    borderColor: ParentColors.pine300,
+    borderRadius: ParentRadii.md,
+    backgroundColor: ParentColors.bgSurface,
+  },
+  rewardRangeHint: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+  },
+  rewardResetLink: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.pine500,
   },
   rewardBody: {
     fontFamily: ParentFonts.body,
