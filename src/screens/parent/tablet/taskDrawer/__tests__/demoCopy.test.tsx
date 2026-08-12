@@ -15,7 +15,7 @@
 import React from 'react';
 import { render, fireEvent } from '@testing-library/react-native';
 
-import { RewardDecisionBlock } from '../editors/DraftReview';
+import { RewardDecisionBlock, type CoinAiState } from '../editors/DraftReview';
 import { DisplayModeProvider, type PresetTaskDrawerDisplayMode } from '../displayMode';
 import { REWARD_POLICY_SHORT_LABEL, reviewCycleText } from '../taskDraft';
 import type { TaskRewardDecision } from '../taskReward/types';
@@ -214,6 +214,160 @@ describe('回饋方式的名稱', () => {
     });
     // 「0 枚」看起來像賺到 0，不像「這件事不用幣衡量」。
     expect(renderedText(r.toJSON()).join('\n')).not.toMatch(/\d+\s*枚/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 11b. 幣值調整欄位（onCoinOverrideChange）
+// ---------------------------------------------------------------------------
+
+describe('幣值調整欄位', () => {
+  it('沒有傳 onCoinOverrideChange 時維持唯讀，不出現輸入框或可調整範圍', () => {
+    const r = renderBlock('demo');
+    expect(r.queryByLabelText('調整成長幣金額')).toBeNull();
+    expect(r.queryByText(/可調整範圍/)).toBeNull();
+    expect(r.getByText('10')).toBeTruthy();
+  });
+
+  it('傳了 onCoinOverrideChange 才出現輸入框與可調整範圍', () => {
+    const onChange = jest.fn();
+    const r = render(
+      <DisplayModeProvider mode="demo">
+        <RewardDecisionBlock decision={COIN_DECISION} onCoinOverrideChange={onChange} />
+      </DisplayModeProvider>,
+    );
+    expect(r.getByLabelText('調整成長幣金額')).toBeTruthy();
+    expect(r.getByText('可調整範圍 5–25 枚')).toBeTruthy();
+  });
+
+  it('在範圍內打字會即時送出新的值', () => {
+    const onChange = jest.fn();
+    const r = render(
+      <DisplayModeProvider mode="demo">
+        <RewardDecisionBlock decision={COIN_DECISION} onCoinOverrideChange={onChange} />
+      </DisplayModeProvider>,
+    );
+    fireEvent.changeText(r.getByLabelText('調整成長幣金額'), '15');
+    expect(onChange).toHaveBeenCalledWith(15);
+  });
+
+  it('打字打到範圍外時先不送出，離開欄位才收斂到上限', () => {
+    const onChange = jest.fn();
+    const r = render(
+      <DisplayModeProvider mode="demo">
+        <RewardDecisionBlock decision={COIN_DECISION} onCoinOverrideChange={onChange} />
+      </DisplayModeProvider>,
+    );
+    const input = r.getByLabelText('調整成長幣金額');
+    fireEvent.changeText(input, '99');
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent(input, 'blur');
+    expect(onChange).toHaveBeenCalledWith(25);
+  });
+
+  it('清空後離開欄位，會退回目前的 finalAmount，不會送出 0', () => {
+    const onChange = jest.fn();
+    const r = render(
+      <DisplayModeProvider mode="demo">
+        <RewardDecisionBlock decision={COIN_DECISION} onCoinOverrideChange={onChange} />
+      </DisplayModeProvider>,
+    );
+    const input = r.getByLabelText('調整成長幣金額');
+    fireEvent.changeText(input, '');
+    fireEvent(input, 'blur');
+    expect(onChange).not.toHaveBeenCalled();
+    expect(r.getByLabelText('調整成長幣金額').props.value).toBe('10');
+  });
+
+  it('調整過建議值之後才出現「重設為建議值」，按下去會呼叫 onChange(undefined)', () => {
+    const onChange = jest.fn();
+    const adjusted: TaskRewardDecision = {
+      ...COIN_DECISION,
+      coin: { ...COIN_DECISION.coin!, finalAmount: 18 },
+    };
+    const r = render(
+      <DisplayModeProvider mode="demo">
+        <RewardDecisionBlock decision={COIN_DECISION} onCoinOverrideChange={onChange} />
+      </DisplayModeProvider>,
+    );
+    expect(r.queryByText(/重設為建議值/)).toBeNull();
+
+    r.rerender(
+      <DisplayModeProvider mode="demo">
+        <RewardDecisionBlock decision={adjusted} onCoinOverrideChange={onChange} />
+      </DisplayModeProvider>,
+    );
+    const resetLink = r.getByText('重設為建議值（10 枚）');
+    fireEvent.press(resetLink);
+    expect(onChange).toHaveBeenCalledWith(undefined);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 11c. 幣值卡的「AI 建議」
+// ---------------------------------------------------------------------------
+
+describe('幣值卡的 AI 建議', () => {
+  function renderWithCoinAi(state: CoinAiState, onRequest = jest.fn(), onAdopt = jest.fn()) {
+    const r = render(
+      <DisplayModeProvider mode="demo">
+        <RewardDecisionBlock
+          decision={COIN_DECISION}
+          onCoinOverrideChange={jest.fn()}
+          coinAi={{ state, onRequest, onAdopt }}
+        />
+      </DisplayModeProvider>,
+    );
+    return { r, onRequest, onAdopt };
+  }
+
+  it('沒有傳 coinAi 就不出現任何 AI 建議按鈕（唯讀或不支援時）', () => {
+    const r = renderBlock('demo');
+    expect(r.queryByText('AI 建議這個幣值')).toBeNull();
+  });
+
+  it('沒有傳 coinAi，就算傳了 onCoinOverrideChange 也不出現 AI 建議按鈕', () => {
+    const r = render(
+      <DisplayModeProvider mode="demo">
+        <RewardDecisionBlock decision={COIN_DECISION} onCoinOverrideChange={jest.fn()} />
+      </DisplayModeProvider>,
+    );
+    expect(r.queryByText('AI 建議這個幣值')).toBeNull();
+  });
+
+  it('idle：出現「AI 建議這個幣值」按鈕，按下去呼叫 onRequest', () => {
+    const { r, onRequest } = renderWithCoinAi({ kind: 'idle' });
+    fireEvent.press(r.getByText('AI 建議這個幣值'));
+    expect(onRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('loading：顯示思考中，按鈕仍在但按不下去', () => {
+    const { r, onRequest } = renderWithCoinAi({ kind: 'loading' });
+    expect(r.getByText('AI 思考中…')).toBeTruthy();
+    fireEvent.press(r.getByText('AI 建議這個幣值'));
+    expect(onRequest).not.toHaveBeenCalled();
+  });
+
+  it('suggested：顯示金額與理由，按「採用這個建議」呼叫 onAdopt(amount)', () => {
+    const { r, onAdopt } = renderWithCoinAi({ kind: 'suggested', amount: 18, reason: '任務內容比較費力' });
+    expect(r.getByText('AI 建議 18 枚')).toBeTruthy();
+    expect(r.getByText('任務內容比較費力')).toBeTruthy();
+    fireEvent.press(r.getByText('採用這個建議'));
+    expect(onAdopt).toHaveBeenCalledWith(18);
+  });
+
+  it('suggested：「重新建議」呼叫 onRequest，不是 onAdopt', () => {
+    const { r, onRequest, onAdopt } = renderWithCoinAi({ kind: 'suggested', amount: 18, reason: '理由' });
+    fireEvent.press(r.getByText('重新建議'));
+    expect(onRequest).toHaveBeenCalledTimes(1);
+    expect(onAdopt).not.toHaveBeenCalled();
+  });
+
+  it('unavailable：說明暫時無法使用、不影響任務建立，並給重試按鈕', () => {
+    const { r, onRequest } = renderWithCoinAi({ kind: 'unavailable' });
+    expect(r.getByText('AI 建議暫時無法使用，不影響任務建立。')).toBeTruthy();
+    fireEvent.press(r.getByText('再試一次'));
+    expect(onRequest).toHaveBeenCalledTimes(1);
   });
 });
 

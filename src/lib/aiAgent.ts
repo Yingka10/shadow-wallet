@@ -337,6 +337,51 @@ export async function clarifyWish(
   }
 }
 
+export type SuggestTaskRewardAmountInput = {
+  taskTitle: string;
+  ageGroupLabel: string;
+  categoryLabel: string;
+  estimatedMinutes?: number;
+  difficultyLabel?: string;
+  /** 規則引擎（coinPolicy）算出的建議值與允許範圍——AI 只在這個範圍內微調。 */
+  suggestedAmount: number;
+  minAllowed: number;
+  maxAllowed: number;
+};
+
+export type SuggestTaskRewardAmountResult =
+  | { status: 'ok'; amount: number; reason: string }
+  | { status: 'unavailable' };
+
+/**
+ * 任務抽屜幣值卡的「AI 建議」：在規則引擎算好的範圍內，讓 AI 給一個微調值與理由。
+ *
+ * amount 一律 clamp 到 [minAllowed, maxAllowed]——即使 Gemini 回傳範圍外的數字，
+ * 這裡也不會吐出來。這不是唯一一層防護：家長按下「採用」之後，數字還會流進
+ * evaluateTaskReward 再 clamp 一次，那一層才是真正決定送進資料庫的金額。
+ *
+ * 任何錯誤都回 unavailable，不偷偷拿 suggestedAmount 充當「AI 建議」——
+ * 那樣家長會以為 AI 真的看過這個任務，其實只是規則引擎的數字被貼了層標籤。
+ */
+export async function suggestTaskRewardAmount(
+  input: SuggestTaskRewardAmountInput,
+): Promise<SuggestTaskRewardAmountResult> {
+  try {
+    const result = await invokeAiProxy<{ amount: unknown; reason: unknown }>(
+      'suggestTaskRewardAmount',
+      { ...input },
+    );
+    if (typeof result.amount !== 'number' || !Number.isFinite(result.amount)) {
+      return { status: 'unavailable' };
+    }
+    const amount = Math.min(input.maxAllowed, Math.max(input.minAllowed, Math.round(result.amount)));
+    return { status: 'ok', amount, reason: typeof result.reason === 'string' ? result.reason : '' };
+  } catch (err) {
+    console.warn('[aiAgent.suggestTaskRewardAmount] unavailable due to error:', err);
+    return { status: 'unavailable' };
+  }
+}
+
 export type WeeklyInsightSummary = {
   completionRate: number;
   totalTimeSavedMin: number;

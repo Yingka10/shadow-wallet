@@ -62,6 +62,7 @@ import {
   ParentSpacing,
 } from '../../../../constants/parentTheme';
 import { calcAgeGroup } from '../../../../lib/onboarding';
+import { suggestTaskRewardAmount } from '../../../../lib/aiAgent';
 import { TaskPresetCard } from './TaskPresetCard';
 import { escapeActionFor, panelWidthFor, scrimColorFor } from './drawerChrome';
 import {
@@ -72,6 +73,7 @@ import {
 import {
   AGE_GROUP_LABEL,
   BROWSE_FILTERS,
+  BROWSE_LABEL,
   defaultVariantOf,
   selectPresetFamilies,
   variantFormLabel,
@@ -103,7 +105,13 @@ import {
   type CreateParentTaskFailureCode,
   type ParentTaskCreationService,
 } from './taskPersistence';
-import { CreatedTaskSummary, DraftReview, TaskDraftEditor } from './editors';
+import {
+  CreatedTaskSummary,
+  DIFFICULTY_LABEL,
+  DraftReview,
+  TaskDraftEditor,
+  type CoinAiState,
+} from './editors';
 import {
   ChevronLeftIcon,
   CloseIcon,
@@ -566,11 +574,15 @@ export function TaskCreationDrawer({
     return { id: child.id, familyId: child.familyId, ageGroup };
   }, [child, ageGroup]);
 
+  /** 家長在預覽卡上調整過的幣值。undefined = 採用政策建議值。 */
+  const [coinOverride, setCoinOverride] = useState<number | undefined>(undefined);
+
   /**
    * 預覽上要顯示的回饋決策。
    *
    * 和送出時走的是同一組函式（見 submitTaskDraft），所以畫面顯示的金額
    * 就是等一下真的會寫進資料庫的那個。各算一份才是兩邊說法不同的來源。
+   * coinOverride 一起傳進去，這樣家長調整過的金額才會反映在 finalAmount 上。
    */
   const previewDecision = useMemo(() => {
     if (!draft || !commandChild || !clientRequestId) return null;
@@ -581,8 +593,75 @@ export function TaskCreationDrawer({
       child: commandChild,
       taskPolicyVersion: TASK_POLICY_VERSION,
       clientRequestId,
+      coinOverride,
     });
-  }, [draft, activeFamily, activeVariant, commandChild, clientRequestId]);
+  }, [draft, activeFamily, activeVariant, commandChild, clientRequestId, coinOverride]);
+
+  /**
+   * 建議值或可調整範圍變了（家長改了時間、難度，或換了任務類型），
+   * 舊的手動調整就不再有意義 —— 清掉它，讓畫面回到新決策的建議值，
+   * 逼家長重新確認一次，而不是讓一個對不上新範圍的舊數字被默默 clamp 沿用。
+   *
+   * 用 suggestedAmount/min/max 當訊號、不是 finalAmount：前者只受政策輸入
+   * 影響，跟 coinOverride 本身無關，才不會變成「因為調整了它，所以又被重設」
+   * 的循環。
+   */
+  const coinRangeSignature =
+    previewDecision?.rewardPolicy === 'coin_eligible' && previewDecision.eligibility === 'allowed'
+      ? `${previewDecision.coin.suggestedAmount}:${previewDecision.coin.minAllowed}:${previewDecision.coin.maxAllowed}`
+      : null;
+  const coinRangeSignatureRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (coinRangeSignature !== coinRangeSignatureRef.current) {
+      coinRangeSignatureRef.current = coinRangeSignature;
+      setCoinOverride(undefined);
+      // 舊的 AI 建議也是針對上一份決策算的，範圍一變就一起清掉，
+      // 不然家長會看到一個建議值落在新範圍外、卻還顯示著「採用」按鈕。
+      setCoinAiState({ kind: 'idle' });
+    }
+  }, [coinRangeSignature]);
+
+  /** 幣值卡的「AI 建議」狀態。見 DraftReview.tsx 的 CoinAiState。 */
+  const [coinAiState, setCoinAiState] = useState<CoinAiState>({ kind: 'idle' });
+
+  /**
+   * 跟 handleAiRequest（標題／描述那組建議）刻意不共用同一支——那組建立在
+   * task-ai-recommendation 的 review-state 機器上（draft 欄位、apply/keep/undo），
+   * 幣值不是草稿欄位，是 evaluateTaskReward 算出來的決策，套用只是設一個數字
+   * 到 coinOverride，用不到那整套機器，硬接上去反而要多繞好幾層。
+   */
+  const handleRequestCoinAi = useCallback(async () => {
+    if (
+      !draft
+      || !ageGroup
+      || !previewDecision
+      || previewDecision.rewardPolicy !== 'coin_eligible'
+      || previewDecision.eligibility !== 'allowed'
+    ) {
+      return;
+    }
+    const coin = previewDecision.coin;
+    setCoinAiState({ kind: 'loading' });
+    const result = await suggestTaskRewardAmount({
+      taskTitle: draft.title,
+      ageGroupLabel: AGE_GROUP_LABEL[ageGroup] ?? ageGroup,
+      categoryLabel: BROWSE_LABEL[draft.purposeCategory],
+      ...(coin.calculationBasis.estimatedMinutes !== undefined
+        ? { estimatedMinutes: coin.calculationBasis.estimatedMinutes }
+        : null),
+      ...(coin.calculationBasis.difficulty !== undefined
+        ? { difficultyLabel: DIFFICULTY_LABEL[coin.calculationBasis.difficulty] }
+        : null),
+      suggestedAmount: coin.suggestedAmount,
+      minAllowed: coin.minAllowed,
+      maxAllowed: coin.maxAllowed,
+    });
+    setCoinAiState(
+      result.status === 'ok'
+        ? { kind: 'suggested', amount: result.amount, reason: result.reason }
+        : { kind: 'unavailable' },
+    );
+  }, [draft, ageGroup, previewDecision]);
 
   // ── AI 建議：輸入、資格與指紋 ────────────────────────────────────────
 
@@ -987,6 +1066,7 @@ export function TaskCreationDrawer({
         // 重試沿用同一個識別碼 —— 這是整套 idempotency 的重點。
         clientRequestId,
         service: taskCreationService,
+        coinOverride,
       });
 
       if (outcome.ok) {
@@ -1017,7 +1097,7 @@ export function TaskCreationDrawer({
       submitLockRef.current = false;
     }
   }, [
-    activeFamily, activeVariant, clientRequestId, commandChild, draft,
+    activeFamily, activeVariant, clientRequestId, coinOverride, commandChild, draft,
     runRefresh, taskCreationService,
   ]);
 
@@ -1635,6 +1715,12 @@ export function TaskCreationDrawer({
                   draft={draft}
                   decision={previewDecision}
                   ruleFindings={ruleFindings}
+                  onCoinOverrideChange={setCoinOverride}
+                  coinAi={{
+                    state: coinAiState,
+                    onRequest: () => void handleRequestCoinAi(),
+                    onAdopt: setCoinOverride,
+                  }}
                   {...(taskAiClient
                     ? {
                         ai: {

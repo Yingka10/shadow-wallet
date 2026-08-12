@@ -41,7 +41,19 @@ export type EvaluateTaskRewardInput = {
   /** 難度列舉。目前抽屜沒有輸入來源，留給之後的家長選擇或協商流程。 */
   difficulty?: CoinDifficulty;
   policy?: TaskRewardPolicySource;
+  /**
+   * 家長在建議範圍內手動調整過的金額。undefined = 採用政策建議值。
+   *
+   * 一律 clamp 到 [minAllowed, maxAllowed]，不信任呼叫端已經擋過範圍 ——
+   * 這裡算出的 finalAmount 會直接寫進資料庫，前端擋不住的值不能靠前端擋。
+   */
+  coinOverride?: number;
 };
+
+/** 家長調整的金額 clamp 到政策範圍內，並收成整數。 */
+function clampCoinOverride(value: number, minAllowed: number, maxAllowed: number): number {
+  return Math.min(Math.max(Math.round(value), minAllowed), maxAllowed);
+}
 
 /** A/B 不發幣（rewardEligibility 第一步的硬規則），C/D 才進得了幣值計算。 */
 const COIN_CATEGORY_BY_PURPOSE: Record<PurposeCategory, CoinCategory | null> = {
@@ -84,7 +96,7 @@ function basisOf(
  *   blocked        —— 一定有原因碼，呼叫端不得自行降級成別的政策
  */
 export function evaluateTaskReward(input: EvaluateTaskRewardInput): TaskRewardDecision {
-  const { command, childAgeGroup, difficulty } = input;
+  const { command, childAgeGroup, difficulty, coinOverride } = input;
   const policy = input.policy ?? DEFAULT_COIN_POLICY_SOURCE;
   const rewardPolicy = command.task.rewardPolicy;
 
@@ -186,15 +198,14 @@ export function evaluateTaskReward(input: EvaluateTaskRewardInput): TaskRewardDe
         };
       }
 
-      const finalAmount = pricing.suggestedAmount;
-
       // 政策自己算出來的東西仍然要檢查一次：這條線一旦鬆掉，
-      // 就會出現 0 幣或超出範圍的 coin_eligible 任務。
+      // 就會出現 0 幣或超出範圍的 coin_eligible 任務。這裡只檢查政策的建議值，
+      // 跟家長有沒有調整無關 —— coinOverride 一定會被 clamp，不可能落到範圍外。
       if (
-        !Number.isInteger(finalAmount)
-        || finalAmount <= 0
-        || finalAmount < pricing.minAllowed
-        || finalAmount > pricing.maxAllowed
+        !Number.isInteger(pricing.suggestedAmount)
+        || pricing.suggestedAmount <= 0
+        || pricing.suggestedAmount < pricing.minAllowed
+        || pricing.suggestedAmount > pricing.maxAllowed
       ) {
         return {
           rewardPolicy,
@@ -202,9 +213,13 @@ export function evaluateTaskReward(input: EvaluateTaskRewardInput): TaskRewardDe
           coin: null,
           rewardPolicyVersion: byCoinPolicy,
           code: 'COIN_POLICY_UNAVAILABLE',
-          explanation: `政策算出的幣值 ${finalAmount} 不在允許範圍 ${pricing.minAllowed}–${pricing.maxAllowed} 內。`,
+          explanation: `政策算出的幣值 ${pricing.suggestedAmount} 不在允許範圍 ${pricing.minAllowed}–${pricing.maxAllowed} 內。`,
         };
       }
+
+      const finalAmount = coinOverride === undefined
+        ? pricing.suggestedAmount
+        : clampCoinOverride(coinOverride, pricing.minAllowed, pricing.maxAllowed);
 
       const difficultyNote = pricing.difficultySpecified
         ? `難度 ${pricing.difficulty}`

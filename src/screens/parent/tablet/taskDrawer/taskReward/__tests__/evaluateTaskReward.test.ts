@@ -218,6 +218,72 @@ describe('可獲得成長幣', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 7b. 家長調整幣值（coinOverride）
+// ---------------------------------------------------------------------------
+
+describe('家長調整幣值', () => {
+  it('沒有帶 coinOverride 時，finalAmount 等於建議值（既有行為不變）', () => {
+    const decision = evaluate(commandFor('learn-reading', 'learn-reading-recurring'));
+    if (decision.eligibility !== 'allowed' || decision.coin === null) throw new Error('unreachable');
+    expect(decision.coin.finalAmount).toBe(decision.coin.suggestedAmount);
+  });
+
+  it('範圍內的 coinOverride 直接採用，不會被改成建議值', () => {
+    const command = commandFor('learn-reading', 'learn-reading-recurring');
+    const base = evaluateTaskReward({ command, childAgeGroup: '6-9' });
+    if (base.eligibility !== 'allowed' || base.coin === null) throw new Error('unreachable');
+    const { minAllowed, maxAllowed, suggestedAmount } = base.coin;
+    // 挑一個落在範圍內、但跟建議值不同的數字，才測得到「真的採用了 override」。
+    const target = suggestedAmount === minAllowed ? maxAllowed : minAllowed;
+
+    const decision = evaluateTaskReward({ command, childAgeGroup: '6-9', coinOverride: target });
+    if (decision.eligibility !== 'allowed' || decision.coin === null) throw new Error('unreachable');
+    expect(decision.coin.finalAmount).toBe(target);
+    expect(decision.coin.suggestedAmount).toBe(suggestedAmount);
+  });
+
+  it('超出上限的 coinOverride 會被 clamp 到 maxAllowed，不會整筆被擋下', () => {
+    const command = commandFor('learn-reading', 'learn-reading-recurring');
+    const base = evaluateTaskReward({ command, childAgeGroup: '6-9' });
+    if (base.eligibility !== 'allowed' || base.coin === null) throw new Error('unreachable');
+
+    const decision = evaluateTaskReward({
+      command, childAgeGroup: '6-9', coinOverride: base.coin.maxAllowed + 999,
+    });
+    if (decision.eligibility !== 'allowed' || decision.coin === null) throw new Error('unreachable');
+    expect(decision.coin.finalAmount).toBe(base.coin.maxAllowed);
+  });
+
+  it('低於下限的 coinOverride 會被 clamp 到 minAllowed', () => {
+    const command = commandFor('learn-reading', 'learn-reading-recurring');
+    const base = evaluateTaskReward({ command, childAgeGroup: '6-9' });
+    if (base.eligibility !== 'allowed' || base.coin === null) throw new Error('unreachable');
+
+    const decision = evaluateTaskReward({ command, childAgeGroup: '6-9', coinOverride: 0 });
+    if (decision.eligibility !== 'allowed' || decision.coin === null) throw new Error('unreachable');
+    expect(decision.coin.finalAmount).toBe(base.coin.minAllowed);
+  });
+
+  it('非整數的 coinOverride 會被四捨五入', () => {
+    const command = commandFor('learn-reading', 'learn-reading-recurring');
+    const base = evaluateTaskReward({ command, childAgeGroup: '6-9' });
+    if (base.eligibility !== 'allowed' || base.coin === null) throw new Error('unreachable');
+    const target = base.coin.minAllowed + 0.6;
+
+    const decision = evaluateTaskReward({ command, childAgeGroup: '6-9', coinOverride: target });
+    if (decision.eligibility !== 'allowed' || decision.coin === null) throw new Error('unreachable');
+    expect(decision.coin.finalAmount).toBe(Math.round(target));
+  });
+
+  it('不發幣的政策不受 coinOverride 影響，coin 仍然是 null', () => {
+    const decision = evaluateTaskReward({
+      command: commandFor('fam-set-table'), childAgeGroup: '6-9', coinOverride: 999,
+    });
+    expect(decision.coin).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 8-10. 政策算不出來的時候
 // ---------------------------------------------------------------------------
 

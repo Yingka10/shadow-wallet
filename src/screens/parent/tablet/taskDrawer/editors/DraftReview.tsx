@@ -6,8 +6,8 @@
 // 「回饋方式：可獲得成長幣」只說了政策名稱，沒說會拿到幾枚 ——
 // 家長在按下建立之前看不到金額，等於在確認一份自己沒看過的內容。
 
-import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   ParentColors,
   ParentFonts,
@@ -55,12 +55,18 @@ import { useShowsImplementationNotes } from '../displayMode';
 import { AGE_GROUP_LABEL, BROWSE_LABEL } from '../taskCatalog';
 import type {
   TaskRewardCalculationBasis,
+  TaskRewardCoin,
   TaskRewardDecision,
 } from '../taskReward/types';
 import { CUSTOM_TASK_BADGE, CUSTOM_TASK_ICON_KEY } from '../customTask/customTaskCopy';
 import { completionPolicyForEditor, editorFormLabel } from '../customTask/customTaskRouting';
 import { LocalOnlyNotice, PolicyNotice, ReadOnlyOutcomeList } from './EditorControls';
-import { RuleFindingsSection, TaskAiSection, type TaskAiSectionProps } from './TaskAiSection';
+import {
+  RequestButton,
+  RuleFindingsSection,
+  TaskAiSection,
+  type TaskAiSectionProps,
+} from './TaskAiSection';
 import type { TaskRuleFinding } from '../taskAi';
 
 function weekdayText(days: number[]): string {
@@ -154,7 +160,7 @@ function demoExplanation(basis: TaskRewardCalculationBasis): string {
     : '依孩子的年齡與任務類型估算。';
 }
 
-const DIFFICULTY_LABEL: Record<string, string> = {
+export const DIFFICULTY_LABEL: Record<string, string> = {
   easy: '較輕鬆',
   standard: '一般',
   hard: '較挑戰',
@@ -207,7 +213,139 @@ function CalculationBasis({ decision }: { decision: TaskRewardDecision }) {
   );
 }
 
-export function RewardDecisionBlock({ decision }: { decision: TaskRewardDecision }) {
+/**
+ * 幣值調整欄位。
+ *
+ * 只在打字過程中即時送出「已經在範圍內」的值 —— 提早 clamp 的話，
+ * 家長打「15」的第一個字「1」會先被拉高成 minAllowed，「5」接上去就變成
+ * 「51」而不是「15」。真正的收斂（空字串、超出範圍）留到 onBlur 才做，
+ * 這時候家長已經打完了，收斂不會打斷輸入。
+ */
+function CoinAmountEditor({
+  coin,
+  onChange,
+}: {
+  coin: TaskRewardCoin;
+  onChange: (value: number) => void;
+}) {
+  const [text, setText] = useState(String(coin.finalAmount));
+
+  // 外部值變了（家長改了時間、難度，決策跟著重算）就跟著同步 ——
+  // 不然畫面上打著的數字會跟真正會送出的 finalAmount 對不上。
+  useEffect(() => {
+    setText(String(coin.finalAmount));
+  }, [coin.finalAmount]);
+
+  return (
+    <View style={s.rewardAmountRow}>
+      <TextInput
+        style={s.rewardAmountInput}
+        value={text}
+        onChangeText={next => {
+          const digitsOnly = next.replace(/[^0-9]/g, '');
+          setText(digitsOnly);
+          if (digitsOnly === '') return;
+          const parsed = Number.parseInt(digitsOnly, 10);
+          if (parsed >= coin.minAllowed && parsed <= coin.maxAllowed) {
+            onChange(parsed);
+          }
+        }}
+        onBlur={() => {
+          if (text === '') {
+            setText(String(coin.finalAmount));
+            return;
+          }
+          const parsed = Number.parseInt(text, 10);
+          const clamped = Math.min(Math.max(parsed, coin.minAllowed), coin.maxAllowed);
+          setText(String(clamped));
+          onChange(clamped);
+        }}
+        keyboardType="number-pad"
+        accessibilityLabel="調整成長幣金額"
+      />
+      <Text style={s.rewardAmountUnit}>枚</Text>
+    </View>
+  );
+}
+
+/**
+ * 幣值卡的「AI 建議」狀態。
+ *
+ * 只有這四種，跟 TaskAiReviewState 同一套精神：家長只需要知道「還沒問」、
+ * 「問完了給了什麼」、「暫時要不到」。沒有 rate_limited／auth_required 這種
+ * 細分——這顆按鈕呼叫的是同一個 ai-proxy，量體比 task-ai-recommendation
+ * 小很多，不值得再蓋一整組錯誤分類。
+ */
+export type CoinAiState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'suggested'; amount: number; reason: string }
+  | { kind: 'unavailable' };
+
+export type CoinAiProps = {
+  state: CoinAiState;
+  onRequest: () => void;
+  /** 採用 AI 建議的金額——直接寫進 coinOverride，跟家長自己打數字走同一條路。 */
+  onAdopt: (amount: number) => void;
+};
+
+function CoinAiSuggestion({ coinAi }: { coinAi: CoinAiProps }) {
+  switch (coinAi.state.kind) {
+    case 'idle':
+      return <RequestButton label="AI 建議這個幣值" variant="secondary" onPress={coinAi.onRequest} />;
+
+    case 'loading':
+      return (
+        <>
+          <Text style={s.rewardRangeHint}>AI 思考中…</Text>
+          <RequestButton label="AI 建議這個幣值" variant="secondary" disabled onPress={coinAi.onRequest} />
+        </>
+      );
+
+    case 'suggested': {
+      const amount = coinAi.state.amount;
+      return (
+        <View style={s.coinAiCard}>
+          <Text style={s.coinAiAmount}>AI 建議 {amount} 枚</Text>
+          <Text style={s.coinAiReason}>{coinAi.state.reason}</Text>
+          <View style={s.coinAiActions}>
+            <Pressable
+              style={s.coinAiAdopt}
+              onPress={() => coinAi.onAdopt(amount)}
+              accessibilityRole="button"
+            >
+              <Text style={s.coinAiAdoptText}>採用這個建議</Text>
+            </Pressable>
+            <RequestButton label="重新建議" variant="secondary" onPress={coinAi.onRequest} />
+          </View>
+        </View>
+      );
+    }
+
+    case 'unavailable':
+      return (
+        <>
+          <Text style={s.rewardRangeHint}>AI 建議暫時無法使用，不影響任務建立。</Text>
+          <RequestButton label="再試一次" variant="secondary" onPress={coinAi.onRequest} />
+        </>
+      );
+  }
+}
+
+export function RewardDecisionBlock({
+  decision,
+  onCoinOverrideChange,
+  coinAi,
+}: {
+  decision: TaskRewardDecision;
+  /**
+   * 家長調整幣值。省略 = 唯讀顯示（沿用原本的靜態卡片，例如其他地方單純
+   * 拿決策來做摘要展示的場合）。傳了才會出現可編輯欄位與可調整範圍提示。
+   */
+  onCoinOverrideChange?: (value: number | undefined) => void;
+  /** 省略 = 不顯示「AI 建議」按鈕（例如唯讀模式，或尚未注入 AI 服務）。 */
+  coinAi?: CoinAiProps;
+}) {
   const showsImplementationNotes = useShowsImplementationNotes();
 
   // 正常流程走不到這裡（能力閘門讓家長根本選不到用不了的政策）。
@@ -224,19 +362,41 @@ export function RewardDecisionBlock({ decision }: { decision: TaskRewardDecision
   }
 
   if (decision.rewardPolicy === 'coin_eligible') {
+    const editable = !!onCoinOverrideChange;
+    const adjusted = decision.coin.finalAmount !== decision.coin.suggestedAmount;
     return (
       <View style={s.rewardCard}>
         <Text style={s.rewardTitle}>{REWARD_POLICY_SHORT_LABEL.coin_eligible}</Text>
-        <View style={s.rewardAmountRow}>
-          <Text style={s.rewardAmount}>{decision.coin.finalAmount}</Text>
-          <Text style={s.rewardAmountUnit}>枚</Text>
-        </View>
+        {editable ? (
+          <CoinAmountEditor coin={decision.coin} onChange={onCoinOverrideChange} />
+        ) : (
+          <View style={s.rewardAmountRow}>
+            <Text style={s.rewardAmount}>{decision.coin.finalAmount}</Text>
+            <Text style={s.rewardAmountUnit}>枚</Text>
+          </View>
+        )}
         {/*
-          demo 只有這一句。可調整範圍、時間分級、難度、政策版本都收進
-          development 的「查看估算依據」——在沒有幣值調整 UI 之前，
-          把範圍寫在正式畫面上，家長會去找一個不存在的滑桿。
+          唯讀模式只有這一句：時間分級、難度、政策版本都收進 development 的
+          「查看估算依據」。可編輯模式多印「可調整範圍」——這是欄位本身的
+          使用說明，不是實作細節，兩種模式都該看得到。
         */}
         <Text style={s.rewardBody}>{demoExplanation(decision.coin.calculationBasis)}</Text>
+        {editable ? (
+          <Text style={s.rewardRangeHint}>
+            可調整範圍 {decision.coin.minAllowed}–{decision.coin.maxAllowed} 枚
+          </Text>
+        ) : null}
+        {editable && adjusted ? (
+          <Pressable
+            onPress={() => onCoinOverrideChange?.(undefined)}
+            accessibilityRole="button"
+          >
+            <Text style={s.rewardResetLink}>
+              重設為建議值（{decision.coin.suggestedAmount} 枚）
+            </Text>
+          </Pressable>
+        ) : null}
+        {editable && coinAi ? <CoinAiSuggestion coinAi={coinAi} /> : null}
         {showsImplementationNotes ? <CalculationBasis decision={decision} /> : null}
       </View>
     );
@@ -262,6 +422,8 @@ export function DraftReview({
   decision,
   ruleFindings = [],
   ai,
+  onCoinOverrideChange,
+  coinAi,
 }: {
   /**
    * preset 的家族與版本。**自訂任務兩者都是 undefined。**
@@ -283,6 +445,10 @@ export function DraftReview({
   ruleFindings?: readonly TaskRuleFinding[];
   /** 省略 = 不顯示 AI 區塊（例如尚未注入服務）。 */
   ai?: TaskAiSectionProps;
+  /** 省略 = 幣值卡唯讀（見 RewardDecisionBlock）。 */
+  onCoinOverrideChange?: (value: number | undefined) => void;
+  /** 省略 = 幣值卡不出現「AI 建議」。 */
+  coinAi?: CoinAiProps;
 }) {
   const growth = isGrowthPlanDraft(draft) ? draft : null;
   const support = isShortSupportDraft(draft) ? draft : null;
@@ -464,7 +630,13 @@ export function DraftReview({
       <RuleFindingsSection findings={ruleFindings} />
       {ai ? <TaskAiSection {...ai} /> : null}
 
-      {decision ? <RewardDecisionBlock decision={decision} /> : null}
+      {decision ? (
+        <RewardDecisionBlock
+          decision={decision}
+          onCoinOverrideChange={onCoinOverrideChange}
+          coinAi={coinAi}
+        />
+      ) : null}
 
       <Block title="回饋與結束">
         <Row
@@ -650,6 +822,65 @@ const s = StyleSheet.create({
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.pMeta,
     color: ParentColors.fgSecondary,
+  },
+  rewardAmountInput: {
+    width: 46,
+    textAlign: 'center',
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.h2,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgPrimary,
+    lineHeight: 34,
+    paddingVertical: 2,
+    paddingHorizontal: ParentSpacing[1],
+    borderWidth: 1,
+    borderColor: ParentColors.pine300,
+    borderRadius: ParentRadii.md,
+    backgroundColor: ParentColors.bgSurface,
+  },
+  rewardRangeHint: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgMuted,
+  },
+  rewardResetLink: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.pine500,
+  },
+  coinAiCard: {
+    gap: ParentSpacing[1],
+    paddingTop: ParentSpacing[1],
+  },
+  coinAiAmount: {
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.pMeta,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.pine500,
+  },
+  coinAiReason: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    color: ParentColors.fgSecondary,
+  },
+  coinAiActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ParentSpacing[2],
+    paddingTop: ParentSpacing[1],
+  },
+  coinAiAdopt: {
+    paddingHorizontal: ParentSpacing[3],
+    paddingVertical: ParentSpacing[1],
+    borderRadius: ParentRadii.pill,
+    backgroundColor: ParentColors.pine500,
+  },
+  coinAiAdoptText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.onSidebar,
   },
   rewardBody: {
     fontFamily: ParentFonts.body,

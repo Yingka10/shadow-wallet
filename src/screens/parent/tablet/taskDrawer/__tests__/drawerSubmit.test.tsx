@@ -418,11 +418,12 @@ describe('預覽顯示的回饋決策', () => {
     expect(r.getByText('枚')).toBeTruthy();
   });
 
-  it('demo 的幣值卡不出現範圍與版本號', () => {
-    // 在沒有家長幣值調整 UI 之前，「政策允許範圍 5–25」只會讓家長
-    // 去找一個不存在的滑桿；版本號則是稽核資訊，不是家長要判斷的東西。
+  it('demo 的幣值卡可調整範圍看得到，但不出現版本號等實作細節', () => {
+    // 幣值調整 UI 上線後，「可調整範圍」是這顆輸入框的使用說明，家長需要它
+    // 才知道能改到多少 —— 不再是只服務開發者的實作細節。版本號、時間分級、
+    // 難度列舉這些稽核資訊仍然收在 development 模式的「查看估算依據」。
     const { r } = openReadingReview();
-    expect(r.queryByText(/政策允許範圍|可調整範圍/)).toBeNull();
+    expect(r.queryByText(/可調整範圍/)).toBeTruthy();
     expect(r.queryByText(/coin-policy-/)).toBeNull();
     expect(r.queryByText(/D\s*類|時間分級|standard/)).toBeNull();
   });
