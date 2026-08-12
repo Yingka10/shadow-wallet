@@ -197,6 +197,8 @@ export type ChildProposalProgressModel = 'weekly_rhythm';
 export type ChildProposalTrialOutcome = 'tried' | 'completed' | 'skipped';
 
 export type ChildProposalAdjustmentKind =
+  // P0-8M 開的唯一一條：進行中的共同計畫換閱讀時段。
+  | 'preferred_time'
   | 'cadence'
   | 'scope'
   | 'support'
@@ -372,6 +374,11 @@ export type ChildProposalAdjustmentRequest = {
   requested_by: ChildProposalActorRole;
   requester_user_id: string | null;
   based_on_plan_version_id: string | null;
+  /**
+   * 同一次送出的識別碼（P0-8M）。重送同一個 id 回原本那筆，不新增。
+   * 舊資料是 NULL —— 這個欄位是 20260817 才加的。
+   */
+  client_request_id: string | null;
   adjustment_kind: ChildProposalAdjustmentKind;
   reason: string;
   requested_changes: unknown | null;
@@ -469,7 +476,9 @@ export type RecordTrialSuccess = {
 export type CreateAdjustmentRequestSuccess = {
   ok: true;
   adjustmentRequestId: string;
-  status: 'open';
+  /** replay 會回原本那筆，所以狀態不一定還是 open。 */
+  status: ChildProposalAdjustmentStatus;
+  idempotentReplay: boolean;
 };
 
 export type CreateChildProposalResult = CreateChildProposalSuccess | ChildProposalFailure;
@@ -701,11 +710,85 @@ export type RecordChildProposalTrialCommand = {
   note?: string;
 };
 
+/**
+ * P0-8M：孩子對進行中的共同計畫提出換時段。
+ *
+ * `requestedChanges` 刻意不是 `unknown` —— RPC 只收這兩個鍵，型別在這裡就把
+ * 形狀定死，免得畫面送出一份 RPC 一定會拒絕的 JSON 才發現。
+ *
+ * `clientRequestId` 是同一次送出的識別碼。重送同一個 id 回原本那筆，不新增；
+ * 沒有它就只能靠「JSON 看起來一樣」猜是不是重試，而那會猜錯。
+ */
+export type ChildProposalPreferredTimeChanges = {
+  preferredTime: ChildProposalReadingTimeWindow;
+  preferredTimeCustom?: null;
+};
+
+/** long_term_goals.preferred_time_window 的 CHECK 只允許這兩個值。 */
+export type ChildProposalReadingTimeWindow = 'after_dinner' | 'before_bed';
+
 export type CreateChildProposalAdjustmentRequestCommand = {
   schemaVersion: typeof CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION;
   proposalId: string;
-  requestedBy?: ChildProposalActorRole;
-  adjustmentKind: ChildProposalAdjustmentKind;
+  expectedPlanVersionId: string;
+  adjustmentKind: 'preferred_time';
   reason: string;
-  requestedChanges?: unknown;
+  requestedChanges: ChildProposalPreferredTimeChanges;
+  clientRequestId?: string;
+};
+
+export type AcceptChildProposalAdjustmentCommand = {
+  schemaVersion: typeof CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION;
+  adjustmentRequestId: string;
+  expectedPlanVersionId: string;
+};
+
+export type DeclineChildProposalAdjustmentCommand = {
+  schemaVersion: typeof CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION;
+  adjustmentRequestId: string;
+  resolutionNote?: string;
+};
+
+export type AcceptAdjustmentSuccess = {
+  ok: true;
+  adjustmentRequestId: string;
+  proposalId: string;
+  planVersionId: string;
+  taskId: string;
+  idempotentReplay: boolean;
+};
+
+export type AcceptAdjustmentResult = AcceptAdjustmentSuccess | ChildProposalFailure;
+
+export type DeclineAdjustmentSuccess = {
+  ok: true;
+  adjustmentRequestId: string;
+  status: 'declined';
+  idempotentReplay: boolean;
+};
+
+export type DeclineAdjustmentResult = DeclineAdjustmentSuccess | ChildProposalFailure;
+
+/** 家長首頁那張「承恩想調整閱讀計畫」的卡需要的全部資料。 */
+export type ChildProposalAdjustmentCardData = {
+  request: ChildProposalAdjustmentRequest;
+  proposal: ChildProposal;
+  basedOnPlanVersion: ChildProposalPlanVersion;
+};
+
+/**
+ * 孩子端長期詳情要判斷「這是不是一份可以重新協商的共同計畫」所需的全部資料。
+ *
+ * 三個欄位都是必要的：沒有 proposal 就沒有協商對象；沒有 current version 就
+ * 不知道要 append 在哪一版之後（也就湊不出 expectedPlanVersionId）；
+ * 沒有 openRequest 的資訊，畫面就會讓孩子重複送出同一件事。
+ *
+ * 讀不到任何一項時整個回 null —— 半套的 context 會讓 UI 開始猜，
+ * 而猜錯的代價是把一般家長任務送進 Shared Plan 的協商 RPC。
+ */
+export type ChildSharedPlanContext = {
+  proposal: ChildProposal;
+  currentPlanVersion: ChildProposalPlanVersion;
+  /** 已經送出、家長還沒回應的換時段請求。沒有就是 null。 */
+  openPreferredTimeRequest: ChildProposalAdjustmentRequest | null;
 };

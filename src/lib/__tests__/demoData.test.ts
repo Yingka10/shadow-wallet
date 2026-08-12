@@ -528,9 +528,27 @@ describe('P0-10B. 行事曆可行性', () => {
     expect(feasibleAt).toBeLessThan(resetAt);
   });
 
-  it('日期推導只用「本週一」與「今天」，兩者都不可能是未來', () => {
+  it('日期推導只用「本週一」與「本週二」，兩者都不可能是未來', () => {
     expect(DEMO_STORY).toContain("date_trunc('week', p_ref::timestamp)::date");
     expect(DEMO_STORY).toMatch(/'feasible',\s*p_ref > m/);
+    expect(DEMO_STORY).toMatch(/'first_day',\s*m,/);
+    expect(DEMO_STORY).toMatch(/'second_day',\s*m \+ 1,/);
+  });
+
+  /*
+    d2 曾經是「今天」，而那讓 P0-8M 的 Demo 橋段永遠演不出來：孩子端「今天預計」
+    的第一順位是今天那筆 completion 的 planned_time_window，所以今天一有完成
+    紀錄，家長剛談定的新時段就會被壓在下面。
+
+    正確的處置是改 Demo 的編排（把 d2 固定成週二），**不是**改 production 的
+    precedence —— 今天實際發生的事本來就該優先於一份往後看的計畫。
+  */
+  it('第二筆完成不是「今天」，否則 P0-8M 的換時段畫面永遠被今天的紀錄蓋住', () => {
+    expect(DEMO_STORY).not.toMatch(/'second_day',\s*p_ref/);
+  });
+
+  it('明確標出 P0-8M 的錄影窗口：要今天沒有完成紀錄才看得到新時段', () => {
+    expect(DEMO_STORY).toMatch(/'p0_8m_capture_ready',\s*p_ref > m \+ 1/);
   });
 });
 

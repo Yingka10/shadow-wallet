@@ -40,6 +40,28 @@ export type AdjustmentDraft =
   | 'pause'
   | 'discuss';
 
+/**
+ * 共同計畫的換時段通道（P0-8M）。
+ *
+ * 只有在畫面確定「這是一份進行中的共同閱讀計畫」時才會傳進來。傳 undefined
+ * 代表沒有這條通道 —— 一般家長建立的長期任務走的就是這條，回顧仍然只留草稿。
+ */
+export type SharedPlanTimeAdjustment = {
+  /** 目前雙方談定的時段。用來判斷孩子選的是不是真的不一樣。 */
+  currentPreferredTime: SharedPlanTimeWindow | null;
+  /** 已經送出、等家長確認。此時不能再送第二次。 */
+  pending: boolean;
+  submitting: boolean;
+  error: string | null;
+  submitted: boolean;
+  onSubmit: (preferredTime: SharedPlanTimeWindow) => Promise<boolean>;
+};
+
+type SharedPlanTimeWindow = PreferredTimeWindow;
+
+const PENDING_COPY = '已送給爸媽，等一起確認。';
+const SUBMITTED_COPY = '已經告訴爸媽了。一起確認後，計畫才會更新。';
+
 type OpenSheet = Exclude<LongTermSheet, null>;
 
 type Props = {
@@ -57,6 +79,7 @@ type Props = {
     timeWindow: PreferredTimeWindow,
   ) => void | Promise<void>;
   correctingTimeWindow?: boolean;
+  sharedPlanTimeAdjustment?: SharedPlanTimeAdjustment;
 };
 
 type IconName = 'close' | 'details' | 'adjust' | 'pause' | 'record';
@@ -567,22 +590,68 @@ function RecordSheet({
   );
 }
 
+/**
+ * 孩子選的時段值 —— 只有 after_dinner / before_bed 送得出去。
+ * 「都適合」「還不確定」是回顧用的答案，不是一個計畫可以寫進去的時段。
+ */
+function submittableWindow(
+  value: ReviewDraft['preferredWindow'],
+): PreferredTimeWindow | null {
+  return value === 'after_dinner' || value === 'before_bed' ? value : null;
+}
+
 function ReviewSheet({
   presentation,
   draft,
   onChange,
   onSave,
+  sharedPlan,
+  onDismiss,
 }: {
   presentation: GoalPresentation;
   draft: ReviewDraft;
   onChange: (draft: ReviewDraft) => void;
   onSave: () => void;
+  sharedPlan?: SharedPlanTimeAdjustment;
+  onDismiss: () => void;
 }) {
   const kind = presentation.goalKind;
   const isReadingPlan = kind === 'reading_habit';
   const nextOptions = isReadingPlan
     ? READING_REVIEW_NEXT_OPTIONS
     : GENERAL_REVIEW_NEXT_OPTIONS;
+
+  /*
+    什麼情況才真的送出去 —— 五個條件全部成立才行：
+
+      1. 這是共同計畫（sharedPlan 有值）
+      2. 這是閱讀計畫
+      3. 孩子選的下一步是「調整時間」
+      4. 選到的是可送出的時段值
+      5. 那個時段和目前談定的不一樣
+
+    少一個就退回原本的 local draft 行為。特別是 (1)：一般家長建立的長期任務
+    也有「調整時間」這個選項，但它沒有提案，不該進協商 RPC。
+  */
+  const chosenWindow = submittableWindow(draft.preferredWindow);
+  const wantsTimeChange = isReadingPlan && draft.nextStep === 'time';
+  const canSend = Boolean(sharedPlan)
+    && wantsTimeChange
+    && chosenWindow !== null
+    && !sharedPlan!.pending
+    && sharedPlan!.currentPreferredTime !== chosenWindow;
+
+  // 送出失敗時**不**動 draft —— 孩子剛做完回顧，清掉等於要他從頭再選一次。
+  const handleSend = () => { void sharedPlan?.onSubmit(chosenWindow!); };
+
+  if (sharedPlan?.submitted) {
+    return (
+      <View>
+        <Text style={styles.sheetIntro}>{SUBMITTED_COPY}</Text>
+        <PrimaryButton label="知道了" onPress={onDismiss} />
+      </View>
+    );
+  }
 
   return (
     <View>
@@ -632,12 +701,39 @@ function ReviewSheet({
         ))}
       </View>
 
-      <View style={styles.localNotice}>
-        <Text style={styles.localNoticeText}>
-          這份回答目前只保留在這個畫面，尚未送出給家長。
+      {sharedPlan?.pending ? (
+        <View style={styles.localNotice}>
+          <Text style={styles.localNoticeText}>{PENDING_COPY}</Text>
+        </View>
+      ) : (
+        <View style={styles.localNotice}>
+          <Text style={styles.localNoticeText}>
+            {canSend
+              ? '送出之後爸媽會看到，一起確認後計畫才會更新。'
+              : '這份回答目前只保留在這個畫面，尚未送出給家長。'}
+          </Text>
+        </View>
+      )}
+
+      {sharedPlan?.error ? (
+        <Text
+          accessibilityRole="alert"
+          accessibilityLiveRegion="polite"
+          style={styles.errorText}
+        >
+          {sharedPlan.error}
         </Text>
-      </View>
-      <PrimaryButton label="保留回顧草稿" onPress={onSave} />
+      ) : null}
+
+      {canSend ? (
+        <PrimaryButton
+          label="送給爸媽一起確認"
+          loading={sharedPlan?.submitting}
+          onPress={handleSend}
+        />
+      ) : (
+        <PrimaryButton label="保留回顧草稿" onPress={onSave} />
+      )}
     </View>
   );
 }
@@ -697,6 +793,7 @@ export default function LongTermGoalDetailSheets({
   onSaveAdjustmentDraft,
   onCorrectTimeWindow,
   correctingTimeWindow = false,
+  sharedPlanTimeAdjustment,
 }: Props) {
   const [localReviewDraft, setLocalReviewDraft] = useState(reviewDraft);
   const [localAdjustmentDraft, setLocalAdjustmentDraft] =
@@ -774,6 +871,8 @@ export default function LongTermGoalDetailSheets({
           draft={localReviewDraft}
           onChange={setLocalReviewDraft}
           onSave={handleSaveReview}
+          sharedPlan={sharedPlanTimeAdjustment}
+          onDismiss={onClose}
         />
       );
       break;

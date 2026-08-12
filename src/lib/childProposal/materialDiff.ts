@@ -40,12 +40,26 @@ export function formatPlanCadence(plan: ChildProposalPlanVersion): string {
   return '還沒決定';
 }
 
-export function formatPreferredTime(plan: ChildProposalPlanVersion): string {
-  if (plan.preferred_time === 'custom') {
-    return plan.preferred_time_custom?.trim() || '自訂時間';
+/**
+ * 單一時段值的中文說法。
+ *
+ * 抽出來是為了讓「調整請求裡要求的新時段」也走同一張對照表 —— 請求還沒被
+ * 接受時並不存在對應的 plan version，但家長看到的字必須和版本 diff 完全一致，
+ * 否則同一個 enum 會在同一個畫面上出現兩種說法。
+ */
+export function formatPreferredTimeValue(
+  preferredTime: string | null,
+  preferredTimeCustom: string | null,
+): string {
+  if (preferredTime === 'custom') {
+    return preferredTimeCustom?.trim() || '自訂時間';
   }
-  if (!plan.preferred_time) return '還沒決定';
-  return PREFERRED_TIME_LABELS[plan.preferred_time] ?? '自訂時間';
+  if (!preferredTime) return '還沒決定';
+  return PREFERRED_TIME_LABELS[preferredTime] ?? '自訂時間';
+}
+
+export function formatPreferredTime(plan: ChildProposalPlanVersion): string {
+  return formatPreferredTimeValue(plan.preferred_time, plan.preferred_time_custom);
 }
 
 function completion(plan: ChildProposalPlanVersion): string {

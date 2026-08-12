@@ -6,6 +6,8 @@ import type {
   ChildProposalTrialEvent,
   AcceptChildProposalResult,
   CloseChildProposalResult,
+  AcceptAdjustmentResult,
+  DeclineAdjustmentResult,
   ConfirmChildProposalResult,
   RequestChildProposalChangesResult,
   ReviseChildProposalResult,
@@ -1202,6 +1204,15 @@ export interface Database {
       close_child_proposal_unsuitable_v1: {
         Args: { p_command: object };
         Returns: CloseChildProposalResult;
+      };
+      // ── 進行中共同計畫的時段調整（P0-8M）──────────────────────────
+      accept_child_proposal_adjustment_v1: {
+        Args: { p_command: object };
+        Returns: AcceptAdjustmentResult;
+      };
+      decline_child_proposal_adjustment_v1: {
+        Args: { p_command: object };
+        Returns: DeclineAdjustmentResult;
       };
       // ── 孩子提案 / 版本契約（P0-1）────────────────────────────────
       //
