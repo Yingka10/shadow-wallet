@@ -4,8 +4,8 @@
  *
  * Supported `type` values:
  *   classifyTask | suggestTaskCoin | analyzeTask | suggestRewardCoin |
- *   screenRedemptionRequest | suggestCoinWithAI | advisorChat | wishClarify |
- *   childProposalPlanDraft
+ *   screenRedemptionRequest | suggestCoinWithAI | suggestTaskRewardAmount |
+ *   advisorChat | wishClarify | childProposalPlanDraft
  */
 
 import {
@@ -396,6 +396,52 @@ async function handleSuggestCoinWithAI(payload: { rewardName: string }) {
   return parseJson<{ coins: number; weeks: number; reason: string }>(raw);
 }
 
+/**
+ * handleSuggestTaskRewardAmount — 任務抽屜幣值卡的「AI 建議」。
+ *
+ * **AI 不決定範圍，只在範圍內微調。** minAllowed/maxAllowed/suggestedAmount
+ * 都是呼叫端已經用規則引擎（taskReward/coinPolicy.ts）算好的，這裡只是
+ * 請 Gemini 針對任務名稱給一個更貼切的數字與理由。回傳值一律 clamp 到
+ * 呼叫端給的範圍——即使 Gemini 回傳範圍外的數字，也不可能真的送到那麼遠：
+ * 家長按下「採用」之後還要再過一次 evaluateTaskReward 的 clamp（見
+ * src/screens/parent/tablet/taskDrawer/taskReward/evaluateTaskReward.ts），
+ * 這裡的 clamp 只是不要讓建議卡片本身顯示一個看起來荒謬的數字。
+ */
+async function handleSuggestTaskRewardAmount(payload: {
+  taskTitle: string;
+  ageGroupLabel: string;
+  categoryLabel: string;
+  estimatedMinutes?: number;
+  difficultyLabel?: string;
+  suggestedAmount: number;
+  minAllowed: number;
+  maxAllowed: number;
+}) {
+  const prompt = `你是一個兒童教養 App 的幣值顧問。這個 App 已經有一套規則引擎，
+根據孩子的年齡段、任務類型與預估時間算出了一個建議幣值與允許調整範圍，你的工作
+是在**這個範圍內**微調，並用一句話說明理由（例如這個任務名稱聽起來比一般同類型
+任務更費力、或其實很輕鬆）。
+
+任務名稱：${payload.taskTitle}
+孩子年齡段：${payload.ageGroupLabel}
+任務類型：${payload.categoryLabel}
+${payload.estimatedMinutes ? `每次預估時間：${payload.estimatedMinutes} 分鐘\n` : ''}${payload.difficultyLabel ? `難度：${payload.difficultyLabel}\n` : ''}
+規則引擎建議值：${payload.suggestedAmount} 枚
+允許調整範圍：${payload.minAllowed}–${payload.maxAllowed} 枚（你的答案一定要落在這個範圍內）
+
+如果規則引擎的建議值已經很合理，amount 可以直接等於建議值，reason 說明為什麼
+合理即可——不要為了顯得有在調整而硬改一個數字。reason 請在 40 字以內，用白話說明。
+只回傳 JSON：{"amount":數字,"reason":"說明"}`;
+
+  const raw = await callGemini(prompt, true);
+  const parsed = parseJson<{ amount: number; reason: string }>(raw);
+  const amount = Math.min(
+    payload.maxAllowed,
+    Math.max(payload.minAllowed, Math.round(parsed.amount)),
+  );
+  return { amount, reason: parsed.reason ?? '' };
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
@@ -436,6 +482,18 @@ Deno.serve(async (req) => {
         break;
       case 'suggestCoinWithAI':
         result = await handleSuggestCoinWithAI(payload as { rewardName: string });
+        break;
+      case 'suggestTaskRewardAmount':
+        result = await handleSuggestTaskRewardAmount(payload as {
+          taskTitle: string;
+          ageGroupLabel: string;
+          categoryLabel: string;
+          estimatedMinutes?: number;
+          difficultyLabel?: string;
+          suggestedAmount: number;
+          minAllowed: number;
+          maxAllowed: number;
+        });
         break;
       case 'advisorChat':
         result = await handleAdvisorChat(payload as {

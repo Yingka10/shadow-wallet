@@ -62,6 +62,7 @@ import {
   ParentSpacing,
 } from '../../../../constants/parentTheme';
 import { calcAgeGroup } from '../../../../lib/onboarding';
+import { suggestTaskRewardAmount } from '../../../../lib/aiAgent';
 import { TaskPresetCard } from './TaskPresetCard';
 import { escapeActionFor, panelWidthFor, scrimColorFor } from './drawerChrome';
 import {
@@ -72,6 +73,7 @@ import {
 import {
   AGE_GROUP_LABEL,
   BROWSE_FILTERS,
+  BROWSE_LABEL,
   defaultVariantOf,
   selectPresetFamilies,
   variantFormLabel,
@@ -103,7 +105,13 @@ import {
   type CreateParentTaskFailureCode,
   type ParentTaskCreationService,
 } from './taskPersistence';
-import { CreatedTaskSummary, DraftReview, TaskDraftEditor } from './editors';
+import {
+  CreatedTaskSummary,
+  DIFFICULTY_LABEL,
+  DraftReview,
+  TaskDraftEditor,
+  type CoinAiState,
+} from './editors';
 import {
   ChevronLeftIcon,
   CloseIcon,
@@ -607,8 +615,53 @@ export function TaskCreationDrawer({
     if (coinRangeSignature !== coinRangeSignatureRef.current) {
       coinRangeSignatureRef.current = coinRangeSignature;
       setCoinOverride(undefined);
+      // 舊的 AI 建議也是針對上一份決策算的，範圍一變就一起清掉，
+      // 不然家長會看到一個建議值落在新範圍外、卻還顯示著「採用」按鈕。
+      setCoinAiState({ kind: 'idle' });
     }
   }, [coinRangeSignature]);
+
+  /** 幣值卡的「AI 建議」狀態。見 DraftReview.tsx 的 CoinAiState。 */
+  const [coinAiState, setCoinAiState] = useState<CoinAiState>({ kind: 'idle' });
+
+  /**
+   * 跟 handleAiRequest（標題／描述那組建議）刻意不共用同一支——那組建立在
+   * task-ai-recommendation 的 review-state 機器上（draft 欄位、apply/keep/undo），
+   * 幣值不是草稿欄位，是 evaluateTaskReward 算出來的決策，套用只是設一個數字
+   * 到 coinOverride，用不到那整套機器，硬接上去反而要多繞好幾層。
+   */
+  const handleRequestCoinAi = useCallback(async () => {
+    if (
+      !draft
+      || !ageGroup
+      || !previewDecision
+      || previewDecision.rewardPolicy !== 'coin_eligible'
+      || previewDecision.eligibility !== 'allowed'
+    ) {
+      return;
+    }
+    const coin = previewDecision.coin;
+    setCoinAiState({ kind: 'loading' });
+    const result = await suggestTaskRewardAmount({
+      taskTitle: draft.title,
+      ageGroupLabel: AGE_GROUP_LABEL[ageGroup] ?? ageGroup,
+      categoryLabel: BROWSE_LABEL[draft.purposeCategory],
+      ...(coin.calculationBasis.estimatedMinutes !== undefined
+        ? { estimatedMinutes: coin.calculationBasis.estimatedMinutes }
+        : null),
+      ...(coin.calculationBasis.difficulty !== undefined
+        ? { difficultyLabel: DIFFICULTY_LABEL[coin.calculationBasis.difficulty] }
+        : null),
+      suggestedAmount: coin.suggestedAmount,
+      minAllowed: coin.minAllowed,
+      maxAllowed: coin.maxAllowed,
+    });
+    setCoinAiState(
+      result.status === 'ok'
+        ? { kind: 'suggested', amount: result.amount, reason: result.reason }
+        : { kind: 'unavailable' },
+    );
+  }, [draft, ageGroup, previewDecision]);
 
   // ── AI 建議：輸入、資格與指紋 ────────────────────────────────────────
 
@@ -1663,6 +1716,11 @@ export function TaskCreationDrawer({
                   decision={previewDecision}
                   ruleFindings={ruleFindings}
                   onCoinOverrideChange={setCoinOverride}
+                  coinAi={{
+                    state: coinAiState,
+                    onRequest: () => void handleRequestCoinAi(),
+                    onAdopt: setCoinOverride,
+                  }}
                   {...(taskAiClient
                     ? {
                         ai: {

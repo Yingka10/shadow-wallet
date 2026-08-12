@@ -286,7 +286,8 @@ function AiBody({
   }
 }
 
-function RequestButton({
+/** 匯出給幣值卡的「AI 建議」按鈕共用——同一套視覺語言，不要各自長一份。 */
+export function RequestButton({
   label,
   disabled,
   variant = 'primary',
