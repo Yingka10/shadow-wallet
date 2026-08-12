@@ -15,10 +15,17 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 const MIGRATIONS = join(__dirname, '..', '..', '..', 'supabase', 'migrations');
+/*
+  行尾一律正規化成 \n。
+
+  Windows 上 git 會依 autocrlf 把這支檔案 checkout 成 CRLF，而下面有幾條
+  斷言比對的是跨行的字串片段 —— 不正規化的話，測試會隨「這份 working copy
+  是怎麼被 checkout 出來的」而時綠時紅，跟 SQL 內容無關。
+*/
 const SQL = readFileSync(
   join(MIGRATIONS, '20260817000000_shared_plan_preferred_time_adjustment.sql'),
   'utf8',
-);
+).replace(/\r\n/g, '\n');
 
 /** 去掉註解，只留真正會被執行的 SQL。註解裡提到某個字不算數。 */
 const CODE = SQL.split('\n').filter(line => !line.trim().startsWith('--')).join('\n');

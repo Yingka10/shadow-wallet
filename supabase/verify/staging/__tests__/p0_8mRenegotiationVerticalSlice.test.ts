@@ -45,7 +45,9 @@ const service = new SupabaseChildProposalService();
  * resolvePreferredWindow）。這裡照抄同一條規則來驗 §8 的 fallback ——
  * 它的三個輸入全部來自 live DB。
  */
-function readingWindowFromTask(value: string | null): PreferredTimeWindow | null {
+function readingWindowFromTask(
+  value: string | null | undefined,
+): PreferredTimeWindow | null {
   return value === 'after_dinner' || value === 'before_bed' ? value : null;
 }
 function resolvePreferredWindow(
@@ -136,7 +138,7 @@ async function snapshot(): Promise<Snapshot> {
   return {
     taskId: task!.id,
     goalId: goal!.id,
-    taskPreferredTime: task!.preferred_time,
+    taskPreferredTime: task!.preferred_time ?? null,
     goalWindow: goal!.preferred_time_window,
     versions: (versions ?? []) as Array<Record<string, unknown>>,
     currentVersionId: proposal!.current_plan_version_id,

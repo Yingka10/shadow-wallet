@@ -374,6 +374,11 @@ export type ChildProposalAdjustmentRequest = {
   requested_by: ChildProposalActorRole;
   requester_user_id: string | null;
   based_on_plan_version_id: string | null;
+  /**
+   * 同一次送出的識別碼（P0-8M）。重送同一個 id 回原本那筆，不新增。
+   * 舊資料是 NULL —— 這個欄位是 20260817 才加的。
+   */
+  client_request_id: string | null;
   adjustment_kind: ChildProposalAdjustmentKind;
   reason: string;
   requested_changes: unknown | null;
