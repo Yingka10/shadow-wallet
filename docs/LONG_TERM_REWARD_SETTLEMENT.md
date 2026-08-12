@@ -451,6 +451,29 @@ long_term + weekly_rhythm + per_period，走完 1/4 → 4/4 → 第 5 次 → �
 
 見 §8.2。機制已完成，定價沒有政策來源。
 
+### 9.4 快照的 payout basis 仍由 claim_period 推導 **[Phase 1 未完成項，rebase 時處理]**
+
+`transition_child_proposal_v1`（`20260810000000`）與 P0-8M 的重寫（`20260817000000`）
+仍然用 `child_proposal_payout_basis(v_task.claim_period)` 產生
+`confirmed_payout_basis`，**沒有改讀 `tasks.payout_basis`**。
+
+多數情況兩者一致（`weekly_frequency → claim_period='week' → per_period`），
+但有一個組合會不一致：
+
+| 任務 | `tasks.payout_basis` | 快照推導值 |
+|---|---|---|
+| `long_term` + `fixed_days` | `per_period` | `claim_period='day'` → **`per_completion`** ❌ |
+
+也就是「每週固定三天」的長期計畫，錢包會按 per_period 結算（正確），
+但共同版本快照會記成 per_completion（錯誤）。這正是本工單要消滅的那種不一致，
+只是換到了快照那一側 —— **錢不會發錯，但紀錄會說謊。**
+
+沒有在 Phase 1 一起改的原因：兩個呼叫點都在大型函式裡，而其中一個
+（`20260817000000`）還沒 merge 進 master。本工單 rebase 到最新 master 時，
+這兩處要一起改成 `COALESCE(v_task.payout_basis, child_proposal_payout_basis(v_task.claim_period))`
+（legacy 任務沒有 payout_basis，仍需 fallback），並在那時把
+`child_proposal_payout_basis` 標記為 deprecated。
+
 ---
 
 ## 10. 明確不在本輪範圍
