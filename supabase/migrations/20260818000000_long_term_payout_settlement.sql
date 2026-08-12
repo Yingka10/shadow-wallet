@@ -286,99 +286,44 @@ GRANT ALL    ON reward_settlements TO service_role;
 -- ═══════════════════════════════════════════════════════════════════════════
 -- 4. shared plan guard
 --
--- payout_basis / period_target_count 是共同約定的內容 → 進 material 清單。
--- payout_basis_effective_from 是 rollout metadata → **不進 material 清單**，
+-- payout_basis / period_target_count 是共同約定的內容 → material change。
+-- payout_basis_effective_from 是 rollout metadata → **不是** material change，
 -- 但一旦寫下就不可改（它是 double-pay 證明的前提，改掉等於推翻證明）。
+--
+-- ⚠️ 這裡刻意**不去 CREATE OR REPLACE guard_active_shared_plan_task_v1**。
+--
+--    那支函式是一份會被多個工作包同時修改的欄位清單：P0-8G（20260816）建立它，
+--    P0-8M（20260817）又把 preferred_time / preferred_time_custom 從清單裡拿掉
+--    ——因為換時段變成可以個別協商的欄位。任何人「forward-derive 一份再加自己的
+--    兩欄」，都會把當時還沒 merge 的那一版默默改回去。
+--    staging 上就已經套了 20260817，用衍生法會當場打壞 P0-8M 的換時段流程。
+--
+--    所以本工單只掛一支**只認自己三個欄位**的獨立 trigger。兩支 BEFORE trigger
+--    都會擋下違規的 UPDATE，誰先跑不影響結果；而清單的所有權留在原本那支函式，
+--    不會有兩份互相覆蓋的版本。
 -- ═══════════════════════════════════════════════════════════════════════════
 
-CREATE OR REPLACE FUNCTION public.guard_active_shared_plan_task_v1()
+CREATE OR REPLACE FUNCTION public.guard_payout_semantics_v1()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
-DECLARE
-  v_task_id uuid;
-  v_material_changed boolean := false;
 BEGIN
-  IF TG_OP = 'DELETE' THEN
-    v_task_id := OLD.id;
-  ELSE
-    v_task_id := NEW.id;
-  END IF;
-
-  -- rollout metadata 的不可變性與「是不是 active shared plan」無關，
-  -- 所以這一條在早退之前。它不是共同約定，但它是那份 double-pay 證明的前提。
-  IF TG_OP = 'UPDATE'
-    AND OLD.payout_basis_effective_from IS NOT NULL
+  -- rollout metadata 的不可變性與「是不是 active shared plan」無關。
+  IF OLD.payout_basis_effective_from IS NOT NULL
     AND NEW.payout_basis_effective_from IS DISTINCT FROM OLD.payout_basis_effective_from
   THEN
     RAISE EXCEPTION 'PAYOUT_ROLLOUT_IMMUTABLE' USING ERRCODE = 'P0001';
   END IF;
 
-  IF NOT public.is_active_shared_plan_task_v1(v_task_id) THEN
-    IF TG_OP = 'DELETE' THEN
-      RETURN OLD;
-    END IF;
+  IF NOT public.is_active_shared_plan_task_v1(NEW.id) THEN
     RETURN NEW;
   END IF;
 
-  IF TG_OP = 'DELETE' THEN
-    RAISE EXCEPTION 'SHARED_PLAN_REQUIRES_RENEGOTIATION'
-      USING ERRCODE = 'P0001';
-  END IF;
-
-  v_material_changed :=
-       NEW.name                         IS DISTINCT FROM OLD.name
-    OR NEW.category                     IS DISTINCT FROM OLD.category
-    OR NEW.day_type                     IS DISTINCT FROM OLD.day_type
-    OR NEW.long_term_type               IS DISTINCT FROM OLD.long_term_type
-    OR NEW.is_long_term                 IS DISTINCT FROM OLD.is_long_term
-    OR NEW.base_time_min                IS DISTINCT FROM OLD.base_time_min
-    OR NEW.difficulty                   IS DISTINCT FROM OLD.difficulty
-    OR NEW.coin_override                IS DISTINCT FROM OLD.coin_override
-    OR NEW.allow_repeat                 IS DISTINCT FROM OLD.allow_repeat
-    OR NEW.min_age                      IS DISTINCT FROM OLD.min_age
-    OR NEW.max_age                      IS DISTINCT FROM OLD.max_age
-    OR NEW.time_saving_min              IS DISTINCT FROM OLD.time_saving_min
-    OR NEW.recurrence_days              IS DISTINCT FROM OLD.recurrence_days
-    OR NEW.due_date                     IS DISTINCT FROM OLD.due_date
-    OR NEW.duration_type                IS DISTINCT FROM OLD.duration_type
-    OR NEW.plan_mode                    IS DISTINCT FROM OLD.plan_mode
-    OR NEW.task_source                  IS DISTINCT FROM OLD.task_source
-    OR NEW.reward_policy                IS DISTINCT FROM OLD.reward_policy
-    OR NEW.completion_policy            IS DISTINCT FROM OLD.completion_policy
-    OR NEW.original_expectation         IS DISTINCT FROM OLD.original_expectation
-    OR NEW.completion_description       IS DISTINCT FROM OLD.completion_description
-    OR NEW.task_details                 IS DISTINCT FROM OLD.task_details
-    OR NEW.notes                        IS DISTINCT FROM OLD.notes
-    OR NEW.schedule_mode                IS DISTINCT FROM OLD.schedule_mode
-    OR NEW.weekly_frequency             IS DISTINCT FROM OLD.weekly_frequency
-    OR NEW.start_date                   IS DISTINCT FROM OLD.start_date
-    OR NEW.scheduled_date               IS DISTINCT FROM OLD.scheduled_date
-    OR NEW.preferred_time               IS DISTINCT FROM OLD.preferred_time
-    OR NEW.preferred_time_custom        IS DISTINCT FROM OLD.preferred_time_custom
-    OR NEW.estimated_minutes            IS DISTINCT FROM OLD.estimated_minutes
-    OR NEW.claim_period                 IS DISTINCT FROM OLD.claim_period
-    OR NEW.max_claims_per_period        IS DISTINCT FROM OLD.max_claims_per_period
-    OR NEW.review_enabled               IS DISTINCT FROM OLD.review_enabled
-    OR NEW.review_after_days            IS DISTINCT FROM OLD.review_after_days
-    OR NEW.support_level                IS DISTINCT FROM OLD.support_level
-    OR NEW.reward_coin_amount           IS DISTINCT FROM OLD.reward_coin_amount
-    OR NEW.reward_coin_suggested_amount IS DISTINCT FROM OLD.reward_coin_suggested_amount
-    OR NEW.reward_coin_min              IS DISTINCT FROM OLD.reward_coin_min
-    OR NEW.reward_coin_max              IS DISTINCT FROM OLD.reward_coin_max
-    OR NEW.task_policy_version          IS DISTINCT FROM OLD.task_policy_version
-    OR NEW.reward_policy_version        IS DISTINCT FROM OLD.reward_policy_version
-    OR NEW.creation_source              IS DISTINCT FROM OLD.creation_source
-    OR NEW.progress_model               IS DISTINCT FROM OLD.progress_model
-    OR NEW.next_step                    IS DISTINCT FROM OLD.next_step
-    -- 新增：結算語意與週目標是共同約定的內容。
-    OR NEW.payout_basis                 IS DISTINCT FROM OLD.payout_basis
-    OR NEW.period_target_count          IS DISTINCT FROM OLD.period_target_count
-    OR (OLD.is_active = true AND NEW.is_active = false);
-
-  IF v_material_changed THEN
+  IF NEW.payout_basis        IS DISTINCT FROM OLD.payout_basis
+    OR NEW.period_target_count IS DISTINCT FROM OLD.period_target_count
+  THEN
     RAISE EXCEPTION 'SHARED_PLAN_REQUIRES_RENEGOTIATION'
       USING ERRCODE = 'P0001';
   END IF;
@@ -386,6 +331,17 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
+COMMENT ON FUNCTION public.guard_payout_semantics_v1() IS
+  '結算語意的守門：payout_basis / period_target_count 屬於共同約定，'
+  'active shared plan 下不得 silent mutation；payout_basis_effective_from 是 '
+  'rollout metadata，不進 material diff、不觸發孩子重新確認，但寫下後不可改。'
+  '刻意與 guard_active_shared_plan_task_v1 分開 —— 那份欄位清單由 P0-8 系列擁有。';
+
+DROP TRIGGER IF EXISTS tasks_payout_semantics_guard ON tasks;
+CREATE TRIGGER tasks_payout_semantics_guard
+  BEFORE UPDATE ON tasks
+  FOR EACH ROW EXECUTE FUNCTION public.guard_payout_semantics_v1();
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- 5. complete_task：拆開 progress 與 settlement

@@ -251,21 +251,29 @@ describe('家長端不再有發幣後門', () => {
 });
 
 describe('shared plan：哪些欄位算共同約定', () => {
-  const guard = () =>
-    functionBody(codeOnly(readSql()), 'FUNCTION public.guard_active_shared_plan_task_v1(');
+  const guard = () => functionBody(codeOnly(readSql()), 'FUNCTION public.guard_payout_semantics_v1(');
+
+  it('不去改寫 guard_active_shared_plan_task_v1 —— 那份清單屬於 P0-8 系列', () => {
+    // 「forward-derive 一份再加自己的兩欄」會把當時還沒 merge 的版本默默改回去。
+    // staging 上已經套了 20260817（它把 preferred_time 移出 material 清單），
+    // 衍生法會當場打壞 P0-8M 的換時段流程。
+    const sql = codeOnly(readSql());
+    expect(sql).not.toContain('FUNCTION public.guard_active_shared_plan_task_v1');
+    expect(sql).not.toContain('preferred_time');
+  });
 
   it('payout_basis 與 period_target_count 是 material change', () => {
     const sql = guard();
-    expect(sql).toContain('NEW.payout_basis                 IS DISTINCT FROM OLD.payout_basis');
-    expect(sql).toContain('NEW.period_target_count          IS DISTINCT FROM OLD.period_target_count');
+    expect(sql).toContain('NEW.payout_basis        IS DISTINCT FROM OLD.payout_basis');
+    expect(sql).toContain('NEW.period_target_count IS DISTINCT FROM OLD.period_target_count');
+    expect(sql).toContain('SHARED_PLAN_REQUIRES_RENEGOTIATION');
   });
 
   it('effective_from 不進 material diff —— 它是 rollout metadata，不是家庭約定', () => {
     const sql = guard();
-    const materialStart = sql.indexOf('v_material_changed :=');
-    const materialBlock = sql.slice(materialStart);
-
-    expect(materialBlock).not.toContain('payout_basis_effective_from');
+    const materialStart = sql.indexOf('IF NEW.payout_basis        IS DISTINCT FROM');
+    expect(materialStart).toBeGreaterThan(-1);
+    expect(sql.slice(materialStart)).not.toContain('payout_basis_effective_from');
   });
 
   it('但 effective_from 一旦寫下就不可改：它是不會 double-pay 那份證明的前提', () => {
@@ -276,5 +284,10 @@ describe('shared plan：哪些欄位算共同約定', () => {
     expect(immutability).toBeGreaterThan(-1);
     // 不可變性與「是不是 active shared plan」無關，所以必須在早退之前。
     expect(immutability).toBeLessThan(earlyReturn);
+  });
+
+  it('只掛 BEFORE UPDATE：DELETE 的守門仍屬原本那支 trigger', () => {
+    const sql = codeOnly(readSql());
+    expect(sql).toMatch(/CREATE TRIGGER tasks_payout_semantics_guard\s*\n\s*BEFORE UPDATE ON tasks/);
   });
 });
