@@ -451,7 +451,9 @@ long_term + weekly_rhythm + per_period，走完 1/4 → 4/4 → 第 5 次 → �
 
 見 §8.2。機制已完成，定價沒有政策來源。
 
-### 9.4 快照的 payout basis 仍由 claim_period 推導 **[Phase 1 未完成項，rebase 時處理]**
+### 9.4 快照的 payout basis 仍由 claim_period 推導 **[已收掉 — `20260819000000`]**
+
+> **狀態：已解決。** 以下保留原始問題敘述作為紀錄，解法見本節末的「收掉的方式」。
 
 `transition_child_proposal_v1`（`20260810000000`）與 P0-8M 的重寫（`20260817000000`）
 仍然用 `child_proposal_payout_basis(v_task.claim_period)` 產生
@@ -469,10 +471,52 @@ long_term + weekly_rhythm + per_period，走完 1/4 → 4/4 → 第 5 次 → �
 只是換到了快照那一側 —— **錢不會發錯，但紀錄會說謊。**
 
 沒有在 Phase 1 一起改的原因：兩個呼叫點都在大型函式裡，而其中一個
-（`20260817000000`）還沒 merge 進 master。本工單 rebase 到最新 master 時，
-這兩處要一起改成 `COALESCE(v_task.payout_basis, child_proposal_payout_basis(v_task.claim_period))`
-（legacy 任務沒有 payout_basis，仍需 fallback），並在那時把
-`child_proposal_payout_basis` 標記為 deprecated。
+（`20260817000000`）還沒 merge 進 master。
+
+#### 收掉的方式（`20260819000000_snapshot_canonical_payout_basis.sql`）
+
+**沒有**照原本的計畫去改那兩個呼叫點。原計畫是 forward-derive 兩支數百行的函式，
+各自加一個 `COALESCE(...)` —— 那正是 `20260818000000` 差點把 P0-8G 的 material
+欄位清單洗回舊版的做法（見該檔的獨立 guard trigger 註解）。其中一支剛驗收進
+master，複製它一次等於把別人的工作包接管過來。
+
+改成在 `child_proposal_plan_versions` 掛一支 `BEFORE INSERT OR UPDATE` trigger
+（`snapshot_canonical_payout_basis_v1`）：快照**第一次成立**時，若來源任務的
+`tasks.payout_basis` 非 NULL，就以它覆寫 `confirmed_payout_basis`。
+
+| 決定 | 理由 |
+|---|---|
+| 掛在資料上而非改寫 RPC | 同時涵蓋 UPDATE 路徑（`transition_child_proposal_v1`）、INSERT 路徑（`accept_child_proposal_adjustment_v1`）與任何未來的寫入者，且既有函式改動面積為零 |
+| 只在 `OLD.confirmed_at IS NULL` 時介入 | 既有 confirmed 版本一列都不改。**不 backfill** —— 那是已經簽下去的歷史 |
+| `payout_basis IS NULL` 時不動 | legacy 任務（遷移仍是零列）繼續由 `claim_period` 推導，行為逐字不變 |
+| 不讀 `payout_basis_effective_from` | 那是 technical rollout metadata，不是共同約定內容（§7.2 / 該欄位的 COMMENT） |
+| 放寬快照的 CHECK 值域 | 加入 `per_milestone` / `final_completion`，保留 legacy 的 `one_time`。否則 Phase 2 打開 milestone 建立路徑的第一筆共同版本會在家長按下確認的那一刻吃 23514 |
+| `20260818000000` 一個字都沒動 | 它已在 staging 實際套用並驗證過，語意保持不動 |
+
+`child_proposal_payout_basis(claim_period)` 留著、行為不變、不 REVOKE，但 COMMENT
+已改寫成 **LEGACY ONLY**：它只在 `payout_basis IS NULL` 時仍決定快照值。
+
+**staging 驗收**（`supabase/verify/staging/p0_snapshot_payout_basis.sql`，
+self-rolling-back，八個 case 全綠）。有鑑別力的是這三個 ——
+它們在修好之前必然是紅的：
+
+| Case | 任務 | `claim_period` 推導值 | canonical | 快照實得 |
+|---|---|---|---|---|
+| 2 | `long_term` + `fixed_days` | `per_completion` ❌ | `per_period` | `per_period` ✅ |
+| 3 | `recurring`（`claim_period='week'`） | `per_period` ❌ | `per_completion` | `per_completion` ✅ |
+| 8 | 同 case 2，走 P0-8M 換時段的 **INSERT** 路徑 | `per_completion` ❌ | `per_period` | `per_period` ✅ |
+
+Case 8 是後來補的。前七個 case 走的都是 UPDATE 路徑，若就此收工，
+`accept_child_proposal_adjustment_v1` 會在「孩子提出換時段、家長按下同意」
+這個最日常的操作上繼續產生錯的快照，而驗收會顯示全綠。
+
+#### 仍然留著的相關缺口
+
+快照**沒有**記 `period_target_count`。一筆 `per_period` 的快照說得出「按週結算」，
+說不出「講好一週幾次算達標」。`confirmed_max_claims_per_period` 不是它 ——
+那是每期 claim 次數上限，見 `docs/CLAIM_PERIOD_VS_PAYOUT_BASIS.md`。
+沒有一起做是因為那要動 `child_proposal_plan_versions_confirmed_atomic` CHECK，
+屬於另一輪的範圍。
 
 ---
 

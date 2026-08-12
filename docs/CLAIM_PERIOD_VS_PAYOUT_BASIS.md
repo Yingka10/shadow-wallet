@@ -89,12 +89,13 @@ END;
 1. **`claim_period` 只負責頻率上限**，只影響 `task_completions` 能不能再寫一列。
 2. **`payout_basis` 只負責結算事件**，只影響 settlement 與錢包。
 3. **兩者不得互相推導，也不得互為預設值。** 新任務兩個都要顯式決定並各自持久化。
-4. `child_proposal_payout_basis(claim_period)` **不再是 canonical truth**。它進入正式 migration plan：
-   * Phase 1：`tasks.payout_basis` 成為 canonical；此函式改為只服務 legacy 快照回填，呼叫點（`20260810000000`、`20260817000000`）改讀 `tasks.payout_basis`。
-   * 函式本身**不在 Phase 1 刪除** —— 它被既有 plan version 的歷史快照依賴，刪掉會讓舊版本回填不出來。改為標記 deprecated + 註解指向本文件。
+4. `child_proposal_payout_basis(claim_period)` **不再是 canonical truth**。**已落地**：
+   * `20260818000000`：`tasks.payout_basis` 成為 canonical。
+   * `20260819000000`：快照改以 `tasks.payout_basis` 為準。做法不是改那兩個呼叫點（`20260810000000` / `20260817000000` 各自都在數百行的函式裡，其中一支剛驗收進 master），而是在 `child_proposal_plan_versions` 掛 `snapshot_canonical_payout_basis_v1` trigger，在快照第一次成立時覆寫。兩條寫入路徑（UPDATE 與 INSERT）都涵蓋，既有函式一個字都沒動。
+   * 函式本身**沒有刪除** —— 它被既有 plan version 的歷史快照依賴，刪掉會讓舊版本回填不出來。COMMENT 已改寫為 **LEGACY ONLY**，只在 `tasks.payout_basis IS NULL` 時仍決定快照值。
 5. 詞彙統一為 `per_completion` / `per_period` / `per_milestone` / `final_completion`。
    * ai-proxy `coinPolicy.ts` 目前用的是 `per_session`，**它指的是 `per_completion` 的舊名**，Phase 1 一併對齊。
-   * `child_proposal_plan_versions.confirmed_payout_basis` 現有值域是 `per_completion` / `per_period` / `one_time`；`one_time` 是 `final_completion` 的舊名，需要 migration 對齊（既有列的向後相容處理見 Phase 1 design）。
+   * `child_proposal_plan_versions.confirmed_payout_basis` 的值域已由 `20260819000000` 放寬為 `per_completion` / `per_period` / `per_milestone` / `final_completion` / `one_time`。`one_time` 是 `final_completion` 的舊名，**保留而不改寫** —— 既有列還在用它，改寫等於竄改已簽下的快照。新寫入不會再產生 `one_time`（canonical 值域沒有這個值）。
 
 ---
 
