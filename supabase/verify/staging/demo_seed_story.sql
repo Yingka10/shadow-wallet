@@ -24,8 +24,9 @@
 --   手寫 INSERT，沒有放寬任何驗證，沒有改動 production code。
 --
 --   **行事曆**：只把「計畫的起訖日」往前移。也就是
---   long_term_goals.started_at / end_date、tasks.start_date / end_date /
---   due_date、以及 current plan version 的 start_date / end_date。
+--   long_term_goals.started_at / end_date，以及 current plan version 的
+--   start_date / end_date。**tasks 的日期刻意不動** —— P0-8G 把它們凍結在
+--   共同約定裡（改不動是對的），而孩子端的行事曆本來就只讀 goal，見第 5 段。
 --
 -- 刻意**不動**任何建立時間戳（activated_at / effective_at / child_accepted_at /
 -- parent_confirmed_at / confirmed_at / created_at）。它們誠實記錄「這份快照是
@@ -225,13 +226,25 @@ BEGIN
   END IF;
 
   -- ── 5. 只把行事曆往前移（見檔頭說明） ──────────────────────────────────
+  --
+  -- ⚠️ 這裡**不碰 tasks.start_date / due_date**。
+  --
+  -- P0-8G（20260816）把 start_date 與 due_date 列進 active shared plan 的
+  -- 凍結欄位，所以那道 UPDATE 會被 tasks_active_shared_plan_guard 擋成
+  -- SHARED_PLAN_REQUIRES_RENEGOTIATION —— 而那是**正確的**：計畫的起訖日
+  -- 是雙方談定的內容，不該被任何人直接改掉。
+  --
+  -- 好消息是這支腳本從來不需要動它。孩子端的行事曆完全由 goal 決定：
+  --   planStart = goal.started_at → goal.created_at → task.created_at
+  --   planEnd   = goal.end_date ?? task.due_date
+  -- （見 longTermGoalPresentation 的 getPlanStart / planEnd）
+  -- goal.started_at 與 goal.end_date 都有值時，task 的兩個日期根本不會被讀到。
+  --
+  -- long_term_goals 的 guard 只凍結 status，plan version 的 guard 不含日期，
+  -- 所以下面兩道是合法的，也足以做出「本週 2/3」。
   UPDATE long_term_goals
      SET started_at = v_accept, end_date = v_plan_end
    WHERE id = v_goal;
-  -- tasks 沒有 end_date 欄位，計畫的結束日在 tasks 這邊是 due_date。
-  UPDATE tasks
-     SET start_date = v_accept, due_date = v_plan_end
-   WHERE id = v_task;
   UPDATE child_proposal_plan_versions
      SET start_date = v_accept, end_date = v_plan_end
    WHERE id = v_parent;
