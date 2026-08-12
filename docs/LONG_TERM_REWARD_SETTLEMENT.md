@@ -549,16 +549,31 @@ trigger 寫進資料列的 canonical 值。同一次呼叫因此可能出現：
 
 `confirmedReward` 也沒有 `periodTargetCount`。
 
-**紀錄是對的，回應是錯的。** 目前沒有畫面直接渲染這個鍵（`childProposalService`
-的 `isConfirmedReward` 會驗它的形狀並原樣往上傳），所以是潛在缺口而非線上錯誤。
+**紀錄是對的，回應是錯的。**
 
-沒有在本輪一起修的原因：它在 `RETURN jsonb_build_object` 裡，trigger 改不到，
-唯一的修法是 forward-derive 整支 `transition_child_proposal_v1`（約 230 行）。
-該函式自 `20260810000000` 起只定義過一次、之後沒有任何 migration 動過它，
-所以衍生風險比 `20260817` 那次低得多 —— 但那仍是一次整段複製，超出本輪授權範圍。
+#### merge 前的 consumer audit 補正了兩件事
 
-建議的收法：獨立一支 forward migration，把 `confirmedReward` 改成 UPDATE 之後
-從版本列讀回來（順帶帶上 `periodTargetCount`），而不是沿用先算好的區域變數。
+**(1) 傳播範圍比原本記的廣。** 不只 `transition_child_proposal_v1` 自己的回應 ——
+家長端與孩子端實際呼叫的兩支 RPC 在第一次成功時是整包轉出去的
+（`20260813000000:584`、`20260815000000:737` 的
+`'confirmedReward', v_transition_result -> 'confirmedReward'`），
+而它們的 **idempotent replay 分支卻是從版本列讀的**（`:308` / `:441`）。
+
+於是同一個操作**第一次的回應與重試的回應會不一樣** —— 而 idempotent replay
+存在的意義正是「重試拿到跟第一次一樣的答案」。這比單一個錯值更值得修。
+
+**(2) 但沒有任何 consumer 依賴這個值。** 逐一查過 `src/`（排除測試）：
+`useParentProposals` 與 `useChildProposalReview` 只讀 `result.ok` / `result.message`；
+`isConfirmedReward` 只驗形狀不看值；`submitChildProposal` 走的是
+`draft → proposed`，該轉換的 `confirmedReward` 恆為 `null`。
+其餘出現 `payoutBasis` 的位置（`ParentHomeTablet`、`useParentDashboard`、
+`completionFeedback`、`taskActions`、`aiAgent`）都是**不同來源**，各自正確。
+
+所以是潛在缺口而非線上錯誤，不阻擋 merge。
+
+完整工單見 **`docs/P0_FOLLOWUP_CONFIRMED_REWARD_RESPONSE.md`**（獨立 P0 correctness
+follow-up）。核心要求：`confirmedReward` 的每一個鍵都必須從已經寫下去的版本列
+讀回來，不再從函式內先算好的區域變數組出來；並驗證第一次回應與 replay 逐鍵相等。
 
 ---
 
