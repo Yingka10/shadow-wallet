@@ -102,20 +102,42 @@ proposal / plan version / task / goal / child_task，比完整包回滾。
 `completionsThisWeek` 沒有 offset 參數，全域也找不到任何 previous-week 的
 呈現路徑。所以「顯示上一個完整週期的 2/3」**目前的 App 做不到**。
 
-| 執行日 | State B |
-|---|---|
-| 週二 ～ 週日 | 可以，本週 2/3 |
-| **週一** | **不行** |
+| 執行日 | State B 本身（2/3） | P0-8M 換時段錄影 |
+|---|---|---|
+| **週一** | **不行** | 不行 |
+| 週二 | 可以 | **不建議**（見下） |
+| 週三 ～ 週日 | 可以 | 可以 |
 
 週一時本週只過了一天，「本週兩個不同日期各完成一次」在現實上不存在。
 這時 runner 回 `STATE_B_2_OF_3_NOT_CALENDAR_FEASIBLE` 並 exit 3，
 **而且這道檢查排在 reset 之前** —— 否則 `reseed --state=b` 會先把 State A
 清掉再失敗，兩個 state 都沒有。不會補第二個日期出來。
 
-> 彩排、錄影、教授測試、正式初選不一定在同一天。**請避開週一**，
-> 其餘任何一天 State B 都能穩定重建。
+完成日固定是**本週一與本週二**，兩者都不可能是未來。
 
-完成日的推導只用「本週一」與「今天」，兩者都不可能是未來。
+#### 為什麼 P0-8M 的錄影窗口是週三～週日
+
+孩子端「今天預計」的時段有一條決策順序（`LongTermDetailScreen`）：
+
+```
+今天那筆 completion 的 planned_time_window
+  → long_term_goals.preferred_time_window
+  → tasks.preferred_time
+  → 尚未選擇
+```
+
+第一順位是**今天實際發生的事**，而那是對的 —— 今天已經在睡前讀完了，畫面就
+不該假裝今天預計在晚餐後。
+
+所以只要今天有完成紀錄，「家長確認換成晚餐後 → 回孩子端」就看不到晚餐後。
+第二筆完成固定在**週二**（而不是「今天」）之後，週三以後今天沒有完成紀錄，
+卡片就會照新的共同版本顯示晚餐後。
+
+> 週二仍然可以建立 State B（2/3 正確），只是那天第二筆完成就是今天，
+> 換時段後「今天預計」會保留當天的實際時段。那是正確行為，不是 bug。
+
+> 彩排、錄影、教授測試、正式初選不一定在同一天。**State B 請避開週一；
+> 要演 P0-8M 換時段請用週三～週日。**
 
 **State B 的計畫行事曆起始日設為上週五**；Proposal / Plan Version 的 lifecycle
 audit timestamps（`activated_at` / `effective_at` / `child_accepted_at` /

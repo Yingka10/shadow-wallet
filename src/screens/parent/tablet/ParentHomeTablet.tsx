@@ -100,8 +100,10 @@ import {
 import { WeekSummary } from './home/WeekSummary';
 import { TipCard, WeekDigestCard, buildWeekDigestLines, TaskPackCard } from './home/RightRailCards';
 import { ParentProposalSection } from './home/ParentProposalSection';
+import { ParentAdjustmentSection } from './home/ParentAdjustmentSection';
 import { ParentSidebar, type ChildOption, type ManageSection } from './ParentSidebar';
 import { useParentProposals } from '../../../hooks/useParentProposals';
+import { useParentAdjustmentRequests } from '../../../hooks/useParentAdjustmentRequests';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
@@ -2706,6 +2708,18 @@ export default function ParentHomeTablet() {
   } = useParentProposals(childId, familyId, undefined, child?.age_group ?? null);
 
   const {
+    requests: adjustmentRequests,
+    loading: adjustmentsLoading,
+    error: adjustmentsError,
+    refresh: adjustmentRefresh,
+    accept: acceptAdjustment,
+    decline: declineAdjustment,
+    actingRequestId: adjustmentActingId,
+    actionError: adjustmentActionError,
+    successMessage: adjustmentSuccessMessage,
+  } = useParentAdjustmentRequests(childId, familyId);
+
+  const {
     items: ltItems,
     totalActive: ltTotalActive,
     loading: ltLoading,
@@ -2718,7 +2732,8 @@ export default function ParentHomeTablet() {
       ltRefresh();
       void refreshRedemption();
       void proposalRefresh();
-    }, [refresh, ltRefresh, refreshRedemption, proposalRefresh]),
+      void adjustmentRefresh();
+    }, [refresh, ltRefresh, refreshRedemption, proposalRefresh, adjustmentRefresh]),
   );
 
   // ── 建立任務抽屜的資料 ────────────────────────────────────────────────────
@@ -2977,6 +2992,27 @@ export default function ParentHomeTablet() {
             actingProposalId={actingProposalId}
             actionError={proposalActionError}
             successMessage={proposalSuccessMessage}
+          />
+
+          {/* ── 孩子想調整共同計畫的時段（P0-8M）──
+               和「需要一起看看」同屬待回應區：兩者都是「家庭在等你回一句話」。
+               確認後長期任務的時段會變，所以成功時一併 refresh 長期清單。 */}
+          <ParentAdjustmentSection
+            childName={nickname}
+            requests={adjustmentRequests}
+            loading={adjustmentsLoading}
+            error={adjustmentsError}
+            onRetry={() => { void adjustmentRefresh(); }}
+            onAccept={(card) => {
+              void acceptAdjustment(card).then(() => {
+                refresh();
+                ltRefresh();
+              });
+            }}
+            onDecline={(card) => { void declineAdjustment(card); }}
+            actingRequestId={adjustmentActingId}
+            actionError={adjustmentActionError}
+            successMessage={adjustmentSuccessMessage}
           />
 
           {/* ── 待你確認 hero 卡（沒有待審就安靜帶過） ── */}
