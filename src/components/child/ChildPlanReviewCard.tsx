@@ -30,7 +30,12 @@ export function ChildPlanReviewCard({
     return (
       <View style={styles.card} testID="child-plan-review-card">
         <Text style={styles.title}>安排剛剛更新了，重新看看就好</Text>
-        <TouchableOpacity style={styles.secondary} onPress={onRetry}>
+        <TouchableOpacity
+          style={styles.secondary}
+          onPress={onRetry}
+          accessibilityRole="button"
+          accessibilityLabel="重新看看"
+        >
           <Text style={styles.secondaryText}>重新看看</Text>
         </TouchableOpacity>
       </View>
@@ -42,12 +47,17 @@ export function ChildPlanReviewCard({
       <View style={styles.header}>
         <Text style={styles.eyebrow}>一起決定</Text>
         <Text style={styles.title}>媽媽調整了一點安排</Text>
-        <Text style={styles.subtitle}>看看這樣是不是也想試試看</Text>
+        <Text style={styles.subtitle}>看看這樣是不是也適合你。</Text>
       </View>
 
       <View style={styles.changes}>
         {changes.map(change => (
-          <View key={change.field} style={styles.changeRow}>
+          <View
+            key={change.field}
+            style={styles.changeRow}
+            accessible
+            accessibilityLabel={`${change.label}，${change.before}改成${change.after}`}
+          >
             <Text style={styles.changeLabel}>{change.label}</Text>
             <View style={styles.beforeAfter}>
               <Text style={styles.before}>{change.before}</Text>
@@ -61,7 +71,14 @@ export function ChildPlanReviewCard({
       {error && (
         <View style={styles.errorBox}>
           <Text style={styles.error}>{error}</Text>
-          <TouchableOpacity onPress={onRetry}><Text style={styles.retry}>重新看看</Text></TouchableOpacity>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={onRetry}
+            accessibilityRole="button"
+            accessibilityLabel="重新看看"
+          >
+            <Text style={styles.retry}>重新看看</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -69,14 +86,18 @@ export function ChildPlanReviewCard({
         style={[styles.primary, saving && styles.disabled]}
         onPress={onAccept}
         disabled={saving}
+        accessibilityRole="button"
+        accessibilityLabel={saving ? '正在把計畫準備好…' : '好，我也想這樣試試看'}
         accessibilityState={{ disabled: saving }}
       >
         <Text style={styles.primaryText}>{saving ? '正在把計畫準備好…' : '好，我也想這樣試試看'}</Text>
       </TouchableOpacity>
       <TouchableOpacity
-        style={styles.secondary}
+        style={[styles.secondary, saving && styles.disabled]}
         onPress={onRequestChanges}
         disabled={saving}
+        accessibilityRole="button"
+        accessibilityLabel="我想再聊聊"
         accessibilityState={{ disabled: saving }}
       >
         <Text style={styles.secondaryText}>我想再聊聊</Text>
@@ -112,10 +133,11 @@ const styles = StyleSheet.create({
   after: { color: Colors.fgPrimary, fontSize: 15, fontWeight: '800' },
   errorBox: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 12, backgroundColor: Colors.cream100 },
   error: { flex: 1, color: Colors.error, fontSize: 13 },
+  retryButton: { minHeight: 48, justifyContent: 'center' },
   retry: { color: Colors.accent, fontSize: 13, fontWeight: '800' },
-  primary: { alignItems: 'center', padding: 14, borderRadius: 22, backgroundColor: Colors.accent },
+  primary: { minHeight: 52, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18, borderRadius: 22, backgroundColor: Colors.accent },
   primaryText: { color: Colors.bgSurface, fontSize: 15, fontWeight: '900' },
-  secondary: { alignItems: 'center', padding: 10 },
+  secondary: { minHeight: 48, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16, borderWidth: 1, borderColor: Colors.borderMedium, borderRadius: 22, backgroundColor: Colors.bgSurface },
   secondaryText: { color: Colors.fgSecondary, fontSize: 14, fontWeight: '700' },
   disabled: { opacity: 0.6 },
 });
