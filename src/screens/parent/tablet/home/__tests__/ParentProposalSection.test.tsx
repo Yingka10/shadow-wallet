@@ -218,6 +218,19 @@ describe('ParentProposalSection', () => {
     expect(screen.getByTestId('proposal-weekly-frequency-input')).toBeTruthy();
   });
 
+  it('one-time 計畫仍可直接確認，但不提供無法保留原節奏的調整入口', () => {
+    const item = card('p1', true);
+    item.currentPlanVersion = plan('p1', {
+      cadence_mode: 'one_time', cadence_weekly_frequency: null, cadence_days: null,
+      duration_type: 'one_time', duration_days: null,
+    });
+    render(<ParentProposalSection {...base} proposals={[item]} />);
+
+    expect(screen.getByText('確認這個計畫')).toBeTruthy();
+    expect(screen.queryByText('調整一下')).toBeNull();
+    expect(screen.getByText('先完成一次')).toBeTruthy();
+  });
+
   it('parent revision 等孩子時不再顯示 confirm/edit，也不把舊 summary 當現況', () => {
     const item = card('p1', true);
     item.proposal = proposal('p1', {

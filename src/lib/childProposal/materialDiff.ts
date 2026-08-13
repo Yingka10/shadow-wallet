@@ -29,6 +29,7 @@ function normalizedDays(days: number[] | null): number[] {
 }
 
 export function formatPlanCadence(plan: ChildProposalPlanVersion): string {
+  if (plan.cadence_mode === 'one_time') return '先完成一次';
   if (plan.cadence_mode === 'weekly_frequency'
     && typeof plan.cadence_weekly_frequency === 'number') {
     return `一週 ${plan.cadence_weekly_frequency} 次`;

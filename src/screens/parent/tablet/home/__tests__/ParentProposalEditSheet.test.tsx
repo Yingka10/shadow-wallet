@@ -2,6 +2,7 @@ import React from 'react';
 import { Modal, StyleSheet, TextInput } from 'react-native';
 import { fireEvent, render, screen, within } from '@testing-library/react-native';
 import type { ChildProposalPlanVersion, ParentProposalCardData } from '../../../../../lib/childProposal';
+import { ParentColors } from '../../../../../constants/parentTheme';
 import { ParentProposalEditSheet } from '../ParentProposalEditSheet';
 
 const card = {
@@ -116,6 +117,27 @@ describe('ParentProposalEditSheet', () => {
     expect(JSON.stringify(onSave.mock.calls)).not.toContain('reward');
   });
 
+  it('沒有實際變更時不能送出，saving 時即使有變更也維持 disabled', () => {
+    const onSave = jest.fn();
+    const { rerender } = render(<ParentProposalEditSheet {...defaultProps} onSave={onSave} />);
+
+    const unchangedPrimary = screen.getByRole('button', { name: '存下來，讓孩子看看' });
+    expect(unchangedPrimary.props.accessibilityState).toMatchObject({ disabled: true });
+    expect(StyleSheet.flatten(unchangedPrimary.props.style).backgroundColor)
+      .toBe(ParentColors.borderMedium);
+    fireEvent.press(unchangedPrimary);
+    expect(onSave).not.toHaveBeenCalled();
+
+    fireEvent.press(screen.getByLabelText('減少每週次數'));
+    expect(screen.getByRole('button', { name: '存下來，讓孩子看看' }).props.accessibilityState)
+      .toMatchObject({ disabled: false });
+    rerender(<ParentProposalEditSheet {...defaultProps} saving onSave={onSave} />);
+    expect(screen.getByRole('button', { name: '正在存下來' }).props.accessibilityState)
+      .toMatchObject({ disabled: true });
+    fireEvent.press(screen.getByRole('button', { name: '正在存下來' }));
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
   it('更多時間和完成標準都採漸進展開，且完整保留合法選項', () => {
     render(<ParentProposalEditSheet {...defaultProps} />);
 
@@ -186,6 +208,36 @@ describe('ParentProposalEditSheet', () => {
     });
   });
 
+  it('自訂時間與完成標準符合後端 60/120 字界線並有可存取名稱', () => {
+    const onSave = jest.fn();
+    render(<ParentProposalEditSheet {...defaultProps} onSave={onSave} />);
+
+    fireEvent.press(screen.getByLabelText('展開更多時間選項'));
+    fireEvent.press(screen.getByText('自訂時間'));
+    const customInput = screen.getByLabelText('自訂適合時間');
+    expect(customInput.props.maxLength).toBe(60);
+    fireEvent.changeText(customInput, '時'.repeat(61));
+    fireEvent.press(screen.getByText('存下來，讓孩子看看'));
+    expect(screen.getByRole('alert')).toHaveTextContent('請用 60 字內描述自訂時間');
+    expect(onSave).not.toHaveBeenCalled();
+
+    fireEvent.changeText(customInput, '時'.repeat(60));
+    fireEvent.press(screen.getByLabelText('修改怎樣算完成'));
+    const completionInput = screen.getByLabelText('怎樣算完成');
+    expect(completionInput.props.maxLength).toBe(120);
+    fireEvent.changeText(completionInput, '完'.repeat(121));
+    fireEvent.press(screen.getByText('存下來，讓孩子看看'));
+    expect(screen.getByRole('alert')).toHaveTextContent('請用 120 字內描述怎樣算完成');
+    expect(onSave).not.toHaveBeenCalled();
+
+    fireEvent.changeText(completionInput, '完'.repeat(120));
+    fireEvent.press(screen.getByText('存下來，讓孩子看看'));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      preferredTimeCustom: '時'.repeat(60),
+      completionDescription: '完'.repeat(120),
+    }));
+  });
+
   it('保留 saving、error 與 close 狀態，未指定時間不會被偷偷改值', () => {
     const onClose = jest.fn();
     const onSave = jest.fn();
@@ -231,5 +283,68 @@ describe('ParentProposalEditSheet', () => {
     />);
     expect(screen.getByText('計畫儲存失敗，請再試一次')).toBeTruthy();
     expect(screen.queryByText('固定星期至少選一天')).toBeNull();
+  });
+
+  it('新的本機驗證錯誤優先於舊外部錯誤，修改欄位後立即清除並可被讀出', () => {
+    render(<ParentProposalEditSheet
+      {...defaultProps}
+      error="上一次儲存失敗"
+    />);
+
+    fireEvent.press(screen.getByText('固定星期'));
+    fireEvent.press(screen.getByText('存下來，讓孩子看看'));
+    const validationError = screen.getByRole('alert');
+    expect(validationError).toHaveTextContent('固定星期至少選一天');
+    expect(validationError.props.accessibilityLiveRegion).toBe('assertive');
+    expect(screen.queryByText('上一次儲存失敗')).toBeNull();
+
+    fireEvent.press(screen.getByText('週一'));
+    expect(screen.queryByText('固定星期至少選一天')).toBeNull();
+    expect(screen.getByRole('alert')).toHaveTextContent('上一次儲存失敗');
+  });
+
+  it('關閉再重開會重設欄位、disclosure 與本機錯誤', () => {
+    const { rerender } = render(<ParentProposalEditSheet {...defaultProps} />);
+
+    fireEvent.press(screen.getByLabelText('減少每週次數'));
+    fireEvent.press(screen.getByLabelText('展開更多時間選項'));
+    fireEvent.press(screen.getByLabelText('修改怎樣算完成'));
+    fireEvent.changeText(screen.getByLabelText('怎樣算完成'), '改過的完成標準');
+    fireEvent.press(screen.getByText('固定星期'));
+    fireEvent.press(screen.getByText('存下來，讓孩子看看'));
+    expect(screen.getByText('固定星期至少選一天')).toBeTruthy();
+
+    rerender(<ParentProposalEditSheet {...defaultProps} visible={false} />);
+    rerender(<ParentProposalEditSheet {...defaultProps} />);
+
+    expect(screen.getByText('4 次')).toBeTruthy();
+    expect(screen.getByTestId('proposal-weekly-frequency-input')).toBeTruthy();
+    expect(screen.getByLabelText('展開更多時間選項').props.accessibilityState)
+      .toEqual({ expanded: false });
+    expect(screen.getByLabelText('修改怎樣算完成').props.accessibilityState)
+      .toEqual({ expanded: false });
+    expect(screen.queryByTestId('proposal-completion-description-input')).toBeNull();
+    expect(within(screen.getByTestId('proposal-change-summary')).getByText('目前沒有調整')).toBeTruthy();
+    expect(screen.queryByText('固定星期至少選一天')).toBeNull();
+  });
+
+  it('意外開啟不支援的 one-time 計畫時只顯示真實原始節奏，不提供編輯或儲存', () => {
+    const oneTimeCard = {
+      ...card,
+      currentPlanVersion: {
+        ...card.currentPlanVersion!,
+        cadence_mode: 'one_time',
+        cadence_weekly_frequency: null,
+        cadence_days: null,
+      },
+    } as ParentProposalCardData;
+    render(<ParentProposalEditSheet {...defaultProps} card={oneTimeCard} />);
+
+    expect(screen.getByText('原本安排：先完成一次')).toBeTruthy();
+    expect(screen.getByText('這種一次完成的計畫目前不能在這裡調整')).toBeTruthy();
+    expect(screen.queryByText('一週幾次')).toBeNull();
+    expect(screen.queryByText('固定星期')).toBeNull();
+    expect(screen.queryByText('存下來，讓孩子看看')).toBeNull();
+    expect(screen.queryByTestId('proposal-change-summary')).toBeNull();
   });
 });

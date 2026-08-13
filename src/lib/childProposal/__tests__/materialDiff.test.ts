@@ -1,5 +1,5 @@
 import type { ChildProposalPlanVersion } from '../types';
-import { materialDiff } from '../materialDiff';
+import { formatPlanCadence, materialDiff } from '../materialDiff';
 
 function plan(overrides: Partial<ChildProposalPlanVersion> = {}): ChildProposalPlanVersion {
   return {
@@ -45,6 +45,12 @@ describe('materialDiff', () => {
       before: '每週一、週三、週五', after: '每週二、週四',
     });
     expect(JSON.stringify(materialDiff(before, after))).not.toContain('fixed_days');
+  });
+
+  it('如實顯示 one-time 節奏，不說成還沒決定', () => {
+    expect(formatPlanCadence(plan({
+      cadence_mode: 'one_time', cadence_weekly_frequency: null, cadence_days: null,
+    }))).toBe('先完成一次');
   });
 
   it('只比較 preferred time/custom 的自然顯示值', () => {

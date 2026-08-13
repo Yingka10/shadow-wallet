@@ -18,7 +18,7 @@ import {
   ParentSpacing,
 } from '../../../../constants/parentTheme';
 import { presentParentProposal } from './parentProposalPresentation';
-import { ParentProposalEditSheet } from './ParentProposalEditSheet';
+import { ParentProposalEditSheet, supportsMaterialEditing } from './ParentProposalEditSheet';
 import { ParentProposalUnsuitableSheet } from './ParentProposalUnsuitableSheet';
 
 type Props = {
@@ -214,7 +214,9 @@ export function ParentProposalSection({
                         <Text style={styles.confirmButtonText}>確認這個計畫</Text>
                       </TouchableOpacity>
                     )}
-                    {(card.state === 'fresh_ai' || card.state === 'child_revisit') && onRevise && (
+                    {(card.state === 'fresh_ai' || card.state === 'child_revisit')
+                      && onRevise
+                      && supportsMaterialEditing(source) && (
                       <TouchableOpacity style={styles.secondaryButton} onPress={() => setEditCard(source)} activeOpacity={0.8}>
                         <Text style={styles.secondaryButtonText}>{card.state === 'child_revisit' ? '再調整一下' : '調整一下'}</Text>
                       </TouchableOpacity>

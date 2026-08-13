@@ -48,6 +48,13 @@ const TIMES = [
 ] as const;
 
 const PRIMARY_TIME_VALUES = new Set<string | null>([null, 'after_dinner', 'before_bed']);
+const MAX_CUSTOM_TIME_LENGTH = 60;
+const MAX_COMPLETION_DESCRIPTION_LENGTH = 120;
+
+export function supportsMaterialEditing(card: ParentProposalCardData): boolean {
+  const cadenceMode = card.currentPlanVersion?.cadence_mode;
+  return cadenceMode === 'weekly_frequency' || cadenceMode === 'fixed_days';
+}
 
 export function ParentProposalEditSheet({ visible, card, saving, error, onClose, onSave }: Props) {
   const plan = card.currentPlanVersion;
@@ -74,7 +81,32 @@ export function ParentProposalEditSheet({ visible, card, saving, error, onClose,
     setLocalError(null);
   }, [plan, visible]);
 
+  const changeMode = (nextMode: 'weekly_frequency' | 'fixed_days') => {
+    setLocalError(null);
+    setMode(nextMode);
+  };
+
+  const adjustFrequency = (delta: -1 | 1) => {
+    setLocalError(null);
+    setFrequency(current => Math.min(7, Math.max(1, current + delta)));
+  };
+
+  const toggleDay = (day: number) => {
+    setLocalError(null);
+    setDays(current => current.includes(day)
+      ? current.filter(value => value !== day)
+      : [...current, day]);
+  };
+
+  const changePreferredTime = (nextPreferredTime: string | null) => {
+    setLocalError(null);
+    setPreferredTime(nextPreferredTime);
+  };
+
   const submit = () => {
+    if (!supportsMaterialEditing(card) || changes.length === 0) return;
+    const trimmedCompletionDescription = completionDescription.trim();
+    const trimmedPreferredTimeCustom = preferredTimeCustom.trim();
     if (mode === 'weekly_frequency' && (!Number.isInteger(frequency) || frequency < 1 || frequency > 7)) {
       setLocalError('一週次數請填 1 到 7');
       return;
@@ -83,12 +115,20 @@ export function ParentProposalEditSheet({ visible, card, saving, error, onClose,
       setLocalError('固定星期至少選一天');
       return;
     }
-    if (!completionDescription.trim()) {
+    if (!trimmedCompletionDescription) {
       setLocalError('請寫下怎樣算完成');
       return;
     }
-    if (preferredTime === 'custom' && !preferredTimeCustom.trim()) {
+    if (trimmedCompletionDescription.length > MAX_COMPLETION_DESCRIPTION_LENGTH) {
+      setLocalError('請用 120 字內描述怎樣算完成');
+      return;
+    }
+    if (preferredTime === 'custom' && !trimmedPreferredTimeCustom) {
       setLocalError('請填寫適合時間');
+      return;
+    }
+    if (preferredTime === 'custom' && trimmedPreferredTimeCustom.length > MAX_CUSTOM_TIME_LENGTH) {
+      setLocalError('請用 60 字內描述自訂時間');
       return;
     }
     setLocalError(null);
@@ -97,22 +137,26 @@ export function ParentProposalEditSheet({ visible, card, saving, error, onClose,
       cadenceWeeklyFrequency: mode === 'weekly_frequency' ? frequency : null,
       cadenceDays: mode === 'fixed_days' ? [...days].sort((a, b) => a - b) : null,
       preferredTime,
-      preferredTimeCustom: preferredTime === 'custom' ? preferredTimeCustom.trim() : null,
-      completionDescription: completionDescription.trim(),
+      preferredTimeCustom: preferredTime === 'custom' ? trimmedPreferredTimeCustom : null,
+      completionDescription: trimmedCompletionDescription,
     });
   };
 
   if (!plan) return null;
-  const editedPlan: ChildProposalPlanVersion = {
-    ...plan,
-    cadence_mode: mode,
-    cadence_weekly_frequency: mode === 'weekly_frequency' ? frequency : null,
-    cadence_days: mode === 'fixed_days' ? [...days].sort((a, b) => a - b) : null,
-    preferred_time: preferredTime,
-    preferred_time_custom: preferredTime === 'custom' ? preferredTimeCustom.trim() || null : null,
-    completion_description: completionDescription.trim() || null,
-  };
-  const changes = materialDiff(plan, editedPlan);
+  const materialEditingSupported = supportsMaterialEditing(card);
+  const editedPlan: ChildProposalPlanVersion = materialEditingSupported
+    ? {
+        ...plan,
+        cadence_mode: mode,
+        cadence_weekly_frequency: mode === 'weekly_frequency' ? frequency : null,
+        cadence_days: mode === 'fixed_days' ? [...days].sort((a, b) => a - b) : null,
+        preferred_time: preferredTime,
+        preferred_time_custom: preferredTime === 'custom' ? preferredTimeCustom.trim() || null : null,
+        completion_description: completionDescription.trim() || null,
+      }
+    : plan;
+  const changes = materialEditingSupported ? materialDiff(plan, editedPlan) : [];
+  const primaryDisabled = saving || changes.length === 0;
   const visibleTimes = showMoreTimes
     ? TIMES
     : TIMES.filter(option => PRIMARY_TIME_VALUES.has(option.value) || option.value === preferredTime);
@@ -147,10 +191,16 @@ export function ParentProposalEditSheet({ visible, card, saving, error, onClose,
               <Text style={styles.originalText}>原本安排：{formatPlanCadence(plan)}</Text>
             </View>
 
+            {!materialEditingSupported ? (
+              <View style={styles.unsupportedCard}>
+                <Text style={styles.currentValue}>這種一次完成的計畫目前不能在這裡調整</Text>
+              </View>
+            ) : (
+              <>
             <Text style={styles.label}>安排方式</Text>
             <View style={styles.row}>
-              <Choice label="一週幾次" selected={mode === 'weekly_frequency'} onPress={() => setMode('weekly_frequency')} />
-              <Choice label="固定星期" selected={mode === 'fixed_days'} onPress={() => setMode('fixed_days')} />
+              <Choice label="一週幾次" selected={mode === 'weekly_frequency'} onPress={() => changeMode('weekly_frequency')} />
+              <Choice label="固定星期" selected={mode === 'fixed_days'} onPress={() => changeMode('fixed_days')} />
             </View>
             {mode === 'weekly_frequency' ? (
               <View
@@ -162,7 +212,7 @@ export function ParentProposalEditSheet({ visible, card, saving, error, onClose,
                   accessibilityRole="button"
                   accessibilityState={{ disabled: frequency <= 1 }}
                   disabled={frequency <= 1}
-                  onPress={() => setFrequency(current => Math.max(1, current - 1))}
+                  onPress={() => adjustFrequency(-1)}
                   style={[styles.stepperButton, frequency <= 1 && styles.controlDisabled]}
                 >
                   <Text style={styles.stepperButtonText}>−</Text>
@@ -173,7 +223,7 @@ export function ParentProposalEditSheet({ visible, card, saving, error, onClose,
                   accessibilityRole="button"
                   accessibilityState={{ disabled: frequency >= 7 }}
                   disabled={frequency >= 7}
-                  onPress={() => setFrequency(current => Math.min(7, current + 1))}
+                  onPress={() => adjustFrequency(1)}
                   style={[styles.stepperButton, frequency >= 7 && styles.controlDisabled]}
                 >
                   <Text style={styles.stepperButtonText}>＋</Text>
@@ -186,9 +236,7 @@ export function ParentProposalEditSheet({ visible, card, saving, error, onClose,
                     key={label}
                     label={label}
                     selected={days.includes(day)}
-                    onPress={() => setDays(current => current.includes(day)
-                      ? current.filter(value => value !== day)
-                      : [...current, day])}
+                    onPress={() => toggleDay(day)}
                   />
                 ))}
               </View>
@@ -201,7 +249,7 @@ export function ParentProposalEditSheet({ visible, card, saving, error, onClose,
                   key={option.value ?? 'not_decided'}
                   label={option.label}
                   selected={preferredTime === option.value}
-                  onPress={() => setPreferredTime(option.value)}
+                  onPress={() => changePreferredTime(option.value)}
                 />
               ))}
             </View>
@@ -219,8 +267,13 @@ export function ParentProposalEditSheet({ visible, card, saving, error, onClose,
             {preferredTime === 'custom' && (
               <TextInput
                 testID="proposal-preferred-time-custom-input"
+                accessibilityLabel="自訂適合時間"
                 value={preferredTimeCustom}
-                onChangeText={setPreferredTimeCustom}
+                onChangeText={value => {
+                  setLocalError(null);
+                  setPreferredTimeCustom(value);
+                }}
+                maxLength={MAX_CUSTOM_TIME_LENGTH}
                 style={styles.input}
                 placeholder="例如：週末早餐後"
               />
@@ -234,8 +287,13 @@ export function ParentProposalEditSheet({ visible, card, saving, error, onClose,
               {editingCompletion && (
                 <TextInput
                   testID="proposal-completion-description-input"
+                  accessibilityLabel="怎樣算完成"
                   value={completionDescription}
-                  onChangeText={setCompletionDescription}
+                  onChangeText={value => {
+                    setLocalError(null);
+                    setCompletionDescription(value);
+                  }}
+                  maxLength={MAX_COMPLETION_DESCRIPTION_LENGTH}
                   style={[styles.input, styles.multiline]}
                   multiline
                 />
@@ -263,16 +321,27 @@ export function ParentProposalEditSheet({ visible, card, saving, error, onClose,
                 </Text>
               ))}
             </View>
-            {(error || localError) && <Text style={styles.error}>{error ?? localError}</Text>}
+            {(localError || error) && (
+              <Text
+                accessibilityRole="alert"
+                accessibilityLiveRegion="assertive"
+                style={styles.error}
+              >
+                {localError ?? error}
+              </Text>
+            )}
             <TouchableOpacity
               accessibilityLabel={saving ? '正在存下來' : '存下來，讓孩子看看'}
               accessibilityRole="button"
-              style={styles.primary}
+              accessibilityState={{ disabled: primaryDisabled }}
+              style={[styles.primary, primaryDisabled && styles.primaryDisabled]}
               onPress={submit}
-              disabled={saving}
+              disabled={primaryDisabled}
             >
               <Text style={styles.primaryText}>{saving ? '正在存下來…' : '存下來，讓孩子看看'}</Text>
             </TouchableOpacity>
+              </>
+            )}
           </ScrollView>
         </View>
       </View>
@@ -321,11 +390,13 @@ const styles = StyleSheet.create({
   input: { minHeight: 44, paddingHorizontal: ParentSpacing[3], paddingVertical: ParentSpacing[2], borderWidth: 1, borderColor: ParentColors.borderMedium, borderRadius: ParentRadii.md, color: ParentColors.fgPrimary },
   multiline: { minHeight: 80, textAlignVertical: 'top' },
   completionCard: { gap: ParentSpacing[2], padding: ParentSpacing[3], borderRadius: ParentRadii.md, borderWidth: 1, borderColor: ParentColors.borderSoft },
+  unsupportedCard: { minHeight: 72, justifyContent: 'center', padding: ParentSpacing[3], borderRadius: ParentRadii.md, backgroundColor: ParentColors.bgSurfaceWarm },
   currentValue: { fontFamily: ParentFonts.body, fontSize: ParentFontSizes.sm, color: ParentColors.fgSecondary },
   summary: { gap: ParentSpacing[2], padding: ParentSpacing[3], borderRadius: ParentRadii.md, backgroundColor: ParentColors.bgSurfaceWarm },
   summaryTitle: { fontFamily: ParentFonts.body, fontSize: ParentFontSizes.sm, fontWeight: ParentFontWeights.bold, color: ParentColors.fgPrimary },
   summaryItem: { fontFamily: ParentFonts.body, fontSize: ParentFontSizes.sm, color: ParentColors.fgSecondary },
   error: { fontFamily: ParentFonts.body, fontSize: ParentFontSizes.sm, color: ParentColors.error },
   primary: { minHeight: 48, alignItems: 'center', justifyContent: 'center', padding: ParentSpacing[3], borderRadius: ParentRadii.pill, backgroundColor: ParentColors.accent },
+  primaryDisabled: { backgroundColor: ParentColors.borderMedium },
   primaryText: { fontFamily: ParentFonts.body, fontSize: ParentFontSizes.sm, fontWeight: ParentFontWeights.bold, color: '#FFFFFF' },
 });
