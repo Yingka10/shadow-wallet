@@ -269,6 +269,21 @@ describe('LongTermGoalDetailView', () => {
     }
   });
 
+  it('gives the Today action and completion CTA stronger visual hierarchy', () => {
+    renderView();
+
+    const actionStyle = StyleSheet.flatten(
+      screen.getByText('自己選一本喜歡的書，閱讀 15 分鐘').props.style,
+    );
+    expect(actionStyle.fontSize).toBeGreaterThanOrEqual(22);
+    expect(actionStyle.lineHeight).toBeGreaterThanOrEqual(30);
+
+    const completeButton = screen.getByLabelText('記錄今天的閱讀');
+    const completeButtonStyle = StyleSheet.flatten(completeButton.props.style);
+    expect(completeButtonStyle.minHeight).toBeGreaterThanOrEqual(56);
+    expect(completeButtonStyle.paddingVertical).toBeGreaterThanOrEqual(12);
+  });
+
   it('expands and collapses the small-step explanation accessibly', () => {
     renderView();
 

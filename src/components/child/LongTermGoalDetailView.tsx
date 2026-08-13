@@ -1255,8 +1255,8 @@ const styles = StyleSheet.create({
   },
   actionTitle: {
     color: Colors.fgPrimary,
-    fontSize: 15,
-    lineHeight: 21,
+    fontSize: 22,
+    lineHeight: 30,
     fontWeight: '900',
   },
   scheduleRow: {
@@ -1363,7 +1363,7 @@ const styles = StyleSheet.create({
     color: Colors.leaf700,
   },
   completeButton: {
-    minHeight: 48,
+    minHeight: 56,
     marginTop: 10,
     borderRadius: 8,
     backgroundColor: Colors.accent,
@@ -1371,6 +1371,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 7,
+    paddingVertical: 12,
   },
   buttonBusy: {
     opacity: 0.65,
