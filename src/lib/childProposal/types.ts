@@ -111,6 +111,19 @@ export type ChildProposalConfirmedReward = {
   /** 只有 coin_eligible 才有值，而且一定 > 0。 */
   coinAmount: number | null;
   payoutBasis: ChildProposalPayoutBasis;
+  /**
+   * per_period 快照當初約定「一個 period 內幾次算達標」。
+   *
+   * **不是 `maxClaimsPerPeriod`。** 後者是每期 claim 次數上限，兩者會不一樣
+   * （「每週 4 次算達標、允許做 5 次」是合法設定），
+   * 見 `docs/CLAIM_PERIOD_VS_PAYOUT_BASIS.md`。
+   *
+   * 兩種情況會是 null，而且都是正確的：
+   *   · 非 per_period 的 basis —— 目標次數只屬於 per_period
+   *   · legacy 快照 —— 那時的 per_period 是從 claim_period 推導出來的，
+   *     家庭從來沒有確認過任何次數（遷移零列，不 backfill）
+   */
+  periodTargetCount: number | null;
   claimPeriod: ChildProposalClaimPeriod;
   maxClaimsPerPeriod: number;
   rewardPolicyVersion: string;

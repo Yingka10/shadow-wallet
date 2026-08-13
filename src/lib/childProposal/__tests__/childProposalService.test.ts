@@ -350,11 +350,24 @@ const COIN_SNAPSHOT = {
   rewardPolicy: 'coin_eligible',
   coinAmount: 8,
   payoutBasis: 'per_completion',
+  periodTargetCount: null,
   claimPeriod: 'day',
   maxClaimsPerPeriod: 1,
   rewardPolicyVersion: 'reward-2026-07',
   taskPolicyVersion: 'task-2026-07',
   sourceTaskId: 'task-1',
+};
+
+/**
+ * per_period 的共同版本。達標次數 4、claim 上限 5 —— 兩個數字刻意不同，
+ * 「拿 maxClaimsPerPeriod 當達標次數」才驗得出來。
+ */
+const PERIOD_SNAPSHOT = {
+  ...COIN_SNAPSHOT,
+  payoutBasis: 'per_period',
+  periodTargetCount: 4,
+  claimPeriod: 'week',
+  maxClaimsPerPeriod: 5,
 };
 
 function activeResponse(confirmedReward: unknown) {
@@ -390,6 +403,27 @@ describe('shared version 的回饋可追溯', () => {
       toStatus: 'active',
       planVersionId: 'v-3',
       confirmedReward: COIN_SNAPSHOT,
+    });
+  });
+
+  it('per_period 的快照帶著達標次數，而且不等於 claim 上限', async () => {
+    mockRpc.mockResolvedValue(activeResponse(PERIOD_SNAPSHOT));
+
+    const result = await service().transition(ACTIVATE);
+    expect(result).toMatchObject({ ok: true, confirmedReward: PERIOD_SNAPSHOT });
+    // 兩個數字必須分開帶回來 —— 混用會讓孩子端的「還差幾次」算錯。
+    expect(PERIOD_SNAPSHOT.periodTargetCount).not.toBe(PERIOD_SNAPSHOT.maxClaimsPerPeriod);
+  });
+
+  it('legacy 快照的 per_period 沒有達標次數，一樣算數', async () => {
+    // 那時的 per_period 是從 claim_period 推導的，家庭沒有確認過任何次數。
+    // 把它擋掉會讓既有共同計畫的重試整個失敗。
+    const legacy = { ...PERIOD_SNAPSHOT, periodTargetCount: null };
+    mockRpc.mockResolvedValue(activeResponse(legacy));
+
+    await expect(service().transition(ACTIVATE)).resolves.toMatchObject({
+      ok: true,
+      confirmedReward: legacy,
     });
   });
 
@@ -431,6 +465,8 @@ describe('shared version 的回饋可追溯', () => {
     ['coin_eligible 卻沒有金額', { ...COIN_SNAPSHOT, coinAmount: null }],
     ['coin_eligible 金額是 0', { ...COIN_SNAPSHOT, coinAmount: 0 }],
     ['不發幣卻夾帶金額', { ...COIN_SNAPSHOT, rewardPolicy: 'progress_only' }],
+    ['達標次數是 0', { ...PERIOD_SNAPSHOT, periodTargetCount: 0 }],
+    ['達標次數不是數字', { ...PERIOD_SNAPSHOT, periodTargetCount: '4' }],
   ])('殘缺的快照不算數：%s', async (_label, snapshot) => {
     mockRpc.mockResolvedValue(activeResponse(snapshot));
 

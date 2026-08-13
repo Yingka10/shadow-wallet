@@ -219,6 +219,16 @@ function isConfirmedReward(value: unknown): value is ChildProposalConfirmedRewar
   }
   if (typeof r.sourceTaskId !== 'string' || r.sourceTaskId.length === 0) return false;
 
+  // 目標次數：有值就必須是正整數，沒值是 null。
+  //
+  // 刻意**不**寫成「payoutBasis === 'per_period' 就一定要有值」——
+  // legacy 快照的 per_period 是從 claim_period 推導出來的，那些家庭
+  // 從來沒有確認過任何次數，它們的 null 是正確答案。把它擋掉會讓
+  // 既有共同計畫的重試整個失敗。
+  if (r.periodTargetCount !== null && r.periodTargetCount !== undefined) {
+    if (typeof r.periodTargetCount !== 'number' || r.periodTargetCount <= 0) return false;
+  }
+
   // 幣值與回饋方式必須互相對得上，兩個方向都查。
   const hasCoin = typeof r.coinAmount === 'number' && r.coinAmount > 0;
   if (r.rewardPolicy === 'coin_eligible') return hasCoin;

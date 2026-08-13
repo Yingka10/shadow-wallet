@@ -1,7 +1,7 @@
 # P0 correctness follow-up｜`confirmedReward` 回應必須讀回持久化的快照
 
-> 獨立工單。**不阻擋** `feat/p0-long-term-reward-settlement` 的 merge
-> （consumer audit clean，見 §3），但它是 correctness 缺口，不是 roadmap 項目。
+> **狀態：已完成 —— `20260821000000_canonical_confirmed_reward.sql`。**
+> 實作與驗收見本文件 §5。以下 §1–§4 保留原始工單內容。
 >
 > 來源：`docs/LONG_TERM_REWARD_SETTLEMENT.md` §9.6。
 
@@ -100,3 +100,75 @@ v_payout_basis := public.child_proposal_payout_basis(v_task.claim_period);
 （已用 `CREATE OR REPLACE FUNCTION public.transition_child_proposal_v1` 全 migration
 搜尋確認），所以衍生風險比 `20260817` 那次低得多 —— 但仍是一次整段複製。
 動它之前先重新確認一次「至今仍只定義過一次」，那是這個判斷的全部前提。
+
+---
+
+## 5. 實作結果（`20260821000000_canonical_confirmed_reward.sql`）
+
+### 5.1 範圍比 §4 預估的大一支
+
+§4 只點名 `transition_child_proposal_v1`，並說「`20260813` / `20260815` 不必再改」。
+**那是錯的。** 它們的 **replay 分支**是各自逐欄手寫 JSON 的，不會因為上游修好
+而長出 `periodTargetCount` —— 於是「第一次有這個鍵、replay 沒有」，違反本工單的
+核心要求。所以實際 forward-derive 了三支：
+
+| 函式 | 來源 | 改動 |
+|---|---|---|
+| `transition_child_proposal_v1` | `20260810` | 回應改讀版本列 |
+| `confirm_child_proposal_v1` | `20260813` | replay 分支改讀版本列 |
+| `accept_child_proposal_plan_v1` | `20260815` | replay 分支改讀版本列 |
+
+三支在動之前都重新確認過「至今只定義過一次」（§4 的風險前提），
+並由 contract test 持續釘住 —— 哪天有人在別的 migration 再定義一次，測試會先紅。
+
+### 5.2 形狀只留一份
+
+`child_proposal_confirmed_reward_v1(plan_version_id) RETURNS jsonb` 是回應形狀的
+**唯一來源**，四個組裝點全部改成呼叫它。
+
+三份手寫的形狀正是這個 bug 的成因：其中一份加了欄位、另外兩份沒加。
+形狀只有一份，就不可能再分岔 —— 這比「這次把三份都補上」更重要。
+
+### 5.3 函式原文不手抄
+
+三支加起來約 1000 行。手抄是本輪最大的風險來源（`20260818` 差點用衍生法把
+P0-8G 的欄位清單洗回舊版），所以改由腳本從原始 migration 讀出原文、只做三處
+**精確字串替換**，任何一處沒命中就中止；產生時另外檢查衍生結果仍帶著
+`assert_child_in_caller_family`、狀態機檢查與快照複製那幾道防線。
+
+contract test 進一步逐行 diff 衍生結果與原始定義，斷言**差異只落在
+`confirmedReward` 那幾行**。
+
+### 5.4 驗收（staging 全綠）
+
+`supabase/verify/staging/p0_canonical_confirmed_reward.sql`，self-rolling-back。
+CASE A / B 走真正的家長直接確認路徑 `confirm_child_proposal_v1`，**各呼叫兩次**
+（第一次成功 + idempotent replay）：
+
+| Case | 計畫 | `claim_period` 推導值 | canonical | 第一次 = replay = 快照 |
+|---|---|---|---|---|
+| A | `long_term` + `fixed_days` | `per_completion` ❌ | `per_period`，target 3 | ✅ |
+| B | `one_time` | `one_time` ❌ | `per_completion`，target null | ✅ |
+| C | legacy（`payout_basis IS NULL`） | `per_period` | 維持推導值，target null | ✅ |
+| D | 尚未確認的版本 | — | helper 回 `NULL` | ✅ |
+
+CASE A 另外斷言 `periodTargetCount`（3）**不等於** `maxClaimsPerPeriod`，
+否則「有沒有混用這兩個數字」根本驗不出來。
+
+> CASE B 原本想用 `recurring` + `weekly_frequency`（推導值 `per_period`，方向相反）。
+> 做不到：直接確認路徑要求 `weekly_frequency` 必須配 `progress_model =
+> 'weekly_rhythm'`，而 `weekly_rhythm` 只允許 `long_term` —— 那個組合進不了這條
+> 路徑。改用 `one_time`，推導值 `one_time` vs canonical `per_completion`，
+> 同樣有鑑別力而且是合法計畫。
+
+回歸：`p0_snapshot_payout_basis`（10 cases）、`p0_payout_settlement`、
+`p0_6_reward_guard` 全部 VERIFY PASS。
+
+### 5.5 TS 端
+
+`ChildProposalConfirmedReward` 新增 `periodTargetCount: number | null`。
+
+`isConfirmedReward` 的驗證**刻意不寫成**「`payoutBasis === 'per_period'` 就一定要有值」
+（§4.5 原本這樣寫）：legacy 快照的 `per_period` 是從 `claim_period` 推導出來的，
+那些家庭從來沒有確認過任何次數，它們的 `null` 是正確答案。照 §4.5 寫會讓
+**既有共同計畫的重試整個失敗**。改成「有值就必須是正整數」。
