@@ -232,10 +232,19 @@ export const CHILD_GOAL_PLANNING_LIMITS = {
  * 要模型讀完孩子的原話再回一整包結構化 JSON，8 秒不夠，而症狀會是
  * SERVICE_ERROR —— 看起來像服務壞掉而不是太慢。
  *
- * 上限來自 App 端的 CHILD_GOAL_PLANNING_TIMEOUT_MS（20 秒）：要留餘裕
+ * **30 秒這個數字是量出來的，不是猜的。** 2026-08-13 的 P1-A1.5 real model
+ * acceptance（15 次真實呼叫，見 childGoalPlanningLiveCheck.test.ts）：
+ *
+ *   延遲 945ms – 26,284ms，中位數約 1.5 秒。
+ *
+ * 分布是**雙峰**的：前五次呼叫 10-26 秒，之後穩定在 1-2 秒。也就是說
+ * 慢的是「冷的那幾次」，而那正是真實使用者會遇到的那幾次 —— 一個孩子
+ * 一天裡的第一次規劃。原本的 15 秒會讓其中 4/15 直接變成 SERVICE_ERROR。
+ *
+ * 上限來自 App 端的 CHILD_GOAL_PLANNING_TIMEOUT_MS（40 秒）：要留餘裕
  * 讓這支在 client 放棄之前把結構化的 unavailable 回出去。
  */
-export const CHILD_GOAL_PLANNING_GEMINI_TIMEOUT_MS = 15_000;
+export const CHILD_GOAL_PLANNING_GEMINI_TIMEOUT_MS = 30_000;
 
 // ---------------------------------------------------------------------------
 // 輸入檢查
@@ -381,6 +390,9 @@ ${conversationRule}
   needs_clarification  連他想達成什麼都還不清楚 → 問一題（一次只有一題）。
   needs_choice         目標清楚了，但他還沒決定怎麼做 → 給 2-3 個可以挑的開始方式。
                        ⚠️ 這**不是**替他決定，是讓他挑。他永遠可以說「我自己想」。
+                       ⚠️ 他如果已經講出數量或期限（「5 本」「兩週」「20 公里」），
+                          question 裡要先接住那個數字，讓他看得出你聽懂了 ——
+                          「暑假 5 本書，你想怎麼排？」，不是只問「你想怎麼開始？」。
   ready                資訊夠了 → 一份可執行的計畫。
 
 goalControlType 與 progressionKind 是**兩個不同的問題**，要分開回答：

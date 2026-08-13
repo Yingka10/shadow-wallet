@@ -7,6 +7,7 @@ import { NEXT_STEP_MAX_LENGTH } from '../../childProposal/planDraft/canonicalPla
 import {
   cadenceEquals,
   checkPlanActionText,
+  childVocabulary,
   containsClockTime,
   containsDomainAuthorityClaim,
   containsMentalStateDiagnosis,
@@ -103,6 +104,46 @@ describe('領域權威 —— AI 是規劃夥伴，不是教練', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toBe('domain_authority');
+  });
+});
+
+describe('guard 限制的是模型生成的內容，不是孩子的輸入', () => {
+  const wantsBest = input({ childOriginalGoal: '我想找到最有效的讀書方法' });
+  const wantsConfidence = input({ childOriginalGoal: '我想變得更有自信' });
+
+  it('孩子自己用過的字眼，整理後仍然留得住', () => {
+    const vocabulary = childVocabulary(wantsBest);
+    expect(vocabulary.domainAuthority).toContain('最有效');
+    expect(
+      containsDomainAuthorityClaim('找到最有效的讀書方法', vocabulary.domainAuthority),
+    ).toBe(false);
+  });
+
+  it('但其他權威字眼一個都沒有放寬', () => {
+    const vocabulary = childVocabulary(wantsBest);
+    // 孩子講了「最有效」，模型仍然不可以說「研究顯示」。
+    expect(
+      containsDomainAuthorityClaim('研究顯示這樣最有效', vocabulary.domainAuthority),
+    ).toBe(true);
+  });
+
+  it('心理狀態也一樣：孩子講的保留，模型自己加的擋掉', () => {
+    const vocabulary = childVocabulary(wantsConfidence);
+    expect(containsMentalStateDiagnosis('變得更有自信', vocabulary.mentalState)).toBe(false);
+    expect(containsMentalStateDiagnosis('你最近失去動機了', vocabulary.mentalState)).toBe(true);
+  });
+
+  it('孩子沒講過就沒有放寬', () => {
+    const vocabulary = childVocabulary(input());
+    expect(vocabulary.domainAuthority).toEqual([]);
+    expect(containsDomainAuthorityClaim('最有效的方法', vocabulary.domainAuthority)).toBe(true);
+  });
+
+  it('硬性 guard 不吃這個放寬 —— 孩子講過也不能當成行動', () => {
+    // childVocabulary 進不了 checkPlanActionText：下一步是 safety guard，
+    // 不是敘述。「更有自信」永遠不是一個他今天做得到的動作。
+    expect(checkPlanActionText('先做到更有自信').ok).toBe(false);
+    expect(checkPlanActionText('照最有效的順序練').ok).toBe(false);
   });
 });
 

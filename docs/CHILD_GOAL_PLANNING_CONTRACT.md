@@ -54,6 +54,26 @@ AI 不可以假設「孩子講出目標 = 他不知道怎麼做」。
 （`MENTAL_STATE_DIAGNOSIS`）。staged 的階段完成條件同樣必須可觀察
 （`PHASE_NOT_OBSERVABLE`）。
 
+### E-bis｜guard 限制的是模型的話，不是孩子的話
+
+`MENTAL_STATE_DIAGNOSIS` 與 `DOMAIN_AUTHORITY_CLAIM` 限制的是**模型生成／
+整理後的內容**。孩子自己用過的字眼（見 `childVocabulary()`）在敘述性欄位裡
+不算違規 —— 孩子說「我想找到最有效的讀書方法」，整份計畫因為那三個字被退掉，
+等於系統因為他用了某個詞就拒絕幫他，而他什麼都沒做錯。
+
+放寬**只限那幾個他自己講過的詞**，其他一個都沒鬆：孩子講了「最有效」，
+模型仍然不可以說「研究顯示」「專業訓練處方」。
+
+**硬性 guard 不吃這個放寬，也不參與證據優先序：**
+
+- `nextAction` / `controllableActions` 一律走完整的 `checkPlanActionText`
+- staged 的 `observableDoneWhen` 一律不准是心理狀態
+
+「更有自信」不會因為孩子講過就變成一個看得見的完成條件，「拿第一名」也不會
+因為孩子講過就變成他今天做得到的動作。**EVIDENCE_PRIORITY 只排序 planning
+content 的 provenance，不是放行清單** —— 一份所有欄位都標成 `child_stated`
+的計畫，一樣會被這兩條擋下來。
+
 ### F｜AI 是規劃夥伴，不是領域教練
 
 **可以**：澄清目標、整理孩子已有的方法、把遠期目標縮成近期行動、
@@ -298,6 +318,36 @@ type ChildPlanProvenance = {
 | 12 | 我想彈完這首曲子＋老師叫我先練右手旋律 | 整理老師的順序（`derived_from_child`）；另造課程 → `CHILD_INPUT_OVERWRITTEN`；「最有效的順序」→ `DOMAIN_AUTHORITY_CLAIM` |
 
 ---
+
+## 7-bis. Real model acceptance（P1-A1.5）
+
+2026-08-13，真實 Gemini，走與 ai-proxy 同一條 MODEL_CHAIN、同一支 prompt、
+同一支 normalize/compose/validator。**沒有部署任何東西、沒有碰 staging 資料、
+沒有寫任何一列。** 重跑方式：
+
+```
+LIVE_MODEL_CHECK=1 npx jest childGoalPlanningLiveCheck
+LIVE_CHECK_ONLY=MT ...      # 只補跑某幾個 case
+LIVE_CHECK_BUDGET_MS=90000 ... # 量測延遲用，不是驗收用
+```
+
+（預設 skip —— 這支會真的花錢。金鑰從 `.env.local` 讀，只讀不印。）
+
+**延遲**：三輪共 69 次呼叫，中位數約 1.3 秒，健康時最大約 3 秒；但會出現
+**偶發的長尾**（同一組輸入某一輪 1.1 秒、另一輪 25 秒以上），與 prompt 長度
+無關，比較像 API 側的壅塞。原本的 15 秒讓 4/15 直接變成 SERVICE_ERROR，
+因此預算改成 **Function 30 秒 / App 40 秒**。
+
+長尾沒辦法靠再加大預算消滅，也不該 —— 契約對它的答案是 fail-soft：
+逾時就是 `unavailable`，不是一份編出來的計畫。實測的兩次逾時確實只產生錯誤，
+沒有產生任何內容。
+
+**已知缺陷（不在這一包修）**：`gemini.ts` 的 `MODEL_CHAIN` 最後一個
+`gemini-2.0-flash` 已被 Google 下架（實測 404：This model is no longer
+available）。前兩個 model 撞到配額時，fallback 的最後一跳一定失敗。
+這支 chain 是**所有** ai-proxy 呼叫端共用的（週報、顧問聊天、許願澄清、
+P0-3 計畫草稿），所以它該有自己的決定與回歸測試，不該在一個 contract
+驗收工作包裡順手改掉。
 
 ## 8. Non-goals（P1-A1 的邊界）
 

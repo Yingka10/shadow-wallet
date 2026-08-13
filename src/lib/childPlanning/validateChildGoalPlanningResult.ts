@@ -22,6 +22,7 @@
 import {
   cadenceEquals,
   checkPlanActionText,
+  childVocabulary,
   containsClockTime,
   containsDomainAuthorityClaim,
   containsMentalStateDiagnosis,
@@ -646,9 +647,17 @@ function checkAgainstChildInput(
     rejections.add('CHILD_INPUT_OVERWRITTEN');
   }
 
-  // 心理狀態推測與領域權威宣稱：所有 AI 寫的自由文字都掃一次。
-  if (texts.some(containsMentalStateDiagnosis)) rejections.add('MENTAL_STATE_DIAGNOSIS');
-  if (texts.some(containsDomainAuthorityClaim)) rejections.add('DOMAIN_AUTHORITY_CLAIM');
+  // 心理狀態推測與領域權威宣稱：所有 AI 寫的敘述都掃一次，但**孩子自己
+  // 用過的字眼不算**——那是保留他的話，不是模型在診斷或冒充專家。
+  // （硬性 guard 不吃這個放寬：下一步／可控行動走完整的 checkPlanActionText，
+  //   階段完成條件一律不准是心理狀態。兩者都在上面各自判斷過了。）
+  const vocabulary = childVocabulary(input);
+  if (texts.some((value) => containsMentalStateDiagnosis(value, vocabulary.mentalState))) {
+    rejections.add('MENTAL_STATE_DIAGNOSIS');
+  }
+  if (texts.some((value) => containsDomainAuthorityClaim(value, vocabulary.domainAuthority))) {
+    rejections.add('DOMAIN_AUTHORITY_CLAIM');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -831,8 +840,15 @@ function checkConversationText(
   input: ChildGoalPlanningInput,
   rejections: Rejections,
 ): void {
-  if (texts.some(containsMentalStateDiagnosis)) rejections.add('MENTAL_STATE_DIAGNOSIS');
-  if (texts.some(containsDomainAuthorityClaim)) rejections.add('DOMAIN_AUTHORITY_CLAIM');
+  // 孩子自己用過的字眼不算 —— 「你想找到最有效的讀書方法，對嗎？」
+  // 是在確認他講的東西，不是在冒充專家。
+  const vocabulary = childVocabulary(input);
+  if (texts.some((value) => containsMentalStateDiagnosis(value, vocabulary.mentalState))) {
+    rejections.add('MENTAL_STATE_DIAGNOSIS');
+  }
+  if (texts.some((value) => containsDomainAuthorityClaim(value, vocabulary.domainAuthority))) {
+    rejections.add('DOMAIN_AUTHORITY_CLAIM');
+  }
   if (knownGoal !== input.childOriginalGoal.trim()) rejections.add('CHILD_INPUT_OVERWRITTEN');
   if (informationSufficiency(input) === 'sufficient') {
     rejections.add('UNNECESSARY_CLARIFICATION');

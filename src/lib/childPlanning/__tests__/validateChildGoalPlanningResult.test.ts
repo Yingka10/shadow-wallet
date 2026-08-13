@@ -443,6 +443,101 @@ describe('領域權威', () => {
   });
 });
 
+describe('safety guard 不參與證據優先序，也不被 child-stated 覆蓋', () => {
+  // 全部標成孩子講的，仍然擋得下來 —— provenance 是「誰決定的」，
+  // 不是「可以放行什麼」。
+  const allChildStated = provenance(
+    {
+      cadence: 'child_stated',
+      sessionSize: 'child_stated',
+      nextAction: 'child_stated',
+      reviewPoint: 'child_stated',
+    },
+    { childStatedApproach: '每天練 10 分鐘' },
+  );
+  const childInput: ChildGoalPlanningInput = {
+    ...INPUT,
+    childApproach: '每天練 10 分鐘',
+    cadence: { mode: 'weekly_frequency', weeklyFrequency: 3 },
+  };
+
+  it('下一步是不可控的成果 → 還是擋下', () => {
+    const result = validate(
+      {
+        cadence: { mode: 'weekly_frequency', weeklyFrequency: 3 },
+        nextAction: { text: '拿第一名', source: 'child_stated' },
+        planningContribution: 'organized_child_plan',
+        provenance: allChildStated,
+      },
+      childInput,
+    );
+    if (result.status !== 'unavailable') throw new Error('expected unavailable');
+    expect(result.rejections).toContain('NEXT_ACTION_INVALID');
+  });
+
+  it('階段完成條件是心理狀態 → 還是擋下，連孩子講過也一樣', () => {
+    const result = validate(
+      {
+        progressionKind: 'staged',
+        cadence: undefined,
+        sessionSize: undefined,
+        trialPeriod: undefined,
+        reviewPoint: null,
+        phases: [
+          { id: 'phase-1', title: '第一步', observableDoneWhen: '更有自信' },
+          { id: 'phase-2', title: '第二步', observableDoneWhen: '能完整彈完一次' },
+        ],
+        nextAction: { text: '今天先練 10 分鐘', source: 'child_stated' },
+        planningContribution: 'organized_child_plan',
+        provenance: provenance(
+          {
+            cadence: 'child_stated',
+            sessionSize: 'undecided',
+            nextAction: 'child_stated',
+            reviewPoint: 'undecided',
+            phases: 'child_stated',
+          },
+          { childStatedApproach: '我想變得更有自信，每天練 10 分鐘' },
+        ),
+      },
+      { ...childInput, childApproach: '我想變得更有自信，每天練 10 分鐘' },
+    );
+    if (result.status !== 'unavailable') throw new Error('expected unavailable');
+    expect(result.rejections).toContain('PHASE_NOT_OBSERVABLE');
+  });
+});
+
+describe('孩子原話含 guard 字眼時，不可以因此拒絕他', () => {
+  const wantsBest: ChildGoalPlanningInput = {
+    ...INPUT,
+    childOriginalGoal: '我想找到最有效的讀書方法',
+  };
+
+  it('把孩子的話整理進 desiredOutcome → 通過', () => {
+    const result = validate(
+      {
+        desiredOutcome: '找到最有效的讀書方法',
+        provenance: provenance({}, { childOriginalGoal: '我想找到最有效的讀書方法' }),
+      },
+      wantsBest,
+    );
+    expect(result.status).toBe('ready');
+  });
+
+  it('但模型自己加上「研究顯示」→ 還是擋下', () => {
+    const result = validate(
+      {
+        desiredOutcome: '找到最有效的讀書方法',
+        actionPlanSummary: '研究顯示這樣安排最有效，先照著做。',
+        provenance: provenance({}, { childOriginalGoal: '我想找到最有效的讀書方法' }),
+      },
+      wantsBest,
+    );
+    if (result.status !== 'unavailable') throw new Error('expected unavailable');
+    expect(result.rejections).toContain('DOMAIN_AUTHORITY_CLAIM');
+  });
+});
+
 describe('澄清問題', () => {
   it('正常的一題會通過', () => {
     const result = validateChildGoalPlanningResult(

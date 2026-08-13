@@ -44,11 +44,15 @@ export const AI_PROXY_FUNCTION_NAME = 'ai-proxy';
 /**
  * 等模型的上限。
  *
- * 與 P0-3 同值（20 秒）並不是巧合：Function 端的預算必須比它短，
- * 才拿得到結構化的 reason —— client 先 abort 的話，「模型太慢」與
- * 「模型亂寫」會一起變成 TIMEOUT。
+ * 必須比 Function 端的預算長，才拿得到結構化的 reason —— client 先
+ * abort 的話，「模型太慢」與「模型亂寫」會一起變成 TIMEOUT。
+ *
+ * 40 秒（而不是 P0-3 的 20 秒）來自 2026-08-13 的真實模型量測：這一支的
+ * prompt 比 P0-3 長，冷啟動時實測到 26 秒。Function 端拿 30 秒，這裡留
+ * 10 秒餘裕。**這不代表要讓孩子盯著轉圈等 40 秒** —— 呼叫端該怎麼呈現
+ * 等待是 UI 工作包的事，這一層只負責不要在模型還在寫的時候就放棄。
  */
-export const CHILD_GOAL_PLANNING_TIMEOUT_MS = 20_000;
+export const CHILD_GOAL_PLANNING_TIMEOUT_MS = 40_000;
 
 export type InvokeAiProxy = (
   body: { type: string; payload: ChildGoalPlanningInput },

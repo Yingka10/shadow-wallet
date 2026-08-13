@@ -50,9 +50,20 @@ export const MENTAL_STATE_MARKERS = [
   '專注力不足', '不專心', '不夠認真', '態度不佳', '懶惰', '偷懶',
 ] as const;
 
-/** 出現任何一個心理狀態詞就是 true。 */
-export function containsMentalStateDiagnosis(value: string): boolean {
-  return MENTAL_STATE_MARKERS.some((marker) => value.includes(marker));
+/**
+ * 出現任何一個心理狀態詞就是 true。
+ *
+ * `allowed` 是**孩子自己講過的**字眼（見 childVocabulary）。孩子說
+ * 「我想更有自信」的時候，AI 把它整理成 desiredOutcome 不是診斷，
+ * 是保留他的話 —— 而弄丟他的話比誤判更糟。
+ */
+export function containsMentalStateDiagnosis(
+  value: string,
+  allowed: readonly string[] = [],
+): boolean {
+  return MENTAL_STATE_MARKERS.some(
+    (marker) => !allowed.includes(marker) && value.includes(marker),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -104,9 +115,57 @@ export const DOMAIN_AUTHORITY_MARKERS = [
   '權威', '必修', '一定要照這個順序', '正統',
 ] as const;
 
-/** 出現任何一個權威宣稱就是 true。 */
-export function containsDomainAuthorityClaim(value: string): boolean {
-  return DOMAIN_AUTHORITY_MARKERS.some((marker) => value.includes(marker));
+/** 出現任何一個權威宣稱就是 true。`allowed` 的意義同上。 */
+export function containsDomainAuthorityClaim(
+  value: string,
+  allowed: readonly string[] = [],
+): boolean {
+  return DOMAIN_AUTHORITY_MARKERS.some(
+    (marker) => !allowed.includes(marker) && value.includes(marker),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 孩子自己的用詞
+// ---------------------------------------------------------------------------
+
+/**
+ * 這些 guard 限制的是**模型生成／整理後的內容**，不是孩子的輸入。
+ *
+ * 孩子說「我想找到最有效的讀書方法」，那句話裡的「最有效」是他的願望；
+ * 整份計畫因為這三個字被退掉，等於系統因為孩子用了某個詞就拒絕幫他 ——
+ * 而他根本沒有做錯任何事，畫面上只會顯示「這一輪沒有計畫」。
+ *
+ * 所以：**孩子自己用過的字眼，在整理後的敘述裡不算 AI 宣稱。**
+ * 其他字眼一個都沒有放寬 —— 孩子講了「最有效」，模型仍然不可以說
+ * 「研究顯示」「專業訓練處方」。
+ *
+ * ⚠️ 這個放寬**只適用於敘述性欄位**（desiredOutcome、摘要、目前重點、
+ *    選項、問題）。硬性 guard 不吃這一套：
+ *
+ *      · nextAction / controllableActions 一律走完整的 checkPlanActionText
+ *      · staged 的 observableDoneWhen 一律不准是心理狀態
+ *
+ *    「更有自信」不會因為孩子講過就變成一個看得見的完成條件，
+ *    「拿第一名」也不會因為孩子講過就變成他下一次做得到的動作。
+ *    這兩類是 safety guard，不參與證據優先序，也不被 child-stated 覆蓋。
+ */
+export type ChildVocabulary = {
+  mentalState: string[];
+  domainAuthority: string[];
+};
+
+export function childVocabulary(input: ChildGoalPlanningInput): ChildVocabulary {
+  const childText = [
+    input.childOriginalGoal,
+    input.childApproach ?? '',
+    input.childOriginalMotivation ?? '',
+  ].join('\n');
+
+  return {
+    mentalState: MENTAL_STATE_MARKERS.filter((marker) => childText.includes(marker)),
+    domainAuthority: DOMAIN_AUTHORITY_MARKERS.filter((marker) => childText.includes(marker)),
+  };
 }
 
 // ---------------------------------------------------------------------------
