@@ -234,7 +234,9 @@ describe('LongTermGoalDetailView', () => {
     const hero = within(screen.getByTestId('goal-hero'));
     expect(hero.getByText('學習與技能')).toBeTruthy();
     expect(hero.getByText('第 1 週／共 4 週')).toBeTruthy();
-    expect(hero.getByRole('progressbar').props.accessibilityValue).toEqual({
+    const overallProgress = hero.getByRole('progressbar');
+    expect(overallProgress.props.accessibilityLabel).toBe('整體計畫進度');
+    expect(overallProgress.props.accessibilityValue).toEqual({
       min: 0,
       max: 100,
       now: 5,

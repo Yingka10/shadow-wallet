@@ -204,7 +204,7 @@ export function ParentProposalEditSheet({ visible, card, saving, error, onClose,
             </View>
             {mode === 'weekly_frequency' ? (
               <View
-                testID="proposal-weekly-frequency-input"
+                testID="proposal-weekly-frequency-stepper"
                 style={styles.stepper}
               >
                 <TouchableOpacity

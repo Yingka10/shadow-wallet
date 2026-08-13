@@ -306,6 +306,7 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
           style={styles.progressTrack}
           accessible
           accessibilityRole="progressbar"
+          accessibilityLabel="整體計畫進度"
           accessibilityValue={{
             min: 0,
             max: 100,

@@ -318,7 +318,8 @@ describe('ParentProposalEditSheet', () => {
     rerender(<ParentProposalEditSheet {...defaultProps} />);
 
     expect(screen.getByText('4 次')).toBeTruthy();
-    expect(screen.getByTestId('proposal-weekly-frequency-input')).toBeTruthy();
+    expect(screen.getByTestId('proposal-weekly-frequency-stepper')).toBeTruthy();
+    expect(screen.queryByTestId('proposal-weekly-frequency-input')).toBeNull();
     expect(screen.getByLabelText('展開更多時間選項').props.accessibilityState)
       .toEqual({ expanded: false });
     expect(screen.getByLabelText('修改怎樣算完成').props.accessibilityState)

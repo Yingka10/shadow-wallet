@@ -215,7 +215,8 @@ describe('ParentProposalSection', () => {
     expect(screen.getByText('目前不適合')).toBeTruthy();
     expect(screen.getByText('這樣開始，適合承恩嗎？')).toBeTruthy();
     fireEvent.press(screen.getByText('調整一下'));
-    expect(screen.getByTestId('proposal-weekly-frequency-input')).toBeTruthy();
+    expect(screen.getByTestId('proposal-weekly-frequency-stepper')).toBeTruthy();
+    expect(screen.queryByTestId('proposal-weekly-frequency-input')).toBeNull();
   });
 
   it('one-time 計畫仍可直接確認，但不提供無法保留原節奏的調整入口', () => {
