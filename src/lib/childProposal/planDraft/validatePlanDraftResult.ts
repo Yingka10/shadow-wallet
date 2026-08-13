@@ -21,8 +21,13 @@ import {
   PLAN_DRAFT_LIMITS,
   type ChildProposalPlanDraft,
   type ChildProposalPlanDraftResult,
+  type PayoutType,
+  type PlanDraftAgeGroup,
+  type PlanDraftBandId,
   type PlanDraftCadence,
   type PlanDraftUnavailableReason,
+  type PricingBasis,
+  type PricingResult,
 } from './types';
 
 const CATEGORIES: readonly string[] = ['A', 'B', 'C', 'D'];
@@ -30,6 +35,14 @@ const DIFFICULTIES: readonly string[] = ['easy', 'standard', 'hard'];
 const DURATION_TYPES: readonly string[] = ['one_time', 'recurring', 'long_term'];
 const PRICING_STATUSES: readonly string[] = ['priced', 'unpriced', 'coin_disabled', 'gated'];
 const CADENCE_SOURCES: readonly string[] = ['child', 'ai_suggested', 'none'];
+const PAYOUT_TYPES: readonly string[] = [
+  'per_completion',
+  'per_period',
+  'per_milestone',
+  'final_completion',
+];
+const AGE_GROUPS: readonly string[] = ['2-4', '4-6', '6-9', '9-12'];
+const BAND_IDS: readonly string[] = ['5-10', '11-20', '21-30', '31-45', '46+'];
 const ACTIVITY_KINDS: readonly string[] = [
   'reading',
   'practice',
@@ -129,6 +142,94 @@ function coinAmountConsistent(
   return policy === 'coin_eligible' && pricingStatus === 'priced';
 }
 
+function validPricingBasis(value: unknown): PricingBasis | null {
+  if (value === null || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+
+  const policyVersion = nonEmptyString(raw.policyVersion, 80);
+  if (policyVersion === null) return null;
+  if (typeof raw.ageGroup !== 'string' || !AGE_GROUPS.includes(raw.ageGroup)) return null;
+  if (raw.taskType !== 'C' && raw.taskType !== 'D') return null;
+  if (typeof raw.band !== 'string' || !BAND_IDS.includes(raw.band)) return null;
+  if (typeof raw.difficulty !== 'string' || !DIFFICULTIES.includes(raw.difficulty)) return null;
+  const estimatedMinutes = intInRange(
+    raw.estimatedMinutes,
+    PLAN_DRAFT_LIMITS.minMinutes,
+    PLAN_DRAFT_LIMITS.maxMinutes,
+  );
+  if (estimatedMinutes === null) return null;
+  if (raw.computedFrom !== 'deterministic') return null;
+
+  return {
+    policyVersion,
+    ageGroup: raw.ageGroup as PlanDraftAgeGroup,
+    taskType: raw.taskType,
+    band: raw.band as PlanDraftBandId,
+    difficulty: raw.difficulty as PricingBasis['difficulty'],
+    estimatedMinutes,
+    computedFrom: 'deterministic',
+  };
+}
+
+/**
+ * payoutType 與 pricing 是不是一份合法組合。
+ *
+ * `pricing === null` 一律合法（不發幣／unpriced/gated/coin_disabled，跟
+ * pricingStatus 是同一件事，不在這裡重複判斷）。`pricing !== null` 時，
+ * `pricing.payoutType` 必須跟草稿頂層的 `payoutType` 一致——兩處各說各話
+ * 代表回應本身是壞的，不是「有一點不一致但還能用」。
+ */
+function validPricingResult(
+  value: unknown,
+  payoutType: PayoutType,
+): PricingResult | null | 'invalid' {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'object') return 'invalid';
+  const raw = value as Record<string, unknown>;
+
+  if (raw.payoutType !== payoutType) return 'invalid';
+
+  const basis = validPricingBasis(raw.basis);
+  if (basis === null) return 'invalid';
+
+  if (payoutType === 'per_completion') {
+    if (raw.status !== 'resolved') return 'invalid';
+    const finalRewardCoins = intInRange(raw.finalRewardCoins, 1, 999);
+    const sessionCoinReference = intInRange(raw.sessionCoinReference, 1, 999);
+    if (finalRewardCoins === null || sessionCoinReference === null) return 'invalid';
+    // per_completion 的 session 價就是最終金額——兩者對不上代表資料本身矛盾。
+    if (finalRewardCoins !== sessionCoinReference) return 'invalid';
+    return { payoutType, status: 'resolved', finalRewardCoins, sessionCoinReference, basis };
+  }
+
+  if (payoutType === 'per_period') {
+    if (raw.status !== 'session_reference_only') return 'invalid';
+    if (raw.gapCode !== 'PERIOD_PRICING_POLICY_GAP') return 'invalid';
+    const sessionCoinReference = intInRange(raw.sessionCoinReference, 1, 999);
+    if (sessionCoinReference === null) return 'invalid';
+    return {
+      payoutType,
+      status: 'session_reference_only',
+      sessionCoinReference,
+      gapCode: 'PERIOD_PRICING_POLICY_GAP',
+      basis,
+    };
+  }
+
+  // per_milestone / final_completion
+  if (raw.status !== 'policy_gap') return 'invalid';
+  if (raw.gapCode !== 'MILESTONE_PRICING_POLICY_GAP') return 'invalid';
+  const sessionCoinReference = intInRange(raw.sessionCoinReference, 1, 999);
+  if (sessionCoinReference === null) return 'invalid';
+  return {
+    payoutType,
+    status: 'policy_gap',
+    sessionCoinReference,
+    gapCode: 'MILESTONE_PRICING_POLICY_GAP',
+    basis,
+  };
+}
+
 function validateDraft(value: unknown): ChildProposalPlanDraft | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
@@ -212,6 +313,36 @@ function validateDraft(value: unknown): ChildProposalPlanDraft | null {
   const rewardPolicyVersion = nonEmptyString(raw.rewardPolicyVersion, 80);
   if (rewardPolicyVersion === null) return null;
 
+  if (typeof raw.payoutType !== 'string' || !PAYOUT_TYPES.includes(raw.payoutType)) return null;
+  const payoutType = raw.payoutType as PayoutType;
+
+  const pricing = validPricingResult(raw.pricing, payoutType);
+  if (pricing === 'invalid') return null;
+  // pricing 非 null 的話，rewardPolicy 一定要是 coin_eligible、pricingStatus 一定要是
+  // priced——跟舊版 coinAmountConsistent 是同一條規則，只是套在新欄位上。
+  if (pricing !== null && !coinAmountConsistent(pricing.sessionCoinReference, raw.rewardPolicy, raw.pricingStatus)) {
+    return null;
+  }
+
+  const sessionCoinReference =
+    raw.sessionCoinReference === null || raw.sessionCoinReference === undefined
+      ? null
+      : intInRange(raw.sessionCoinReference, 1, 999);
+  if (
+    raw.sessionCoinReference !== null
+    && raw.sessionCoinReference !== undefined
+    && sessionCoinReference === null
+  ) {
+    return null;
+  }
+  if (!coinAmountConsistent(sessionCoinReference, raw.rewardPolicy, raw.pricingStatus)) {
+    return null;
+  }
+  // pricing 有值時，sessionCoinReference 一定要跟它裡面的數字相等——
+  // 兩處各講一個數字代表回應本身矛盾。
+  if (pricing !== null && sessionCoinReference !== pricing.sessionCoinReference) return null;
+  if (pricing === null && sessionCoinReference !== null) return null;
+
   const aiSuggestedCoinAmount =
     raw.aiSuggestedCoinAmount === null || raw.aiSuggestedCoinAmount === undefined
       ? null
@@ -226,6 +357,8 @@ function validateDraft(value: unknown): ChildProposalPlanDraft | null {
   if (!coinAmountConsistent(aiSuggestedCoinAmount, raw.rewardPolicy, raw.pricingStatus)) {
     return null;
   }
+  // shim：舊欄位必須跟新欄位相等，不能各講各的。
+  if (aiSuggestedCoinAmount !== sessionCoinReference) return null;
 
   const blockingIssues = stringList(raw.blockingIssues);
   const requiresConfirmation = stringList(raw.requiresConfirmation);
@@ -254,6 +387,9 @@ function validateDraft(value: unknown): ChildProposalPlanDraft | null {
     rewardEligibility: raw.rewardEligibility as ChildProposalPlanDraft['rewardEligibility'],
     rewardPolicyVersion,
     pricingStatus: raw.pricingStatus as ChildProposalPlanDraft['pricingStatus'],
+    payoutType,
+    pricing,
+    sessionCoinReference,
     aiSuggestedCoinAmount,
     blockingIssues,
     requiresConfirmation,

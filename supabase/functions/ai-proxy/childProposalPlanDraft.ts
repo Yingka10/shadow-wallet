@@ -124,7 +124,7 @@ function resolvePricing(
   );
 
   if (calc.status === 'priced') {
-    return { status: 'priced', coins: calc.coins, policyVersion: calc.policyVersion };
+    return { status: 'priced', coins: calc.coins, band: calc.band, policyVersion: calc.policyVersion };
   }
   if (calc.status === 'coin_disabled') {
     return { status: 'coin_disabled', policyVersion: calc.policyVersion };

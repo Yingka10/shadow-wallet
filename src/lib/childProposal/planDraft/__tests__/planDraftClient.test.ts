@@ -11,7 +11,7 @@ import {
 import type { ChildProposalPlanDraftInput } from '../types';
 
 const INPUT: ChildProposalPlanDraftInput = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   ageGroup: '6-9',
   childOriginalGoal: '我想兩週把這本書讀完',
   childOriginalMotivation: '因為同學說這本書很好看',
@@ -23,9 +23,9 @@ const INPUT: ChildProposalPlanDraftInput = {
 
 const GOOD_DRAFT = {
   status: 'draft',
-  schemaVersion: 1,
+  schemaVersion: 2,
   draft: {
-    schemaVersion: 1,
+    schemaVersion: 2,
     planTitle: '兩週閱讀挑戰',
     planSummary: '先用一週 4 次的節奏開始。',
     completionDescription: '完成一次約定的閱讀時段',
@@ -43,6 +43,9 @@ const GOOD_DRAFT = {
     rewardEligibility: 'allowed',
     rewardPolicyVersion: 'coin-policy-1.0.0',
     pricingStatus: 'unpriced',
+    payoutType: 'per_completion',
+    pricing: null,
+    sessionCoinReference: null,
     aiSuggestedCoinAmount: null,
     blockingIssues: [],
     requiresConfirmation: [],
@@ -89,7 +92,7 @@ describe('失效時只降到「這一輪沒有草稿」', () => {
     const client = new LiveChildProposalPlanDraftClient(invoke, 10);
     const result = await client.requestPlanDraft(INPUT);
 
-    expect(result).toEqual({ status: 'unavailable', schemaVersion: 1, reason: 'TIMEOUT' });
+    expect(result).toEqual({ status: 'unavailable', schemaVersion: 2, reason: 'TIMEOUT' });
   });
 
   it('Function 回錯誤 → SERVICE_ERROR', async () => {
@@ -110,7 +113,7 @@ describe('失效時只降到「這一輪沒有草稿」', () => {
 
   it('回了看不懂的東西 → INVALID_RESPONSE（不 cast，走 validator）', async () => {
     const invoke: InvokeAiProxy = async () => ({
-      data: { status: 'draft', schemaVersion: 1, draft: { planTitle: '只有標題' } },
+      data: { status: 'draft', schemaVersion: 2, draft: { planTitle: '只有標題' } },
       error: null,
     });
     const result = await new LiveChildProposalPlanDraftClient(invoke).requestPlanDraft(INPUT);

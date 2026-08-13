@@ -28,6 +28,7 @@ import {
 import type {
   ChildProposalPlanDraft,
   ChildProposalPlanDraftInput,
+  PricingBasis,
 } from './types';
 
 /** snapshot 的版本。改了內容結構就要改它，讀的人才知道自己在看哪一代。 */
@@ -82,7 +83,15 @@ export type PlanDraftSnapshot = {
     taskPolicyVersion: string;
     /** 幣值走到哪一步。unpriced = 規則引擎的數字還沒定案，不是壞掉。 */
     pricingStatus: ChildProposalPlanDraft['pricingStatus'];
-    /** 規則引擎算出來的建議值。**永遠不是最終確認的幣值。** */
+    /** 結算基準。目前恆為 'per_completion'，見 planDraft/types.ts 的說明。 */
+    payoutType: ChildProposalPlanDraft['payoutType'];
+    /** 一次投入的參考值。**不是**最終確認的幣值，尤其在 payoutType 不是
+     *  per_completion 時。歷史 snapshot 一律保留舊名，不追溯改寫。 */
+    sessionCoinReference: number | null;
+    /** 算出 sessionCoinReference 的依據；沒有 session price 時是 null。 */
+    pricingBasis: PricingBasis | null;
+    /** @deprecated 用 sessionCoinReference。保留舊名是因為它是歷史稽核紀錄
+     *  的一部分，不追溯改寫已經寫入的 snapshot 形狀。 */
     aiSuggestedCoinAmount: number | null;
   };
   findings: {
@@ -135,6 +144,9 @@ export function buildPlanDraftSnapshot(args: {
       rewardPolicyVersion: draft.rewardPolicyVersion,
       taskPolicyVersion: TASK_POLICY_VERSION,
       pricingStatus: draft.pricingStatus,
+      payoutType: draft.payoutType,
+      sessionCoinReference: draft.sessionCoinReference,
+      pricingBasis: draft.pricing?.basis ?? null,
       aiSuggestedCoinAmount: draft.aiSuggestedCoinAmount,
     },
     findings: {
@@ -200,9 +212,14 @@ export function toAddPlanVersionCommand(args: {
       policy: draft.rewardPolicy,
       eligibility: draft.rewardEligibility,
       policyVersion: draft.rewardPolicyVersion,
-      // 規則引擎算得出數字才有這一鍵。模型講的數字到不了這裡。
-      ...(draft.aiSuggestedCoinAmount !== null
-        ? { aiSuggestedCoinAmount: draft.aiSuggestedCoinAmount }
+      // 只有 payoutType 是 per_completion 且真的 resolved，session 價才等於
+      // 最終金額——這個命令的鍵仍然叫 aiSuggestedCoinAmount（RPC／DB 契約，
+      // 這次不改），但寫不寫這一鍵現在由 pricing.status 決定，不是單看
+      // 「有沒有數字」。payoutType 現階段恆為 per_completion，所以這條路徑
+      // 的實際輸出跟改動前一樣；差別只在於未來哪天 payoutType 真的變成
+      // per_period，這裡會自動、正確地不再把 session 參考值當最終金額送出去。
+      ...(draft.pricing?.status === 'resolved'
+        ? { aiSuggestedCoinAmount: draft.pricing.finalRewardCoins }
         : null),
     },
     taskPolicyVersion: TASK_POLICY_VERSION,
