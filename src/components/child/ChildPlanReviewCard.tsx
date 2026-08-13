@@ -70,7 +70,13 @@ export function ChildPlanReviewCard({
 
       {error && (
         <View style={styles.errorBox}>
-          <Text style={styles.error}>{error}</Text>
+          <Text
+            style={styles.error}
+            accessibilityRole="alert"
+            accessibilityLiveRegion="polite"
+          >
+            {error}
+          </Text>
           <TouchableOpacity
             style={styles.retryButton}
             onPress={onRetry}
@@ -88,7 +94,7 @@ export function ChildPlanReviewCard({
         disabled={saving}
         accessibilityRole="button"
         accessibilityLabel={saving ? '正在把計畫準備好…' : '好，我也想這樣試試看'}
-        accessibilityState={{ disabled: saving }}
+        accessibilityState={{ disabled: saving, busy: saving }}
       >
         <Text style={styles.primaryText}>{saving ? '正在把計畫準備好…' : '好，我也想這樣試試看'}</Text>
       </TouchableOpacity>
@@ -98,7 +104,7 @@ export function ChildPlanReviewCard({
         disabled={saving}
         accessibilityRole="button"
         accessibilityLabel="我想再聊聊"
-        accessibilityState={{ disabled: saving }}
+        accessibilityState={{ disabled: saving, busy: saving }}
       >
         <Text style={styles.secondaryText}>我想再聊聊</Text>
       </TouchableOpacity>
@@ -128,9 +134,15 @@ const styles = StyleSheet.create({
   changeRow: { gap: 6, padding: 12, borderRadius: 16, backgroundColor: Colors.leaf50 },
   changeLabel: { color: Colors.fgMuted, fontSize: 12, fontWeight: '700' },
   beforeAfter: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
-  before: { color: Colors.fgMuted, fontSize: 14, textDecorationLine: 'line-through' },
-  arrow: { color: Colors.accent, fontSize: 15, fontWeight: '800' },
-  after: { color: Colors.fgPrimary, fontSize: 15, fontWeight: '800' },
+  before: {
+    minWidth: 0,
+    flexShrink: 1,
+    color: Colors.fgMuted,
+    fontSize: 14,
+    textDecorationLine: 'line-through',
+  },
+  arrow: { minWidth: 0, flexShrink: 1, color: Colors.accent, fontSize: 15, fontWeight: '800' },
+  after: { minWidth: 0, flexShrink: 1, color: Colors.fgPrimary, fontSize: 15, fontWeight: '800' },
   errorBox: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 12, backgroundColor: Colors.cream100 },
   error: { flex: 1, color: Colors.error, fontSize: 13 },
   retryButton: { minHeight: 48, justifyContent: 'center' },
