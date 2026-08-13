@@ -553,11 +553,17 @@ describe('LongTermDetailScreen', () => {
     render(<LongTermDetailScreen />);
 
     fireEvent.press(await screen.findByLabelText('開始週末回顧'));
-    fireEvent.changeText(screen.getByLabelText('最喜歡的閱讀內容'), '神奇樹屋');
+    fireEvent.press(screen.getByRole('button', { name: '睡前' }));
+    fireEvent.press(screen.getByRole('button', { name: '改成睡前' }));
     fireEvent.press(screen.getByText('保留回顧草稿'));
     fireEvent.press(screen.getByLabelText('開始週末回顧'));
 
-    expect(screen.getByLabelText('最喜歡的閱讀內容').props.value).toBe('神奇樹屋');
+    expect(
+      screen.getByRole('button', { name: '睡前' }).props.accessibilityState.selected,
+    ).toBe(true);
+    expect(
+      screen.getByRole('button', { name: '改成睡前' }).props.accessibilityState.selected,
+    ).toBe(true);
     expectNoSupabaseWrites();
   });
 
@@ -840,10 +846,16 @@ describe('LongTermDetailScreen', () => {
     fireEvent.press(screen.getByText('暫停一下'));
     fireEvent.press(screen.getByText('保留調整草稿'));
     fireEvent.press(await screen.findByLabelText('開始週末回顧'));
-    fireEvent.changeText(screen.getByLabelText('最喜歡的閱讀內容'), '神奇樹屋');
+    fireEvent.press(screen.getByRole('button', { name: '晚餐後' }));
+    fireEvent.press(screen.getByRole('button', { name: '就照現在這樣' }));
     fireEvent.press(screen.getByText('保留回顧草稿'));
     fireEvent.press(screen.getByLabelText('開始週末回顧'));
-    expect(screen.getByLabelText('最喜歡的閱讀內容').props.value).toBe('神奇樹屋');
+    expect(
+      screen.getByRole('button', { name: '晚餐後' }).props.accessibilityState.selected,
+    ).toBe(true);
+    expect(
+      screen.getByRole('button', { name: '就照現在這樣' }).props.accessibilityState.selected,
+    ).toBe(true);
 
     mockRouteParams = {
       goalId: 'goal-skill',
@@ -853,7 +865,8 @@ describe('LongTermDetailScreen', () => {
     rerender(<LongTermDetailScreen />);
 
     expect(await screen.findByText('目前階段：雙手合奏')).toBeTruthy();
-    expect(screen.queryByLabelText('最喜歡的閱讀內容')).toBeNull();
+    expect(screen.queryByRole('button', { name: '晚餐後' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '就照現在這樣' })).toBeNull();
     fireEvent.press(screen.getByLabelText('開始週末回顧'));
     expect(screen.getByText('這週哪一段練習最有感？')).toBeTruthy();
     expect(screen.getByLabelText('這週最有感的片段').props.value).toBe('');
@@ -863,6 +876,21 @@ describe('LongTermDetailScreen', () => {
     expect(
       screen.getByLabelText('想先暫停一下').props.accessibilityState.selected,
     ).toBe(false);
+
+    fireEvent.press(screen.getByLabelText('關閉調整選單'));
+    mockRouteParams = {
+      goalId: 'goal-reading',
+      taskId: 'task-reading',
+      taskName: '自主閱讀計畫',
+    };
+    rerender(<LongTermDetailScreen />);
+
+    await screen.findByText('自主閱讀計畫 15 分鐘，今天繼續就好');
+    fireEvent.press(screen.getByLabelText('開始週末回顧'));
+    expect(
+      screen.getByRole('button', { name: '晚餐後' }).props.accessibilityState.selected,
+    ).toBe(false);
+    expect(screen.queryByText('下週想怎麼試？')).toBeNull();
   });
 
   it('does not let an A to B to A completion request update the new A generation', async () => {
