@@ -147,6 +147,30 @@ describe('46-48. 學習與技能的成長幣', () => {
     expect(service.calls[0].reward.decision.rewardPolicyVersion).toMatch(/coin-policy/);
   });
 
+  it('填完每次時間，成長幣自動選上——不用家長回頭再點一次', () => {
+    // 草稿建立當下還沒有每次時間，成長幣是 unavailable，初始 rewardPolicy
+    // 落在 record_only。這裡只按時間，不手動點「成長幣回饋」。
+    const { r } = openEditor('學習或練習技能', '固定重複');
+    expect(r.getByLabelText('一般紀錄').props.accessibilityState.selected).toBe(true);
+
+    fireEvent.press(r.getByText('20 分鐘'));
+
+    expect(r.getByLabelText('成長幣回饋').props.accessibilityState.selected).toBe(true);
+  });
+
+  it('家長自己選了一般紀錄之後，改時間不會被自動換回成長幣', () => {
+    const { r } = openEditor('學習或練習技能', '固定重複');
+    fireEvent.press(r.getByText('20 分鐘'));
+    // 成長幣此時已自動選上；家長改成明確選一般紀錄。
+    fireEvent.press(r.getByLabelText('一般紀錄'));
+    expect(r.getByLabelText('一般紀錄').props.accessibilityState.selected).toBe(true);
+
+    fireEvent.press(r.getByText('30 分鐘'));
+
+    // 手動選過之後就不再自動改——這是家長的決定。
+    expect(r.getByLabelText('一般紀錄').props.accessibilityState.selected).toBe(true);
+  });
+
   it('47. 自訂流程的原始碼裡沒有硬編的幣值', () => {
     const dir = path.resolve(__dirname, '..');
     const sources = fs

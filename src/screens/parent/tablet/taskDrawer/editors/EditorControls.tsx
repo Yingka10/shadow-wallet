@@ -6,7 +6,7 @@
 // 規則：0 emoji、0 硬編碼 hex、一律走 ParentTheme token；
 // 中文不因固定高度被截斷（multiline 隨內容增高、所有列用 minHeight 不用 height）。
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -344,24 +344,57 @@ export function RewardPolicyChips({
     （建議家庭貢獻、可選紀錄與進度、成長幣需要明確意圖）只存在於
     evaluateCustomTaskRewardOptions。在這裡用 chip 再擺一次的話，
     那份政策就有兩個實作，而 UI 這一份會先過期。
-
-    ⚠️ 這一段刻意放在所有 hook 之後 —— 提早 return 會讓 hook 數量隨 variant
-    改變，那是 React 最難查的一種錯誤。
   */
+  const customOptions = variant === undefined
+    ? evaluateCustomTaskRewardOptions({
+        ageGroup: ageGroup ?? '',
+        purposeCategory: draft.purposeCategory,
+        editorKind: draft.editorKind,
+        ...(draftEstimatedMinutes(draft) !== undefined
+          ? { estimatedMinutes: draftEstimatedMinutes(draft) }
+          : null),
+      })
+    : null;
+
+  /*
+    草稿建立當下（createCustomTaskDraft）還沒填「每次時間」，C/D 類的成長幣
+    選項那時候一定是 unavailable，於是初始 rewardPolicy 落在 record_only。
+    等家長之後補上每次時間，成長幣才會變成 recommended——但 draft.rewardPolicy
+    不會自己跟著換，家長不回頭點一次選單就會一路停在 record_only，而且四種
+    購買類別都一樣，看起來像「這個 App 都不發幣」。
+
+    這裡讓它在家長**還沒手動選過**的情況下，跟著目前的建議預設值走；一旦
+    家長自己點過任何一個選項（不管選哪個），就不再自動改——那之後是他的決定。
+
+    只在自訂任務（variant undefined）生效；preset 任務的建議值不會变動。
+  */
+  const touchedRef = useRef(false);
+  const recommendedPolicy = customOptions?.find(o => o.availability === 'recommended')
+    ?.rewardPolicy;
+
+  useEffect(() => {
+    if (variant !== undefined) return;
+    if (touchedRef.current) return;
+    if (recommendedPolicy === undefined || recommendedPolicy === draft.rewardPolicy) return;
+    onChange(recommendedPolicy);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只要看 recommendedPolicy 換了沒
+  }, [variant, recommendedPolicy]);
+
+  const handleCustomChange = (policy: RewardPolicy) => {
+    touchedRef.current = true;
+    onChange(policy);
+  };
+
+  // ⚠️ 這一段刻意放在所有 hook 之後 —— 提早 return 會讓 hook 數量隨 variant
+  // 改變，那是 React 最難查的一種錯誤（上面兩個 hook 因此對兩種 variant
+  // 都無條件呼叫，只在內部用 if 判斷要不要真的做事）。
   if (variant === undefined) {
     return (
       <CustomTaskRewardSection
-        options={evaluateCustomTaskRewardOptions({
-          ageGroup: ageGroup ?? '',
-          purposeCategory: draft.purposeCategory,
-          editorKind: draft.editorKind,
-          ...(draftEstimatedMinutes(draft) !== undefined
-            ? { estimatedMinutes: draftEstimatedMinutes(draft) }
-            : null),
-        })}
+        options={customOptions ?? []}
         selected={draft.rewardPolicy}
         {...(error !== undefined ? { error } : null)}
-        onChange={onChange}
+        onChange={handleCustomChange}
       />
     );
   }
