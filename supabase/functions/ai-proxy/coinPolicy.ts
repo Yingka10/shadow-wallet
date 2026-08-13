@@ -2,8 +2,15 @@
  * coinPolicy — 讀取版本化的 coin-policy.json，提供型別安全的存取與幣值計算骨架。
  *
  * 對應 docs/coin-policy-draft.md 第 3 節（時間分級 → 難度加減 → range clamp）。
- * ⚠️ coin-policy.json 內所有 bandBaseCoins 目前為 null（placeholder，待團隊定案）。
- *    calcCoins 在遇到未填數字時回傳 { status: 'unpriced' }，不會亂猜幣值。
+ *
+ * coin-policy.json 自 coin-policy-1.0.0（effectiveDate 2026-07-22）起是 ACTIVE，
+ * C / D 各年齡段的 bandBaseCoins 都是定案數字。calcCoins 的 unpriced 分支保留給
+ * 未來新增而尚未填值的 band —— 它是防禦，不是現況。
+ * （這段註解曾停在定案前的「全部是 placeholder」版本，並讓一次 audit 誤判為 unpriced。）
+ *
+ * ⚠️ 這裡算的是**一次投入（一個 session）值多少幣**，不是「一週達標回饋多少」。
+ *    per-period 的定價目前沒有政策來源，**禁止**用單次幣值 × 次數推導。
+ *    見 docs/CLAIM_PERIOD_VS_PAYOUT_BASIS.md 第 5 節。
  *
  * 本檔只負責「C / D 已通過資格閘門後」的計算；A / B 的攔截屬 reward-eligibility，不在此。
  */
