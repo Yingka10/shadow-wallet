@@ -63,6 +63,9 @@ describe('列舉兩邊一致', () => {
     ['回饋方式', ['record_only', 'family_contribution', 'progress_only', 'coin_eligible']],
     // 封閉列舉。少一個值，App 端就會把那種活動整筆拒收。
     ['活動種類', ['reading', 'practice', 'exercise', 'creating', 'learning', 'helping', 'other']],
+    ['結算基準', ['per_completion', 'per_period', 'per_milestone', 'final_completion']],
+    ['定價結果狀態', ['resolved', 'session_reference_only', 'policy_gap']],
+    ['定價缺口代碼', ['PERIOD_PRICING_POLICY_GAP', 'MILESTONE_PRICING_POLICY_GAP']],
   ])('%s', (_label, values) => {
     for (const value of values) {
       expect({ value, inFunction: LOGIC.includes(`'${value}'`) })
@@ -75,13 +78,13 @@ describe('列舉兩邊一致', () => {
     for (const reason of ['INVALID_AI_OUTPUT', 'SERVICE_ERROR', 'INVALID_INPUT']) {
       expect(HANDLER).toContain(`'${reason}'`);
       expect(
-        validatePlanDraftResult({ status: 'unavailable', schemaVersion: 1, reason }),
-      ).toEqual({ status: 'unavailable', schemaVersion: 1, reason });
+        validatePlanDraftResult({ status: 'unavailable', schemaVersion: 2, reason }),
+      ).toEqual({ status: 'unavailable', schemaVersion: 2, reason });
     }
   });
 
-  it('schema 版本兩邊都是 1', () => {
-    expect(LOGIC).toContain('CHILD_PROPOSAL_PLAN_DRAFT_SCHEMA_VERSION = 1');
+  it('schema 版本兩邊都是 2', () => {
+    expect(LOGIC).toContain('CHILD_PROPOSAL_PLAN_DRAFT_SCHEMA_VERSION = 2');
   });
 
   it('Function 端有回 activityKind 與 nextStepSuggestion —— App 端靠它們組 canonical 欄位', () => {

@@ -21,7 +21,7 @@ import type { ChildProposalPlanDraft } from '../types';
 
 function draft(overrides: Partial<ChildProposalPlanDraft> = {}): ChildProposalPlanDraft {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     planTitle: '兩週閱讀挑戰',
     planSummary: '先用一週 4 次的節奏開始。',
     completionDescription: '模型自己寫的完成說明',
@@ -39,6 +39,23 @@ function draft(overrides: Partial<ChildProposalPlanDraft> = {}): ChildProposalPl
     rewardEligibility: 'allowed',
     rewardPolicyVersion: 'coin-policy-1.0.0',
     pricingStatus: 'priced',
+    payoutType: 'per_completion',
+    pricing: {
+      payoutType: 'per_completion',
+      status: 'resolved',
+      finalRewardCoins: 10,
+      sessionCoinReference: 10,
+      basis: {
+        policyVersion: 'coin-policy-1.0.0',
+        ageGroup: '6-9',
+        taskType: 'D',
+        band: '11-20',
+        difficulty: 'standard',
+        estimatedMinutes: 15,
+        computedFrom: 'deterministic',
+      },
+    },
+    sessionCoinReference: 10,
     aiSuggestedCoinAmount: 10,
     blockingIssues: [],
     requiresConfirmation: [],

@@ -9,6 +9,7 @@
 import { runEligibilityGate } from '../rewardEligibility';
 import {
   buildPlanDraftPrompt,
+  buildPricingResult,
   composePlanDraft,
   describeCadenceForPrompt,
   normalizePlanDraftUnderstanding,
@@ -18,6 +19,7 @@ import {
   resolveRewardPolicy,
   toEligibilityDurationType,
   type ChildProposalPlanDraftInput,
+  type PayoutType,
   type PlanDraftPricing,
   type PlanDraftUnderstanding,
 } from '../childProposalPlanDraftLogic';
@@ -28,7 +30,7 @@ function input(
   overrides: Partial<ChildProposalPlanDraftInput> = {},
 ): ChildProposalPlanDraftInput {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     ageGroup: '6-9',
     childOriginalGoal: DEMO_GOAL,
     childOriginalMotivation: '因為同學說這本書很好看',
@@ -66,6 +68,7 @@ const UNPRICED: PlanDraftPricing = { status: 'unpriced', policyVersion: 'coin-po
 const PRICED: PlanDraftPricing = {
   status: 'priced',
   coins: 10,
+  band: '11-20',
   policyVersion: 'coin-policy-1.0.0',
 };
 
@@ -253,6 +256,50 @@ describe('幣值只從規則引擎來', () => {
     expect(draft.aiSuggestedCoinAmount).toBe(10);
   });
 
+  it('payoutType 恆為 per_completion，不從 cadence 推導', () => {
+    // demo 主線本身用的是 weekly_frequency 節奏，仍然必須是 per_completion——
+    // 這正是這個欄位「不能從 cadence 推導」的直接證據。
+    const u = understanding();
+    const draft = composePlanDraft({
+      input: input({ cadence: { mode: 'weekly_frequency', weeklyFrequency: 4 } }),
+      understanding: u, gate: gateFor(u), pricing: PRICED, model: 'm',
+    });
+    expect(draft.payoutType).toBe('per_completion');
+  });
+
+  it('priced + coin_eligible → pricing.resolved，sessionCoinReference 跟 aiSuggestedCoinAmount 相等', () => {
+    const u = understanding();
+    const draft = composePlanDraft({
+      input: input(), understanding: u, gate: gateFor(u), pricing: PRICED, model: 'm',
+    });
+    expect(draft.pricing).toEqual({
+      payoutType: 'per_completion',
+      status: 'resolved',
+      finalRewardCoins: 10,
+      sessionCoinReference: 10,
+      basis: {
+        policyVersion: 'coin-policy-1.0.0',
+        ageGroup: '6-9',
+        taskType: 'D',
+        band: '11-20',
+        difficulty: u.difficulty,
+        estimatedMinutes: u.estimatedMinutes,
+        computedFrom: 'deterministic',
+      },
+    });
+    expect(draft.sessionCoinReference).toBe(10);
+    expect(draft.aiSuggestedCoinAmount).toBe(draft.sessionCoinReference);
+  });
+
+  it('unpriced → pricing 是 null，不是一個假的 per_completion 分支', () => {
+    const u = understanding();
+    const draft = composePlanDraft({
+      input: input(), understanding: u, gate: gateFor(u), pricing: UNPRICED, model: 'm',
+    });
+    expect(draft.pricing).toBeNull();
+    expect(draft.sessionCoinReference).toBeNull();
+  });
+
   it('模型回應裡的任何數字都到不了建議幣值 —— normalize 根本不讀它', () => {
     const parsed = normalizePlanDraftUnderstanding({
       ...understanding(),
@@ -266,6 +313,77 @@ describe('幣值只從規則引擎來', () => {
 
   it('prompt 明講不要決定幣值', () => {
     expect(buildPlanDraftPrompt(input())).toContain('不要決定任何幣值');
+  });
+});
+
+describe('buildPricingResult — payout-aware 定價', () => {
+  const baseArgs = {
+    pricing: PRICED,
+    rewardPolicy: 'coin_eligible' as const,
+    ageGroup: '6-9' as const,
+    category: 'D' as const,
+    difficulty: 'standard' as const,
+    estimatedMinutes: 15,
+  };
+
+  it('rewardPolicy 不是 coin_eligible → null', () => {
+    expect(
+      buildPricingResult({ ...baseArgs, payoutType: 'per_completion', rewardPolicy: 'progress_only' }),
+    ).toBeNull();
+  });
+
+  it('session 價沒算出來（unpriced）→ null，不管 payoutType 是什麼', () => {
+    expect(
+      buildPricingResult({ ...baseArgs, payoutType: 'per_completion', pricing: UNPRICED }),
+    ).toBeNull();
+  });
+
+  it('per_completion + priced → resolved，finalRewardCoins 等於 sessionCoinReference', () => {
+    const result = buildPricingResult({ ...baseArgs, payoutType: 'per_completion' });
+    expect(result).toMatchObject({
+      payoutType: 'per_completion',
+      status: 'resolved',
+      finalRewardCoins: 10,
+      sessionCoinReference: 10,
+    });
+  });
+
+  it('per_period → session_reference_only，型別上沒有 finalRewardCoins', () => {
+    const result = buildPricingResult({ ...baseArgs, payoutType: 'per_period' });
+    expect(result).toMatchObject({
+      payoutType: 'per_period',
+      status: 'session_reference_only',
+      sessionCoinReference: 10,
+      gapCode: 'PERIOD_PRICING_POLICY_GAP',
+    });
+    expect(result && 'finalRewardCoins' in result).toBe(false);
+  });
+
+  it.each<PayoutType>(['per_milestone', 'final_completion'])(
+    '%s → policy_gap，型別上沒有 finalRewardCoins',
+    (payoutType) => {
+      const result = buildPricingResult({ ...baseArgs, payoutType });
+      expect(result).toMatchObject({
+        payoutType,
+        status: 'policy_gap',
+        sessionCoinReference: 10,
+        gapCode: 'MILESTONE_PRICING_POLICY_GAP',
+      });
+      expect(result && 'finalRewardCoins' in result).toBe(false);
+    },
+  );
+
+  it('basis 帶著算出這個數字的完整依據', () => {
+    const result = buildPricingResult({ ...baseArgs, payoutType: 'per_completion' });
+    expect(result?.basis).toEqual({
+      policyVersion: 'coin-policy-1.0.0',
+      ageGroup: '6-9',
+      taskType: 'D',
+      band: '11-20',
+      difficulty: 'standard',
+      estimatedMinutes: 15,
+      computedFrom: 'deterministic',
+    });
   });
 });
 

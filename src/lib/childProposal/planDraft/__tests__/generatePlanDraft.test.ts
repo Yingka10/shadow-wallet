@@ -57,7 +57,7 @@ function proposal(overrides: Partial<ChildProposal> = {}): ChildProposal {
 
 function draft(overrides: Partial<ChildProposalPlanDraft> = {}): ChildProposalPlanDraft {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     planTitle: '兩週閱讀挑戰',
     planSummary: '先用一週 4 次的節奏，每次讀一個不會太大的段落。',
     // 模型寫什麼都不會成為正式的完成標準 —— 這裡刻意放一句不一樣的，
@@ -77,6 +77,25 @@ function draft(overrides: Partial<ChildProposalPlanDraft> = {}): ChildProposalPl
     rewardEligibility: 'allowed',
     rewardPolicyVersion: 'coin-policy-1.0.0',
     pricingStatus: 'priced',
+    // demo 主線本身：weekly_frequency 節奏，payoutType 仍然是 per_completion
+    // （見 docs/CLAIM_PERIOD_VS_PAYOUT_BASIS.md —— cadence 推不出 payoutType）。
+    payoutType: 'per_completion',
+    pricing: {
+      payoutType: 'per_completion',
+      status: 'resolved',
+      finalRewardCoins: 10,
+      sessionCoinReference: 10,
+      basis: {
+        policyVersion: 'coin-policy-1.0.0',
+        ageGroup: '6-9',
+        taskType: 'D',
+        band: '11-20',
+        difficulty: 'standard',
+        estimatedMinutes: 15,
+        computedFrom: 'deterministic',
+      },
+    },
+    sessionCoinReference: 10,
     aiSuggestedCoinAmount: 10,
     blockingIssues: [],
     requiresConfirmation: [],
@@ -118,7 +137,7 @@ function makePort(overrides: Partial<PlanDraftPort> = {}, row = proposal()): Rec
 }
 
 function client(
-  result: ChildProposalPlanDraftResult = { status: 'draft', schemaVersion: 1, draft: draft() },
+  result: ChildProposalPlanDraftResult = { status: 'draft', schemaVersion: 2, draft: draft() },
 ): ChildProposalPlanDraftClient & { calls: number } {
   const stub = {
     calls: 0,
@@ -214,7 +233,7 @@ describe('A：模型正常回應 → 一版真實的 AI 計畫版本', () => {
       {
         client: client({
           status: 'draft',
-          schemaVersion: 1,
+          schemaVersion: 2,
           draft: draft({ nextStepSuggestion: '兩週後把整本書讀完' }),
         }),
         port,
@@ -235,7 +254,7 @@ describe('A：模型正常回應 → 一版真實的 AI 計畫版本', () => {
       {
         client: client({
           status: 'draft',
-          schemaVersion: 1,
+          schemaVersion: 2,
           // C 類、只做一次：沒有每週節奏可看。
           draft: draft({
             category: 'C',
@@ -469,7 +488,7 @@ describe('重試不會產生第二版、第三版', () => {
     const stub: ChildProposalPlanDraftClient = {
       async requestPlanDraft() {
         order.push('model');
-        return { status: 'draft', schemaVersion: 1, draft: draft() };
+        return { status: 'draft', schemaVersion: 2, draft: draft() };
       },
     };
 

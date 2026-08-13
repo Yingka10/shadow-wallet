@@ -7,9 +7,30 @@
 import { validatePlanDraftResult } from '../validatePlanDraftResult';
 import type { ChildProposalPlanDraft } from '../types';
 
+/** priced + coin_eligible 的標準幣值三欄位（sessionCoinReference / pricing / aiSuggestedCoinAmount 互相一致）。 */
+const PRICED_COIN_FIELDS = {
+  sessionCoinReference: 10,
+  aiSuggestedCoinAmount: 10,
+  pricing: {
+    payoutType: 'per_completion' as const,
+    status: 'resolved' as const,
+    finalRewardCoins: 10,
+    sessionCoinReference: 10,
+    basis: {
+      policyVersion: 'coin-policy-1.0.0',
+      ageGroup: '6-9' as const,
+      taskType: 'D' as const,
+      band: '11-20' as const,
+      difficulty: 'standard' as const,
+      estimatedMinutes: 15,
+      computedFrom: 'deterministic' as const,
+    },
+  },
+};
+
 function draft(overrides: Partial<ChildProposalPlanDraft> = {}): ChildProposalPlanDraft {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     planTitle: '兩週閱讀挑戰',
     planSummary: '先用一週 4 次的節奏開始。',
     completionDescription: '完成一次約定的閱讀時段',
@@ -27,7 +48,8 @@ function draft(overrides: Partial<ChildProposalPlanDraft> = {}): ChildProposalPl
     rewardEligibility: 'allowed',
     rewardPolicyVersion: 'coin-policy-1.0.0',
     pricingStatus: 'priced',
-    aiSuggestedCoinAmount: 10,
+    payoutType: 'per_completion',
+    ...PRICED_COIN_FIELDS,
     blockingIssues: [],
     requiresConfirmation: [],
     warnings: [],
@@ -38,16 +60,19 @@ function draft(overrides: Partial<ChildProposalPlanDraft> = {}): ChildProposalPl
 }
 
 function ok(overrides: Partial<ChildProposalPlanDraft> = {}) {
-  return validatePlanDraftResult({ status: 'draft', schemaVersion: 1, draft: draft(overrides) });
+  return validatePlanDraftResult({ status: 'draft', schemaVersion: 2, draft: draft(overrides) });
 }
 
 function bad(patch: Record<string, unknown>) {
   return validatePlanDraftResult({
     status: 'draft',
-    schemaVersion: 1,
+    schemaVersion: 2,
     draft: { ...draft(), ...patch },
   });
 }
+
+/** 不發幣／沒有 session price 的狀態：三個幣值欄位都要一起清空，不能只清一個。 */
+const NO_COIN_FIELDS = { sessionCoinReference: null, aiSuggestedCoinAmount: null, pricing: null };
 
 describe('正常的回應', () => {
   it('原樣通過', () => {
@@ -68,13 +93,13 @@ describe('看不懂的一律 INVALID_RESPONSE', () => {
   it.each([
     ['null', null],
     ['字串', 'nope'],
-    ['沒有 status', { schemaVersion: 1 }],
-    ['沒見過的 status', { status: 'maybe', schemaVersion: 1 }],
-    ['schema 版本不同', { status: 'draft', schemaVersion: 2, draft: {} }],
-    ['draft 是空的', { status: 'draft', schemaVersion: 1, draft: {} }],
+    ['沒有 status', { schemaVersion: 2 }],
+    ['沒見過的 status', { status: 'maybe', schemaVersion: 2 }],
+    ['schema 版本不同', { status: 'draft', schemaVersion: 1, draft: {} }],
+    ['draft 是空的', { status: 'draft', schemaVersion: 2, draft: {} }],
   ])('%s', (_label, value) => {
     expect(validatePlanDraftResult(value)).toEqual({
-      status: 'unavailable', schemaVersion: 1, reason: 'INVALID_RESPONSE',
+      status: 'unavailable', schemaVersion: 2, reason: 'INVALID_RESPONSE',
     });
   });
 
@@ -115,7 +140,22 @@ describe('幣值與回饋方式必須對得上', () => {
   });
 
   it('unpriced 且沒有數字 → 正常，這是目前最常見的情況', () => {
-    expect(ok({ pricingStatus: 'unpriced', aiSuggestedCoinAmount: null }).status).toBe('draft');
+    expect(ok({ pricingStatus: 'unpriced', ...NO_COIN_FIELDS }).status).toBe('draft');
+  });
+
+  it('sessionCoinReference 跟 pricing 裡的數字對不上 → 不放行', () => {
+    expect(bad({ sessionCoinReference: 12 }))
+      .toMatchObject({ status: 'unavailable', reason: 'INVALID_RESPONSE' });
+  });
+
+  it('aiSuggestedCoinAmount（deprecated shim）跟 sessionCoinReference 對不上 → 不放行', () => {
+    expect(bad({ aiSuggestedCoinAmount: 12 }))
+      .toMatchObject({ status: 'unavailable', reason: 'INVALID_RESPONSE' });
+  });
+
+  it('payoutType 跟 pricing.payoutType 對不上 → 不放行', () => {
+    expect(bad({ pricing: { ...PRICED_COIN_FIELDS.pricing, payoutType: 'per_period' } }))
+      .toMatchObject({ status: 'unavailable', reason: 'INVALID_RESPONSE' });
   });
 
   it('離譜的幣值不放行', () => {
@@ -128,14 +168,14 @@ describe('server 說沒有草稿', () => {
   it.each(['SERVICE_ERROR', 'INVALID_AI_OUTPUT', 'INVALID_INPUT', 'TIMEOUT'])(
     '%s 原樣傳達 —— 診斷才不會找錯地方',
     (reason) => {
-      expect(validatePlanDraftResult({ status: 'unavailable', schemaVersion: 1, reason }))
-        .toEqual({ status: 'unavailable', schemaVersion: 1, reason });
+      expect(validatePlanDraftResult({ status: 'unavailable', schemaVersion: 2, reason }))
+        .toEqual({ status: 'unavailable', schemaVersion: 2, reason });
     },
   );
 
   it('沒見過的理由退回 INVALID_RESPONSE，不原樣照收', () => {
     expect(
-      validatePlanDraftResult({ status: 'unavailable', schemaVersion: 1, reason: 'BANANA' }),
-    ).toEqual({ status: 'unavailable', schemaVersion: 1, reason: 'INVALID_RESPONSE' });
+      validatePlanDraftResult({ status: 'unavailable', schemaVersion: 2, reason: 'BANANA' }),
+    ).toEqual({ status: 'unavailable', schemaVersion: 2, reason: 'INVALID_RESPONSE' });
   });
 });
