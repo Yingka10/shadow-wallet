@@ -25,7 +25,9 @@ import type {
   ChildRewardPreference,
 } from '../types';
 
-export const CHILD_PROPOSAL_PLAN_DRAFT_SCHEMA_VERSION = 1;
+// 2：新增 payoutType / pricing / sessionCoinReference（payout-aware pricing）。
+// 舊版一端解析新契約、或反過來，一律回 unavailable，不要半驗證通過。
+export const CHILD_PROPOSAL_PLAN_DRAFT_SCHEMA_VERSION = 2;
 
 /** ai-proxy 的 request type。改版會是另一個字串，這裡是唯一寫出它的地方。 */
 export const CHILD_PROPOSAL_PLAN_DRAFT_REQUEST_TYPE = 'childProposalPlanDraft';
@@ -70,6 +72,64 @@ export type PlanDraftDifficulty = 'easy' | 'standard' | 'hard';
 export type PlanDraftDurationType = 'one_time' | 'recurring' | 'long_term';
 export type PlanDraftPricingStatus = 'priced' | 'unpriced' | 'coin_disabled' | 'gated';
 export type PlanDraftCategory = 'A' | 'B' | 'C' | 'D';
+
+/** 時間分級 band id。跟 ai-proxy 端同一組值，鏡射宣告（見 parity 測試）。 */
+export type PlanDraftBandId = '5-10' | '11-20' | '21-30' | '31-45' | '46+';
+
+// ---------------------------------------------------------------------------
+// payout-aware pricing
+// ---------------------------------------------------------------------------
+//
+// pricingStatus 回答「這一次投入，規則引擎算不算得出價」；PricingResult／
+// payoutType 回答「算出來的 session 價，能不能直接當成這份計畫最終會發的
+// 金額」。兩者正交，不能互相推導——跟 claim_period 推不出 payout_basis
+// 是同一個錯誤模式（見 docs/CLAIM_PERIOD_VS_PAYOUT_BASIS.md）。
+//
+// payoutType 目前恆為 'per_completion'：唯一有實作結算路徑的方式，
+// 不從 cadence／durationType 推導（demo 主線用 weekly_frequency 節奏卻仍
+// 必須是 per_completion，證明推導不出來）。
+
+/** 結算基準：錢包因為什麼事件而改變。目前只有 per_completion 會被產出。 */
+export type PayoutType = 'per_completion' | 'per_period' | 'per_milestone' | 'final_completion';
+
+/** 算出 session 價的依據。稽核用。 */
+export type PricingBasis = {
+  policyVersion: string;
+  ageGroup: PlanDraftAgeGroup;
+  taskType: 'C' | 'D';
+  band: PlanDraftBandId;
+  difficulty: PlanDraftDifficulty;
+  estimatedMinutes: number;
+  /** 固定值，標示這不是模型吐出來的數字。 */
+  computedFrom: 'deterministic';
+};
+
+/**
+ * payout-aware 的定價結果。只有 per_completion 分支拿得到
+ * finalRewardCoins——其他分支型別上就沒有這個欄位。
+ */
+export type PricingResult =
+  | {
+      payoutType: 'per_completion';
+      status: 'resolved';
+      finalRewardCoins: number;
+      sessionCoinReference: number;
+      basis: PricingBasis;
+    }
+  | {
+      payoutType: 'per_period';
+      status: 'session_reference_only';
+      sessionCoinReference: number;
+      gapCode: 'PERIOD_PRICING_POLICY_GAP';
+      basis: PricingBasis;
+    }
+  | {
+      payoutType: 'per_milestone' | 'final_completion';
+      status: 'policy_gap';
+      sessionCoinReference: number;
+      gapCode: 'MILESTONE_PRICING_POLICY_GAP';
+      basis: PricingBasis;
+    };
 
 /** 這份草稿的節奏是誰決定的。孩子選過就一定是 child。 */
 export type PlanDraftCadenceSource = 'child' | 'ai_suggested' | 'none';
@@ -122,7 +182,16 @@ export type ChildProposalPlanDraft = {
   rewardEligibility: ChildProposalRewardEligibility;
   rewardPolicyVersion: string;
   pricingStatus: PlanDraftPricingStatus;
-  /** 規則引擎算得出數字才有值；目前 coin-policy 是 placeholder，所以通常是 null。 */
+
+  /** 目前恆為 'per_completion'。見上方 payout-aware pricing 說明。 */
+  payoutType: PayoutType;
+  /** null = 沒有 session price 可算（不發幣／unpriced/gated/coin_disabled）。 */
+  pricing: PricingResult | null;
+  /** 一次投入的參考值。**不是**這份計畫最終會發的金額——那個只有
+   *  payoutType 是 per_completion 時才等於它，見 pricing.status。 */
+  sessionCoinReference: number | null;
+  /** @deprecated 用 sessionCoinReference。名稱讓人誤以為是「AI 決定的
+   *  金額」或「最終發放金額」，兩者都不是。內部一律等於 sessionCoinReference。 */
   aiSuggestedCoinAmount: number | null;
 
   blockingIssues: string[];

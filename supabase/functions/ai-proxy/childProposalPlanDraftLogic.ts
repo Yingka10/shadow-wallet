@@ -22,7 +22,9 @@
 
 import type { AgeGroup, Category, EligibilityResult } from './rewardEligibility.ts';
 
-export const CHILD_PROPOSAL_PLAN_DRAFT_SCHEMA_VERSION = 1;
+// 2：新增 payoutType / pricing / sessionCoinReference（payout-aware pricing）。
+// 舊版一端解析新契約、或反過來，一律回 unavailable，不要半驗證通過。
+export const CHILD_PROPOSAL_PLAN_DRAFT_SCHEMA_VERSION = 2;
 
 // ---------------------------------------------------------------------------
 // 輸入 —— 一筆真實 Proposal 的實質內容
@@ -128,6 +130,81 @@ export type PlanDraftRewardEligibility = 'not_evaluated' | 'allowed' | 'blocked'
 /** 幣值來自規則引擎，不是模型。四種狀態都要能被家長端解釋。 */
 export type PlanDraftPricingStatus = 'priced' | 'unpriced' | 'coin_disabled' | 'gated';
 
+/**
+ * 時間分級 band id。跟 coinPolicy.ts 的 BandId 是同一組值，但**獨立宣告**——
+ * 這個檔案刻意不 import coinPolicy.ts（它有 `with { type: 'json' }` import
+ * attribute，jest 解析不了），所以型別在這裡自己重宣告一份，跟
+ * PlanDraftDifficulty 是同一個理由。
+ */
+export type PlanDraftBandId = '5-10' | '11-20' | '21-30' | '31-45' | '46+';
+
+// ---------------------------------------------------------------------------
+// payout-aware pricing
+// ---------------------------------------------------------------------------
+//
+// 兩件事分開講：
+//
+//   pricingStatus（上面那個列舉）回答「這一次投入，規則引擎算不算得出價」。
+//   PricingResult／payoutType 回答「算出來的這個 session 價，能不能直接當成
+//   這份計畫最終會發的金額」。
+//
+// 兩者正交，不能互相推導 —— 跟 claim_period 不能推導 payout_basis 是同一個
+// 錯誤模式（見 docs/CLAIM_PERIOD_VS_PAYOUT_BASIS.md）。
+//
+// payoutType 目前**永遠是 'per_completion'**：這是目前唯一有實作結算路徑的
+// 方式，per_period／per_milestone／final_completion 都還沒有定價政策
+// （PRODUCT_POLICY_GAP）。**不從 cadence／durationType 推導**——demo 主線
+// 「兩週讀完這本書」用的是 weekly_frequency 節奏，卻仍然必須是
+// per_completion，證明 cadence 推不出 payoutType。之後如果產品真的決定了
+// per_period 定價政策，這裡才會有第二個值，而且會是一個新的、顯式的輸入，
+// 不是從既有欄位反推出來的。
+
+/** 結算基準：錢包因為什麼事件而改變。目前只有 per_completion 會被產出。 */
+export type PayoutType = 'per_completion' | 'per_period' | 'per_milestone' | 'final_completion';
+
+/**
+ * 算出這個 session 價的依據。稽核用——半年後要回答「這個數字怎麼來的」，
+ * 答案都在這裡，不用回去猜當時的 coin-policy 版本或輸入。
+ */
+export type PricingBasis = {
+  policyVersion: string;
+  ageGroup: AgeGroup;
+  taskType: 'C' | 'D';
+  band: PlanDraftBandId;
+  difficulty: PlanDraftDifficulty;
+  estimatedMinutes: number;
+  /** 固定值，標示這不是模型吐出來的數字。 */
+  computedFrom: 'deterministic';
+};
+
+/**
+ * payout-aware 的定價結果。**只有 per_completion 這個分支拿得到
+ * finalRewardCoins**——其他分支在型別上就沒有這個欄位，所以
+ * 「session 價 × 次數」這種寫法在編譯期就不可能表達，不必靠 review 抓。
+ */
+export type PricingResult =
+  | {
+      payoutType: 'per_completion';
+      status: 'resolved';
+      finalRewardCoins: number;
+      sessionCoinReference: number;
+      basis: PricingBasis;
+    }
+  | {
+      payoutType: 'per_period';
+      status: 'session_reference_only';
+      sessionCoinReference: number;
+      gapCode: 'PERIOD_PRICING_POLICY_GAP';
+      basis: PricingBasis;
+    }
+  | {
+      payoutType: 'per_milestone' | 'final_completion';
+      status: 'policy_gap';
+      sessionCoinReference: number;
+      gapCode: 'MILESTONE_PRICING_POLICY_GAP';
+      basis: PricingBasis;
+    };
+
 export type ChildProposalPlanDraft = {
   schemaVersion: typeof CHILD_PROPOSAL_PLAN_DRAFT_SCHEMA_VERSION;
 
@@ -161,7 +238,16 @@ export type ChildProposalPlanDraft = {
   rewardEligibility: PlanDraftRewardEligibility;
   rewardPolicyVersion: string;
   pricingStatus: PlanDraftPricingStatus;
-  /** 規則引擎算得出來才有值。模型說什麼都不會寫進這裡。 */
+
+  /** 目前恆為 'per_completion'。見上方 payout-aware pricing 說明。 */
+  payoutType: PayoutType;
+  /** null = 沒有 session price 可算（不發幣／unpriced/gated/coin_disabled）。 */
+  pricing: PricingResult | null;
+  /** 一次投入的參考值。**不是**這份計畫最終會發的金額——那個只有
+   *  payoutType 是 per_completion 時才等於它，見 pricing.status。 */
+  sessionCoinReference: number | null;
+  /** @deprecated 用 sessionCoinReference。名稱讓人誤以為是「AI 決定的
+   *  金額」或「最終發放金額」，兩者都不是。內部一律等於 sessionCoinReference。 */
   aiSuggestedCoinAmount: number | null;
 
   blockingIssues: string[];
@@ -516,10 +602,76 @@ export function resolveRewardPolicy(gate: EligibilityResult): PlanDraftRewardPol
 }
 
 export type PlanDraftPricing =
-  | { status: 'priced'; coins: number; policyVersion: string }
+  | { status: 'priced'; coins: number; band: PlanDraftBandId; policyVersion: string }
   | { status: 'unpriced'; policyVersion: string }
   | { status: 'coin_disabled'; policyVersion: string }
   | { status: 'gated'; policyVersion: string };
+
+/**
+ * 把「這一次投入值多少幣」（PlanDraftPricing）跟 payoutType 組成
+ * payout-aware 的定價結果。
+ *
+ * `rewardPolicy !== 'coin_eligible'` 或 session 價本身沒算出來，一律回
+ * `null`——跟現有 `aiSuggestedCoinAmount` 的判斷條件一致，不變。
+ *
+ * payoutType 現階段只會是 'per_completion'（見上方型別區的說明），所以
+ * 這裡只有第一個分支會被真的走到；其餘分支寫出來是為了讓型別完整、
+ * 讓未來真的出現 per_period 時這個函式不用重寫，只是先天不會被觸發。
+ */
+export function buildPricingResult(args: {
+  payoutType: PayoutType;
+  pricing: PlanDraftPricing;
+  rewardPolicy: PlanDraftRewardPolicy;
+  ageGroup: AgeGroup;
+  category: Category;
+  difficulty: PlanDraftDifficulty;
+  estimatedMinutes: number;
+}): PricingResult | null {
+  const { payoutType, pricing, rewardPolicy, ageGroup, category, difficulty, estimatedMinutes } = args;
+
+  if (rewardPolicy !== 'coin_eligible' || pricing.status !== 'priced') return null;
+  if (category !== 'C' && category !== 'D') return null;
+
+  const basis: PricingBasis = {
+    policyVersion: pricing.policyVersion,
+    ageGroup,
+    taskType: category,
+    band: pricing.band,
+    difficulty,
+    estimatedMinutes,
+    computedFrom: 'deterministic',
+  };
+
+  const sessionCoinReference = pricing.coins;
+
+  switch (payoutType) {
+    case 'per_completion':
+      return {
+        payoutType,
+        status: 'resolved',
+        finalRewardCoins: sessionCoinReference,
+        sessionCoinReference,
+        basis,
+      };
+    case 'per_period':
+      return {
+        payoutType,
+        status: 'session_reference_only',
+        sessionCoinReference,
+        gapCode: 'PERIOD_PRICING_POLICY_GAP',
+        basis,
+      };
+    case 'per_milestone':
+    case 'final_completion':
+      return {
+        payoutType,
+        status: 'policy_gap',
+        sessionCoinReference,
+        gapCode: 'MILESTONE_PRICING_POLICY_GAP',
+        basis,
+      };
+  }
+}
 
 /**
  * 把模型的理解、閘門結果與幣值結果組成一份 Plan Draft。
@@ -546,9 +698,21 @@ export function composePlanDraft(args: {
   const durationType = resolveDurationType(cadence, understanding.durationDays);
   const rewardPolicy = resolveRewardPolicy(gate);
 
-  // 幣值只在規則引擎真的算出數字時才有。模型從頭到尾沒有機會碰這一欄。
-  const aiSuggestedCoinAmount =
-    pricing.status === 'priced' && rewardPolicy === 'coin_eligible' ? pricing.coins : null;
+  // payoutType 目前恆為 'per_completion'——不從 cadence/durationType 推導。
+  // 見上方 payout-aware pricing 說明與 docs/CLAIM_PERIOD_VS_PAYOUT_BASIS.md。
+  const payoutType: PayoutType = 'per_completion';
+  const pricingResult = buildPricingResult({
+    payoutType,
+    pricing,
+    rewardPolicy,
+    ageGroup: input.ageGroup,
+    category: understanding.category,
+    difficulty: understanding.difficulty,
+    estimatedMinutes: understanding.estimatedMinutes,
+  });
+  const sessionCoinReference = pricingResult?.sessionCoinReference ?? null;
+  // shim：舊欄位內部一律等於新欄位，不獨立計算。
+  const aiSuggestedCoinAmount = sessionCoinReference;
 
   return {
     schemaVersion: CHILD_PROPOSAL_PLAN_DRAFT_SCHEMA_VERSION,
@@ -574,6 +738,10 @@ export function composePlanDraft(args: {
     rewardEligibility: gate.coinEnabled && !gate.gateBlocked ? 'allowed' : 'blocked',
     rewardPolicyVersion: pricing.policyVersion,
     pricingStatus: pricing.status,
+
+    payoutType,
+    pricing: pricingResult,
+    sessionCoinReference,
     aiSuggestedCoinAmount,
 
     blockingIssues: gate.blockingIssues,
