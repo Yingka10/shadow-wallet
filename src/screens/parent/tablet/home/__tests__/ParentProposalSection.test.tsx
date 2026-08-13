@@ -68,7 +68,7 @@ describe('ParentProposalSection', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
-  it('real structured plan 顯示整理內容與 GrowBook 建議，CTA 是共同確認語言', () => {
+  it('把孩子原話與精簡的 structured plan 分成三個有順序的決策帶', () => {
     const item = card('p1', true);
     item.proposal = proposal('p1', {
       current_plan_version_id: item.currentPlanVersion!.id,
@@ -76,23 +76,53 @@ describe('ParentProposalSection', () => {
       child_original_motivation: '因為同學說這本書很好看',
       child_reward_preference: 'hopes_for_coin',
     });
+    item.currentPlanVersion = plan('p1', { preferred_time: 'after_dinner' });
     const onConfirm = jest.fn();
     render(<ParentProposalSection {...base} proposals={[item]} onConfirm={onConfirm} />);
 
-    expect(screen.getByText('孩子原本怎麼說')).toBeTruthy();
+    expect(screen.getByTestId('proposal-card-p1')).toBeTruthy();
+    expect(screen.getByTestId('proposal-child-voice-p1')).toBeTruthy();
+    expect(screen.getByTestId('proposal-plan-p1')).toBeTruthy();
+    expect(screen.getByTestId('proposal-decision-p1')).toBeTruthy();
+    expect(screen.getByText('孩子的聲音')).toBeTruthy();
     expect(screen.getByText('我想兩週把這本書讀完')).toBeTruthy();
+    expect(screen.getByText('因為同學說這本書很好看')).toBeTruthy();
+    expect(screen.getByText('還沒決定，想一起討論')).toBeTruthy();
+    expect(screen.getByText('希望如果適合，可以有成長幣鼓勵')).toBeTruthy();
     expect(screen.getByText('GrowBook 幫忙整理')).toBeTruthy();
-    expect(screen.getByText('兩週閱讀挑戰')).toBeTruthy();
     expect(screen.getByText('一週 4 次')).toBeTruthy();
     expect(screen.getByText('每次約 15 分鐘')).toBeTruthy();
     expect(screen.getByText('完成一次約定的閱讀時段')).toBeTruthy();
+    expect(screen.getByText('晚餐後')).toBeTruthy();
     expect(screen.getByText('拿出想讀的書，先閱讀約 15 分鐘')).toBeTruthy();
     expect(screen.getByText('以每週節奏累積，不會因漏一天重新開始')).toBeTruthy();
     expect(screen.getByText('GrowBook 建議')).toBeTruthy();
     expect(screen.getByText('建議：每次完成 10 成長幣')).toBeTruthy();
+    expect(screen.getByText('這樣開始，適合承恩嗎？')).toBeTruthy();
     fireEvent.press(screen.getByText('確認這個計畫'));
     expect(onConfirm).toHaveBeenCalledWith(item);
     expect(screen.queryByText(/核准|批准|審核通過|已核定/)).toBeNull();
+  });
+
+  it('把 plan summary 預設收起，並用可存取的 disclosure 展開與收合', () => {
+    const item = card('p1', true);
+    item.currentPlanVersion = plan('p1', {
+      plan_summary: '先用短時間建立節奏，再依承恩的感受調整閱讀安排',
+    });
+    render(<ParentProposalSection {...base} proposals={[item]} />);
+
+    expect(screen.queryByText('先用短時間建立節奏，再依承恩的感受調整閱讀安排')).toBeNull();
+    const expandButton = screen.getByLabelText('展開為什麼這樣整理');
+    expect(expandButton.props.accessibilityState).toEqual({ expanded: false });
+
+    fireEvent.press(expandButton);
+
+    expect(screen.getByText('先用短時間建立節奏，再依承恩的感受調整閱讀安排')).toBeTruthy();
+    const collapseButton = screen.getByLabelText('收起為什麼這樣整理');
+    expect(collapseButton.props.accessibilityState).toEqual({ expanded: true });
+
+    fireEvent.press(collapseButton);
+    expect(screen.queryByText('先用短時間建立節奏，再依承恩的感受調整閱讀安排')).toBeNull();
   });
 
   it('沒有完整 AI plan 時保留原話但不顯示 confirm CTA 或 fake plan', () => {
@@ -122,8 +152,10 @@ describe('ParentProposalSection', () => {
     render(<ParentProposalSection {...base} proposals={[
       card('p1'), card('p2'), card('p3'), card('p4'),
     ]} />);
-    expect(screen.getAllByText('承恩有一個新的挑戰想法')).toHaveLength(3);
-    expect(screen.queryByText('想法 p4')).toBeNull();
+    expect(screen.getByTestId('proposal-card-p1')).toBeTruthy();
+    expect(screen.getByTestId('proposal-card-p2')).toBeTruthy();
+    expect(screen.getByTestId('proposal-card-p3')).toBeTruthy();
+    expect(screen.queryByTestId('proposal-card-p4')).toBeNull();
   });
 
   it('fresh AI plan 提供確認、調整與目前不適合三條窄路徑', () => {
@@ -132,6 +164,7 @@ describe('ParentProposalSection', () => {
     expect(screen.getByText('確認這個計畫')).toBeTruthy();
     expect(screen.getByText('調整一下')).toBeTruthy();
     expect(screen.getByText('目前不適合')).toBeTruthy();
+    expect(screen.getByText('這樣開始，適合承恩嗎？')).toBeTruthy();
     fireEvent.press(screen.getByText('調整一下'));
     expect(screen.getByTestId('proposal-weekly-frequency-input')).toBeTruthy();
   });

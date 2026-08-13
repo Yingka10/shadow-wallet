@@ -54,6 +54,7 @@ export function ParentProposalSection({
 }: Props) {
   const [editCard, setEditCard] = useState<ParentProposalCardData | null>(null);
   const [closeCard, setCloseCard] = useState<ParentProposalCardData | null>(null);
+  const [expandedReasoning, setExpandedReasoning] = useState<Record<string, boolean>>({});
   const cards = useMemo(
     () => proposals.slice(0, 3).map(item => ({
       source: item,
@@ -89,113 +90,138 @@ export function ParentProposalSection({
         </View>
       ) : (
         <View style={styles.cardList}>
-          {cards.map(({ source, view: card }) => (
-            <View key={card.id} style={styles.card}>
-              <View style={styles.cardHead}>
-                <View style={styles.ideaMark}>
-                  <Text style={styles.ideaMarkText}>想</Text>
-                </View>
-                <View style={styles.cardHeadCopy}>
-                  <Text style={styles.cardTitle}>{card.title}</Text>
+          {cards.map(({ source, view: card }) => {
+            const reasoningIsExpanded = expandedReasoning[card.id] === true;
+            const reasoningLabel = reasoningIsExpanded
+              ? '收起為什麼這樣整理'
+              : '展開為什麼這樣整理';
+
+            return (
+              <View key={card.id} style={styles.card} testID={`proposal-card-${card.id}`}>
+              <View style={styles.childVoiceBand} testID={`proposal-child-voice-${card.id}`}>
+                <View style={styles.bandHead}>
+                  <Text style={styles.bandEyebrow}>孩子的聲音</Text>
                   <Text style={styles.statusLabel}>{card.statusLabel}</Text>
                 </View>
-              </View>
-
-              <View style={styles.detailBlock}>
-                <Text style={styles.detailLabel}>孩子原本怎麼說</Text>
                 <Text style={styles.goalText}>{card.goal}</Text>
-              </View>
-              {card.motivation && (
-                <View style={styles.detailBlock}>
-                  <Text style={styles.detailLabel}>孩子為什麼想做</Text>
-                  <Text style={styles.detailText}>{card.motivation}</Text>
-                </View>
-              )}
-              <View style={styles.summaryRow}>
-                <View style={styles.summaryItem}>
-                  <Text style={styles.detailLabel}>想怎麼開始</Text>
-                  <Text style={styles.detailText}>{card.cadence}</Text>
-                </View>
-                <View style={styles.summaryItem}>
-                  <Text style={styles.detailLabel}>孩子希望的回饋</Text>
-                  <Text style={styles.detailText}>{card.rewardHope}</Text>
+                {card.motivation && (
+                  <View style={styles.detailBlock}>
+                    <Text style={styles.detailLabel}>為什麼想做</Text>
+                    <Text style={styles.voiceMotivation}>{card.motivation}</Text>
+                  </View>
+                )}
+                <View style={styles.compactFacts}>
+                  <View style={styles.compactFact}>
+                    <Text style={styles.detailLabel}>想怎麼開始</Text>
+                    <Text style={styles.detailText}>{card.cadence}</Text>
+                  </View>
+                  <View style={styles.compactFact}>
+                    <Text style={styles.detailLabel}>希望的回饋</Text>
+                    <Text style={styles.detailText}>{card.rewardHope}</Text>
+                  </View>
                 </View>
               </View>
 
               {card.planTitle ? (
-                <View style={styles.planBlock}>
-                  <Text style={styles.planEyebrow}>GrowBook 幫忙整理</Text>
-                  <Text style={styles.planTitle}>{card.planTitle}</Text>
-                  {card.planSummary && <Text style={styles.detailText}>{card.planSummary}</Text>}
-                  <View style={styles.summaryRow}>
-                  {card.planCadence && (
-                      <View style={styles.summaryItem}>
-                        <Text style={styles.detailLabel}>這份計畫的節奏</Text>
+                <View style={styles.planBand} testID={`proposal-plan-${card.id}`}>
+                  <Text style={styles.bandEyebrow}>GrowBook 幫忙整理</Text>
+                  <View style={styles.planFacts}>
+                    {card.planCadence && (
+                      <View style={styles.planFact}>
+                        <Text style={styles.detailLabel}>計畫節奏</Text>
                         <Text style={styles.detailText}>{card.planCadence}</Text>
                       </View>
                     )}
                     {card.estimatedTime && (
-                      <View style={styles.summaryItem}>
+                      <View style={styles.planFact}>
                         <Text style={styles.detailLabel}>每次投入</Text>
                         <Text style={styles.detailText}>{card.estimatedTime}</Text>
                       </View>
                     )}
+                    {card.completionDescription && (
+                      <View style={styles.planFact}>
+                        <Text style={styles.detailLabel}>怎樣算完成</Text>
+                        <Text style={styles.detailText}>{card.completionDescription}</Text>
+                      </View>
+                    )}
+                    {card.preferredTime && (
+                      <View style={styles.planFact}>
+                        <Text style={styles.detailLabel}>適合時間</Text>
+                        <Text style={styles.detailText}>{card.preferredTime}</Text>
+                      </View>
+                    )}
+                    {card.nextStep && (
+                      <View style={styles.planFactWide}>
+                        <Text style={styles.detailLabel}>下一步</Text>
+                        <Text style={styles.detailText}>{card.nextStep}</Text>
+                      </View>
+                    )}
                   </View>
-                  {card.completionDescription && (
-                    <View style={styles.detailBlock}>
-                      <Text style={styles.detailLabel}>一次完成標準</Text>
-                      <Text style={styles.detailText}>{card.completionDescription}</Text>
+                  {(card.rhythmCopy || card.rewardSuggestion) && (
+                    <View style={styles.supportingDetails}>
+                      {card.rhythmCopy && <Text style={styles.supportingText}>{card.rhythmCopy}</Text>}
+                      {card.rewardSuggestion && (
+                        <View style={styles.rewardDetail}>
+                          <Text style={styles.suggestionLabel}>{card.rewardSuggestionLabel}</Text>
+                          <Text style={styles.supportingText}>{card.rewardSuggestion}</Text>
+                        </View>
+                      )}
                     </View>
                   )}
-                  {card.preferredTime && (
-                    <View style={styles.summaryItem}>
-                      <Text style={styles.detailLabel}>適合時間</Text>
-                      <Text style={styles.detailText}>{card.preferredTime}</Text>
-                    </View>
-                  )}
-                  {card.nextStep && (
-                    <View style={styles.detailBlock}>
-                      <Text style={styles.detailLabel}>下一步</Text>
-                      <Text style={styles.detailText}>{card.nextStep}</Text>
-                    </View>
-                  )}
-                  {card.rhythmCopy && <Text style={styles.rhythmText}>{card.rhythmCopy}</Text>}
-                  {card.rewardSuggestion && (
-                    <View style={styles.rewardBlock}>
-                      <Text style={styles.suggestionLabel}>{card.rewardSuggestionLabel}</Text>
-                      <Text style={styles.detailText}>{card.rewardSuggestion}</Text>
-                    </View>
+                  {card.planSummary && (
+                    <>
+                      <TouchableOpacity
+                        style={styles.reasoningToggle}
+                        accessibilityRole="button"
+                        accessibilityLabel={reasoningLabel}
+                        accessibilityState={{ expanded: reasoningIsExpanded }}
+                        onPress={() => setExpandedReasoning(current => ({
+                          ...current,
+                          [card.id]: current[card.id] !== true,
+                        }))}
+                        activeOpacity={0.72}
+                      >
+                        <Text style={styles.reasoningToggleText}>{reasoningLabel}</Text>
+                      </TouchableOpacity>
+                      {reasoningIsExpanded && (
+                        <Text style={styles.reasoningText}>{card.planSummary}</Text>
+                      )}
+                    </>
                   )}
                 </View>
               ) : null}
 
-              {confirmingProposalId === card.id || actingProposalId === card.id ? (
-                <View style={styles.confirmingRow}>
-                  <ActivityIndicator size="small" color={ParentColors.accent} />
-                  <Text style={styles.detailText}>{confirmingProposalId === card.id ? '正在建立共同計畫…' : '正在保存你們的決定…'}</Text>
-                </View>
-              ) : (
-                <View style={styles.actions}>
-                  {card.canConfirm && (
-                    <TouchableOpacity style={styles.confirmButton} onPress={() => onConfirm(source)} activeOpacity={0.8}>
-                      <Text style={styles.confirmButtonText}>確認這個計畫</Text>
-                    </TouchableOpacity>
-                  )}
-                  {(card.state === 'fresh_ai' || card.state === 'child_revisit') && onRevise && (
-                    <TouchableOpacity style={styles.secondaryButton} onPress={() => setEditCard(source)} activeOpacity={0.8}>
-                      <Text style={styles.secondaryButtonText}>{card.state === 'child_revisit' ? '再調整一下' : '調整一下'}</Text>
-                    </TouchableOpacity>
-                  )}
-                  {card.waitingMessage && <Text style={styles.waitingText}>{card.waitingMessage}</Text>}
-                  {onCloseProposal && (
-                    <TouchableOpacity style={styles.lowButton} onPress={() => setCloseCard(source)} activeOpacity={0.8}>
-                      <Text style={styles.lowButtonText}>目前不適合</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              )}
-            </View>
-          ))}
+              <View style={styles.decisionBand} testID={`proposal-decision-${card.id}`}>
+                <Text style={styles.decisionTitle}>這樣開始，適合{childName}嗎？</Text>
+                {confirmingProposalId === card.id || actingProposalId === card.id ? (
+                  <View style={styles.confirmingRow}>
+                    <ActivityIndicator size="small" color={ParentColors.accent} />
+                    <Text style={styles.detailText}>{confirmingProposalId === card.id ? '正在建立共同計畫…' : '正在保存你們的決定…'}</Text>
+                  </View>
+                ) : (
+                  <View style={styles.actions}>
+                    {card.canConfirm && (
+                      <TouchableOpacity style={styles.confirmButton} onPress={() => onConfirm(source)} activeOpacity={0.8}>
+                        <Text style={styles.confirmButtonText}>確認這個計畫</Text>
+                      </TouchableOpacity>
+                    )}
+                    {(card.state === 'fresh_ai' || card.state === 'child_revisit') && onRevise && (
+                      <TouchableOpacity style={styles.secondaryButton} onPress={() => setEditCard(source)} activeOpacity={0.8}>
+                        <Text style={styles.secondaryButtonText}>{card.state === 'child_revisit' ? '再調整一下' : '調整一下'}</Text>
+                      </TouchableOpacity>
+                    )}
+                    {card.waitingMessage && <Text style={styles.waitingText}>{card.waitingMessage}</Text>}
+                    {onCloseProposal && (
+                      <TouchableOpacity style={styles.lowButton} onPress={() => setCloseCard(source)} activeOpacity={0.8}>
+                        <Text style={styles.lowButtonText}>目前不適合</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+              </View>
+              </View>
+            );
+          })}
         </View>
       )}
       {editCard && (
@@ -277,30 +303,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: ParentColors.borderSoft,
     backgroundColor: ParentColors.bgSurface,
-    gap: ParentSpacing[4],
     ...ParentShadows.card,
   },
-  cardHead: { flexDirection: 'row', alignItems: 'center', gap: ParentSpacing[3] },
-  ideaMark: {
-    width: 40,
-    height: 40,
-    borderRadius: ParentRadii.md,
+  childVoiceBand: { gap: ParentSpacing[3], paddingBottom: ParentSpacing[5] },
+  bandHead: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: ParentColors.reqIconGreen,
+    justifyContent: 'space-between',
+    gap: ParentSpacing[3],
   },
-  ideaMarkText: {
-    fontFamily: ParentFonts.display,
-    fontSize: ParentFontSizes.base,
-    fontWeight: ParentFontWeights.black,
-    color: ParentColors.accent,
-  },
-  cardHeadCopy: { flex: 1, gap: ParentSpacing[1] },
-  cardTitle: {
-    fontFamily: ParentFonts.display,
-    fontSize: ParentFontSizes.lg,
+  bandEyebrow: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
     fontWeight: ParentFontWeights.bold,
-    color: ParentColors.fgPrimary,
+    color: ParentColors.accent,
   },
   statusLabel: {
     fontFamily: ParentFonts.body,
@@ -316,11 +332,17 @@ const styles = StyleSheet.create({
     color: ParentColors.fgMuted,
   },
   goalText: {
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.xl,
+    fontWeight: ParentFontWeights.bold,
+    lineHeight: 29,
+    color: ParentColors.fgPrimary,
+  },
+  voiceMotivation: {
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.base,
-    fontWeight: ParentFontWeights.semi,
     lineHeight: 24,
-    color: ParentColors.fgPrimary,
+    color: ParentColors.fgSecondary,
   },
   detailText: {
     fontFamily: ParentFonts.body,
@@ -328,50 +350,81 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     color: ParentColors.fgSecondary,
   },
-  summaryRow: { flexDirection: 'row', gap: ParentSpacing[4] },
-  summaryItem: {
+  compactFacts: {
+    flexDirection: 'row',
+    gap: ParentSpacing[5],
+    paddingTop: ParentSpacing[2],
+  },
+  compactFact: {
     flex: 1,
     minWidth: 0,
     gap: ParentSpacing[1],
-    padding: ParentSpacing[3],
-    borderRadius: ParentRadii.md,
-    backgroundColor: ParentColors.bgSurfaceWarm,
   },
-  planBlock: {
+  planBand: {
     gap: ParentSpacing[3],
-    padding: ParentSpacing[4],
-    borderRadius: ParentRadii.md,
-    backgroundColor: ParentColors.bgSurfaceWarm,
-  },
-  planEyebrow: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.xs,
-    fontWeight: ParentFontWeights.bold,
-    color: ParentColors.accent,
-  },
-  planTitle: {
-    fontFamily: ParentFonts.display,
-    fontSize: ParentFontSizes.base,
-    fontWeight: ParentFontWeights.bold,
-    color: ParentColors.fgPrimary,
-  },
-  rhythmText: {
-    fontFamily: ParentFonts.body,
-    fontSize: ParentFontSizes.sm,
-    lineHeight: 21,
-    color: ParentColors.accent,
-  },
-  rewardBlock: {
-    gap: ParentSpacing[1],
-    paddingTop: ParentSpacing[2],
+    paddingVertical: ParentSpacing[5],
     borderTopWidth: 1,
     borderTopColor: ParentColors.borderSoft,
   },
+  planFacts: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    columnGap: ParentSpacing[5],
+    rowGap: ParentSpacing[3],
+  },
+  planFact: {
+    flexGrow: 1,
+    flexBasis: '42%',
+    minWidth: 0,
+    gap: ParentSpacing[1],
+  },
+  planFactWide: { flexBasis: '100%', gap: ParentSpacing[1] },
+  supportingDetails: {
+    gap: ParentSpacing[2],
+    paddingTop: ParentSpacing[3],
+    borderTopWidth: 1,
+    borderTopColor: ParentColors.hairline,
+  },
+  supportingText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    lineHeight: 18,
+    color: ParentColors.fgMuted,
+  },
+  rewardDetail: { gap: ParentSpacing[1] },
   suggestionLabel: {
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgMuted,
+  },
+  reasoningToggle: {
+    alignSelf: 'flex-start',
+    paddingVertical: ParentSpacing[1],
+  },
+  reasoningToggleText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.accent,
+  },
+  reasoningText: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    lineHeight: 19,
+    color: ParentColors.fgMuted,
+  },
+  decisionBand: {
+    gap: ParentSpacing[3],
+    paddingTop: ParentSpacing[5],
+    borderTopWidth: 1,
+    borderTopColor: ParentColors.borderSoft,
+  },
+  decisionTitle: {
+    fontFamily: ParentFonts.display,
+    fontSize: ParentFontSizes.lg,
     fontWeight: ParentFontWeights.bold,
-    color: ParentColors.pending,
+    color: ParentColors.fgPrimary,
   },
   confirmButton: {
     alignItems: 'center',
