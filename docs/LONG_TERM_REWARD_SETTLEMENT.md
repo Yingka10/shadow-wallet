@@ -538,7 +538,12 @@ staging 十個 case 全綠。針對「不得代用」最直接的兩個證據：
 **3**（cadence）而 claim 上限是 **5**；case 5 把 claim 上限改成 **1** 之後，
 達標次數仍然是 **4**。
 
-### 9.6 `confirmedReward` 回傳值仍是推導值 **[已知缺口，本輪未處理]**
+### 9.6 `confirmedReward` 回傳值仍是推導值 **[已收掉 — `20260821000000`]**
+
+> **狀態：已解決。** 回應改為讀回持久化的版本列，並保證
+> 「第一次成功 = idempotent replay = 快照」。實作與驗收見
+> `docs/P0_FOLLOWUP_CONFIRMED_REWARD_RESPONSE.md` §5。
+> 以下保留原始問題敘述作為紀錄。
 
 `transition_child_proposal_v1` 的 `RETURN` 裡，`confirmedReward.payoutBasis`
 用的是函式內先算好的 `v_payout_basis`（`claim_period` 推導值），而**不是**
