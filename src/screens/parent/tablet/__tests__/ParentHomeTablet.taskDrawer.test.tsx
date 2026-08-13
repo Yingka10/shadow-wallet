@@ -207,7 +207,8 @@ describe('P0-4 家長首頁孩子提案', () => {
     expect(screen.getByText('孩子的聲音')).toBeTruthy();
     expect(screen.getByText('我想兩週把這本書讀完')).toBeTruthy();
     expect(screen.getByText('一週 4 次')).toBeTruthy();
-    expect(screen.getByText('這樣開始，適合承恩嗎？')).toBeTruthy();
+    expect(screen.getByText('GrowBook 還在整理，目前先看看孩子的原始想法')).toBeTruthy();
+    expect(screen.queryByText('這樣開始，適合承恩嗎？')).toBeNull();
 
     expect(SOURCE.indexOf('<ParentProposalSection')).toBeLessThan(SOURCE.indexOf('<WeekSummary'));
     expect(SOURCE).toContain('proposalRefresh();');

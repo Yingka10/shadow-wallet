@@ -54,7 +54,7 @@ export function ParentProposalSection({
 }: Props) {
   const [editCard, setEditCard] = useState<ParentProposalCardData | null>(null);
   const [closeCard, setCloseCard] = useState<ParentProposalCardData | null>(null);
-  const [expandedReasoning, setExpandedReasoning] = useState<Record<string, boolean>>({});
+  const [expandedSummaries, setExpandedSummaries] = useState<Record<string, boolean>>({});
   const cards = useMemo(
     () => proposals.slice(0, 3).map(item => ({
       source: item,
@@ -91,10 +91,19 @@ export function ParentProposalSection({
       ) : (
         <View style={styles.cardList}>
           {cards.map(({ source, view: card }) => {
-            const reasoningIsExpanded = expandedReasoning[card.id] === true;
-            const reasoningLabel = reasoningIsExpanded
-              ? '收起為什麼這樣整理'
-              : '展開為什麼這樣整理';
+            const summaryKey = source.currentPlanVersion?.id;
+            const summaryIsExpanded = summaryKey
+              ? expandedSummaries[summaryKey] === true
+              : false;
+            const summaryButtonText = summaryIsExpanded ? '收合整理摘要' : '查看整理摘要';
+            const summaryAccessibilityLabel = summaryIsExpanded
+              ? `收合「${card.goal}」的整理摘要`
+              : `查看「${card.goal}」的整理摘要`;
+            const decisionHeading = card.state === 'fresh_ai'
+              ? `這樣開始，適合${childName}嗎？`
+              : card.state === 'child_revisit'
+                ? '要再一起調整哪裡？'
+                : null;
 
             return (
               <View key={card.id} style={styles.card} testID="parent-proposal-card">
@@ -168,23 +177,23 @@ export function ParentProposalSection({
                       )}
                     </View>
                   )}
-                  {card.planSummary && (
+                  {card.planSummary && summaryKey && (
                     <>
                       <TouchableOpacity
-                        style={styles.reasoningToggle}
+                        style={styles.summaryToggle}
                         accessibilityRole="button"
-                        accessibilityLabel={reasoningLabel}
-                        accessibilityState={{ expanded: reasoningIsExpanded }}
-                        onPress={() => setExpandedReasoning(current => ({
+                        accessibilityLabel={summaryAccessibilityLabel}
+                        accessibilityState={{ expanded: summaryIsExpanded }}
+                        onPress={() => setExpandedSummaries(current => ({
                           ...current,
-                          [card.id]: current[card.id] !== true,
+                          [summaryKey]: current[summaryKey] !== true,
                         }))}
                         activeOpacity={0.72}
                       >
-                        <Text style={styles.reasoningToggleText}>{reasoningLabel}</Text>
+                        <Text style={styles.summaryToggleText}>{summaryButtonText}</Text>
                       </TouchableOpacity>
-                      {reasoningIsExpanded && (
-                        <Text style={styles.reasoningText}>{card.planSummary}</Text>
+                      {summaryIsExpanded && (
+                        <Text style={styles.summaryText}>{card.planSummary}</Text>
                       )}
                     </>
                   )}
@@ -192,7 +201,7 @@ export function ParentProposalSection({
               ) : null}
 
               <View style={styles.decisionBand} testID={`proposal-decision-${card.id}`}>
-                <Text style={styles.decisionTitle}>這樣開始，適合{childName}嗎？</Text>
+                {decisionHeading && <Text style={styles.decisionTitle}>{decisionHeading}</Text>}
                 {confirmingProposalId === card.id || actingProposalId === card.id ? (
                   <View style={styles.confirmingRow}>
                     <ActivityIndicator size="small" color={ParentColors.accent} />
@@ -398,17 +407,18 @@ const styles = StyleSheet.create({
     fontWeight: ParentFontWeights.semi,
     color: ParentColors.fgMuted,
   },
-  reasoningToggle: {
+  summaryToggle: {
     alignSelf: 'flex-start',
-    paddingVertical: ParentSpacing[1],
+    minHeight: 44,
+    justifyContent: 'center',
   },
-  reasoningToggleText: {
+  summaryToggleText: {
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.xs,
     fontWeight: ParentFontWeights.semi,
     color: ParentColors.accent,
   },
-  reasoningText: {
+  summaryText: {
     fontFamily: ParentFonts.body,
     fontSize: ParentFontSizes.xs,
     lineHeight: 19,

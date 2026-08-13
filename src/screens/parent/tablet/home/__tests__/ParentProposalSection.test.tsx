@@ -1,4 +1,5 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { fireEvent, render, screen, within } from '@testing-library/react-native';
 import type {
   ChildProposal,
@@ -107,7 +108,7 @@ describe('ParentProposalSection', () => {
     expect(screen.queryByText(/核准|批准|審核通過|已核定/)).toBeNull();
   });
 
-  it('把 plan summary 預設收起，並用可存取的 disclosure 展開與收合', () => {
+  it('把 plan summary 誠實標為整理摘要，並提供至少 44px 的可存取 disclosure', () => {
     const item = card('p1', true);
     item.currentPlanVersion = plan('p1', {
       plan_summary: '先用短時間建立節奏，再依承恩的感受調整閱讀安排',
@@ -115,17 +116,63 @@ describe('ParentProposalSection', () => {
     render(<ParentProposalSection {...base} proposals={[item]} />);
 
     expect(screen.queryByText('先用短時間建立節奏，再依承恩的感受調整閱讀安排')).toBeNull();
-    const expandButton = screen.getByLabelText('展開為什麼這樣整理');
+    const expandButton = screen.getByLabelText('查看「想法 p1」的整理摘要');
+    expect(screen.getByText('查看整理摘要')).toBeTruthy();
     expect(expandButton.props.accessibilityState).toEqual({ expanded: false });
+    expect(StyleSheet.flatten(expandButton.props.style).minHeight).toBeGreaterThanOrEqual(44);
 
     fireEvent.press(expandButton);
 
     expect(screen.getByText('先用短時間建立節奏，再依承恩的感受調整閱讀安排')).toBeTruthy();
-    const collapseButton = screen.getByLabelText('收起為什麼這樣整理');
+    const collapseButton = screen.getByLabelText('收合「想法 p1」的整理摘要');
+    expect(screen.getByText('收合整理摘要')).toBeTruthy();
     expect(collapseButton.props.accessibilityState).toEqual({ expanded: true });
 
     fireEvent.press(collapseButton);
     expect(screen.queryByText('先用短時間建立節奏，再依承恩的感受調整閱讀安排')).toBeNull();
+  });
+
+  it('用孩子目標區分多張摘要，且各自獨立展開', () => {
+    const first = card('p1', true);
+    first.currentPlanVersion = plan('p1', { plan_summary: '第一份整理摘要' });
+    const second = card('p2', true);
+    second.currentPlanVersion = plan('p2', { plan_summary: '第二份整理摘要' });
+    render(<ParentProposalSection {...base} proposals={[first, second]} />);
+
+    const firstDisclosure = screen.getByLabelText('查看「想法 p1」的整理摘要');
+    const secondDisclosure = screen.getByLabelText('查看「想法 p2」的整理摘要');
+    expect(firstDisclosure.props.accessibilityState).toEqual({ expanded: false });
+    expect(secondDisclosure.props.accessibilityState).toEqual({ expanded: false });
+
+    fireEvent.press(firstDisclosure);
+
+    expect(screen.getByText('第一份整理摘要')).toBeTruthy();
+    expect(screen.queryByText('第二份整理摘要')).toBeNull();
+    expect(
+      screen.getByLabelText('收合「想法 p1」的整理摘要').props.accessibilityState,
+    ).toEqual({ expanded: true });
+    expect(
+      screen.getByLabelText('查看「想法 p2」的整理摘要').props.accessibilityState,
+    ).toEqual({ expanded: false });
+  });
+
+  it('同一提案換成新的 plan version 時把摘要重新收起', () => {
+    const initial = card('p1', true);
+    initial.currentPlanVersion = plan('p1', { plan_summary: '第一版摘要' });
+    const { rerender } = render(<ParentProposalSection {...base} proposals={[initial]} />);
+    fireEvent.press(screen.getByLabelText('查看「想法 p1」的整理摘要'));
+    expect(screen.getByText('第一版摘要')).toBeTruthy();
+
+    const replacement: ParentProposalCardData = {
+      proposal: proposal('p1', { current_plan_version_id: 'version-p1-2' }),
+      currentPlanVersion: plan('p1', { id: 'version-p1-2', plan_summary: '第二版摘要' }),
+    };
+    rerender(<ParentProposalSection {...base} proposals={[replacement]} />);
+
+    expect(screen.queryByText('第二版摘要')).toBeNull();
+    expect(
+      screen.getByLabelText('查看「想法 p1」的整理摘要').props.accessibilityState,
+    ).toEqual({ expanded: false });
   });
 
   it('沒有完整 AI plan 時保留原話但不顯示 confirm CTA 或 fake plan', () => {
@@ -134,6 +181,7 @@ describe('ParentProposalSection', () => {
     expect(screen.getByText('GrowBook 還在整理，目前先看看孩子的原始想法')).toBeTruthy();
     expect(screen.queryByText('確認這個計畫')).toBeNull();
     expect(screen.queryByText('GrowBook 幫忙整理')).toBeNull();
+    expect(screen.queryByText('這樣開始，適合承恩嗎？')).toBeNull();
   });
 
   it('confirm loading、success 與 typed error 都使用自然文案', () => {
@@ -185,6 +233,7 @@ describe('ParentProposalSection', () => {
     expect(screen.queryByText('舊文字仍寫一週 4 次')).toBeNull();
     expect(screen.queryByText('確認這個計畫')).toBeNull();
     expect(screen.queryByText('調整一下')).toBeNull();
+    expect(screen.queryByText('這樣開始，適合承恩嗎？')).toBeNull();
   });
 
   it('孩子想再聊聊時可重新調整，並把 typed action error 留在卡區', () => {
@@ -192,6 +241,8 @@ describe('ParentProposalSection', () => {
     item.currentPlanVersion = plan('p1', { authored_by: 'parent', requires_child_review: true });
     render(<ParentProposalSection {...base} proposals={[item]} actionError="計畫已更新，請重新整理" />);
     expect(screen.getAllByText('孩子想再一起聊聊')).toHaveLength(2);
+    expect(screen.getByText('要再一起調整哪裡？')).toBeTruthy();
+    expect(screen.queryByText('這樣開始，適合承恩嗎？')).toBeNull();
     expect(screen.getByText('再調整一下')).toBeTruthy();
     expect(screen.getByText('計畫已更新，請重新整理')).toBeTruthy();
   });
