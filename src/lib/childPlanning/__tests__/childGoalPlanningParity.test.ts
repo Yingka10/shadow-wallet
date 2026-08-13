@@ -25,7 +25,9 @@ import {
   CHILD_PLANNING_CONTRIBUTIONS,
   CHILD_PLAN_CLARIFICATION_KINDS,
   CHILD_PLAN_FIELD_SOURCES,
+  CHILD_PLAN_GOAL_CONTROL_TYPES,
   CHILD_PLAN_PROGRESSION_KINDS,
+  EVIDENCE_PRIORITY,
   type ChildGoalPlanningInput,
 } from '../types';
 
@@ -100,10 +102,12 @@ describe('上限兩邊一致', () => {
 
 describe('列舉兩邊一致', () => {
   it.each([
+    ['goal control type', CHILD_PLAN_GOAL_CONTROL_TYPES],
     ['progression kind', CHILD_PLAN_PROGRESSION_KINDS],
     ['clarification kind', CHILD_PLAN_CLARIFICATION_KINDS],
     ['provenance 來源', CHILD_PLAN_FIELD_SOURCES],
     ['planning contribution', CHILD_PLANNING_CONTRIBUTIONS],
+    ['四態', ['needs_clarification', 'needs_choice', 'ready', 'unavailable']],
     ['review point', ['after_days', 'after_sessions', 'after_phase']],
     ['session size', ['minutes', 'count']],
     ['cadence mode', ['one_time', 'weekly_frequency', 'fixed_days']],
@@ -122,6 +126,54 @@ describe('列舉兩邊一致', () => {
         validateChildGoalPlanningResult({ status: 'unavailable', schemaVersion: 1, reason }, INPUT),
       ).toEqual({ status: 'unavailable', schemaVersion: 1, reason });
     }
+  });
+});
+
+describe('兩個維度是正交的，沒有被合回同一個 enum', () => {
+  it('outcome_to_action 不再是任何一邊的 progression', () => {
+    for (const source of [codeOnly(LOGIC), codeOnly(readApp('types.ts'))]) {
+      expect(source).not.toContain('outcome_to_action');
+    }
+    expect(CHILD_PLAN_PROGRESSION_KINDS).toEqual(['rhythm', 'staged', 'accumulation']);
+  });
+
+  it('可控行動掛在 goalControlType 上，不是掛在 progression 上', () => {
+    // external_outcome 一定要附可控行動；三種 progression 都可以搭配它。
+    expect(LOGIC).toContain('controllableActions');
+    expect(LOGIC).toContain("goalControlType === 'external_outcome'");
+  });
+});
+
+describe('孩子永遠可以說「我自己想」', () => {
+  it('allowCustomAnswer 兩邊都是字面量 true，不是從模型讀來的', () => {
+    expect(LOGIC).toContain('allowCustomAnswer: true');
+    expect(codeOnly(readApp('types.ts'))).toContain('allowCustomAnswer: true');
+    // App 端 validator 拒收任何不是 true 的值。
+    expect(codeOnly(readApp('validateChildGoalPlanningResult.ts')))
+      .toContain('value.allowCustomAnswer !== true');
+  });
+});
+
+describe('證據優先序', () => {
+  it('順序是「孩子講的 > 從孩子推導 > GrowBook 規則 > AI 建議 > 沒人決定」', () => {
+    const ordered = Object.entries(EVIDENCE_PRIORITY)
+      .sort((a, b) => a[1] - b[1])
+      .map(([key]) => key);
+    expect(ordered).toEqual([
+      'child_stated',
+      'derived_from_child',
+      'deterministic_policy',
+      'ai_suggested',
+      'undecided',
+    ]);
+  });
+
+  it('derived_from_child 與 deterministic_policy 是兩個不同的等級', () => {
+    // 早期版本共用一個 derived，於是「從孩子的話推出來的」與
+    // 「GrowBook 政策決定的」在資料上分不出來，而它們差一級。
+    expect(EVIDENCE_PRIORITY.derived_from_child).toBeLessThan(
+      EVIDENCE_PRIORITY.deterministic_policy,
+    );
   });
 });
 
@@ -162,13 +214,21 @@ describe('關鍵字規則只有一份，而且是既有的那一份', () => {
     for (const forbidden of [
       'OUTCOME_MARKERS',
       'MENTAL_STATE_MARKERS',
+      'DOMAIN_AUTHORITY_MARKERS',
       'NON_CHILD_MARKERS',
       'validateNextStep',
       'containsMentalStateDiagnosis',
+      'containsDomainAuthorityClaim',
     ]) {
       expect({ forbidden, present: code.includes(forbidden) })
         .toEqual({ forbidden, present: false });
     }
+  });
+
+  it('領域權威清單也只有一份，住在 App 端', () => {
+    expect(readApp('planGuards.ts')).toContain('DOMAIN_AUTHORITY_MARKERS');
+    // prompt 要講給模型聽，但判斷不在那裡。
+    expect(LOGIC).toContain('你是規劃夥伴，不是教練或老師');
   });
 
   it('「該不該再問一題」兩端是同一條結構條件，不是關鍵字', () => {

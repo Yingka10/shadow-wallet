@@ -8,7 +8,9 @@ import {
   cadenceEquals,
   checkPlanActionText,
   containsClockTime,
+  containsDomainAuthorityClaim,
   containsMentalStateDiagnosis,
+  evidenceSatisfies,
   informationSufficiency,
 } from '../planGuards';
 import { buildChildGoalPlanningInput } from '../buildChildGoalPlanningInput';
@@ -74,6 +76,50 @@ describe('心理狀態推測', () => {
     '能不扶著騎完 10 公尺',
   ])('%s → 可以（都是看得見的事）', (text) => {
     expect(containsMentalStateDiagnosis(text)).toBe(false);
+  });
+});
+
+describe('領域權威 —— AI 是規劃夥伴，不是教練', () => {
+  it.each([
+    '這是最有效的鋼琴練習順序',
+    '研究顯示先分手練最好',
+    '照專業訓練處方做',
+    '這是標準課程的正確順序',
+    '教練建議每天跑五公里',
+  ])('%s → 擋下', (text) => {
+    expect(containsDomainAuthorityClaim(text)).toBe(true);
+  });
+
+  it.each([
+    '照老師說的，先練右手旋律',
+    '先想故事，再畫分鏡',
+    '先試七天看看順不順',
+  ])('%s → 可以（整理孩子已有的方法、給暫定路線）', (text) => {
+    expect(containsDomainAuthorityClaim(text)).toBe(false);
+  });
+
+  it('權威宣稱不可以當成下一步', () => {
+    const result = checkPlanActionText('照最有效的順序練 10 分鐘');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('domain_authority');
+  });
+});
+
+describe('證據優先序', () => {
+  it('孩子講的可以代表任何較低的等級', () => {
+    expect(evidenceSatisfies('child_stated', 'child_stated')).toBe(true);
+    expect(evidenceSatisfies('child_stated', 'ai_suggested')).toBe(true);
+  });
+
+  it('AI 建議代表不了孩子講過的東西', () => {
+    expect(evidenceSatisfies('ai_suggested', 'child_stated')).toBe(false);
+    expect(evidenceSatisfies('undecided', 'derived_from_child')).toBe(false);
+  });
+
+  it('從孩子推導 ≠ GrowBook 規則決定 —— 兩者差一級', () => {
+    expect(evidenceSatisfies('derived_from_child', 'deterministic_policy')).toBe(true);
+    expect(evidenceSatisfies('deterministic_policy', 'derived_from_child')).toBe(false);
   });
 });
 

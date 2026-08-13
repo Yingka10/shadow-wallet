@@ -19,7 +19,11 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { validateNextStep } from '../childProposal/planDraft/canonicalPlanFields';
-import type { ChildGoalPlanningInput } from './types';
+import {
+  EVIDENCE_PRIORITY,
+  type ChildGoalPlanningInput,
+  type ChildPlanFieldSource,
+} from './types';
 
 // ---------------------------------------------------------------------------
 // 心理狀態推測
@@ -75,6 +79,56 @@ export function containsClockTime(value: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// 領域權威
+// ---------------------------------------------------------------------------
+
+/**
+ * GrowBook 的 AI 是**規劃夥伴**，不是各領域的專業教練。
+ *
+ * 它可以：澄清目標、整理孩子已有的方法、把遠期目標縮成近期行動、
+ * 幫忙決定節奏與試行期、對明顯是專案的事給一條暫定路線、提供 2-3 種
+ * 可能的開始方式。
+ *
+ * 它**不可以**把模型的一般知識講成領域權威 ——「最有效的鋼琴練習順序」
+ * 「科學上最佳的複習頻率」「專業的重訓處方」。理由不是謙虛：
+ * 一個十歲孩子（和他的家長）沒有辦法分辨那句話是教練說的還是模型編的，
+ * 而如果他真的有老師，模型的版本會直接和老師的版本打架。
+ *
+ * 所以 staged 的 phases 一律是 **provisional route**，不是 curriculum。
+ */
+export const DOMAIN_AUTHORITY_MARKERS = [
+  '最佳', '最有效', '最正確', '最科學', '最專業',
+  '正確順序', '標準課程', '標準流程', '正規訓練', '專業訓練', '專業課程',
+  '科學證明', '研究顯示', '研究證實', '實證',
+  '教練建議', '醫師建議', '營養師', '處方', '療程',
+  '權威', '必修', '一定要照這個順序', '正統',
+] as const;
+
+/** 出現任何一個權威宣稱就是 true。 */
+export function containsDomainAuthorityClaim(value: string): boolean {
+  return DOMAIN_AUTHORITY_MARKERS.some((marker) => value.includes(marker));
+}
+
+// ---------------------------------------------------------------------------
+// 證據優先序
+// ---------------------------------------------------------------------------
+
+/**
+ * 低順位證據不得覆蓋高順位。
+ *
+ *   孩子講的 > 從孩子的內容推導 > GrowBook 的決定性規則 > AI 建議 > 沒有人決定
+ *
+ * 這支回答的是「actual 這個來源，夠不夠格代表 expected 那個等級的東西」。
+ * 孩子講過節奏，provenance 卻標成 ai_suggested，就是一次覆蓋。
+ */
+export function evidenceSatisfies(
+  actual: ChildPlanFieldSource,
+  atLeast: ChildPlanFieldSource,
+): boolean {
+  return EVIDENCE_PRIORITY[actual] <= EVIDENCE_PRIORITY[atLeast];
+}
+
+// ---------------------------------------------------------------------------
 // 下一步 / 可控制的行動
 // ---------------------------------------------------------------------------
 
@@ -91,6 +145,9 @@ export function checkPlanActionText(value: string): PlanActionCheck {
   if (!result.ok) return { ok: false, reason: result.reason };
   if (containsMentalStateDiagnosis(result.value)) {
     return { ok: false, reason: 'mental_state' };
+  }
+  if (containsDomainAuthorityClaim(result.value)) {
+    return { ok: false, reason: 'domain_authority' };
   }
   return { ok: true, value: result.value };
 }

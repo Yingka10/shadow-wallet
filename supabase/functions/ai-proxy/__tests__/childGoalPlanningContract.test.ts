@@ -58,26 +58,10 @@ function roundTrip(
   modelOutput: unknown,
 ): { response: ChildGoalPlanningResponse; result: ChildGoalPlanningResult } {
   const understanding = normalizeChildGoalPlanning(modelOutput);
-  if (understanding === null) {
-    const response: ChildGoalPlanningResponse = {
-      status: 'unavailable',
-      schemaVersion: 1,
-      reason: 'INVALID_AI_OUTPUT',
-    };
-    return {
-      response,
-      result: validateChildGoalPlanningResult(
-        JSON.parse(JSON.stringify(response)),
-        fnInput as AppInput,
-      ),
-    };
-  }
-
-  const response = composeChildGoalPlanningResponse({
-    input: fnInput,
-    understanding,
-    model: MODEL,
-  });
+  const response: ChildGoalPlanningResponse =
+    understanding === null
+      ? { status: 'unavailable', schemaVersion: 1, reason: 'INVALID_AI_OUTPUT' }
+      : composeChildGoalPlanningResponse({ input: fnInput, understanding, model: MODEL });
 
   return {
     response,
@@ -103,10 +87,11 @@ const CASE_1_INPUT = input({
 const CASE_1_MODEL = {
   status: 'ready',
   desiredOutcome: '兩週讀完神奇樹屋',
+  goalControlType: 'directly_actionable',
   progressionKind: 'rhythm',
   actionPlanSummary: '平日睡前讀 15 分鐘，兩週把這本書讀完。',
   currentFocus: '先維持平日睡前的閱讀',
-  nextAction: { text: '今晚睡前先讀 15 分鐘', source: 'child' },
+  nextAction: { text: '今晚睡前先讀 15 分鐘', source: 'child_stated' },
   reviewPoint: { type: 'after_days', days: 7 },
   planningContribution: 'organized_child_plan',
   suggestedCadence: null,
@@ -117,15 +102,15 @@ const CASE_1_MODEL = {
   targetUnit: null,
   currentValue: null,
   controllableActions: null,
-  startOptions: null,
 };
 
 describe('Case 1｜孩子已經完整想好', () => {
   const { result } = roundTrip(CASE_1_INPUT, CASE_1_MODEL);
 
-  it('是 ready、rhythm、organized_child_plan', () => {
+  it('是 ready、directly_actionable、rhythm、organized_child_plan', () => {
     expect(result.status).toBe('ready');
     if (result.status !== 'ready') return;
+    expect(result.plan.goalControlType).toBe('directly_actionable');
     expect(result.plan.progressionKind).toBe('rhythm');
     expect(result.plan.planningContribution).toBe('organized_child_plan');
   });
@@ -136,8 +121,8 @@ describe('Case 1｜孩子已經完整想好', () => {
     }
     // 節奏原封不動 —— 不是「差不多」，是同一個物件內容。
     expect(result.plan.cadence).toEqual(CASE_1_INPUT.cadence);
-    expect(result.plan.provenance.fields.cadence).toBe('child');
-    expect(result.plan.provenance.fields.preferredTime).toBe('child');
+    expect(result.plan.provenance.fields.cadence).toBe('child_stated');
+    expect(result.plan.provenance.fields.preferredTime).toBe('child_stated');
   });
 
   it('孩子的原話與方法逐字保留', () => {
@@ -146,11 +131,16 @@ describe('Case 1｜孩子已經完整想好', () => {
     expect(result.plan.provenance.childStatedApproach).toBe('平日睡前讀 15 分鐘');
   });
 
+  it('單次份量記成「從孩子的話推出來的」，不是 AI 想的', () => {
+    if (result.status !== 'ready') throw new Error('expected ready');
+    expect(result.plan.provenance.fields.sessionSize).toBe('derived_from_child');
+  });
+
   it('成果保留在 desiredOutcome，而下一步是他今天做得到的事', () => {
     if (result.status !== 'ready') throw new Error('expected ready');
     expect(result.plan.desiredOutcome).toContain('讀完');
     expect(result.plan.nextAction.text).not.toContain('讀完');
-    expect(result.plan.nextAction.source).toBe('child');
+    expect(result.plan.nextAction.source).toBe('child_stated');
   });
 });
 
@@ -190,27 +180,29 @@ describe('Case 3｜知道成果，不知道方法', () => {
   const { result } = roundTrip(CASE_3_INPUT, {
     status: 'ready',
     desiredOutcome: '國文考 100 分',
-    progressionKind: 'outcome_to_action',
+    goalControlType: 'external_outcome',
+    progressionKind: 'rhythm',
     actionPlanSummary: '成績沒辦法直接控制，先把每週的複習做起來。',
     currentFocus: '先固定複習的時間',
     nextAction: { text: '先複習 15 分鐘', source: 'ai_suggested' },
     reviewPoint: { type: 'after_days', days: 14 },
     planningContribution: 'filled_missing_details',
     suggestedCadence: { mode: 'weekly_frequency', weeklyFrequency: 3 },
-    sessionSize: null,
-    trialPeriod: null,
+    sessionSize: { kind: 'minutes', minutes: 15 },
+    trialPeriod: { days: 14 },
     phases: null,
     targetValue: null,
     targetUnit: null,
     currentValue: null,
     controllableActions: ['每次先複習 15 分鐘', '把寫錯的題目抄下來'],
-    startOptions: null,
   });
 
-  it('是 outcome_to_action', () => {
+  it('成果是 external_outcome，但行動計畫的 progression 是 rhythm', () => {
     expect(result.status).toBe('ready');
     if (result.status !== 'ready') return;
-    expect(result.plan.progressionKind).toBe('outcome_to_action');
+    // 這正是兩個維度分開的理由：不可控的成果一樣可以有節奏型的行動計畫。
+    expect(result.plan.goalControlType).toBe('external_outcome');
+    expect(result.plan.progressionKind).toBe('rhythm');
   });
 
   it('保留「國文考 100 分」這個成果', () => {
@@ -224,6 +216,14 @@ describe('Case 3｜知道成果，不知道方法', () => {
     expect(result.plan.nextAction.text).not.toContain('100 分');
     expect(result.plan.nextAction.text).not.toContain('考');
     expect(result.plan.nextAction.text).not.toBe(result.plan.desiredOutcome);
+  });
+
+  it('可控行動獨立於 progression 存在', () => {
+    if (result.status !== 'ready' || result.plan.goalControlType !== 'external_outcome') {
+      throw new Error('expected external outcome');
+    }
+    expect(result.plan.controllableActions).toHaveLength(2);
+    expect(result.plan.provenance.fields.controllableActions).toBe('ai_suggested');
   });
 
   it('先問一題也是合法的（不是每次都必須直接生計畫）', () => {
@@ -248,10 +248,11 @@ const CASE_4_INPUT = input({
 const CASE_4_MODEL = {
   status: 'ready',
   desiredOutcome: '投籃更準',
+  goalControlType: 'directly_actionable',
   progressionKind: 'rhythm',
   actionPlanSummary: '每天放學投 20 球，先照他自己想的方式做。',
   currentFocus: '先把每天 20 球固定下來',
-  nextAction: { text: '放學後先投 20 球', source: 'child' },
+  nextAction: { text: '放學後先投 20 球', source: 'child_stated' },
   reviewPoint: { type: 'after_days', days: 7 },
   planningContribution: 'organized_child_plan',
   suggestedCadence: null,
@@ -262,7 +263,6 @@ const CASE_4_MODEL = {
   targetUnit: null,
   currentValue: null,
   controllableActions: null,
-  startOptions: null,
 };
 
 describe('Case 4｜孩子有自己的方法', () => {
@@ -283,12 +283,20 @@ describe('Case 4｜孩子有自己的方法', () => {
     const { result: overwritten } = roundTrip(CASE_4_INPUT, {
       ...CASE_4_MODEL,
       nextAction: { text: '先做 20 下運球練習', source: 'ai_suggested' },
-      planningContribution: 'suggested_options',
-      startOptions: ['先練運球', '先練投籃姿勢'],
     });
     expect(overwritten.status).toBe('unavailable');
     if (overwritten.status !== 'unavailable') return;
     expect(overwritten.rejections).toContain('CHILD_INPUT_OVERWRITTEN');
+  });
+
+  it('已經有方法了還丟選項給他 → 這一輪無效', () => {
+    const { response, result: choice } = roundTrip(CASE_4_INPUT, {
+      status: 'needs_choice',
+      question: '你想先用哪一種方式開始？',
+      options: ['先練運球', '先練投籃姿勢'],
+    });
+    expect(response.status).toBe('unavailable');
+    expect(choice.status).toBe('unavailable');
   });
 });
 
@@ -303,6 +311,7 @@ describe('Case 5｜技能型「我想學會騎腳踏車」', () => {
     const { result } = roundTrip(CASE_5_INPUT, {
       status: 'ready',
       desiredOutcome: '學會騎腳踏車',
+      goalControlType: 'directly_actionable',
       progressionKind: 'staged',
       actionPlanSummary: '先從滑行開始，能穩住之後再練踩踏。',
       currentFocus: '先練滑行',
@@ -320,7 +329,6 @@ describe('Case 5｜技能型「我想學會騎腳踏車」', () => {
       targetUnit: null,
       currentValue: null,
       controllableActions: null,
-      startOptions: null,
     });
 
     expect(result.status).toBe('ready');
@@ -349,6 +357,7 @@ describe('Case 6｜專案型「我想做一本漫畫」', () => {
   const { result } = roundTrip(input({ childOriginalGoal: '我想做一本漫畫' }), {
     status: 'ready',
     desiredOutcome: '做出一本自己的漫畫',
+    goalControlType: 'directly_actionable',
     progressionKind: 'staged',
     actionPlanSummary: '先想故事，再畫分鏡，最後上色收尾。',
     currentFocus: '先把故事想出來',
@@ -367,7 +376,6 @@ describe('Case 6｜專案型「我想做一本漫畫」', () => {
     targetUnit: null,
     currentValue: null,
     controllableActions: null,
-    startOptions: null,
   });
 
   it('是 staged，有自然的階段', () => {
@@ -390,6 +398,7 @@ describe('Case 7｜累積型「暑假想讀 5 本書」', () => {
   const { result } = roundTrip(input({ childOriginalGoal: '暑假想讀 5 本書' }), {
     status: 'ready',
     desiredOutcome: '暑假讀 5 本書',
+    goalControlType: 'directly_actionable',
     progressionKind: 'accumulation',
     actionPlanSummary: '暑假讀 5 本書，一本一本累積上去。',
     currentFocus: '先挑第一本想看的書',
@@ -404,7 +413,6 @@ describe('Case 7｜累積型「暑假想讀 5 本書」', () => {
     targetUnit: '本',
     currentValue: 0,
     controllableActions: null,
-    startOptions: null,
   });
 
   it('是 accumulation，進度是 current / target', () => {
@@ -437,8 +445,9 @@ describe('Case 8｜資訊已經足夠，不該再問', () => {
     expect(informationIsSufficient(CASE_8_INPUT)).toBe(true);
   });
 
-  it('prompt 直接禁止這一輪問問題', () => {
-    expect(buildChildGoalPlanningPrompt(CASE_8_INPUT)).toContain('不可以再問問題');
+  it('prompt 直接禁止這一輪問問題或給選項', () => {
+    const prompt = buildChildGoalPlanningPrompt(CASE_8_INPUT);
+    expect(prompt).toContain('不可以再問問題、也不可以再給選項');
   });
 
   it('模型還是問了 → 這一輪無效，不是把問題吞掉再自己編一份計畫', () => {
@@ -452,6 +461,15 @@ describe('Case 8｜資訊已經足夠，不該再問', () => {
       reason: 'INVALID_AI_OUTPUT',
     });
     expect(result.status).toBe('unavailable');
+  });
+
+  it('改成丟選項給他，一樣是多嘴', () => {
+    const { response } = roundTrip(CASE_8_INPUT, {
+      status: 'needs_choice',
+      question: '你想先用哪一種方式開始？',
+      options: ['一週兩次', '一週四次'],
+    });
+    expect(response.status).toBe('unavailable');
   });
 
   it('就算問題繞過 Function 直接到 App，App 端也擋得下來', () => {
@@ -480,28 +498,28 @@ const CASE_9_INPUT = input({ childOriginalGoal: '我要比賽第一名' });
 const CASE_9_MODEL = {
   status: 'ready',
   desiredOutcome: '比賽拿第一名',
-  progressionKind: 'outcome_to_action',
+  goalControlType: 'external_outcome',
+  progressionKind: 'rhythm',
   actionPlanSummary: '名次沒辦法直接控制，先把每週的練習做起來。',
   currentFocus: '先固定每週的練習',
   nextAction: { text: '今天先練 20 分鐘', source: 'ai_suggested' },
   reviewPoint: { type: 'after_sessions', sessions: 3 },
   planningContribution: 'filled_missing_details',
   suggestedCadence: { mode: 'weekly_frequency', weeklyFrequency: 3 },
-  sessionSize: null,
-  trialPeriod: null,
+  sessionSize: { kind: 'minutes', minutes: 20 },
+  trialPeriod: { sessions: 3 },
   phases: null,
   targetValue: null,
   targetUnit: null,
   currentValue: null,
   controllableActions: ['每次練習前先暖身', '練完記下哪裡卡住'],
-  startOptions: null,
 };
 
 describe('Case 9｜不可控結果「我要比賽第一名」', () => {
   it('成果保留，行動是他控制得了的', () => {
     const { result } = roundTrip(CASE_9_INPUT, CASE_9_MODEL);
     expect(result.status).toBe('ready');
-    if (result.status !== 'ready' || result.plan.progressionKind !== 'outcome_to_action') return;
+    if (result.status !== 'ready' || result.plan.goalControlType !== 'external_outcome') return;
     expect(result.plan.desiredOutcome).toContain('第一名');
     expect(result.plan.controllableActions).toHaveLength(2);
   });
@@ -525,6 +543,14 @@ describe('Case 9｜不可控結果「我要比賽第一名」', () => {
     if (result.status !== 'unavailable') return;
     expect(result.rejections).toContain('OUTCOME_USED_AS_ACTION');
   });
+
+  it('external_outcome 卻沒給可控行動 → 型別上就不成立', () => {
+    const { result } = roundTrip(CASE_9_INPUT, {
+      ...CASE_9_MODEL,
+      controllableActions: null,
+    });
+    expect(result.status).toBe('unavailable');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -546,6 +572,7 @@ describe('Case 10｜不准心理推測', () => {
     const { result } = roundTrip(input({ childOriginalGoal: '我想學會騎腳踏車' }), {
       status: 'ready',
       desiredOutcome: '學會騎腳踏車',
+      goalControlType: 'directly_actionable',
       progressionKind: 'staged',
       actionPlanSummary: '先從滑行開始，能穩住之後再練踩踏。',
       currentFocus: '先練滑行',
@@ -563,7 +590,6 @@ describe('Case 10｜不准心理推測', () => {
       targetUnit: null,
       currentValue: null,
       controllableActions: null,
-      startOptions: null,
     });
 
     expect(result.status).toBe('unavailable');
@@ -585,6 +611,155 @@ describe('Case 10｜不准心理推測', () => {
     expect(result.status).toBe('unavailable');
     if (result.status !== 'unavailable') return;
     expect(result.rejections).toContain('MENTAL_STATE_DIAGNOSIS');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Case 11 — 目標清楚，但還不知道怎麼安排
+// ---------------------------------------------------------------------------
+
+const CASE_11_INPUT = input({
+  childOriginalGoal: '我想兩週讀完這本書，但不知道怎麼安排',
+  planningSupportPreference: 'give_me_options',
+});
+
+describe('Case 11｜目標清楚、還沒決定怎麼做', () => {
+  const { result } = roundTrip(CASE_11_INPUT, {
+    status: 'needs_choice',
+    question: '你想先用哪一種方式開始？',
+    options: ['每天睡前讀 15 分鐘', '週末一次讀完一章', '每天上學前讀 10 分鐘'],
+  });
+
+  it('是 needs_choice，不是 clarification —— 他知道自己要幹嘛', () => {
+    expect(result.status).toBe('needs_choice');
+  });
+
+  it('給的是 2-3 個平等的選項，不是一個 AI 決定好的 schedule', () => {
+    if (result.status !== 'needs_choice') throw new Error('expected needs_choice');
+    expect(result.options).toHaveLength(3);
+    expect(result.options.map((option) => option.id)).toEqual([
+      'option-1',
+      'option-2',
+      'option-3',
+    ]);
+  });
+
+  it('孩子一定可以說「我自己想」', () => {
+    if (result.status !== 'needs_choice') throw new Error('expected needs_choice');
+    expect(result.allowCustomAnswer).toBe(true);
+  });
+
+  it('目標沒有被改寫', () => {
+    if (result.status !== 'needs_choice') throw new Error('expected needs_choice');
+    expect(result.knownGoal).toBe('我想兩週讀完這本書，但不知道怎麼安排');
+  });
+
+  it('孩子挑了之後，下一輪的計畫記成 child_chose_option', () => {
+    const chosen = input({
+      childOriginalGoal: '我想兩週讀完這本書，但不知道怎麼安排',
+      childApproach: '每天睡前讀 15 分鐘',
+      cadence: { mode: 'weekly_frequency', weeklyFrequency: 7 },
+      preferredTime: '睡前',
+    });
+
+    const { result: after } = roundTrip(chosen, {
+      ...CASE_1_MODEL,
+      desiredOutcome: '兩週讀完這本書',
+      planningContribution: 'child_chose_option',
+      nextAction: { text: '今晚睡前先讀 15 分鐘', source: 'child_stated' },
+    });
+
+    expect(after.status).toBe('ready');
+    if (after.status !== 'ready') return;
+    expect(after.plan.planningContribution).toBe('child_chose_option');
+    // 選項的文字是 AI 寫的，但決定是孩子做的 —— 兩件事都留在資料裡。
+    expect(after.plan.provenance.childStatedApproach).toBe('每天睡前讀 15 分鐘');
+  });
+
+  it('沒有人挑過選項卻自稱 child_chose_option → 降級，不照抄', () => {
+    const { response } = roundTrip(CASE_9_INPUT, {
+      ...CASE_9_MODEL,
+      planningContribution: 'child_chose_option',
+    });
+    if (response.status !== 'ready') throw new Error('expected ready');
+    expect(response.plan.planningContribution).toBe('filled_missing_details');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Case 12 — 領域專業的邊界
+// ---------------------------------------------------------------------------
+
+const CASE_12_INPUT = input({
+  childOriginalGoal: '我想彈完這首曲子',
+  childApproach: '老師叫我先練右手旋律，再練左手',
+  cadence: { mode: 'weekly_frequency', weeklyFrequency: 3 },
+});
+
+const CASE_12_MODEL = {
+  status: 'ready',
+  desiredOutcome: '彈完這首曲子',
+  goalControlType: 'directly_actionable',
+  progressionKind: 'staged',
+  actionPlanSummary: '照老師說的順序：先右手旋律，再左手，最後合起來。',
+  currentFocus: '先練右手旋律',
+  nextAction: { text: '今天先練右手旋律 10 分鐘', source: 'child_stated' },
+  reviewPoint: { type: 'after_phase', phaseIndex: 1 },
+  planningContribution: 'organized_child_plan',
+  suggestedCadence: null,
+  sessionSize: null,
+  trialPeriod: null,
+  phases: [
+    { title: '右手旋律', observableDoneWhen: '能不看譜彈完右手' },
+    { title: '左手伴奏', observableDoneWhen: '能不看譜彈完左手' },
+  ],
+  targetValue: null,
+  targetUnit: null,
+  currentValue: null,
+  controllableActions: null,
+};
+
+describe('Case 12｜孩子已經有老師教的方法', () => {
+  it('整理老師的順序 → 通過，而且階段記成從孩子的話推出來的', () => {
+    const { result } = roundTrip(CASE_12_INPUT, CASE_12_MODEL);
+    expect(result.status).toBe('ready');
+    if (result.status !== 'ready' || result.plan.progressionKind !== 'staged') return;
+    expect(result.plan.provenance.fields.phases).toBe('derived_from_child');
+    expect(result.plan.provenance.childStatedApproach).toBe('老師叫我先練右手旋律，再練左手');
+    expect(result.plan.phases[0].title).toBe('右手旋律');
+  });
+
+  it('AI 另造一套自己的鋼琴學習順序 → 不放行', () => {
+    // 覆寫在資料上唯一的形狀：下一步變成 AI 想的。
+    const { result } = roundTrip(CASE_12_INPUT, {
+      ...CASE_12_MODEL,
+      currentFocus: '先練音階',
+      nextAction: { text: '今天先練 C 大調音階', source: 'ai_suggested' },
+      phases: [
+        { title: '基礎音階', observableDoneWhen: '能彈完 C 大調音階' },
+        { title: '和弦轉換', observableDoneWhen: '能連續轉三個和弦' },
+      ],
+    });
+    expect(result.status).toBe('unavailable');
+    if (result.status !== 'unavailable') return;
+    expect(result.rejections).toContain('CHILD_INPUT_OVERWRITTEN');
+  });
+
+  it('把模型的一般知識講成領域權威 → 不放行', () => {
+    const { result } = roundTrip(CASE_12_INPUT, {
+      ...CASE_12_MODEL,
+      actionPlanSummary: '這是最有效的鋼琴練習順序，研究顯示先分手練最好。',
+    });
+    expect(result.status).toBe('unavailable');
+    if (result.status !== 'unavailable') return;
+    expect(result.rejections).toContain('DOMAIN_AUTHORITY_CLAIM');
+  });
+
+  it('prompt 明講它不是教練，phases 只是暫定路線', () => {
+    const prompt = buildChildGoalPlanningPrompt(CASE_12_INPUT);
+    expect(prompt).toContain('你是規劃夥伴，不是教練或老師');
+    expect(prompt).toContain('暫定路線');
+    expect(prompt).toContain('那一套優先');
   });
 });
 
@@ -618,6 +793,14 @@ describe('孩子沒說的事，AI 不可以自己決定', () => {
     if (result.status !== 'unavailable') return;
     expect(result.rejections).toContain('UNDECIDED_DETAIL_INVENTED');
   });
+
+  it('孩子沒選節奏時，AI 的建議不會被掛到孩子頭上', () => {
+    const { result } = roundTrip(CASE_9_INPUT, CASE_9_MODEL);
+    if (result.status !== 'ready' || result.plan.progressionKind !== 'rhythm') {
+      throw new Error('expected rhythm');
+    }
+    expect(result.plan.provenance.fields.cadence).toBe('ai_suggested');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -628,14 +811,20 @@ describe('看不懂的輸出就是沒有計畫', () => {
   it.each([
     ['不是物件', 'nope'],
     ['沒有 status', { desiredOutcome: 'x' }],
-    ['認不得的 progressionKind', { ...CASE_1_MODEL, progressionKind: 'milestones' }],
+    ['認不得的 progressionKind', { ...CASE_1_MODEL, progressionKind: 'outcome_to_action' }],
+    ['認不得的 goalControlType', { ...CASE_1_MODEL, goalControlType: 'maybe' }],
     ['認不得的 clarification kind', {
       status: 'needs_clarification',
       question: { kind: 'why_not', text: '為什麼？' },
     }],
+    ['只有一個選項', {
+      status: 'needs_choice',
+      question: '你想先用哪一種方式開始？',
+      options: ['每天睡前讀 15 分鐘'],
+    }],
     ['太長的下一步', {
       ...CASE_1_MODEL,
-      nextAction: { text: '一'.repeat(41), source: 'child' },
+      nextAction: { text: '一'.repeat(41), source: 'child_stated' },
     }],
     ['壞掉的階段', {
       ...CASE_1_MODEL,
@@ -648,24 +837,22 @@ describe('看不懂的輸出就是沒有計畫', () => {
       targetValue: null,
       targetUnit: null,
     }],
-    ['outcome_to_action 沒有可控制的行動', {
-      ...CASE_1_MODEL,
-      progressionKind: 'outcome_to_action',
-      controllableActions: [],
-    }],
   ])('%s → unavailable', (_label, modelOutput) => {
     const { result } = roundTrip(CASE_1_INPUT, modelOutput);
     expect(result.status).toBe('unavailable');
   });
 
+  it('outcome_to_action 已經不是合法的 progression', () => {
+    // 舊契約的形狀送進來要整筆退掉，不是「認得但忽略」。
+    expect(
+      normalizeChildGoalPlanning({ ...CASE_1_MODEL, progressionKind: 'outcome_to_action' }),
+    ).toBeNull();
+  });
+
   it('input 本身不可用時，連模型都不會被呼叫', () => {
     expect(childGoalPlanningInputIsUsable(input({ childOriginalGoal: '   ' }))).toBe(false);
-    expect(
-      childGoalPlanningInputIsUsable(input({ ageGroup: '13-15' as never })),
-    ).toBe(false);
-    expect(
-      childGoalPlanningInputIsUsable(input({ schemaVersion: 2 as never })),
-    ).toBe(false);
+    expect(childGoalPlanningInputIsUsable(input({ ageGroup: '13-15' as never }))).toBe(false);
+    expect(childGoalPlanningInputIsUsable(input({ schemaVersion: 2 as never }))).toBe(false);
   });
 });
 
@@ -681,9 +868,16 @@ describe('prompt 說得出孩子已經想到多少', () => {
     expect(prompt).toContain('不要改掉它');
   });
 
-  it('沒有方法時，prompt 不會假裝孩子講過', () => {
+  it('沒有方法時，prompt 不會假裝孩子講過，而且說得出可以給選項', () => {
     const prompt = buildChildGoalPlanningPrompt(CASE_2_INPUT);
     expect(prompt).toContain('孩子沒有說他打算怎麼做');
+    expect(prompt).toContain('needs_choice');
+  });
+
+  it('prompt 分得清楚兩個維度', () => {
+    const prompt = buildChildGoalPlanningPrompt(CASE_3_INPUT);
+    expect(prompt).toContain('goalControlType 與 progressionKind 是**兩個不同的問題**');
+    expect(prompt).toContain('progressionKind 是 rhythm');
   });
 
   it('輸出 schema 裡沒有任何幣值欄位 —— 這條鏈不碰幣', () => {

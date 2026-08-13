@@ -18,7 +18,7 @@
 // 那些東西 code review 看得到，scratch 草稿看不到。
 // ─────────────────────────────────────────────────────────────────────────
 
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join, relative } from 'path';
 import { globSync } from 'glob';
 
@@ -62,6 +62,22 @@ describe('測試不依賴 gitignore 掉的檔案', () => {
 
   it('.gitignore 仍然把 docs/ 當本機草稿（規則的前提沒變）', () => {
     const gitignore = readFileSync(join(ROOT, '.gitignore'), 'utf8');
-    expect(gitignore).toMatch(/^docs\/$/m);
+    // 2026-08-13（P1-A1）：`docs/` 改寫成 `docs/*` ＋ 一份明確的例外清單，
+    // 因為 planning contract 必須進版本庫。**前提沒有變** —— 除了清單上
+    // 那幾個檔案，docs/ 底下的東西仍然只存在於本機，所以「測試不從 docs/
+    // 讀檔」這條規則照舊。（寫成 docs/* 是因為 git 沒辦法把一個被排除的
+    // 目錄底下的檔案再加回來，只有排除內容才 ! 得回來。）
+    expect(gitignore).toMatch(/^docs\/\*?$/m);
+  });
+
+  it('docs/ 的例外清單沒有留下失效的規則', () => {
+    // 一條指向不存在檔案的 `!docs/…`，看起來像「這份文件有進版本庫」，
+    // 實際上什麼都沒放行 —— 而下一個人會照著它的承諾去找那份文件。
+    const gitignore = readFileSync(join(ROOT, '.gitignore'), 'utf8');
+    const allowed = [...gitignore.matchAll(/^!(docs\/.+)$/gm)].map((match) => match[1].trim());
+
+    for (const file of allowed) {
+      expect({ file, exists: existsSync(join(ROOT, file)) }).toEqual({ file, exists: true });
+    }
   });
 });

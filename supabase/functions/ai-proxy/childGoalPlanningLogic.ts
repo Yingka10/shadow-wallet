@@ -7,19 +7,21 @@
 // 分工與 P0-3 完全一致，也刻意如此：
 //
 //   Function 端  回「理解」＋ deterministic 組裝（孩子講過的東西一定贏）
-//   App 端       決定「這份計畫能不能用」（下一步驗證、心理狀態、多嘴檢查）
+//   App 端       決定「這份計畫能不能用」（下一步驗證、心理狀態、
+//                領域權威、多嘴檢查、證據優先序）
 //
 // 所以這裡**沒有**任何關鍵字清單。「讀完整本書不能當下一步」那份清單
 // 只有一份，住在 App 端的 canonicalPlanFields.ts —— 在這裡再寫一份，
 // 兩份一定會分岔，而分岔之後某一條路徑會安靜地放行它。
 // （parity 測試會確認這個檔案沒有第二份清單。）
 //
-// 這一層要守住的四件事，都是程式，不是 prompt 裡的請求：
+// 這一層要守住的五件事，都是程式，不是 prompt 裡的請求：
 //
 //   1. **孩子選的節奏由程式覆寫回去。** 模型講什麼都不算數。
 //   2. **孩子講過的方法逐字保留在 provenance。** 模型碰不到那個欄位。
 //   3. **孩子沒說的事一律 undecided。** 模型補不進去。
-//   4. **孩子已經講夠了就不准再問。** 資訊足夠時模型還問問題 = 這一輪無效。
+//   4. **孩子已經講夠了就不准再問、也不准再給選項。**
+//   5. **needs_choice 一定附帶「我自己想」。** allowCustomAnswer 是字面量。
 // ─────────────────────────────────────────────────────────────────────────
 
 /** 1：第一版 planning contract。與 P0-3 的 schemaVersion 是兩個獨立的數列。 */
@@ -52,7 +54,7 @@ export type ChildGoalPlanningInput = {
   /** 孩子的原話。**只讀。** 這一層不會、也不能改寫它。 */
   childOriginalGoal: string;
   childOriginalMotivation: string | null;
-  /** 孩子自己已經想到的做法。有值時只能整理，不能換掉。 */
+  /** 孩子自己已經想到的做法（含老師教的、課程安排的）。有值時只能整理。 */
   childApproach: string | null;
   cadence: ChildPlanCadence | null;
   preferredTime: string | null;
@@ -63,11 +65,11 @@ export type ChildGoalPlanningInput = {
 // 輸出（與 App 端契約鏡射，由 parity 測試釘住）
 // ---------------------------------------------------------------------------
 
-export type ChildPlanProgressionKind =
-  | 'rhythm'
-  | 'staged'
-  | 'accumulation'
-  | 'outcome_to_action';
+/** 成果控制得了嗎。與 progressionKind **正交**。 */
+export type ChildPlanGoalControlType = 'directly_actionable' | 'external_outcome';
+
+/** 怎麼向前走。不含 outcome_to_action —— 那是控制性，不是前進方式。 */
+export type ChildPlanProgressionKind = 'rhythm' | 'staged' | 'accumulation';
 
 export type ChildPlanClarificationKind =
   | 'goal_focus'
@@ -77,14 +79,19 @@ export type ChildPlanClarificationKind =
   | 'session_size'
   | 'target_amount';
 
-export type ChildPlanFieldSource = 'child' | 'ai_suggested' | 'derived' | 'undecided';
+export type ChildPlanFieldSource =
+  | 'child_stated'
+  | 'derived_from_child'
+  | 'deterministic_policy'
+  | 'ai_suggested'
+  | 'undecided';
 
-export type ChildPlanActionSource = 'child' | 'ai_suggested' | 'derived';
+export type ChildPlanActionSource = 'child_stated' | 'derived_from_child' | 'ai_suggested';
 
 export type ChildPlanningContribution =
   | 'organized_child_plan'
   | 'filled_missing_details'
-  | 'suggested_options';
+  | 'child_chose_option';
 
 export type ChildPlanReviewPoint =
   | { type: 'after_days'; days: number }
@@ -111,6 +118,7 @@ export type ChildPlanProvenance = {
     reviewPoint: ChildPlanFieldSource;
     phases: ChildPlanFieldSource;
     target: ChildPlanFieldSource;
+    controllableActions: ChildPlanFieldSource;
   };
 };
 
@@ -122,29 +130,30 @@ export type ChildGoalPlanCore = {
   reviewPoint: ChildPlanReviewPoint;
   planningContribution: ChildPlanningContribution;
   provenance: ChildPlanProvenance;
-  startOptions: ChildPlanStartOption[] | null;
   model: string;
 };
 
-export type ChildGoalPlan =
-  | (ChildGoalPlanCore & {
+export type ChildGoalPlanControl =
+  | { goalControlType: 'directly_actionable' }
+  | { goalControlType: 'external_outcome'; controllableActions: string[] };
+
+export type ChildGoalPlanProgression =
+  | {
       progressionKind: 'rhythm';
       cadence: ChildPlanCadence | null;
       sessionSize: ChildPlanSessionSize | null;
       trialPeriod: { days: number } | { sessions: number } | null;
-    })
-  | (ChildGoalPlanCore & { progressionKind: 'staged'; phases: ChildPlanPhase[] })
-  | (ChildGoalPlanCore & {
+    }
+  | { progressionKind: 'staged'; phases: ChildPlanPhase[] }
+  | {
       progressionKind: 'accumulation';
       targetValue: number;
       targetUnit: string;
       currentValue: number;
-    })
-  | (ChildGoalPlanCore & {
-      progressionKind: 'outcome_to_action';
-      controllableActions: string[];
-      cadence: ChildPlanCadence | null;
-    });
+    };
+
+/** 兩個正交維度的交集。「external_outcome 的 rhythm 計畫」是合法形狀。 */
+export type ChildGoalPlan = ChildGoalPlanCore & ChildGoalPlanControl & ChildGoalPlanProgression;
 
 export type ChildGoalPlanningResponse =
   | {
@@ -152,6 +161,16 @@ export type ChildGoalPlanningResponse =
       schemaVersion: typeof CHILD_GOAL_PLANNING_SCHEMA_VERSION;
       knownGoal: string;
       question: { kind: ChildPlanClarificationKind; text: string };
+      model: string;
+    }
+  | {
+      status: 'needs_choice';
+      schemaVersion: typeof CHILD_GOAL_PLANNING_SCHEMA_VERSION;
+      knownGoal: string;
+      question: string;
+      options: ChildPlanStartOption[];
+      /** 字面量 true —— 孩子永遠可以說「我自己想」。 */
+      allowCustomAnswer: true;
       model: string;
     }
   | {
@@ -180,6 +199,7 @@ export const CHILD_GOAL_PLANNING_LIMITS = {
   maxFocusLength: 40,
   maxActionLength: 40,
   maxQuestionLength: 40,
+  maxChoiceQuestionLength: 40,
   maxPhaseTitleLength: 20,
   maxPhaseIdLength: 24,
   maxDoneWhenLength: 40,
@@ -190,8 +210,8 @@ export const CHILD_GOAL_PLANNING_LIMITS = {
   maxPhases: 5,
   minControllableActions: 1,
   maxControllableActions: 4,
-  minStartOptions: 2,
-  maxStartOptions: 3,
+  minChoiceOptions: 2,
+  maxChoiceOptions: 3,
   minTargetValue: 1,
   maxTargetValue: 10000,
   maxWeeklyFrequency: 7,
@@ -237,6 +257,8 @@ export function childGoalPlanningInputIsUsable(input: ChildGoalPlanningInput): b
  * 與 App 端 planGuards.informationSufficiency 是同一條規則，而且刻意是
  * 一個**結構條件**（有節奏 ＋ 有自己的方法），不是一份關鍵字清單 ——
  * 所以兩端各有一份實作不會像關鍵字那樣默默分岔，parity 測試也釘得住。
+ *
+ * 足夠時**兩種對話狀態都被禁止**：再問一題是多嘴，再給選項也是。
  */
 export function informationIsSufficient(input: ChildGoalPlanningInput): boolean {
   const hasCadence = input.cadence !== null && input.cadence !== undefined;
@@ -271,13 +293,14 @@ const SUPPORT_ZH: Record<ChildPlanningSupportPreference, string> = {
 /**
  * 給模型的指示。
  *
- * 四段話是重點，而且每一段在程式裡都有對應的 deterministic 執法點 ——
- * prompt 只是讓模型第一次就寫對，不是唯一的防線：
+ * 每一段在程式裡都有對應的 deterministic 執法點 —— prompt 只是讓模型
+ * 第一次就寫對，不是唯一的防線：
  *
  *   · 「孩子已經有方法就先整理他的方法」→ composeChildGoalPlan 逐字保留
  *   · 「沒說的不要幫他決定」            → provenance 一律 undecided
  *   · 「不是每件事都要拆成 3-5 步」      → progressionKind 是 union 判別欄位
  *   · 「不要猜他的心理狀態」            → App 端 guard 一律擋掉
+ *   · 「你不是教練」                    → App 端的領域權威 guard 擋掉
  */
 export function buildChildGoalPlanningPrompt(input: ChildGoalPlanningInput): string {
   const L = CHILD_GOAL_PLANNING_LIMITS;
@@ -288,10 +311,9 @@ export function buildChildGoalPlanningPrompt(input: ChildGoalPlanningInput): str
 
   const approachRule = approach
     ? `孩子已經自己想到做法了（「${approach}」）。**先整理他的方法**，不要換成另一套。`
-      + ' planningContribution 只能是 organized_child_plan 或 filled_missing_details，'
-      + '不可以是 suggested_options。'
+      + ' 這一輪不可以回 needs_choice —— 他已經決定怎麼做了。'
     : '孩子還沒說他打算怎麼做。如果從他的話裡看得出方向，就幫他整理成可執行的行動；'
-      + '看不出來而且問了才有辦法規劃，就問一題。';
+      + '看得出目標但看不出做法，就回 needs_choice 給他 2-3 個可以挑的開始方式。';
 
   const cadenceRule = input.cadence
     ? `孩子已經自己選了節奏（${describeCadenceForPrompt(input.cadence)}）。**不要改掉它**，`
@@ -299,11 +321,12 @@ export function buildChildGoalPlanningPrompt(input: ChildGoalPlanningInput): str
     : '孩子還沒選節奏。這件事需要節奏才成立的話，可以在 suggestedCadence 給一個'
       + '對這個年紀合理、容易開始的建議；不需要就給 null。';
 
-  const clarificationRule = sufficient
+  const conversationRule = sufficient
     ? '⚠️ 孩子這次已經講得夠清楚了（有節奏、也講了他打算怎麼做）。'
-      + '**這一輪一定要給計畫，status 必須是 ready，不可以再問問題。**'
-      + ' 而且 nextAction 要從他自己講的做法裡拿出來，source 給 "child" 或 "derived"，'
-      + '不可以是 "ai_suggested" —— 他已經說了要做什麼，下一步就不該換成你想的。'
+      + '**這一輪一定要給計畫，status 必須是 ready，不可以再問問題、也不可以再給選項。**'
+      + ' 而且 nextAction 要從他自己講的做法裡拿出來，source 給 "child_stated" 或'
+      + ' "derived_from_child"，不可以是 "ai_suggested" —— 他已經說了要做什麼，'
+      + '下一步就不該換成你想的。'
     : '只有在「不知道答案就沒辦法形成合理的行動計畫」時才問，而且**一次只問一題**。'
       + '孩子的話裡已經回答過的事不要再問一次（例如他說「平日睡前」，就不要再問一週幾次）。';
 
@@ -319,7 +342,7 @@ ${approach ? `孩子自己想到的做法：「${approach}」` : '孩子沒有�
 ${input.preferredTime ? `孩子想做的時段：${input.preferredTime}` : '孩子沒有說想在什麼時段做。'}
 孩子希望你幫多少：${input.planningSupportPreference ? SUPPORT_ZH[input.planningSupportPreference] : '他沒有特別說（預設：先整理，缺什麼才補）'}
 
-最重要的四條規則：
+最重要的五條規則：
 
 1. **先看孩子有沒有自己的方法，再決定要不要建議。**
    ${approachRule}
@@ -342,43 +365,75 @@ ${input.preferredTime ? `孩子想做的時段：${input.preferredTime}` : '孩�
    staged 的階段完成條件也一樣，必須是看得見的（「能不扶著騎完 10 公尺」），
    不可以是心情或理解程度。
 
-${clarificationRule}
+5. **你是規劃夥伴，不是教練或老師。**
+   你可以幫忙：把遠期目標縮成近期行動、決定節奏與先試多久、
+   對明顯是專案的事給一條**暫定**路線、提供 2-3 種可能的開始方式。
+   你**不可以**把自己的一般知識講成領域權威：
+   「最有效的鋼琴練習順序」「科學上最佳的複習頻率」「專業的重訓處方」都不行。
+   如果孩子已經有老師、教材、課程或自己的方法，**那一套優先** ——
+   你的工作是把它整理清楚，不是另外設計一套課程。
+   staged 的 phases 是「先這樣試試看」的暫定路線，不是正式課程大綱。
 
-progressionKind —— 先想清楚「這件事怎麼向前走」，不要每件事都拆成 3-5 步：
+${conversationRule}
 
-  rhythm             靠固定頻率往前（每天讀 15 分鐘、30 天跑步、練琴習慣）。
-                     重點是頻率、單次份量、先試多久，不要編假的里程碑。
-  staged             有真實的能力或成果進展（學會騎車、學一首曲子、做一本漫畫）。
-                     phases 給 ${CHILD_GOAL_PLANNING_LIMITS.minPhases}-${CHILD_GOAL_PLANNING_LIMITS.maxPhases} 個，每個都要是真的進展，不是為了湊數。
-  accumulation       主要進度是「做到幾個 / 目標幾個」（讀 5 本書、跑 20 公里）。
-                     不要硬拆成「第一本」「第二本」這種假階段。
-  outcome_to_action  成果受外部因素影響（考 100 分、拿第一名、進校隊）。
-                     保留成果，另外給 1-${CHILD_GOAL_PLANNING_LIMITS.maxControllableActions} 個他控制得了的行動。
-                     絕對不要寫成「80 分 → 90 分 → 100 分」這種假進度。
+三種狀態，選一個：
+
+  needs_clarification  連他想達成什麼都還不清楚 → 問一題（一次只有一題）。
+  needs_choice         目標清楚了，但他還沒決定怎麼做 → 給 2-3 個可以挑的開始方式。
+                       ⚠️ 這**不是**替他決定，是讓他挑。他永遠可以說「我自己想」。
+  ready                資訊夠了 → 一份可執行的計畫。
+
+goalControlType 與 progressionKind 是**兩個不同的問題**，要分開回答：
+
+  goalControlType —— 這個成果他控制得了嗎？
+    directly_actionable  做了就會發生（讀完一本書、學會騎車、每天練琴）
+    external_outcome     受外部因素影響（考 100 分、拿第一名、被老師選中）
+                         這時一定要另外給 1-${L.maxControllableActions} 個他控制得了的行動。
+
+  progressionKind —— 這件事怎麼向前走？不要每件事都拆成 3-5 步。
+    rhythm        靠固定頻率往前（每天讀 15 分鐘、30 天跑步、練琴習慣）。
+                  重點是頻率、單次份量、先試多久，不要編假的里程碑。
+    staged        有真實的能力或成果進展（學會騎車、學一首曲子、做一本漫畫）。
+                  phases 給 ${L.minPhases}-${L.maxPhases} 個，每個都要是真的進展，不是為了湊數。
+    accumulation  主要進度是「做到幾個 / 目標幾個」（讀 5 本書、跑 20 公里）。
+                  不要硬拆成「第一本」「第二本」這種假階段。
+
+  ⚠️ 「國文考 100 分」是 external_outcome，但它的行動計畫「每週複習三次」
+     的 progressionKind 是 rhythm。**不要**因為成果不可控就選一種特別的
+     progression，也不要寫成「80 分 → 90 分 → 100 分」這種假進度。
 
 其他限制：
-- desiredOutcome ${L.maxOutcomeLength} 字內、actionPlanSummary ${L.maxSummaryLength} 字內、currentFocus ${L.maxFocusLength} 字內、nextAction.text ${L.maxActionLength} 字內。
-- nextAction.source：孩子自己講過的動作給 "child"，你提的給 "ai_suggested"，從他的話推出來的給 "derived"。
+- desiredOutcome ${L.maxOutcomeLength} 字內、actionPlanSummary ${L.maxSummaryLength} 字內、currentFocus ${L.maxFocusLength} 字內、nextAction.text ${L.maxActionLength} 字內。超過就是這一輪無效，不會被截斷。
+- nextAction.source：孩子自己講過的動作給 "child_stated"，從他的話推出來的給 "derived_from_child"，你提的給 "ai_suggested"。
 - reviewPoint 是「什麼時候回頭看看這個方法適不適合」，不是完成或失敗。不需要就給 null。
-- 只有孩子明顯不知道怎麼開始、而且你要給他挑的時候，planningContribution 才是 suggested_options，
-  這時 startOptions 給 ${L.minStartOptions}-${L.maxStartOptions} 個，其他情況一律 null。
 - 不要出現「任務」「審核」「批准」「系統」「AI」這些字。
 - 不要提到任何幣值、點數、獎勵數字——這個 JSON 裡沒有那種欄位。
 
-只回傳 JSON，前後不要有其他文字。資訊不夠時：
+只回傳 JSON，前後不要有其他文字。
+
+目標還不清楚時：
 {"status":"needs_clarification","question":{"kind":"goal_focus","text":"你最想在哪一件事情上變厲害？"}}
 
 question.kind 只能是：goal_focus（不知道要做什麼）、current_level（不知道他現在到哪）、
-approach（有目標沒方法）、cadence（缺頻率）、session_size（缺單次份量）、target_amount（缺目標數量）。
+approach（有目標但連方向都看不出來）、cadence（缺頻率）、session_size（缺單次份量）、
+target_amount（缺目標數量）。
+
+目標清楚、但他還沒決定怎麼做時：
+{"status":"needs_choice","question":"你想先用哪一種方式開始？","options":["每天睡前讀 15 分鐘","週末一次讀完一章"]}
+
+options 給 ${L.minChoiceOptions}-${L.maxChoiceOptions} 個，每個 ${L.maxOptionLength} 字內。不要標「推薦」，它們是平等的選項。
 
 資訊夠時：
-{"status":"ready","desiredOutcome":"兩週讀完神奇樹屋","progressionKind":"rhythm","actionPlanSummary":"平日睡前讀 15 分鐘，兩週把這本書讀完。","currentFocus":"先維持平日睡前的閱讀","nextAction":{"text":"今晚睡前先讀 15 分鐘","source":"child"},"reviewPoint":{"type":"after_days","days":7},"planningContribution":"organized_child_plan","suggestedCadence":null,"sessionSize":{"kind":"minutes","minutes":15},"trialPeriod":{"days":7},"phases":null,"targetValue":null,"targetUnit":null,"currentValue":null,"controllableActions":null,"startOptions":null}
+{"status":"ready","desiredOutcome":"兩週讀完神奇樹屋","goalControlType":"directly_actionable","progressionKind":"rhythm","actionPlanSummary":"平日睡前讀 15 分鐘，兩週把這本書讀完。","currentFocus":"先維持平日睡前的閱讀","nextAction":{"text":"今晚睡前先讀 15 分鐘","source":"child_stated"},"reviewPoint":{"type":"after_days","days":7},"planningContribution":"organized_child_plan","suggestedCadence":null,"sessionSize":{"kind":"minutes","minutes":15},"trialPeriod":{"days":7},"phases":null,"targetValue":null,"targetUnit":null,"currentValue":null,"controllableActions":null}
+
+planningContribution：只有整理他的方法給 organized_child_plan；補了缺的細節給 filled_missing_details；他是從你上一輪給的選項裡挑的，給 child_chose_option。
 
 各 progressionKind 專屬欄位（其他一律給 null，不要為了整齊硬填）：
-  rhythm            sessionSize、trialPeriod（trialPeriod 有值時 reviewPoint 要講同一個數字）
-  staged            phases: [{"title":"先能自己滑行","observableDoneWhen":"能雙腳離地滑行 5 公尺"}]（不用給 id）
-  accumulation      targetValue、targetUnit（${L.maxUnitLength} 字內，例如「本」「公里」）、currentValue
-  outcome_to_action controllableActions: ["先複習 15 分鐘"]
+  rhythm        sessionSize、trialPeriod（trialPeriod 有值時 reviewPoint 要講同一個數字）
+  staged        phases: [{"title":"先能自己滑行","observableDoneWhen":"能雙腳離地滑行 5 公尺"}]（不用給 id）
+  accumulation  targetValue、targetUnit（${L.maxUnitLength} 字內，例如「本」「公里」）、currentValue
+
+goalControlType 是 external_outcome 時，另外給 controllableActions: ["先複習 15 分鐘"]。
 
 sessionSize 只能是 null 或：{"kind":"minutes","minutes":15} 或 {"kind":"count","count":20,"unit":"球"}
 suggestedCadence 只能是 null 或：{"mode":"weekly_frequency","weeklyFrequency":3} 或 {"mode":"fixed_days","days":[1,2,3,4,5]} 或 {"mode":"one_time"}
@@ -417,12 +472,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-const PROGRESSION_KINDS: readonly string[] = [
-  'rhythm',
-  'staged',
-  'accumulation',
-  'outcome_to_action',
-];
+const GOAL_CONTROL_TYPES: readonly string[] = ['directly_actionable', 'external_outcome'];
+
+const PROGRESSION_KINDS: readonly string[] = ['rhythm', 'staged', 'accumulation'];
 
 const CLARIFICATION_KINDS: readonly string[] = [
   'goal_focus',
@@ -436,10 +488,14 @@ const CLARIFICATION_KINDS: readonly string[] = [
 const CONTRIBUTIONS: readonly string[] = [
   'organized_child_plan',
   'filled_missing_details',
-  'suggested_options',
+  'child_chose_option',
 ];
 
-const ACTION_SOURCES: readonly string[] = ['child', 'ai_suggested', 'derived'];
+const ACTION_SOURCES: readonly string[] = [
+  'child_stated',
+  'derived_from_child',
+  'ai_suggested',
+];
 
 export function normalizeCadence(value: unknown): ChildPlanCadence | null {
   if (!isRecord(value)) return null;
@@ -526,10 +582,10 @@ function normalizePhases(value: unknown): RawPhase[] | null {
   return phases;
 }
 
-function normalizeStartOptions(value: unknown): string[] | null {
+function normalizeOptions(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
   const L = CHILD_GOAL_PLANNING_LIMITS;
-  if (value.length < L.minStartOptions || value.length > L.maxStartOptions) return null;
+  if (value.length < L.minChoiceOptions || value.length > L.maxChoiceOptions) return null;
 
   const options: string[] = [];
   for (const item of value) {
@@ -541,12 +597,14 @@ function normalizeStartOptions(value: unknown): string[] | null {
   return options;
 }
 
-/** 模型的「理解」。只有理解，沒有 provenance —— 那是組裝端的事。 */
+/** 模型的「理解」。沒有 provenance —— 那是組裝端的事。 */
 export type ChildGoalPlanningUnderstanding =
   | { status: 'needs_clarification'; question: { kind: ChildPlanClarificationKind; text: string } }
+  | { status: 'needs_choice'; question: string; options: string[] }
   | {
       status: 'ready';
       desiredOutcome: string;
+      goalControlType: ChildPlanGoalControlType;
       progressionKind: ChildPlanProgressionKind;
       actionPlanSummary: string;
       currentFocus: string;
@@ -561,7 +619,6 @@ export type ChildGoalPlanningUnderstanding =
       targetUnit: string | null;
       currentValue: number | null;
       controllableActions: string[] | null;
-      startOptions: string[] | null;
     };
 
 /**
@@ -585,12 +642,27 @@ export function normalizeChildGoalPlanning(value: unknown): ChildGoalPlanningUnd
     };
   }
 
+  if (value.status === 'needs_choice') {
+    const questionText = text(value.question, L.maxChoiceQuestionLength);
+    const options = normalizeOptions(value.options);
+    if (questionText === null || options === null) return null;
+    return { status: 'needs_choice', question: questionText, options };
+  }
+
   if (value.status !== 'ready') return null;
 
   const desiredOutcome = text(value.desiredOutcome, L.maxOutcomeLength);
   const actionPlanSummary = text(value.actionPlanSummary, L.maxSummaryLength);
   const currentFocus = text(value.currentFocus, L.maxFocusLength);
   if (desiredOutcome === null || actionPlanSummary === null || currentFocus === null) return null;
+
+  if (
+    typeof value.goalControlType !== 'string'
+    || !GOAL_CONTROL_TYPES.includes(value.goalControlType)
+  ) {
+    return null;
+  }
+  const goalControlType = value.goalControlType as ChildPlanGoalControlType;
 
   if (
     typeof value.progressionKind !== 'string'
@@ -621,7 +693,6 @@ export function normalizeChildGoalPlanning(value: unknown): ChildGoalPlanningUnd
   let targetValue: number | null = null;
   let targetUnit: string | null = null;
   let currentValue: number | null = null;
-  let controllableActions: string[] | null = null;
 
   if (progressionKind === 'staged') {
     phases = normalizePhases(value.phases);
@@ -636,7 +707,9 @@ export function normalizeChildGoalPlanning(value: unknown): ChildGoalPlanningUnd
     if (currentValue > targetValue) return null;
   }
 
-  if (progressionKind === 'outcome_to_action') {
+  // 可控行動只跟 goalControlType 有關，與 progression 無關 —— 兩個維度正交。
+  let controllableActions: string[] | null = null;
+  if (goalControlType === 'external_outcome') {
     if (!Array.isArray(value.controllableActions)) return null;
     if (
       value.controllableActions.length < L.minControllableActions
@@ -664,6 +737,7 @@ export function normalizeChildGoalPlanning(value: unknown): ChildGoalPlanningUnd
   return {
     status: 'ready',
     desiredOutcome,
+    goalControlType,
     progressionKind,
     actionPlanSummary,
     currentFocus,
@@ -674,14 +748,13 @@ export function normalizeChildGoalPlanning(value: unknown): ChildGoalPlanningUnd
     reviewPoint: normalizeReviewPoint(value.reviewPoint),
     planningContribution: value.planningContribution as ChildPlanningContribution,
     suggestedCadence: normalizeCadence(value.suggestedCadence),
-    sessionSize: normalizeSessionSize(value.sessionSize),
+    sessionSize: progressionKind === 'rhythm' ? normalizeSessionSize(value.sessionSize) : null,
     trialPeriod: progressionKind === 'rhythm' ? trialPeriod : null,
     phases,
     targetValue,
     targetUnit,
     currentValue,
     controllableActions,
-    startOptions: normalizeStartOptions(value.startOptions),
   };
 }
 
@@ -696,13 +769,13 @@ function phaseId(index: number): string {
 /**
  * 把模型的理解組成一份計畫。
  *
- * ⚠️ 這一段是「AI 不可以默默改掉孩子的東西」在程式裡的樣子。四行 if，
- *    不是 prompt 裡的四句請求：
+ * ⚠️ 這一段是「AI 不可以默默改掉孩子的東西」在程式裡的樣子。幾行 if，
+ *    不是 prompt 裡的幾句請求：
  *
  *      · 孩子選的節奏一定贏
  *      · 孩子講的方法逐字進 provenance
  *      · 孩子沒說的時段一律 undecided
- *      · 孩子已經有方法時，這一輪不可能是「AI 給你幾個選項」
+ *      · 孩子已經有方法時，階段只能是那套方法的整理（derived_from_child）
  */
 export function composeChildGoalPlan(args: {
   input: ChildGoalPlanningInput;
@@ -720,28 +793,15 @@ export function composeChildGoalPlan(args: {
       ? input.preferredTime.trim()
       : null;
 
-  // 孩子選過就照抄；沒選才看模型的建議。
-  const cadence = input.cadence ?? understanding.suggestedCadence ?? null;
+  const isRhythm = understanding.progressionKind === 'rhythm';
+
+  // 孩子選過就照抄；沒選才看模型的建議。而模型的建議只有 rhythm 放得下。
+  const cadence = isRhythm ? input.cadence ?? understanding.suggestedCadence ?? null : null;
   const cadenceSource: ChildPlanFieldSource = input.cadence
-    ? 'child'
-    : understanding.suggestedCadence
+    ? 'child_stated'
+    : cadence !== null
       ? 'ai_suggested'
       : 'undecided';
-
-  // 孩子已經有方法 → 不可能是「AI 給你幾個做法挑」。降級而不是照抄，
-  // 因為照抄會讓資料看起來像整份計畫都是 AI 想的。
-  const planningContribution: ChildPlanningContribution =
-    childApproach !== null && understanding.planningContribution === 'suggested_options'
-      ? 'filled_missing_details'
-      : understanding.planningContribution;
-
-  const startOptions: ChildPlanStartOption[] | null =
-    planningContribution === 'suggested_options' && understanding.startOptions !== null
-      ? understanding.startOptions.map((textValue, index) => ({
-          id: `option-${index + 1}`,
-          text: textValue,
-        }))
-      : null;
 
   const phases: ChildPlanPhase[] | null =
     understanding.phases === null
@@ -768,8 +828,8 @@ export function composeChildGoalPlan(args: {
   }
 
   // trialPeriod 與 reviewPoint 講的是同一件事。模型只講了一邊時，
-  // 由 trialPeriod 補出 reviewPoint（derived），不是各留各的。
-  const trialPeriod = understanding.progressionKind === 'rhythm' ? understanding.trialPeriod : null;
+  // 由 trialPeriod 補出 reviewPoint，不是各留各的。
+  const trialPeriod = isRhythm ? understanding.trialPeriod : null;
   if (trialPeriod !== null) {
     reviewPoint =
       'days' in trialPeriod
@@ -777,24 +837,36 @@ export function composeChildGoalPlan(args: {
         : { type: 'after_sessions', sessions: trialPeriod.sessions };
   }
 
+  const sessionSize = isRhythm ? understanding.sessionSize : null;
+
   const provenance: ChildPlanProvenance = {
     // 孩子的原話與方法由這裡複製，模型碰不到這兩個欄位。
     childOriginalGoal: input.childOriginalGoal.trim(),
     childStatedApproach: childApproach,
     fields: {
       cadence: cadenceSource,
+      // 孩子講過方法時，單次份量是從他的話推出來的，不是 AI 想的。
       sessionSize:
-        understanding.sessionSize === null
+        sessionSize === null ? 'undecided' : childApproach !== null ? 'derived_from_child' : 'ai_suggested',
+      // 孩子沒說時段就一定是 undecided —— 這是「不可以偷偷補決定」的執法點。
+      preferredTime: childPreferredTime === null ? 'undecided' : 'child_stated',
+      nextAction: understanding.nextAction.source,
+      reviewPoint:
+        reviewPoint === null
+          ? 'undecided'
+          : trialPeriod !== null && childApproach !== null
+            ? 'derived_from_child'
+            : 'ai_suggested',
+      // 孩子已經有一套方法時，階段只能是那套方法的整理，不是模型另造的課程。
+      phases:
+        phases === null ? 'undecided' : childApproach !== null ? 'derived_from_child' : 'ai_suggested',
+      target: understanding.targetValue === null ? 'undecided' : 'ai_suggested',
+      controllableActions:
+        understanding.controllableActions === null
           ? 'undecided'
           : childApproach !== null
-            ? 'derived'
+            ? 'derived_from_child'
             : 'ai_suggested',
-      // 孩子沒說時段就一定是 undecided —— 這是「不可以偷偷補決定」的執法點。
-      preferredTime: childPreferredTime === null ? 'undecided' : 'child',
-      nextAction: understanding.nextAction.source,
-      reviewPoint: reviewPoint === null ? 'undecided' : trialPeriod !== null ? 'derived' : 'ai_suggested',
-      phases: phases === null ? 'undecided' : 'ai_suggested',
-      target: understanding.targetValue === null ? 'undecided' : 'ai_suggested',
     },
   };
 
@@ -804,50 +876,48 @@ export function composeChildGoalPlan(args: {
     currentFocus: understanding.currentFocus,
     nextAction: understanding.nextAction,
     reviewPoint,
-    planningContribution,
+    // 「他從選項裡挑的」只有在那個選項真的回到 childApproach 時才成立。
+    // 沒有的話降級，不照抄 —— 照抄會在資料裡留下一個沒發生過的選擇。
+    planningContribution:
+      understanding.planningContribution === 'child_chose_option' && childApproach === null
+        ? 'filled_missing_details'
+        : understanding.planningContribution,
     provenance,
-    startOptions,
     model,
   };
 
-  if (understanding.progressionKind === 'rhythm') {
-    return {
-      ...core,
-      progressionKind: 'rhythm',
-      cadence,
-      sessionSize: understanding.sessionSize,
-      trialPeriod,
-    };
-  }
+  const control: ChildGoalPlanControl =
+    understanding.goalControlType === 'external_outcome'
+      ? {
+          goalControlType: 'external_outcome',
+          controllableActions: understanding.controllableActions ?? [],
+        }
+      : { goalControlType: 'directly_actionable' };
 
-  if (understanding.progressionKind === 'staged') {
-    return { ...core, progressionKind: 'staged', phases: phases ?? [] };
-  }
+  const progression: ChildGoalPlanProgression =
+    understanding.progressionKind === 'rhythm'
+      ? { progressionKind: 'rhythm', cadence, sessionSize, trialPeriod }
+      : understanding.progressionKind === 'staged'
+        ? { progressionKind: 'staged', phases: phases ?? [] }
+        : {
+            progressionKind: 'accumulation',
+            targetValue: understanding.targetValue ?? 0,
+            targetUnit: understanding.targetUnit ?? '',
+            currentValue: understanding.currentValue ?? 0,
+          };
 
-  if (understanding.progressionKind === 'accumulation') {
-    return {
-      ...core,
-      progressionKind: 'accumulation',
-      targetValue: understanding.targetValue ?? 0,
-      targetUnit: understanding.targetUnit ?? '',
-      currentValue: understanding.currentValue ?? 0,
-    };
-  }
-
-  return {
-    ...core,
-    progressionKind: 'outcome_to_action',
-    controllableActions: understanding.controllableActions ?? [],
-    cadence,
-  };
+  return { ...core, ...control, ...progression };
 }
 
 /**
  * understanding → 要回給 App 的東西。
  *
- * 這裡是「多嘴」的第一道防線：孩子已經講夠了，模型卻回一個問題，
- * 這一輪就是無效輸出。**不是**把問題吞掉再自己編一份計畫 ——
+ * 這裡是「多嘴」的第一道防線：孩子已經講夠了，模型卻回一個問題或一組
+ * 選項，這一輪就是無效輸出。**不是**把它吞掉再自己編一份計畫 ——
  * 那會產出一份沒有人決定過的計畫。
+ *
+ * 孩子已經有自己的方法時，needs_choice 一樣被擋掉：給他選項的下一步
+ * 就是把他的方法換掉。
  */
 export function composeChildGoalPlanningResponse(args: {
   input: ChildGoalPlanningInput;
@@ -856,19 +926,39 @@ export function composeChildGoalPlanningResponse(args: {
 }): ChildGoalPlanningResponse {
   const { input, understanding, model } = args;
 
+  const invalid: ChildGoalPlanningResponse = {
+    status: 'unavailable',
+    schemaVersion: CHILD_GOAL_PLANNING_SCHEMA_VERSION,
+    reason: 'INVALID_AI_OUTPUT',
+  };
+
+  const childHasApproach =
+    typeof input.childApproach === 'string' && input.childApproach.trim().length > 0;
+
   if (understanding.status === 'needs_clarification') {
-    if (informationIsSufficient(input)) {
-      return {
-        status: 'unavailable',
-        schemaVersion: CHILD_GOAL_PLANNING_SCHEMA_VERSION,
-        reason: 'INVALID_AI_OUTPUT',
-      };
-    }
+    if (informationIsSufficient(input)) return invalid;
     return {
       status: 'needs_clarification',
       schemaVersion: CHILD_GOAL_PLANNING_SCHEMA_VERSION,
       knownGoal: input.childOriginalGoal.trim(),
       question: understanding.question,
+      model,
+    };
+  }
+
+  if (understanding.status === 'needs_choice') {
+    if (informationIsSufficient(input) || childHasApproach) return invalid;
+    return {
+      status: 'needs_choice',
+      schemaVersion: CHILD_GOAL_PLANNING_SCHEMA_VERSION,
+      knownGoal: input.childOriginalGoal.trim(),
+      question: understanding.question,
+      options: understanding.options.map((optionText, index) => ({
+        id: `option-${index + 1}`,
+        text: optionText,
+      })),
+      // 字面量，不是從模型讀來的。孩子永遠可以說「我自己想」。
+      allowCustomAnswer: true,
       model,
     };
   }

@@ -14,7 +14,6 @@
 // 後者代表模型這一次寫了不該寫的東西（要去看 prompt）。
 //
 // 驗不過一律 unavailable，**不修補、不補預設值、不替模型改寫**。
-// 一個會幫模型補完的 validator 產出的是沒有人決定過的內容。
 //
 // 這支需要 input 才驗得完：「該不該再問一題」「孩子講過的節奏有沒有被
 // 換掉」「時段是不是憑空冒出來的」都是相對於孩子講過什麼才成立的判斷。
@@ -24,7 +23,9 @@ import {
   cadenceEquals,
   checkPlanActionText,
   containsClockTime,
+  containsDomainAuthorityClaim,
   containsMentalStateDiagnosis,
+  evidenceSatisfies,
   informationSufficiency,
 } from './planGuards';
 import {
@@ -33,15 +34,20 @@ import {
   CHILD_PLANNING_CONTRIBUTIONS,
   CHILD_PLAN_CLARIFICATION_KINDS,
   CHILD_PLAN_FIELD_SOURCES,
+  CHILD_PLAN_GOAL_CONTROL_TYPES,
   CHILD_PLAN_PROGRESSION_KINDS,
+  isChildOwned,
   type ChildGoalPlan,
+  type ChildGoalPlanControl,
   type ChildGoalPlanCore,
+  type ChildGoalPlanProgression,
   type ChildGoalPlanningInput,
   type ChildGoalPlanningResult,
   type ChildGoalPlanningUnavailableReason,
   type ChildPlanCadence,
   type ChildPlanClarificationKind,
   type ChildPlanFieldSource,
+  type ChildPlanGoalControlType,
   type ChildPlanPhase,
   type ChildPlanProgressionKind,
   type ChildPlanProvenance,
@@ -185,6 +191,17 @@ function validFieldSource(value: unknown): ChildPlanFieldSource | null {
     : null;
 }
 
+const PROVENANCE_KEYS = [
+  'cadence',
+  'sessionSize',
+  'preferredTime',
+  'nextAction',
+  'reviewPoint',
+  'phases',
+  'target',
+  'controllableActions',
+] as const;
+
 function validProvenance(value: unknown): ChildPlanProvenance | null {
   if (!isRecord(value) || !isRecord(value.fields)) return null;
 
@@ -198,18 +215,8 @@ function validProvenance(value: unknown): ChildPlanProvenance | null {
     if (childStatedApproach === null) return null;
   }
 
-  const keys = [
-    'cadence',
-    'sessionSize',
-    'preferredTime',
-    'nextAction',
-    'reviewPoint',
-    'phases',
-    'target',
-  ] as const;
-
   const fields = {} as ChildPlanProvenance['fields'];
-  for (const key of keys) {
+  for (const key of PROVENANCE_KEYS) {
     const source = validFieldSource(value.fields[key]);
     if (source === null) return null;
     fields[key] = source;
@@ -237,19 +244,18 @@ function validPhases(value: unknown): ChildPlanPhase[] | null {
   return phases;
 }
 
-function validStartOptions(value: unknown): ChildPlanStartOption[] | null | 'invalid' {
-  if (value === null || value === undefined) return null;
-  if (!Array.isArray(value)) return 'invalid';
-  if (value.length < L.minStartOptions || value.length > L.maxStartOptions) return 'invalid';
+function validOptions(value: unknown): ChildPlanStartOption[] | null {
+  if (!Array.isArray(value)) return null;
+  if (value.length < L.minChoiceOptions || value.length > L.maxChoiceOptions) return null;
 
   const options: ChildPlanStartOption[] = [];
   const seen = new Set<string>();
   for (const item of value) {
-    if (!isRecord(item)) return 'invalid';
+    if (!isRecord(item)) return null;
     const id = nonEmptyString(item.id, L.maxPhaseIdLength);
     const text = nonEmptyString(item.text, L.maxOptionLength);
-    if (id === null || text === null) return 'invalid';
-    if (seen.has(id)) return 'invalid';
+    if (id === null || text === null) return null;
+    if (seen.has(id)) return null;
     seen.add(id);
     options.push({ id, text });
   }
@@ -298,9 +304,9 @@ function validateCore(raw: Record<string, unknown>, rejections: Rejections): Cor
   const nextActionSource = raw.nextAction.source;
   if (
     nextActionText === null
-    || (nextActionSource !== 'child'
-      && nextActionSource !== 'ai_suggested'
-      && nextActionSource !== 'derived')
+    || (nextActionSource !== 'child_stated'
+      && nextActionSource !== 'derived_from_child'
+      && nextActionSource !== 'ai_suggested')
   ) {
     rejections.add('SHAPE_INVALID');
     return null;
@@ -318,19 +324,8 @@ function validateCore(raw: Record<string, unknown>, rejections: Rejections): Cor
     return null;
   }
 
-  const startOptions = validStartOptions(raw.startOptions);
-  if (startOptions === 'invalid') {
-    rejections.add('SHAPE_INVALID');
-    return null;
-  }
-
-  // 選項只在「AI 提供了幾種做法」時成立。其他情況有選項，代表這份計畫
-  // 一邊說「只是幫你整理」一邊在給建議——兩件事不能同時是真的。
-  if (startOptions !== null && planningContribution !== 'suggested_options') {
-    rejections.add('SHAPE_INVALID');
-    return null;
-  }
-  if (startOptions === null && planningContribution === 'suggested_options') {
+  // nextAction 的來源在兩個地方各講一次，講不一樣就是回應本身矛盾。
+  if (provenance.fields.nextAction !== nextActionSource) {
     rejections.add('SHAPE_INVALID');
     return null;
   }
@@ -338,7 +333,9 @@ function validateCore(raw: Record<string, unknown>, rejections: Rejections): Cor
   // 下一步走既有的 validateNextStep。過不了就整份不放行——
   // 這是「不可以把成果當成行動」在程式裡的樣子。
   const action = checkPlanActionText(nextActionText);
-  if (!action.ok) rejections.add('NEXT_ACTION_INVALID');
+  if (!action.ok) {
+    rejections.add(action.reason === 'domain_authority' ? 'DOMAIN_AUTHORITY_CLAIM' : 'NEXT_ACTION_INVALID');
+  }
 
   return {
     core: {
@@ -349,26 +346,95 @@ function validateCore(raw: Record<string, unknown>, rejections: Rejections): Cor
       reviewPoint,
       planningContribution,
       provenance,
-      startOptions,
       model,
     },
-    texts: [
-      desiredOutcome,
-      actionPlanSummary,
-      currentFocus,
-      nextActionText,
-      ...(startOptions ?? []).map((option) => option.text),
-    ],
+    texts: [desiredOutcome, actionPlanSummary, currentFocus, nextActionText],
+  };
+}
+
+/**
+ * 成果控制得了嗎。
+ *
+ * external_outcome 的每一條可控行動都要通過與下一步同一套驗證：
+ * 「拿第一名」不是孩子控制得了的行動，寫在這裡等於把成果偽裝成計畫。
+ */
+function validateControl(
+  raw: Record<string, unknown>,
+  rejections: Rejections,
+): { control: ChildGoalPlanControl; texts: string[] } | null {
+  if (
+    typeof raw.goalControlType !== 'string'
+    || !(CHILD_PLAN_GOAL_CONTROL_TYPES as readonly string[]).includes(raw.goalControlType)
+  ) {
+    rejections.add('SHAPE_INVALID');
+    return null;
+  }
+  const goalControlType = raw.goalControlType as ChildPlanGoalControlType;
+
+  if (goalControlType === 'directly_actionable') {
+    // 控制得了的目標不該有「可控行動」這個欄位 —— 整份計畫就是可控行動。
+    if (raw.controllableActions !== null && raw.controllableActions !== undefined) {
+      rejections.add('SHAPE_INVALID');
+      return null;
+    }
+    return { control: { goalControlType }, texts: [] };
+  }
+
+  if (!Array.isArray(raw.controllableActions)) {
+    rejections.add('SHAPE_INVALID');
+    return null;
+  }
+  if (
+    raw.controllableActions.length < L.minControllableActions
+    || raw.controllableActions.length > L.maxControllableActions
+  ) {
+    rejections.add('SHAPE_INVALID');
+    return null;
+  }
+
+  const controllableActions: string[] = [];
+  for (const item of raw.controllableActions) {
+    const text = nonEmptyString(item, L.maxActionLength);
+    if (text === null) {
+      rejections.add('SHAPE_INVALID');
+      return null;
+    }
+    const check = checkPlanActionText(text);
+    if (!check.ok) {
+      rejections.add(
+        check.reason === 'domain_authority' ? 'DOMAIN_AUTHORITY_CLAIM' : 'OUTCOME_USED_AS_ACTION',
+      );
+    }
+    controllableActions.push(text);
+  }
+
+  return {
+    control: { goalControlType, controllableActions },
+    texts: controllableActions,
   };
 }
 
 /** progression 專屬的欄位。回 null 代表形狀不對。 */
-function validateVariant(
-  kind: ChildPlanProgressionKind,
+function validateProgression(
   raw: Record<string, unknown>,
   core: ChildGoalPlanCore,
   rejections: Rejections,
-): { plan: ChildGoalPlan; texts: string[] } | null {
+): { progression: ChildGoalPlanProgression; texts: string[] } | null {
+  if (
+    typeof raw.progressionKind !== 'string'
+    || !(CHILD_PLAN_PROGRESSION_KINDS as readonly string[]).includes(raw.progressionKind)
+  ) {
+    rejections.add('SHAPE_INVALID');
+    return null;
+  }
+  const kind = raw.progressionKind as ChildPlanProgressionKind;
+
+  if (kind !== 'staged' && core.reviewPoint?.type === 'after_phase') {
+    // 沒有 phase 的 progression 指向一個不存在的階段。
+    rejections.add('SHAPE_INVALID');
+    return null;
+  }
+
   if (kind === 'rhythm') {
     const cadence = validCadence(raw.cadence);
     const sessionSize = validSessionSize(raw.sessionSize);
@@ -411,14 +477,8 @@ function validateVariant(
       }
     }
 
-    if (core.reviewPoint?.type === 'after_phase') {
-      // rhythm 沒有 phase，指向一個不存在的階段。
-      rejections.add('SHAPE_INVALID');
-      return null;
-    }
-
     return {
-      plan: { ...core, progressionKind: 'rhythm', cadence, sessionSize, trialPeriod },
+      progression: { progressionKind: 'rhythm', cadence, sessionSize, trialPeriod },
       texts: sessionSize !== null && sessionSize.kind === 'count' ? [sessionSize.unit] : [],
     };
   }
@@ -435,7 +495,6 @@ function validateVariant(
       reviewPoint?.type === 'after_phase'
       && !phases.some((phase) => phase.id === reviewPoint.phaseId)
     ) {
-      // 指向一個不存在的階段。留著它，畫面會顯示一個永遠到不了的 review。
       rejections.add('SHAPE_INVALID');
       return null;
     }
@@ -448,82 +507,71 @@ function validateVariant(
     }
 
     return {
-      plan: { ...core, progressionKind: 'staged', phases },
+      progression: { progressionKind: 'staged', phases },
       texts: phases.flatMap((phase) => [phase.title, phase.observableDoneWhen]),
     };
   }
 
-  if (kind === 'accumulation') {
-    const targetValue = intInRange(raw.targetValue, L.minTargetValue, L.maxTargetValue);
-    const targetUnit = nonEmptyString(raw.targetUnit, L.maxUnitLength);
-    const currentValue = intInRange(raw.currentValue, 0, L.maxTargetValue);
-    if (targetValue === null || targetUnit === null || currentValue === null) {
-      rejections.add('SHAPE_INVALID');
-      return null;
-    }
-    if (currentValue > targetValue) {
-      rejections.add('SHAPE_INVALID');
-      return null;
-    }
-    if (core.reviewPoint?.type === 'after_phase') {
-      rejections.add('SHAPE_INVALID');
-      return null;
-    }
-
-    return {
-      plan: { ...core, progressionKind: 'accumulation', targetValue, targetUnit, currentValue },
-      texts: [targetUnit],
-    };
-  }
-
-  // outcome_to_action
-  const cadence = validCadence(raw.cadence);
-  if (cadence === 'invalid') {
+  // accumulation
+  const targetValue = intInRange(raw.targetValue, L.minTargetValue, L.maxTargetValue);
+  const targetUnit = nonEmptyString(raw.targetUnit, L.maxUnitLength);
+  const currentValue = intInRange(raw.currentValue, 0, L.maxTargetValue);
+  if (targetValue === null || targetUnit === null || currentValue === null) {
     rejections.add('SHAPE_INVALID');
     return null;
   }
-  if (!Array.isArray(raw.controllableActions)) {
-    rejections.add('SHAPE_INVALID');
-    return null;
-  }
-  if (
-    raw.controllableActions.length < L.minControllableActions
-    || raw.controllableActions.length > L.maxControllableActions
-  ) {
-    rejections.add('SHAPE_INVALID');
-    return null;
-  }
-
-  const controllableActions: string[] = [];
-  for (const item of raw.controllableActions) {
-    const text = nonEmptyString(item, L.maxActionLength);
-    if (text === null) {
-      rejections.add('SHAPE_INVALID');
-      return null;
-    }
-    // 每一句都要通過與下一步同一套驗證：「拿第一名」「考 100 分」
-    // 不是孩子控制得了的行動，寫在這裡等於把成果偽裝成計畫。
-    if (!checkPlanActionText(text).ok) rejections.add('OUTCOME_USED_AS_ACTION');
-    controllableActions.push(text);
-  }
-
-  if (core.reviewPoint?.type === 'after_phase') {
+  if (currentValue > targetValue) {
     rejections.add('SHAPE_INVALID');
     return null;
   }
 
   return {
-    plan: { ...core, progressionKind: 'outcome_to_action', controllableActions, cadence },
-    texts: controllableActions,
+    progression: { progressionKind: 'accumulation', targetValue, targetUnit, currentValue },
+    texts: [targetUnit],
   };
+}
+
+/**
+ * provenance 的內部一致性 —— 不需要 input 就看得出來的部分。
+ *
+ * 一個欄位不存在，它的來源就只能是 undecided。反過來也一樣：
+ * 說得出來源，那個欄位就得真的在。兩者對不上代表這份 provenance
+ * 是拼出來的，而不是真的在記錄誰決定了什麼。
+ */
+function checkProvenanceShape(plan: ChildGoalPlan, rejections: Rejections): void {
+  const { fields } = plan.provenance;
+
+  const expectUndecided = (key: keyof ChildPlanProvenance['fields'], present: boolean) => {
+    if (!present && fields[key] !== 'undecided') rejections.add('SHAPE_INVALID');
+    if (present && fields[key] === 'undecided') rejections.add('SHAPE_INVALID');
+  };
+
+  expectUndecided('phases', plan.progressionKind === 'staged');
+  expectUndecided('target', plan.progressionKind === 'accumulation');
+  expectUndecided('controllableActions', plan.goalControlType === 'external_outcome');
+  expectUndecided(
+    'sessionSize',
+    plan.progressionKind === 'rhythm' && plan.sessionSize !== null,
+  );
+  expectUndecided('reviewPoint', plan.reviewPoint !== null);
+
+  // 節奏是唯一的例外：只有 rhythm 的計畫帶得動它，但孩子講過的節奏仍然
+  // 要留下記錄（staged 的目標孩子一樣可以說「我想一週三次」）。
+  // 所以非 rhythm 時只允許 undecided 或 child_stated —— AI 不可以替一個
+  // 沒有節奏欄位的計畫「建議」一個節奏，那個建議沒有地方放。
+  if (plan.progressionKind === 'rhythm') {
+    expectUndecided('cadence', plan.cadence !== null);
+  } else if (fields.cadence !== 'undecided' && fields.cadence !== 'child_stated') {
+    rejections.add('SHAPE_INVALID');
+  }
 }
 
 /**
  * 與孩子講過的話對照。
  *
- * 這一段是 Principle A 與「不可以偷偷補決定」的執法點，而且它**只有
- * 拿得到 input 才做得到** —— 光看回應本身，一個被換掉的方法看起來
- * 跟一個被整理過的方法一模一樣。
+ * 這一段是 Principle A、證據優先序與「不可以偷偷補決定」的執法點，
+ * 而且它**只有拿得到 input 才做得到** —— 光看回應本身，一個被換掉的
+ * 方法看起來跟一個被整理過的方法一模一樣。
  */
 function checkAgainstChildInput(
   plan: ChildGoalPlan,
@@ -546,46 +594,46 @@ function checkAgainstChildInput(
     rejections.add('CHILD_INPUT_OVERWRITTEN');
   }
 
-  // 孩子已經講過方法時，這一輪不可能是「AI 提供了幾種做法」——
-  // 那正是「把孩子的方法換成另一套」長出來的樣子。
-  if (inputApproach !== null && plan.planningContribution === 'suggested_options') {
+  // 「孩子挑了一個選項」的前提，是那個選項真的從 childApproach 回來了。
+  // 反過來不成立 —— 孩子自己講的方法也會在 childApproach，那是
+  // organized_child_plan，不是他從我們給的選項裡挑的。
+  if (plan.planningContribution === 'child_chose_option' && inputApproach === null) {
     rejections.add('CHILD_INPUT_OVERWRITTEN');
   }
 
   // 孩子連節奏帶方法都講了，下一步就不可能是 AI 想出來的。
   //
   // 這條是「不得直接覆寫成另一套訓練」唯一驗得出來的形式：光看回應本身，
-  // 一份把「每天放學投 20 球」換成五階段運球訓練的計畫，跟一份整理過的
-  // 計畫長得一模一樣 —— 差別只在下一步是誰想的。
+  // 一份把「老師叫我先練右手旋律」換成模型自己那套鋼琴課程的計畫，
+  // 跟一份整理過的計畫長得一模一樣 —— 差別只在下一步是誰想的。
   if (
     informationSufficiency(input) === 'sufficient'
-    && plan.nextAction.source === 'ai_suggested'
+    && !isChildOwned(provenance.fields.nextAction)
   ) {
     rejections.add('CHILD_INPUT_OVERWRITTEN');
   }
 
-  // 節奏：孩子選過就一定是 child，而且有節奏欄位的 progression 要原封不動。
+  // 孩子已經有一套方法時，階段只能是那套方法的整理，不是模型另造的課程。
+  // GrowBook 的 phases 是 provisional route，不是 authoritative curriculum。
+  if (
+    inputApproach !== null
+    && plan.progressionKind === 'staged'
+    && !isChildOwned(provenance.fields.phases)
+  ) {
+    rejections.add('CHILD_INPUT_OVERWRITTEN');
+  }
+
+  // 節奏：孩子選過就一定是 child_stated，而且 rhythm 要原封不動。
   if (input.cadence !== null) {
-    if (provenance.fields.cadence !== 'child') rejections.add('CHILD_INPUT_OVERWRITTEN');
-    if (
-      (plan.progressionKind === 'rhythm' || plan.progressionKind === 'outcome_to_action')
-      && !cadenceEquals(plan.cadence, input.cadence)
-    ) {
+    if (!evidenceSatisfies(provenance.fields.cadence, 'child_stated')) {
       rejections.add('CHILD_INPUT_OVERWRITTEN');
     }
-  } else if (
-    (plan.progressionKind === 'rhythm' || plan.progressionKind === 'outcome_to_action')
-  ) {
-    if (plan.cadence === null && provenance.fields.cadence !== 'undecided') {
-      rejections.add('SHAPE_INVALID');
+    if (plan.progressionKind === 'rhythm' && !cadenceEquals(plan.cadence, input.cadence)) {
+      rejections.add('CHILD_INPUT_OVERWRITTEN');
     }
-    if (
-      plan.cadence !== null
-      && provenance.fields.cadence !== 'ai_suggested'
-      && provenance.fields.cadence !== 'derived'
-    ) {
-      rejections.add('SHAPE_INVALID');
-    }
+  } else if (plan.progressionKind === 'rhythm' && plan.cadence !== null) {
+    // 孩子沒選、卻標成他講的 —— 那是把 AI 的建議掛到孩子頭上。
+    if (isChildOwned(provenance.fields.cadence)) rejections.add('CHILD_INPUT_OVERWRITTEN');
   }
 
   // 時段：孩子沒說就必須留白，而且計畫裡不可以冒出一個具體鐘點。
@@ -594,12 +642,13 @@ function checkAgainstChildInput(
       rejections.add('UNDECIDED_DETAIL_INVENTED');
     }
     if (texts.some(containsClockTime)) rejections.add('UNDECIDED_DETAIL_INVENTED');
-  } else if (provenance.fields.preferredTime !== 'child') {
+  } else if (!evidenceSatisfies(provenance.fields.preferredTime, 'child_stated')) {
     rejections.add('CHILD_INPUT_OVERWRITTEN');
   }
 
-  // 心理狀態推測：所有 AI 寫的自由文字都掃一次。
+  // 心理狀態推測與領域權威宣稱：所有 AI 寫的自由文字都掃一次。
   if (texts.some(containsMentalStateDiagnosis)) rejections.add('MENTAL_STATE_DIAGNOSIS');
+  if (texts.some(containsDomainAuthorityClaim)) rejections.add('DOMAIN_AUTHORITY_CLAIM');
 }
 
 // ---------------------------------------------------------------------------
@@ -630,9 +679,8 @@ export function validateChildGoalPlanningResult(
     );
   }
 
-  if (value.status === 'needs_clarification') {
-    return validateClarification(value, input);
-  }
+  if (value.status === 'needs_clarification') return validateClarification(value, input);
+  if (value.status === 'needs_choice') return validateChoice(value, input);
 
   if (value.status !== 'ready') return childGoalPlanningUnavailable('INVALID_RESPONSE');
 
@@ -643,28 +691,32 @@ export function validateChildGoalPlanningResult(
   }
   const raw = value.plan;
 
-  if (
-    typeof raw.progressionKind !== 'string'
-    || !(CHILD_PLAN_PROGRESSION_KINDS as readonly string[]).includes(raw.progressionKind)
-  ) {
-    return childGoalPlanningUnavailable('INVALID_RESPONSE', ['SHAPE_INVALID']);
-  }
-  const kind = raw.progressionKind as ChildPlanProgressionKind;
-
   const coreParts = validateCore(raw, rejections);
   if (coreParts === null) {
     return childGoalPlanningUnavailable('INVALID_RESPONSE', rejections.list);
   }
 
-  const variant = validateVariant(kind, raw, coreParts.core, rejections);
-  if (variant === null) {
+  const control = validateControl(raw, rejections);
+  if (control === null) {
     return childGoalPlanningUnavailable('INVALID_RESPONSE', rejections.list);
   }
 
+  const progression = validateProgression(raw, coreParts.core, rejections);
+  if (progression === null) {
+    return childGoalPlanningUnavailable('INVALID_RESPONSE', rejections.list);
+  }
+
+  const plan: ChildGoalPlan = {
+    ...coreParts.core,
+    ...control.control,
+    ...progression.progression,
+  };
+
+  checkProvenanceShape(plan, rejections);
   checkAgainstChildInput(
-    variant.plan,
+    plan,
     input,
-    [...coreParts.texts, ...variant.texts],
+    [...coreParts.texts, ...control.texts, ...progression.texts],
     rejections,
   );
 
@@ -676,11 +728,7 @@ export function validateChildGoalPlanningResult(
     );
   }
 
-  return {
-    status: 'ready',
-    schemaVersion: CHILD_GOAL_PLANNING_SCHEMA_VERSION,
-    plan: variant.plan,
-  };
+  return { status: 'ready', schemaVersion: CHILD_GOAL_PLANNING_SCHEMA_VERSION, plan };
 }
 
 function validateClarification(
@@ -703,19 +751,11 @@ function validateClarification(
     return childGoalPlanningUnavailable('INVALID_RESPONSE', ['SHAPE_INVALID']);
   }
 
-  // 澄清也不可以夾帶心理推測（「你好像有點沒興趣，還想做嗎？」）。
-  if (containsMentalStateDiagnosis(text)) {
-    return childGoalPlanningUnavailable('INVALID_AI_OUTPUT', ['MENTAL_STATE_DIAGNOSIS']);
-  }
+  const rejections = new Rejections();
+  checkConversationText([text], knownGoal, input, rejections);
 
-  // 孩子的目標不可以在問問題的時候被改寫。
-  if (knownGoal !== input.childOriginalGoal.trim()) {
-    return childGoalPlanningUnavailable('INVALID_AI_OUTPUT', ['CHILD_INPUT_OVERWRITTEN']);
-  }
-
-  // Minimal Question Principle：孩子已經講夠了還在問，就是多嘴。
-  if (informationSufficiency(input) === 'sufficient') {
-    return childGoalPlanningUnavailable('INVALID_AI_OUTPUT', ['UNNECESSARY_CLARIFICATION']);
+  if (rejections.any) {
+    return childGoalPlanningUnavailable('INVALID_AI_OUTPUT', rejections.list);
   }
 
   return {
@@ -725,4 +765,76 @@ function validateClarification(
     question: { kind: kind as ChildPlanClarificationKind, text },
     model,
   };
+}
+
+/**
+ * 「目標清楚了，但還沒決定怎麼做」。
+ *
+ * 與 clarification 的差別不是語氣，是產品狀態：這裡不再需要孩子解釋
+ * 他想幹嘛，只需要他決定從哪裡開始。而**決定權在他** ——
+ * allowCustomAnswer 是字面量 true，回傳別的值就是壞掉的回應。
+ */
+function validateChoice(
+  value: Record<string, unknown>,
+  input: ChildGoalPlanningInput,
+): ChildGoalPlanningResult {
+  const knownGoal = nonEmptyString(value.knownGoal, L.maxGoalLength);
+  const model = nonEmptyString(value.model, L.maxModelLength);
+  const question = nonEmptyString(value.question, L.maxChoiceQuestionLength);
+  const options = validOptions(value.options);
+  if (knownGoal === null || model === null || question === null || options === null) {
+    return childGoalPlanningUnavailable('INVALID_RESPONSE', ['SHAPE_INVALID']);
+  }
+
+  // 孩子永遠可以自己想。這不是一個可以被關掉的旗標。
+  if (value.allowCustomAnswer !== true) {
+    return childGoalPlanningUnavailable('INVALID_RESPONSE', ['SHAPE_INVALID']);
+  }
+
+  const rejections = new Rejections();
+  checkConversationText(
+    [question, ...options.map((option) => option.text)],
+    knownGoal,
+    input,
+    rejections,
+  );
+
+  // 孩子已經有方法了還在給他選項 —— 那就是把他的方法換掉的前一步。
+  if (input.childApproach !== null && input.childApproach.trim().length > 0) {
+    rejections.add('CHILD_INPUT_OVERWRITTEN');
+  }
+
+  if (rejections.any) {
+    return childGoalPlanningUnavailable('INVALID_AI_OUTPUT', rejections.list);
+  }
+
+  return {
+    status: 'needs_choice',
+    schemaVersion: CHILD_GOAL_PLANNING_SCHEMA_VERSION,
+    knownGoal,
+    question,
+    options,
+    allowCustomAnswer: true,
+    model,
+  };
+}
+
+/**
+ * 兩種「還在對話」的狀態共用的檢查。
+ *
+ * 問題與選項一樣不可以夾帶心理推測或領域權威，孩子的目標一樣不可以
+ * 被改寫，而資訊已經足夠時**兩種都算多嘴** —— 給選項也是在耽誤他。
+ */
+function checkConversationText(
+  texts: string[],
+  knownGoal: string,
+  input: ChildGoalPlanningInput,
+  rejections: Rejections,
+): void {
+  if (texts.some(containsMentalStateDiagnosis)) rejections.add('MENTAL_STATE_DIAGNOSIS');
+  if (texts.some(containsDomainAuthorityClaim)) rejections.add('DOMAIN_AUTHORITY_CLAIM');
+  if (knownGoal !== input.childOriginalGoal.trim()) rejections.add('CHILD_INPUT_OVERWRITTEN');
+  if (informationSufficiency(input) === 'sufficient') {
+    rejections.add('UNNECESSARY_CLARIFICATION');
+  }
 }

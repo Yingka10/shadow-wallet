@@ -10,21 +10,28 @@
 // 它**不碰幣值、不碰資格、不寫任何資料庫**，也還沒有接上正式的
 // Child Proposal 流程（P1-A1 的邊界，見 docs/CHILD_GOAL_PLANNING_CONTRACT.md）。
 //
-// 三件事在型別上就必須成立，不能靠 prompt 拜託模型：
+// 五件事在型別上就必須成立，不能靠 prompt 拜託模型：
 //
-//   1. **不一定有計畫。** 結果是 union：資訊不夠就只回一個問題，
-//      不會硬生一份看起來很完整的 Plan。
+//   1. **不一定有計畫。** 結果是四態 union：目標不清楚就問一題、
+//      目標清楚但還沒決定怎麼做就給選項、資訊夠了才生計畫、
+//      技術性失敗單獨一態。
 //
-//   2. **不是所有目標都拆成 3-5 步。** progressionKind 是
-//      discriminated union 的判別欄位 —— rhythm 的計畫在型別上
-//      根本沒有 phases 這個欄位可以填。
+//   2. **「怎麼前進」與「成果控制得了嗎」是兩個維度。**
+//      goalControlType 與 progressionKind 正交 —— 「國文考 100 分」是
+//      external_outcome，但它的行動計畫可以是 rhythm。
 //
-//   3. **孩子想到的東西不會被洗掉。** provenance 逐欄記錄「這是誰決定的」，
-//      而且沒說過的事只能是 'undecided'，不能被模型偷偷補上。
+//   3. **不是所有目標都拆成 3-5 步。** progressionKind 是 discriminated
+//      union 的判別欄位，rhythm 的計畫在型別上根本沒有 phases 可以填。
+//
+//   4. **孩子想到的東西不會被洗掉。** provenance 逐欄記錄「這是誰決定的」，
+//      而且沒說過的事只能是 'undecided'。
+//
+//   5. **孩子永遠可以說「我自己想」。** needs_choice 的 allowCustomAnswer
+//      是字面量 true —— 一個只能從 AI 選項裡挑的畫面寫不出來。
 //
 // ⚠️ progressionKind **不是** progress_model。後者（weekly_rhythm）是 P0 的
 //    正式欄位，Direct Confirm 依賴它。兩者不要互相代入，也不要把這裡的
-//    四個值塞進那個 enum。
+//    三個值塞進那個 enum。
 // ─────────────────────────────────────────────────────────────────────────
 
 /** 1：第一版 planning contract。與 P0-3 的 schemaVersion 是兩個獨立的數列。 */
@@ -75,8 +82,13 @@ export type ChildGoalPlanningInput = {
    * 孩子自己已經想到的做法（原話）。
    *
    * 「我想每天放學投 20 球」屬於這裡，不屬於 childOriginalGoal。
-   * 有值時 AI 只能整理它，不能換成另一套五階段訓練 —— 這條由
+   * 「老師叫我先練右手旋律，再練左手」也屬於這裡 —— 孩子已經有老師、
+   * 教材或課程時，那套方法就是這裡的內容。
+   *
+   * 有值時 AI 只能整理它，不能換成另一套 —— 這條由
    * validateChildGoalPlanningResult 強制，不是由 prompt 拜託。
+   *
+   * needs_choice 之後孩子挑的那個選項，下一輪也從這裡帶回來。
    */
   childApproach: string | null;
   cadence: ChildPlanCadence | null;
@@ -85,32 +97,47 @@ export type ChildGoalPlanningInput = {
 };
 
 // ---------------------------------------------------------------------------
-// Progression Kind —— 「這件事怎麼向前走」
+// 兩個正交維度
 // ---------------------------------------------------------------------------
 
 /**
- * 四種前進方式。
+ * 這個成果，孩子控制得了嗎。
  *
- * ⚠️ 這與 A/B/C/D 是兩個維度：A/B/C/D 回答「為什麼做」，
- *    progressionKind 回答「怎麼前進」。一個 D 類的目標可以是
- *    rhythm、staged、accumulation 或 outcome_to_action 其中任何一種。
+ * directly_actionable  做了就會發生（讀完一本書、學會騎車、每天練琴）
+ * external_outcome     受外部因素影響（考 100 分、拿第一名、被老師選中）
  *
- * rhythm             固定頻率的投入（每天讀 15 分鐘、30 天跑步）
- * staged             有真實能力／成果進展的階段（學騎車、做一本漫畫）
- * accumulation       主要進度是 current / target（讀 5 本書、跑 20 公里）
- * outcome_to_action  成果受外部因素影響，只能規劃可控制的行動（考 100 分）
+ * external_outcome **不代表不能做計畫** —— 它代表計畫要建立在孩子控制得了的
+ * 行動上，成果本身保留在 desiredOutcome。
  */
-export type ChildPlanProgressionKind =
-  | 'rhythm'
-  | 'staged'
-  | 'accumulation'
-  | 'outcome_to_action';
+export type ChildPlanGoalControlType = 'directly_actionable' | 'external_outcome';
+
+export const CHILD_PLAN_GOAL_CONTROL_TYPES: readonly ChildPlanGoalControlType[] = [
+  'directly_actionable',
+  'external_outcome',
+] as const;
+
+/**
+ * 這件事怎麼向前走。
+ *
+ * ⚠️ 這與 goalControlType 是**兩個正交維度**，也與 A/B/C/D 無關。
+ *
+ *    「國文考 100 分」的成果是 external_outcome，
+ *    但它的行動計畫「每週複習三次」的 progression 是 rhythm。
+ *
+ *    早期版本把 outcome_to_action 放在這個 enum 裡是錯的：它把
+ *    「成果控制得了嗎」偽裝成一種前進方式，於是每個不可控目標都
+ *    只能有一種節奏形狀。
+ *
+ * rhythm        固定頻率的投入（每天讀 15 分鐘、30 天跑步）
+ * staged        有真實能力／成果進展的階段（學騎車、做一本漫畫）
+ * accumulation  主要進度是 current / target（讀 5 本書、跑 20 公里）
+ */
+export type ChildPlanProgressionKind = 'rhythm' | 'staged' | 'accumulation';
 
 export const CHILD_PLAN_PROGRESSION_KINDS: readonly ChildPlanProgressionKind[] = [
   'rhythm',
   'staged',
   'accumulation',
-  'outcome_to_action',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -127,7 +154,7 @@ export type ChildPlanClarificationKind =
   | 'goal_focus'
   /** 「我想學會騎腳踏車」→ 你現在騎到哪裡了？（不能假設完全不會） */
   | 'current_level'
-  /** 有成果、沒方法 → 你想先從什麼開始試？ */
+  /** 有成果、沒方法，而且連方向都還看不出來。 */
   | 'approach'
   /** 完全沒有頻率線索，而且這件事沒有頻率就不成立。 */
   | 'cadence'
@@ -152,25 +179,71 @@ export type ChildPlanClarificationQuestion = {
 };
 
 // ---------------------------------------------------------------------------
+// Choice
+// ---------------------------------------------------------------------------
+
+/** 一個可以選的開始方式。**不是唯一最佳答案。** */
+export type ChildPlanStartOption = {
+  id: string;
+  text: string;
+};
+
+// ---------------------------------------------------------------------------
 // Provenance —— 孩子的自主性
 // ---------------------------------------------------------------------------
 
 /**
  * 一個欄位是誰決定的。
  *
+ * 五個值，而且**順序就是證據強度**（見 EVIDENCE_PRIORITY）：
+ *
+ *   child_stated        孩子自己講的（原話裡就有）
+ *   derived_from_child  從孩子講的內容直接推導（「投 20 球」→ 單次份量 20 球）
+ *   deterministic_policy GrowBook 自己的規則決定的（不是模型、也不是孩子）
+ *   ai_suggested        模型提的
+ *   undecided           沒有人決定 —— **留白**
+ *
+ * `derived_from_child` 與 `deterministic_policy` 一定要分開：早期版本共用
+ * 一個 `derived`，於是「從孩子的話推出來的」與「GrowBook 政策決定的」
+ * 在資料上長得一模一樣，而它們的證據強度差一級。半年後要回答
+ * 「這個數字憑什麼」時，那個 derived 答不出來。
+ *
  * `undecided` 是這組值裡最重要的一個：孩子沒說、而這件事又不是計畫成立
- * 的必要條件時，正確答案是**留白**，不是讓模型挑一個看起來合理的值。
- * 沒有這個值的話，「每天晚上 8:00」這種沒有人決定過的內容會安靜地
- * 變成計畫的一部分。
+ * 的必要條件時，正確答案是留白，不是讓模型挑一個看起來合理的值。
  */
-export type ChildPlanFieldSource = 'child' | 'ai_suggested' | 'derived' | 'undecided';
+export type ChildPlanFieldSource =
+  | 'child_stated'
+  | 'derived_from_child'
+  | 'deterministic_policy'
+  | 'ai_suggested'
+  | 'undecided';
 
 export const CHILD_PLAN_FIELD_SOURCES: readonly ChildPlanFieldSource[] = [
-  'child',
+  'child_stated',
+  'derived_from_child',
+  'deterministic_policy',
   'ai_suggested',
-  'derived',
   'undecided',
 ] as const;
+
+/**
+ * 證據強度。數字越小越優先。
+ *
+ * **低順位不得覆蓋高順位。** 這不是一句原則宣言 —— validator 會拿它去比對：
+ * 孩子講過的節奏被標成 ai_suggested，就是一次覆蓋，整份不放行。
+ */
+export const EVIDENCE_PRIORITY: Record<ChildPlanFieldSource, number> = {
+  child_stated: 0,
+  derived_from_child: 1,
+  deterministic_policy: 2,
+  ai_suggested: 3,
+  undecided: 4,
+};
+
+/** 這個來源夠不夠格代表「這件事是孩子自己的」。 */
+export function isChildOwned(source: ChildPlanFieldSource): boolean {
+  return EVIDENCE_PRIORITY[source] <= EVIDENCE_PRIORITY.derived_from_child;
+}
 
 /**
  * 這份計畫裡，哪些是孩子想的、哪些是 AI 補的。
@@ -194,6 +267,8 @@ export type ChildPlanProvenance = {
     phases: ChildPlanFieldSource;
     /** accumulation 以外一律 undecided。 */
     target: ChildPlanFieldSource;
+    /** external_outcome 以外一律 undecided。 */
+    controllableActions: ChildPlanFieldSource;
   };
 };
 
@@ -201,8 +276,12 @@ export type ChildPlanProvenance = {
 // Ready Plan
 // ---------------------------------------------------------------------------
 
-/** 下一步是誰想的。與 provenance.fields.nextAction 一致，由組裝端保證。 */
-export type ChildPlanActionSource = 'child' | 'ai_suggested' | 'derived';
+/**
+ * 下一步是誰想的。與 provenance.fields.nextAction 一致，由組裝端保證。
+ *
+ * 用的是同一組詞彙 —— 兩個 enum 講同一件事會各自漂移。
+ */
+export type ChildPlanActionSource = 'child_stated' | 'derived_from_child' | 'ai_suggested';
 
 export type ChildPlanNextAction = {
   /** 下一次可以直接做完的一個小動作。過不了 validateNextStep 就整份不放行。 */
@@ -226,18 +305,21 @@ export type ChildPlanSessionSize =
   | { kind: 'minutes'; minutes: number }
   | { kind: 'count'; count: number; unit: string };
 
-/** staged 的階段。**必須是可觀察的**，不可以是心理狀態。 */
+/**
+ * staged 的階段。
+ *
+ * ⚠️ **這是 provisional route，不是 authoritative curriculum。**
+ *    GrowBook 的 AI 是規劃夥伴，不是鋼琴老師、不是籃球教練、不是醫師。
+ *    孩子已經有老師／教材／自己的方法時，phases 只能是那套方法的整理
+ *    （provenance 會是 derived_from_child），不是模型另造的一套課程。
+ *
+ * 完成條件**必須可觀察**，不可以是心理狀態。
+ */
 export type ChildPlanPhase = {
   id: string;
   title: string;
   /** 「能不扶著騎完 10 公尺」可以；「真正理解」「更有自信」不行。 */
   observableDoneWhen: string;
-};
-
-/** 孩子不知道怎麼開始時給的選項。**不是唯一最佳答案。** */
-export type ChildPlanStartOption = {
-  id: string;
-  text: string;
 };
 
 /** AI 這一輪到底做了什麼。 */
@@ -246,16 +328,22 @@ export type ChildPlanningContribution =
   | 'organized_child_plan'
   /** 孩子有方向，AI 補了缺的細節。 */
   | 'filled_missing_details'
-  /** 孩子不知道怎麼開始，AI 給了幾個可選做法。 */
-  | 'suggested_options';
+  /**
+   * 孩子從 needs_choice 的選項裡挑了一個。
+   *
+   * 選項的文字是 AI 寫的，但**決定是孩子做的** —— 這兩件事不能被寫成
+   * 同一件。挑過之後那個選項會從下一輪的 childApproach 帶回來，
+   * 所以這個值成立的前提是 input.childApproach 有值。
+   */
+  | 'child_chose_option';
 
 export const CHILD_PLANNING_CONTRIBUTIONS: readonly ChildPlanningContribution[] = [
   'organized_child_plan',
   'filled_missing_details',
-  'suggested_options',
+  'child_chose_option',
 ] as const;
 
-/** 四種 progression 共有的部分。 */
+/** 三種 progression 共有的部分。 */
 export type ChildGoalPlanCore = {
   /**
    * 孩子想要的成果。**可以是不可控的**（「國文考 100 分」）——
@@ -270,44 +358,54 @@ export type ChildGoalPlanCore = {
   reviewPoint: ChildPlanReviewPoint;
   planningContribution: ChildPlanningContribution;
   provenance: ChildPlanProvenance;
-  /** null = 這一輪沒有提供選項。只有 suggested_options 才會有 2-3 個。 */
-  startOptions: ChildPlanStartOption[] | null;
   /** 真正回答的 model。稽核用 —— MODEL_CHAIN 會 fallback，不能寫死首選。 */
   model: string;
 };
 
 /**
- * 一份可執行的計畫。
+ * 成果控制得了嗎。
  *
- * discriminated union 的意義：rhythm 的計畫**在型別上就沒有** phases，
- * 所以「把所有目標都拆成 3-5 步」這件事寫不出來，不必靠 review 抓。
+ * external_outcome 一定要附上孩子控制得了的行動 —— 型別上就沒有
+ * 「不可控目標但沒有可控行動」這個形狀。
  */
-export type ChildGoalPlan =
-  | (ChildGoalPlanCore & {
+export type ChildGoalPlanControl =
+  | { goalControlType: 'directly_actionable' }
+  | { goalControlType: 'external_outcome'; controllableActions: string[] };
+
+/**
+ * 怎麼向前走。
+ *
+ * rhythm 的計畫**在型別上就沒有** phases，所以「把所有目標都拆成 3-5 步」
+ * 這件事寫不出來，不必靠 review 抓。
+ */
+export type ChildGoalPlanProgression =
+  | {
       progressionKind: 'rhythm';
       /** null = 還沒定，而且不是計畫成立的必要條件。 */
       cadence: ChildPlanCadence | null;
       sessionSize: ChildPlanSessionSize | null;
       /** 先試多久再看看。與 reviewPoint 必須一致（見 validator）。 */
       trialPeriod: { days: number } | { sessions: number } | null;
-    })
-  | (ChildGoalPlanCore & {
+    }
+  | {
       progressionKind: 'staged';
-      /** 2-5 個真實的能力／成果進展，不是為了湊數字。 */
+      /** 2-5 個真實的能力／成果進展，不是為了湊數字。provisional route。 */
       phases: ChildPlanPhase[];
-    })
-  | (ChildGoalPlanCore & {
+    }
+  | {
       progressionKind: 'accumulation';
       targetValue: number;
       targetUnit: string;
       currentValue: number;
-    })
-  | (ChildGoalPlanCore & {
-      progressionKind: 'outcome_to_action';
-      /** 孩子控制得了的行動。每一句都要通過與 nextAction 同一套驗證。 */
-      controllableActions: string[];
-      cadence: ChildPlanCadence | null;
-    });
+    };
+
+/**
+ * 一份可執行的計畫 = 共同欄位 × 成果控制性 × 前進方式。
+ *
+ * 交集而不是單一 union：兩個維度正交，所以
+ * 「external_outcome 的 rhythm 計畫」是一個合法、而且很常見的形狀。
+ */
+export type ChildGoalPlan = ChildGoalPlanCore & ChildGoalPlanControl & ChildGoalPlanProgression;
 
 // ---------------------------------------------------------------------------
 // Result
@@ -343,17 +441,31 @@ export type ChildPlanRejectionCode =
   | 'NEXT_ACTION_INVALID'
   /** 出現心理狀態推測（失去動機、不夠自律、更有自信…）。 */
   | 'MENTAL_STATE_DIAGNOSIS'
-  /** 資訊已經足夠，卻還在問問題。 */
+  /** 資訊已經足夠，卻還在問問題或還在給選項。 */
   | 'UNNECESSARY_CLARIFICATION'
-  /** 孩子講過的方法／節奏被換掉了。 */
+  /** 孩子講過的方法／節奏被換掉，或低順位證據覆蓋了高順位。 */
   | 'CHILD_INPUT_OVERWRITTEN'
-  /** 孩子沒說時段，計畫裡卻冒出一個具體時間。 */
+  /** 孩子沒說時，計畫裡卻冒出一個具體時間。 */
   | 'UNDECIDED_DETAIL_INVENTED'
   /** staged 的階段完成條件不可觀察。 */
   | 'PHASE_NOT_OBSERVABLE'
-  /** outcome_to_action 把不可控的成果寫成了行動。 */
-  | 'OUTCOME_USED_AS_ACTION';
+  /** 不可控的成果被寫成了行動。 */
+  | 'OUTCOME_USED_AS_ACTION'
+  /** 模型把自己的一般知識講成領域權威（最佳訓練順序、專業處方…）。 */
+  | 'DOMAIN_AUTHORITY_CLAIM';
 
+/**
+ * 四態。
+ *
+ * needs_clarification  連孩子想達成什麼都還不夠清楚 → 問一題
+ * needs_choice         目標清楚，但還沒決定怎麼做 → 給 2-3 個選項
+ * ready                資訊夠了 → 一份可執行的計畫
+ * unavailable          技術性失敗（關著／逾時／亂回／服務錯誤）
+ *
+ * ⚠️ unavailable **不可以**被偽裝成 needs_clarification。Gemini 逾時的時候
+ *    把它塞成一個問題，孩子看到的是「AI 在問我問題」，但他講得一點都沒錯 ——
+ *    只是服務掛了。技術狀態與對話狀態是兩件事。
+ */
 export type ChildGoalPlanningResult =
   | {
       status: 'needs_clarification';
@@ -362,6 +474,23 @@ export type ChildGoalPlanningResult =
       knownGoal: string;
       /** **一次只有一題。** */
       question: ChildPlanClarificationQuestion;
+      model: string;
+    }
+  | {
+      status: 'needs_choice';
+      schemaVersion: typeof CHILD_GOAL_PLANNING_SCHEMA_VERSION;
+      knownGoal: string;
+      question: string;
+      /** 2-3 個可選的開始方式。 */
+      options: ChildPlanStartOption[];
+      /**
+       * 字面量 `true`。
+       *
+       * 孩子**一定**可以說「我自己想」——這不是一個可以被關掉的旗標，
+       * 所以型別上它只有一個值。一個「只能從 AI 選項裡挑」的畫面，
+       * 在這個契約下寫不出來。
+       */
+      allowCustomAnswer: true;
       model: string;
     }
   | {
@@ -393,6 +522,7 @@ export const CHILD_GOAL_PLANNING_LIMITS = {
   /** 與既有的 NEXT_STEP_MAX_LENGTH 同值——下一步是同一種東西，不該有兩個上限。 */
   maxActionLength: 40,
   maxQuestionLength: 40,
+  maxChoiceQuestionLength: 40,
   maxPhaseTitleLength: 20,
   maxPhaseIdLength: 24,
   maxDoneWhenLength: 40,
@@ -403,8 +533,8 @@ export const CHILD_GOAL_PLANNING_LIMITS = {
   maxPhases: 5,
   minControllableActions: 1,
   maxControllableActions: 4,
-  minStartOptions: 2,
-  maxStartOptions: 3,
+  minChoiceOptions: 2,
+  maxChoiceOptions: 3,
   minTargetValue: 1,
   maxTargetValue: 10000,
   maxWeeklyFrequency: 7,
