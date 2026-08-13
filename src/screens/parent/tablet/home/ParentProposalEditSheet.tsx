@@ -91,6 +91,7 @@ export function ParentProposalEditSheet({ visible, card, saving, error, onClose,
       setLocalError('請填寫適合時間');
       return;
     }
+    setLocalError(null);
     onSave({
       cadenceMode: mode,
       cadenceWeeklyFrequency: mode === 'weekly_frequency' ? frequency : null,
@@ -135,6 +136,7 @@ export function ParentProposalEditSheet({ visible, card, saving, error, onClose,
                 accessibilityRole="button"
                 onPress={onClose}
                 disabled={saving}
+                style={styles.closeButton}
               >
                 <Text style={styles.close}>關閉</Text>
               </TouchableOpacity>
@@ -261,8 +263,14 @@ export function ParentProposalEditSheet({ visible, card, saving, error, onClose,
                 </Text>
               ))}
             </View>
-            {(localError || error) && <Text style={styles.error}>{localError ?? error}</Text>}
-            <TouchableOpacity style={styles.primary} onPress={submit} disabled={saving}>
+            {(error || localError) && <Text style={styles.error}>{error ?? localError}</Text>}
+            <TouchableOpacity
+              accessibilityLabel={saving ? '正在存下來' : '存下來，讓孩子看看'}
+              accessibilityRole="button"
+              style={styles.primary}
+              onPress={submit}
+              disabled={saving}
+            >
               <Text style={styles.primaryText}>{saving ? '正在存下來…' : '存下來，讓孩子看看'}</Text>
             </TouchableOpacity>
           </ScrollView>
@@ -291,6 +299,7 @@ const styles = StyleSheet.create({
   content: { gap: ParentSpacing[3], padding: ParentSpacing[5] },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   title: { fontFamily: ParentFonts.display, fontSize: ParentFontSizes.h3, fontWeight: ParentFontWeights.bold, color: ParentColors.fgPrimary },
+  closeButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   close: { fontFamily: ParentFonts.body, color: ParentColors.fgMuted },
   contextCard: { gap: ParentSpacing[2], padding: ParentSpacing[3], borderRadius: ParentRadii.md, backgroundColor: ParentColors.bgSurfaceWarm },
   contextText: { fontFamily: ParentFonts.body, fontSize: ParentFontSizes.sm, color: ParentColors.fgSecondary },
@@ -317,6 +326,6 @@ const styles = StyleSheet.create({
   summaryTitle: { fontFamily: ParentFonts.body, fontSize: ParentFontSizes.sm, fontWeight: ParentFontWeights.bold, color: ParentColors.fgPrimary },
   summaryItem: { fontFamily: ParentFonts.body, fontSize: ParentFontSizes.sm, color: ParentColors.fgSecondary },
   error: { fontFamily: ParentFonts.body, fontSize: ParentFontSizes.sm, color: ParentColors.error },
-  primary: { alignItems: 'center', padding: ParentSpacing[3], borderRadius: ParentRadii.pill, backgroundColor: ParentColors.accent },
+  primary: { minHeight: 48, alignItems: 'center', justifyContent: 'center', padding: ParentSpacing[3], borderRadius: ParentRadii.pill, backgroundColor: ParentColors.accent },
   primaryText: { fontFamily: ParentFonts.body, fontSize: ParentFontSizes.sm, fontWeight: ParentFontWeights.bold, color: '#FFFFFF' },
 });

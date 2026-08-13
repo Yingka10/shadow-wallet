@@ -80,6 +80,20 @@ describe('ParentProposalEditSheet', () => {
     expect(StyleSheet.flatten(increase.props.style).minHeight).toBeGreaterThanOrEqual(44);
   });
 
+  it('關閉、主要操作和漸進展開都有至少 44px 的可存取觸控範圍', () => {
+    render(<ParentProposalEditSheet {...defaultProps} />);
+
+    const close = screen.getByRole('button', { name: '關閉' });
+    const primary = screen.getByRole('button', { name: '存下來，讓孩子看看' });
+    const timeDisclosure = screen.getByLabelText('展開更多時間選項');
+    const completionDisclosure = screen.getByLabelText('修改怎樣算完成');
+
+    expect(StyleSheet.flatten(close.props.style).minHeight).toBeGreaterThanOrEqual(44);
+    expect(StyleSheet.flatten(primary.props.style).minHeight).toBeGreaterThanOrEqual(44);
+    expect(StyleSheet.flatten(timeDisclosure.props.style).minHeight).toBeGreaterThanOrEqual(44);
+    expect(StyleSheet.flatten(completionDisclosure.props.style).minHeight).toBeGreaterThanOrEqual(44);
+  });
+
   it('只摘要實際變更，並送出與既有 API 完全相同的 editable patch', () => {
     const onSave = jest.fn();
     render(<ParentProposalEditSheet {...defaultProps} onSave={onSave} />);
@@ -196,5 +210,26 @@ describe('ParentProposalEditSheet', () => {
     fireEvent.press(screen.getByText('正在存下來…'));
     expect(onClose).not.toHaveBeenCalled();
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('修正驗證錯誤並送出後，外部儲存錯誤不會被舊驗證訊息遮住', () => {
+    const onSave = jest.fn();
+    const { rerender } = render(<ParentProposalEditSheet {...defaultProps} onSave={onSave} />);
+
+    fireEvent.press(screen.getByText('固定星期'));
+    fireEvent.press(screen.getByText('存下來，讓孩子看看'));
+    expect(screen.getByText('固定星期至少選一天')).toBeTruthy();
+
+    fireEvent.press(screen.getByText('週一'));
+    fireEvent.press(screen.getByText('存下來，讓孩子看看'));
+    expect(onSave).toHaveBeenCalledTimes(1);
+
+    rerender(<ParentProposalEditSheet
+      {...defaultProps}
+      error="計畫儲存失敗，請再試一次"
+      onSave={onSave}
+    />);
+    expect(screen.getByText('計畫儲存失敗，請再試一次')).toBeTruthy();
+    expect(screen.queryByText('固定星期至少選一天')).toBeNull();
   });
 });
