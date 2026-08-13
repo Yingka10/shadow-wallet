@@ -90,20 +90,20 @@ function renderReview(
   return { ...render(<LongTermGoalDetailSheets {...props} />), props };
 }
 
-/** 走完「選晚餐後 → 選調整時間」這兩步，也就是 golden path 的前半。 */
+/** 走完「選晚餐後 → 選改成晚餐後」這兩步，也就是 golden path 的前半。 */
 function chooseAfterDinnerAndTime() {
   fireEvent.press(screen.getByRole('button', { name: '晚餐後' }));
-  fireEvent.press(screen.getByRole('button', { name: '調整時間' }));
+  fireEvent.press(screen.getByRole('button', { name: '改成晚餐後' }));
 }
 
 describe('P0-8M · 孩子回顧 → 送出換時段', () => {
-  it('選了「晚餐後」＋「調整時間」之後，CTA 變成送給爸媽一起確認', () => {
+  it('選了「晚餐後」＋「改成晚餐後」之後，CTA 說明下週先試的時段', () => {
     renderReview({ sharedPlanTimeAdjustment: makeSharedPlan() });
 
     expect(screen.getByRole('button', { name: '保留回顧草稿' })).toBeTruthy();
     chooseAfterDinnerAndTime();
 
-    expect(screen.getByRole('button', { name: '送給爸媽一起確認' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '下週先試晚餐後' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '保留回顧草稿' })).toBeNull();
   });
 
@@ -112,7 +112,7 @@ describe('P0-8M · 孩子回顧 → 送出換時段', () => {
     renderReview({ sharedPlanTimeAdjustment: makeSharedPlan({ onSubmit }) });
 
     chooseAfterDinnerAndTime();
-    fireEvent.press(screen.getByRole('button', { name: '送給爸媽一起確認' }));
+    fireEvent.press(screen.getByRole('button', { name: '下週先試晚餐後' }));
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit).toHaveBeenCalledWith('after_dinner');
@@ -124,9 +124,9 @@ describe('P0-8M · 孩子回顧 → 送出換時段', () => {
     });
 
     fireEvent.press(screen.getByRole('button', { name: '睡前' }));
-    fireEvent.press(screen.getByRole('button', { name: '調整時間' }));
+    fireEvent.press(screen.getByRole('button', { name: '改成睡前' }));
 
-    expect(screen.queryByRole('button', { name: '送給爸媽一起確認' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '下週先試睡前' })).toBeNull();
     expect(screen.getByRole('button', { name: '保留回顧草稿' })).toBeTruthy();
   });
 
@@ -136,7 +136,7 @@ describe('P0-8M · 孩子回顧 → 送出換時段', () => {
 
     chooseAfterDinnerAndTime();
 
-    expect(screen.queryByRole('button', { name: '送給爸媽一起確認' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '下週先試晚餐後' })).toBeNull();
     expect(screen.getByRole('button', { name: '保留回顧草稿' })).toBeTruthy();
   });
 
@@ -144,26 +144,50 @@ describe('P0-8M · 孩子回顧 → 送出換時段', () => {
     renderReview({ sharedPlanTimeAdjustment: makeSharedPlan() });
 
     fireEvent.press(screen.getByRole('button', { name: '晚餐後' }));
-    fireEvent.press(screen.getByRole('button', { name: '維持現在安排' }));
+    fireEvent.press(screen.getByRole('button', { name: '就照現在這樣' }));
 
-    expect(screen.queryByRole('button', { name: '送給爸媽一起確認' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '下週先試晚餐後' })).toBeNull();
   });
 
-  it('選「都適合／還不確定」不是一個可以寫進計畫的時段，不送', () => {
-    renderReview({ sharedPlanTimeAdjustment: makeSharedPlan() });
+  it('改選時段後要重新回答下一步，不沿用前一個時段的送出選擇', () => {
+    renderReview({
+      sharedPlanTimeAdjustment: makeSharedPlan({ currentPreferredTime: null }),
+    });
 
-    fireEvent.press(screen.getByRole('button', { name: '都適合' }));
-    fireEvent.press(screen.getByRole('button', { name: '調整時間' }));
+    chooseAfterDinnerAndTime();
+    expect(screen.getByRole('button', { name: '下週先試晚餐後' })).toBeTruthy();
 
-    expect(screen.queryByRole('button', { name: '送給爸媽一起確認' })).toBeNull();
+    fireEvent.press(screen.getByRole('button', { name: '睡前' }));
+
+    expect(
+      screen.getByRole('button', { name: '改成睡前' }).props.accessibilityState.selected,
+    ).toBe(false);
+    expect(screen.queryByRole('button', { name: '下週先試睡前' })).toBeNull();
+    expect(screen.getByRole('button', { name: '保留回顧草稿' })).toBeTruthy();
   });
+
+  it.each(['都適合', '還不確定'])(
+    '選「%s」不是一個可以寫進計畫的時段，不送',
+    (answer) => {
+      const onSubmit = jest.fn(async () => true);
+      renderReview({ sharedPlanTimeAdjustment: makeSharedPlan({ onSubmit }) });
+
+      fireEvent.press(screen.getByRole('button', { name: answer }));
+
+      expect(screen.queryByRole('button', { name: /下週先試/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: /改成/ })).toBeNull();
+      expect(screen.getByRole('button', { name: '就照現在這樣' })).toBeTruthy();
+      fireEvent.press(screen.getByRole('button', { name: '保留回顧草稿' }));
+      expect(onSubmit).not.toHaveBeenCalled();
+    },
+  );
 
   it('已經有一筆等家長確認的請求時，不給第二次送出的入口', () => {
     renderReview({ sharedPlanTimeAdjustment: makeSharedPlan({ pending: true }) });
 
     chooseAfterDinnerAndTime();
 
-    expect(screen.queryByRole('button', { name: '送給爸媽一起確認' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '下週先試晚餐後' })).toBeNull();
     expect(screen.getByText('已送給爸媽，等一起確認。')).toBeTruthy();
   });
 
@@ -174,7 +198,7 @@ describe('P0-8M · 孩子回顧 → 送出換時段', () => {
     });
 
     chooseAfterDinnerAndTime();
-    const cta = screen.getByRole('button', { name: '送給爸媽一起確認' });
+    const cta = screen.getByRole('button', { name: '下週先試晚餐後' });
     expect(cta.props.accessibilityState.busy).toBe(true);
 
     fireEvent.press(cta);
@@ -187,6 +211,7 @@ describe('P0-8M · 孩子回顧 → 送出換時段', () => {
     expect(
       screen.getByText('已經告訴爸媽了。一起確認後，計畫才會更新。'),
     ).toBeTruthy();
+    expect(screen.getByText('這週已完成的紀錄都會保留。')).toBeTruthy();
     // 家長還沒確認，任何「已生效」的說法都是假的。
     expect(screen.queryByText(/已更新|已套用|已生效/)).toBeNull();
   });
@@ -204,9 +229,9 @@ describe('P0-8M · 孩子回顧 → 送出換時段', () => {
       screen.getByRole('button', { name: '晚餐後' }).props.accessibilityState.selected,
     ).toBe(true);
     expect(
-      screen.getByRole('button', { name: '調整時間' }).props.accessibilityState.selected,
+      screen.getByRole('button', { name: '改成晚餐後' }).props.accessibilityState.selected,
     ).toBe(true);
-    expect(screen.getByRole('button', { name: '送給爸媽一起確認' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '下週先試晚餐後' })).toBeTruthy();
   });
 
   it('非閱讀計畫不會出現時段題，也就送不出換時段請求', () => {
@@ -217,6 +242,6 @@ describe('P0-8M · 孩子回顧 → 送出換時段', () => {
 
     expect(screen.queryByRole('button', { name: '晚餐後' })).toBeNull();
     fireEvent.press(screen.getByRole('button', { name: '調整進行時間' }));
-    expect(screen.queryByRole('button', { name: '送給爸媽一起確認' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /下週先試/ })).toBeNull();
   });
 });

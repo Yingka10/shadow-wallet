@@ -221,10 +221,10 @@ beforeEach(() => {
 
 afterEach(() => { jest.useRealTimers(); });
 
-/** 週進度在 hero 與週卡各出現一次，所以用 getAllByText 而不是 getByText。 */
+/** Task 1 將週進度收進今天卡片；這裡只確認協商沒有改動數字。 */
 function expectWeekProgressUnchanged() {
-  expect(screen.getAllByText('本週完成 2／3 次').length).toBeGreaterThan(0);
-  expect(screen.queryByText(/本週完成 3／3 次|本週完成 2／4 次/)).toBeNull();
+  expect(screen.getByText(/本週\s*2\s*\/\s*3/)).toBeTruthy();
+  expect(screen.queryByText(/本週\s*(?:3\s*\/\s*3|2\s*\/\s*4)/)).toBeNull();
 }
 
 async function renderScreen() {

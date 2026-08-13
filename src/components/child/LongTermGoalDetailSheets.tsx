@@ -99,16 +99,6 @@ const REVIEW_TIME_OPTIONS: Array<{
   { value: 'unsure', label: '還不確定' },
 ];
 
-const READING_REVIEW_NEXT_OPTIONS: Array<{
-  value: NonNullable<ReviewDraft['nextStep']>;
-  label: string;
-}> = [
-  { value: 'keep', label: '維持現在安排' },
-  { value: 'time', label: '調整時間' },
-  { value: 'frequency', label: '調整次數' },
-  { value: 'method', label: '調整方式' },
-];
-
 const GENERAL_REVIEW_NEXT_OPTIONS: Array<{
   value: NonNullable<ReviewDraft['nextStep']>;
   label: string;
@@ -605,6 +595,7 @@ function ReviewSheet({
   draft,
   onChange,
   onSave,
+  onOpenSheet,
   sharedPlan,
   onDismiss,
 }: {
@@ -612,14 +603,18 @@ function ReviewSheet({
   draft: ReviewDraft;
   onChange: (draft: ReviewDraft) => void;
   onSave: () => void;
+  onOpenSheet: (sheet: OpenSheet) => void;
   sharedPlan?: SharedPlanTimeAdjustment;
   onDismiss: () => void;
 }) {
   const kind = presentation.goalKind;
   const isReadingPlan = kind === 'reading_habit';
-  const nextOptions = isReadingPlan
-    ? READING_REVIEW_NEXT_OPTIONS
-    : GENERAL_REVIEW_NEXT_OPTIONS;
+  const chosenLabel = draft.preferredWindow === 'after_dinner'
+    ? '晚餐後'
+    : draft.preferredWindow === 'before_bed'
+      ? '睡前'
+      : null;
+  const showNextStep = draft.preferredWindow !== null;
 
   /*
     什麼情況才真的送出去 —— 五個條件全部成立才行：
@@ -648,6 +643,7 @@ function ReviewSheet({
     return (
       <View>
         <Text style={styles.sheetIntro}>{SUBMITTED_COPY}</Text>
+        <Text style={styles.preservedCopy}>這週已完成的紀錄都會保留。</Text>
         <PrimaryButton label="知道了" onPress={onDismiss} />
       </View>
     );
@@ -655,51 +651,78 @@ function ReviewSheet({
 
   return (
     <View>
-      <Text style={styles.questionLabel}>{getReviewPrompt(kind)}</Text>
-      <TextInput
-        accessibilityLabel={isReadingPlan ? '最喜歡的閱讀內容' : '這週最有感的片段'}
-        placeholder={
-          isReadingPlan
-            ? '想記下哪一本書或哪一段？'
-            : '想記下這週最有感的一段嗎？'
-        }
-        placeholderTextColor={Colors.fgMuted}
-        value={draft.favoriteNote}
-        onChangeText={(favoriteNote) => onChange({ ...draft, favoriteNote })}
-        multiline
-        maxLength={160}
-        style={styles.textInput}
-      />
-
       {isReadingPlan ? (
         <>
+          <Text style={styles.reviewLead}>
+            這週已經讀了 {presentation.weekCompleted} 次，一起看看什麼安排最順。
+          </Text>
           <Text style={styles.questionLabel}>哪個時間比較適合？</Text>
-          <View style={styles.optionGrid}>
+          <View style={styles.largeChoiceGrid}>
             {REVIEW_TIME_OPTIONS.map((option) => (
               <OptionButton
                 key={option.label}
                 label={option.label}
                 selected={draft.preferredWindow === option.value}
                 onPress={() =>
-                  onChange({ ...draft, preferredWindow: option.value })
+                  onChange({
+                    ...draft,
+                    preferredWindow: option.value,
+                    nextStep:
+                      draft.preferredWindow === option.value
+                        ? draft.nextStep
+                        : null,
+                  })
                 }
               />
             ))}
           </View>
-        </>
-      ) : null}
 
-      <Text style={styles.questionLabel}>下週想維持還是調整？</Text>
-      <View style={styles.optionGrid}>
-        {nextOptions.map((option) => (
-          <OptionButton
-            key={option.value}
-            label={option.label}
-            selected={draft.nextStep === option.value}
-            onPress={() => onChange({ ...draft, nextStep: option.value })}
+          {showNextStep ? (
+            <View style={styles.reviewStage}>
+              <Text style={styles.questionLabel}>下週想怎麼試？</Text>
+              <View style={styles.largeChoiceGrid}>
+                <OptionButton
+                  label="就照現在這樣"
+                  selected={draft.nextStep === 'keep'}
+                  onPress={() => onChange({ ...draft, nextStep: 'keep' })}
+                />
+                {chosenLabel ? (
+                  <OptionButton
+                    label={`改成${chosenLabel}`}
+                    selected={draft.nextStep === 'time'}
+                    onPress={() => onChange({ ...draft, nextStep: 'time' })}
+                  />
+                ) : null}
+              </View>
+            </View>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <Text style={styles.questionLabel}>{getReviewPrompt(kind)}</Text>
+          <TextInput
+            accessibilityLabel="這週最有感的片段"
+            placeholder="想記下這週最有感的一段嗎？"
+            placeholderTextColor={Colors.fgMuted}
+            value={draft.favoriteNote}
+            onChangeText={(favoriteNote) => onChange({ ...draft, favoriteNote })}
+            multiline
+            maxLength={160}
+            style={styles.textInput}
           />
-        ))}
-      </View>
+          <Text style={styles.questionLabel}>下週想維持還是調整？</Text>
+          <View style={styles.optionGrid}>
+            {GENERAL_REVIEW_NEXT_OPTIONS.map((option) => (
+              <OptionButton
+                key={option.value}
+                label={option.label}
+                selected={draft.nextStep === option.value}
+                onPress={() => onChange({ ...draft, nextStep: option.value })}
+              />
+            ))}
+          </View>
+        </>
+      )}
 
       {sharedPlan?.pending ? (
         <View style={styles.localNotice}>
@@ -725,9 +748,21 @@ function ReviewSheet({
         </Text>
       ) : null}
 
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="和爸媽一起調整"
+        activeOpacity={0.76}
+        style={styles.sharedImpactLink}
+        onPress={() => onOpenSheet('adjustment')}
+      >
+        <Text style={styles.sharedImpactCopy}>想調整每週次數或其他安排？</Text>
+        <Text style={styles.sharedImpactAction}>和爸媽一起調整 →</Text>
+      </TouchableOpacity>
+      <Text style={styles.preservedCopy}>這週已完成的紀錄都會保留。</Text>
+
       {canSend ? (
         <PrimaryButton
-          label="送給爸媽一起確認"
+          label={`下週先試${chosenLabel}`}
           loading={sharedPlan?.submitting}
           onPress={handleSend}
         />
@@ -871,6 +906,7 @@ export default function LongTermGoalDetailSheets({
           draft={localReviewDraft}
           onChange={setLocalReviewDraft}
           onSave={handleSaveReview}
+          onOpenSheet={onOpenSheet}
           sharedPlan={sharedPlanTimeAdjustment}
           onDismiss={onClose}
         />
@@ -1140,6 +1176,18 @@ const styles = StyleSheet.create({
   optionGrid: {
     gap: 8,
   },
+  reviewLead: {
+    color: Colors.fgSecondary,
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '700',
+  },
+  largeChoiceGrid: {
+    gap: 10,
+  },
+  reviewStage: {
+    marginTop: 4,
+  },
   compactOption: {
     minHeight: 44,
     borderWidth: 1,
@@ -1235,5 +1283,32 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     fontWeight: '700',
+  },
+  sharedImpactLink: {
+    minHeight: 48,
+    marginTop: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.hairline,
+    paddingTop: 12,
+    justifyContent: 'center',
+  },
+  sharedImpactCopy: {
+    color: Colors.fgMuted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  sharedImpactAction: {
+    marginTop: 2,
+    color: Colors.accent,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '800',
+  },
+  preservedCopy: {
+    marginTop: 10,
+    color: Colors.fgMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
   },
 });

@@ -94,6 +94,45 @@ const READING_ONLY_COPY =
   /閱讀時間|最喜歡哪一本書|閱讀時段|閱讀內容|晚餐後還是睡前比較適合/;
 
 describe('LongTermGoalDetailSheets', () => {
+  it('asks the reading time first and reveals the next step after a choice', () => {
+    renderSheet('review', {
+      presentation: makePresentation({ weekCompleted: 2, weekTarget: 3 }),
+    });
+
+    expect(
+      screen.getByText('這週已經讀了 2 次，一起看看什麼安排最順。'),
+    ).toBeTruthy();
+    expect(screen.getByText('哪個時間比較適合？')).toBeTruthy();
+    expect(screen.queryByText('下週想怎麼試？')).toBeNull();
+    expect(screen.queryByPlaceholderText('想記下哪一本書或哪一段？')).toBeNull();
+
+    fireEvent.press(screen.getByRole('button', { name: '晚餐後' }));
+
+    expect(screen.getByText('下週想怎麼試？')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '就照現在這樣' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '改成晚餐後' })).toBeTruthy();
+  });
+
+  it('does not flatten shared-impact adjustments into the review', () => {
+    const onOpenSheet = jest.fn();
+    renderSheet('review', { onOpenSheet });
+
+    fireEvent.press(screen.getByRole('button', { name: '晚餐後' }));
+
+    expect(screen.queryByRole('button', { name: '調整次數' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '調整方式' })).toBeNull();
+    expect(screen.getByText('想調整每週次數或其他安排？')).toBeTruthy();
+
+    fireEvent.press(screen.getByRole('button', { name: '和爸媽一起調整' }));
+    expect(onOpenSheet).toHaveBeenCalledWith('adjustment');
+  });
+
+  it('states that this week’s completed records stay unchanged', () => {
+    renderSheet('review');
+
+    expect(screen.getByText('這週已完成的紀錄都會保留。')).toBeTruthy();
+  });
+
   it('renders truthful plan details and opens the adjustment sheet', () => {
     const onOpenSheet = jest.fn();
     renderSheet('details', { onOpenSheet });
@@ -116,38 +155,33 @@ describe('LongTermGoalDetailSheets', () => {
       screen.getByText('這份回答目前只保留在這個畫面，尚未送出給家長。'),
     ).toBeTruthy();
 
-    fireEvent.changeText(
-      screen.getByPlaceholderText('想記下哪一本書或哪一段？'),
-      '神奇樹屋',
-    );
     fireEvent.press(screen.getByRole('button', { name: '睡前' }));
+    fireEvent.press(screen.getByRole('button', { name: '改成睡前' }));
     fireEvent.press(screen.getByRole('button', { name: '保留回顧草稿' }));
 
     expect(onSaveReviewDraft).toHaveBeenCalledWith({
-      favoriteNote: '神奇樹屋',
+      favoriteNote: '',
       preferredWindow: 'before_bed',
-      nextStep: null,
+      nextStep: 'time',
     });
   });
 
   it('discards an unsaved review edit after close and reopen', () => {
     const { props, rerender } = renderSheet('review');
 
-    fireEvent.changeText(
-      screen.getByPlaceholderText('想記下哪一本書或哪一段？'),
-      '還沒保留的內容',
-    );
+    fireEvent.press(screen.getByRole('button', { name: '睡前' }));
     expect(
-      screen.getByPlaceholderText('想記下哪一本書或哪一段？').props.value,
-    ).toBe('還沒保留的內容');
+      screen.getByRole('button', { name: '睡前' }).props.accessibilityState,
+    ).toEqual(expect.objectContaining({ selected: true }));
 
     fireEvent.press(screen.getByLabelText('關閉週末回顧'));
     rerender(<LongTermGoalDetailSheets {...props} activeSheet={null} />);
     rerender(<LongTermGoalDetailSheets {...props} activeSheet="review" />);
 
     expect(
-      screen.getByPlaceholderText('想記下哪一本書或哪一段？').props.value,
-    ).toBe('');
+      screen.getByRole('button', { name: '睡前' }).props.accessibilityState,
+    ).toEqual(expect.objectContaining({ selected: false }));
+    expect(screen.queryByText('下週想怎麼試？')).toBeNull();
   });
 
   it('saves an adjustment draft without claiming it was sent or applied', () => {
