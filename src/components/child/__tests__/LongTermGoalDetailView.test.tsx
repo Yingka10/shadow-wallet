@@ -228,13 +228,21 @@ function renderView(
 }
 
 describe('LongTermGoalDetailView', () => {
-  it('puts the current week first without showing a percentage or game-like next stop', () => {
+  it('keeps the hero focused on truthful long-term progress', () => {
     renderView();
 
-    expect(screen.getByText('第 1 週／共 4 週')).toBeTruthy();
-    expect(screen.getByText('本週完成 1／5 次')).toBeTruthy();
-    expect(screen.getByText('第一週：先找到適合自己的閱讀節奏')).toBeTruthy();
-    expect(screen.getByText('今天繼續就好，已完成的閱讀都會保留')).toBeTruthy();
+    const hero = within(screen.getByTestId('goal-hero'));
+    expect(hero.getByText('學習與技能')).toBeTruthy();
+    expect(hero.getByText('第 1 週／共 4 週')).toBeTruthy();
+    expect(hero.getByRole('progressbar').props.accessibilityValue).toEqual({
+      min: 0,
+      max: 100,
+      now: 5,
+    });
+    expect(hero.getByText('第一週：先找到適合自己的閱讀節奏')).toBeTruthy();
+    expect(hero.getByText('今天繼續就好，已完成的閱讀都會保留')).toBeTruthy();
+    expect(hero.queryByText('本週完成 1／5 次')).toBeNull();
+    expect(screen.getByTestId('goal-hero').props.accessibilityLabel).toBeUndefined();
     expect(screen.queryByText('5%')).toBeNull();
     expect(screen.queryByText(/下一站/)).toBeNull();
   });
@@ -246,11 +254,13 @@ describe('LongTermGoalDetailView', () => {
       '今天的小步驟',
       '本週安排',
       '週末一起回顧',
-      '最近紀錄',
-      '計畫詳情',
     ]) {
       expect(screen.getByText(heading)).toBeTruthy();
     }
+
+    fireEvent.press(screen.getByLabelText('展開更多紀錄與計畫'));
+    expect(screen.getByText('最近紀錄')).toBeTruthy();
+    expect(screen.getByText('計畫詳情')).toBeTruthy();
 
     for (const emoji of ['🌱', '📚', '📊', '⭐', '❤️', '🌿', '🌳']) {
       expect(screen.queryByText(emoji)).toBeNull();
@@ -366,6 +376,8 @@ describe('LongTermGoalDetailView', () => {
     expect(screen.queryByLabelText('開始週末回顧')).toBeNull();
     expect(screen.queryByLabelText('查看計畫詳情')).toBeNull();
     expect(screen.getByText('這週哪個時間最適合閱讀？')).toBeTruthy();
+
+    fireEvent.press(screen.getByLabelText('展開更多紀錄與計畫'));
     expect(screen.getByText('2026-07-27 ～ 2026-08-23（共 4 週） · 完成 20 次')).toBeTruthy();
   });
 
@@ -546,7 +558,7 @@ describe('LongTermGoalDetailView', () => {
     }));
 
     expect(screen.getByText(longPlanWeek).props.numberOfLines).toBe(2);
-    expect(screen.getByText(longWeekProgress).props.numberOfLines).toBe(2);
+    expect(screen.queryByText(longWeekProgress)).toBeNull();
     expect(screen.getByText(longFocus)).toBeTruthy();
     expect(screen.getByText(longNext)).toBeTruthy();
 
@@ -702,15 +714,36 @@ describe('LongTermGoalDetailView', () => {
     expect(milestones.queryByText('已完成')).toBeNull();
   });
 
-  it('opens the weekend review and quiet plan-details entry', () => {
+  it('hides supporting details behind one accessible disclosure and preserves callbacks', () => {
     const onOpenReview = jest.fn();
     const onOpenDetails = jest.fn();
+    const onOpenRecord = jest.fn();
 
-    renderView(makePresentation(), { onOpenReview, onOpenDetails });
+    renderView(makePresentation(), {
+      onOpenReview,
+      onOpenDetails,
+      onOpenRecord,
+    });
+
+    expect(screen.getByTestId('goal-review')).toBeTruthy();
+    expect(screen.queryByText('最近紀錄')).toBeNull();
+    expect(screen.queryByTestId('goal-details')).toBeNull();
+
+    const disclosure = screen.getByLabelText('展開更多紀錄與計畫');
+    expect(disclosure.props.accessibilityState).toEqual({ expanded: false });
+    fireEvent.press(disclosure);
+
+    expect(
+      screen.getByLabelText('收合更多紀錄與計畫').props.accessibilityState,
+    ).toEqual({ expanded: true });
+    expect(screen.getByText('最近紀錄')).toBeTruthy();
+    expect(screen.getByTestId('goal-details')).toBeTruthy();
 
     fireEvent.press(screen.getByLabelText('開始週末回顧'));
+    fireEvent.press(screen.getByLabelText('查看今天的紀錄'));
     fireEvent.press(screen.getByLabelText('查看計畫詳情'));
     expect(onOpenReview).toHaveBeenCalledTimes(1);
+    expect(onOpenRecord).toHaveBeenCalledWith('completion-today');
     expect(onOpenDetails).toHaveBeenCalledTimes(1);
   });
 
@@ -733,6 +766,8 @@ describe('LongTermGoalDetailView', () => {
         },
       ],
     }), { onOpenRecord });
+
+    fireEvent.press(screen.getByLabelText('展開更多紀錄與計畫'));
 
     expect(screen.getAllByText('今天').length).toBeGreaterThan(0);
     expect(screen.getByText('星期一')).toBeTruthy();
@@ -773,10 +808,10 @@ describe('LongTermGoalDetailView', () => {
       'goal-week',
       'goal-rewards',
       'goal-review',
-      'goal-details',
     ]) {
       expect(screen.getByTestId(testID)).toBeTruthy();
     }
+    expect(screen.queryByTestId('goal-details')).toBeNull();
     expect(screen.getByText('記下今天的完成')).toBeTruthy();
     expect(screen.queryByText('記錄今天的閱讀')).toBeNull();
 
@@ -800,11 +835,11 @@ describe('LongTermGoalDetailView', () => {
     expect(week.queryByTestId('goal-day-caption-1')).toBeNull();
   });
 
-  it('renders weekly-frequency reading progress without a weekday judgement timeline', () => {
+  it('moves flexible-reading weekly rhythm into Today without a duplicate week card or hero label', () => {
     const presentation = buildGoalPresentation(
       makeTask({
         schedule_mode: 'weekly_frequency',
-        weekly_frequency: 4,
+        weekly_frequency: 3,
         recurrence_days: null,
         due_date: '2026-08-16',
       }),
@@ -817,19 +852,37 @@ describe('LongTermGoalDetailView', () => {
       [
         { id: 'monday', completed_at: '2026-08-03T19:00:00+08:00', planned_time_window: null, start_mode: null },
         { id: 'thursday', completed_at: '2026-08-06T19:00:00+08:00', planned_time_window: null, start_mode: null },
-        { id: 'friday', completed_at: '2026-08-07T10:00:00+08:00', planned_time_window: null, start_mode: null },
       ],
       dayjs('2026-08-07T12:00:00+08:00'),
     );
 
     renderView(presentation);
 
+    const today = within(screen.getByTestId('goal-today'));
+    expect(today.getByText('本週 2 / 3')).toBeTruthy();
+    expect(today.getByText('再 1 次，就完成這週的節奏。')).toBeTruthy();
+    expect(screen.queryByTestId('goal-week')).toBeNull();
+
+    const hero = within(screen.getByTestId('goal-hero'));
+    expect(hero.queryByText(/本週.*2.*3/)).toBeNull();
+    expect(screen.getByTestId('goal-hero').props.accessibilityLabel).toBeUndefined();
+  });
+
+  it('retains the real fixed-day schedule for a non-reading habit', () => {
+    const presentation = buildGoalPresentation(
+      makeTask({ name: '晨間伸展', schedule_mode: 'fixed_days' }),
+      makeGoal(),
+      [],
+      dayjs('2026-07-30T12:00:00+08:00'),
+    );
+
+    renderView(presentation);
+
+    expect(presentation.goalKind).toBe('habit');
+    expect(screen.getByText('本週安排')).toBeTruthy();
     const week = within(screen.getByTestId('goal-week'));
-    expect(screen.getByText('本週進度')).toBeTruthy();
-    expect(week.getByText('本週完成 3／4 次')).toBeTruthy();
-    expect(week.getByText(/這週還差 1 次/)).toBeTruthy();
-    expect(week.queryByTestId('goal-day-caption-1')).toBeNull();
-    expect(week.queryByText(/尚未記錄|未安排|漏掉/)).toBeNull();
+    expect(week.getByTestId('goal-day-caption-1')).toBeTruthy();
+    expect(week.getByTestId('goal-day-caption-5')).toBeTruthy();
   });
 
   it.each([

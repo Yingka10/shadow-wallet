@@ -260,7 +260,6 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
     <View
       testID="goal-hero"
       style={styles.hero}
-      accessibilityLabel={`${presentation.planWeekLabel}，${presentation.weekProgressLabel}`}
     >
       <Svg
         style={StyleSheet.absoluteFill}
@@ -303,11 +302,9 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
         <Text style={styles.planWeekLabel} numberOfLines={2}>
           {presentation.planWeekLabel}
         </Text>
-        <Text style={styles.weekProgressLabel} numberOfLines={2}>
-          {presentation.weekProgressLabel}
-        </Text>
         <View
           style={styles.progressTrack}
+          accessible
           accessibilityRole="progressbar"
           accessibilityValue={{
             min: 0,
@@ -343,6 +340,35 @@ type TodayStepCardProps = Pick<
   | 'onSelectTimeWindow'
   | 'onOpenRecord'
 >;
+
+function isFlexibleReadingRhythm(presentation: GoalPresentation): boolean {
+  return presentation.goalKind === 'reading_habit'
+    && presentation.weekTarget > 0
+    && !presentation.weekDays.some((day) => day.isScheduled);
+}
+
+function TodayWeekRhythm({
+  completed,
+  target,
+}: {
+  completed: number;
+  target: number;
+}) {
+  const remaining = Math.max(target - completed, 0);
+
+  return (
+    <View style={styles.todayWeekRhythm}>
+      <Text style={styles.todayWeekRhythmLabel}>
+        本週 {completed} / {target}
+      </Text>
+      <Text style={styles.todayWeekRhythmCopy}>
+        {remaining > 0
+          ? `再 ${remaining} 次，就完成這週的節奏。`
+          : '這週的節奏完成了。'}
+      </Text>
+    </View>
+  );
+}
 
 function CompletedTodayState({
   presentation,
@@ -416,6 +442,9 @@ function TodayStepCard({
   const isReadingPlan = presentation.goalKind === 'reading_habit';
   const showReadingTimeControls =
     isReadingPlan && presentation.canCompleteToday;
+  const showTodayWeekRhythm =
+    presentation.planState === 'active'
+    && isFlexibleReadingRhythm(presentation);
   const todayCompletion = isCompletedToday
     ? presentation.recentRecords[0]
     : undefined;
@@ -448,7 +477,7 @@ function TodayStepCard({
   return (
     <View>
       <SectionHeading icon="sprout" title={presentation.todayTitle} />
-      <View testID="goal-today" style={styles.card}>
+      <View testID="goal-today" style={[styles.card, styles.todayCard]}>
         <View style={styles.actionHead}>
           <View style={styles.actionIcon}>
             <DetailIcon
@@ -610,6 +639,12 @@ function TodayStepCard({
             {completionError}
           </Text>
         ) : null}
+        {showTodayWeekRhythm ? (
+          <TodayWeekRhythm
+            completed={presentation.weekCompleted}
+            target={presentation.weekTarget}
+          />
+        ) : null}
       </View>
     </View>
   );
@@ -656,6 +691,8 @@ function WeekProgressCard({
 }: {
   presentation: GoalPresentation;
 }) {
+  if (isFlexibleReadingRhythm(presentation)) return null;
+
   const showsDailySchedule =
     presentation.planState === 'active'
     && presentation.weekTarget > 0
@@ -996,6 +1033,7 @@ export default function LongTermGoalDetailView({
   onOpenDetails,
   pendingTimeAdjustmentNotice = null,
 }: Props) {
+  const [showSupportingDetails, setShowSupportingDetails] = useState(false);
   const recentRecords = useMemo(
     () => presentation.recentRecords.slice(0, 3),
     [presentation.recentRecords],
@@ -1034,14 +1072,40 @@ export default function LongTermGoalDetailView({
         onOpenReview={onOpenReview}
         pendingTimeAdjustmentNotice={pendingTimeAdjustmentNotice}
       />
-      <RecentRecords
-        records={recentRecords}
-        onOpenRecord={onOpenRecord}
-      />
-      <PlanDetailsEntry
-        presentation={presentation}
-        onOpenDetails={onOpenDetails}
-      />
+      <TouchableOpacity
+        style={styles.supportingDetailsToggle}
+        accessibilityRole="button"
+        accessibilityLabel={
+          showSupportingDetails
+            ? '收合更多紀錄與計畫'
+            : '展開更多紀錄與計畫'
+        }
+        accessibilityState={{ expanded: showSupportingDetails }}
+        onPress={() => setShowSupportingDetails((visible) => !visible)}
+        activeOpacity={0.72}
+      >
+        <Text style={styles.supportingDetailsLabel}>更多紀錄與計畫</Text>
+        <View
+          style={[
+            styles.supportingDetailsChevron,
+            showSupportingDetails && styles.supportingDetailsChevronExpanded,
+          ]}
+        >
+          <DetailIcon name="chevron" size={18} color={Colors.fgMuted} />
+        </View>
+      </TouchableOpacity>
+      {showSupportingDetails ? (
+        <>
+          <RecentRecords
+            records={recentRecords}
+            onOpenRecord={onOpenRecord}
+          />
+          <PlanDetailsEntry
+            presentation={presentation}
+            onOpenDetails={onOpenDetails}
+          />
+        </>
+      ) : null}
     </ScrollView>
   );
 }
@@ -1099,13 +1163,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 22,
     fontWeight: '900',
-  },
-  weekProgressLabel: {
-    marginTop: 1,
-    color: Colors.gold100,
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '800',
   },
   progressTrack: {
     width: '100%',
@@ -1179,6 +1236,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04,
     shadowRadius: 10,
     elevation: 1,
+  },
+  todayCard: {
+    padding: 16,
+    borderWidth: 2,
+    borderColor: Colors.leaf100,
+    shadowOpacity: 0.08,
+    elevation: 2,
   },
   actionHead: {
     flexDirection: 'row',
@@ -1409,6 +1473,25 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
+  todayWeekRhythm: {
+    marginTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.leaf100,
+    paddingTop: 11,
+  },
+  todayWeekRhythmLabel: {
+    color: Colors.leaf700,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: '900',
+  },
+  todayWeekRhythmCopy: {
+    marginTop: 2,
+    color: Colors.fgSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
+  },
   weekRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1630,6 +1713,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     fontWeight: '700',
+  },
+  supportingDetailsToggle: {
+    minHeight: 48,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: Colors.hairline,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+  },
+  supportingDetailsLabel: {
+    color: Colors.fgSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '800',
+  },
+  supportingDetailsChevron: {
+    transform: [{ rotate: '90deg' }],
+  },
+  supportingDetailsChevronExpanded: {
+    transform: [{ rotate: '-90deg' }],
   },
   recordList: {
     borderTopWidth: 1,

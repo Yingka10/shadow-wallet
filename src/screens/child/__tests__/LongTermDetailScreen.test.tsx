@@ -317,12 +317,13 @@ describe('LongTermDetailScreen', () => {
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
   });
 
-  it('renders week-first progress without self-start scoring', async () => {
+  it('renders long-term progress and the scheduled week without self-start scoring', async () => {
     render(<LongTermDetailScreen />);
 
     expect(await screen.findByText('自主閱讀計畫')).toBeTruthy();
     expect(screen.getAllByText('第 1 週／共 4 週').length).toBeGreaterThan(0);
-    expect(screen.getByText('本週完成 3／5 次')).toBeTruthy();
+    expect(screen.queryByText('本週完成 3／5 次')).toBeNull();
+    expect(screen.getByText('本週安排')).toBeTruthy();
     expect(screen.getByText('今天預計：晚餐後')).toBeTruthy();
     expect(screen.getByText(/這週已閱讀 3 次。/)).toBeTruthy();
     expect(screen.queryByText(/自己開始/)).toBeNull();
@@ -348,7 +349,8 @@ describe('LongTermDetailScreen', () => {
     render(<LongTermDetailScreen />);
 
     expect(await screen.findByText('自主閱讀計畫')).toBeTruthy();
-    expect(screen.getByText('本週完成 3／5 次')).toBeTruthy();
+    expect(screen.queryByText('本週完成 3／5 次')).toBeNull();
+    expect(screen.getByText('本週安排')).toBeTruthy();
     expect(screen.queryByText('今天已完成 15 分鐘')).toBeNull();
     expect(
       mockSupabaseEqCalls.filter(({ table, column, value }) =>
@@ -478,7 +480,8 @@ describe('LongTermDetailScreen', () => {
 
     render(<LongTermDetailScreen />);
 
-    expect(await screen.findByText('本週完成 3／5 次')).toBeTruthy();
+    expect(await screen.findByText('本週安排')).toBeTruthy();
+    expect(screen.queryByText('本週完成 3／5 次')).toBeNull();
     expect(screen.queryByText('今天已完成 15 分鐘')).toBeNull();
     expect(mockSupabaseEqCalls).toContainEqual({
       table: 'task_completions',
@@ -743,7 +746,8 @@ describe('LongTermDetailScreen', () => {
     });
     render(<LongTermDetailScreen />);
 
-    expect(await screen.findByText('本週完成 3／5 次')).toBeTruthy();
+    expect(await screen.findByText('本週安排')).toBeTruthy();
+    expect(screen.queryByText('本週完成 3／5 次')).toBeNull();
     expect(screen.queryByTestId('goal-rewards')).toBeNull();
     fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
 
@@ -763,7 +767,8 @@ describe('LongTermDetailScreen', () => {
     });
     render(<LongTermDetailScreen />);
 
-    expect(await screen.findByText('本週完成 3／5 次')).toBeTruthy();
+    expect(await screen.findByText('本週安排')).toBeTruthy();
+    expect(screen.queryByText('本週完成 3／5 次')).toBeNull();
     expect(screen.queryByTestId('goal-rewards')).toBeNull();
     fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
 
@@ -795,6 +800,7 @@ describe('LongTermDetailScreen', () => {
   it('corrects the selected real completion and updates the record sheet', async () => {
     render(<LongTermDetailScreen />);
 
+    fireEvent.press(await screen.findByLabelText('展開更多紀錄與計畫'));
     fireEvent.press(await screen.findByLabelText('查看2026/07/29的紀錄'));
     await act(async () => {
       fireEvent.press(screen.getByText('改成睡前'));
@@ -815,6 +821,7 @@ describe('LongTermDetailScreen', () => {
     mockRecordCompletionContext.mockRejectedValueOnce(new Error('network'));
     render(<LongTermDetailScreen />);
 
+    fireEvent.press(await screen.findByLabelText('展開更多紀錄與計畫'));
     fireEvent.press(await screen.findByLabelText('查看2026/07/29的紀錄'));
     await act(async () => {
       fireEvent.press(screen.getByText('改成睡前'));
@@ -881,7 +888,7 @@ describe('LongTermDetailScreen', () => {
       taskName: '自主閱讀計畫',
     };
     rerender(<LongTermDetailScreen />);
-    await screen.findByText('本週完成 3／5 次');
+    await screen.findByText('本週安排');
 
     await act(async () => {
       completionRequest.resolve({
@@ -902,6 +909,7 @@ describe('LongTermDetailScreen', () => {
     mockRecordCompletionContext.mockReturnValueOnce(correctionRequest.promise);
     const { rerender } = render(<LongTermDetailScreen />);
 
+    fireEvent.press(await screen.findByLabelText('展開更多紀錄與計畫'));
     fireEvent.press(await screen.findByLabelText('查看2026/07/29的紀錄'));
     fireEvent.press(screen.getByText('改成睡前'));
     mockRouteParams = {
@@ -918,7 +926,7 @@ describe('LongTermDetailScreen', () => {
       taskName: '自主閱讀計畫',
     };
     rerender(<LongTermDetailScreen />);
-    await screen.findByText('本週完成 3／5 次');
+    await screen.findByText('本週安排');
 
     await act(async () => {
       correctionRequest.resolve();
@@ -926,6 +934,7 @@ describe('LongTermDetailScreen', () => {
       await Promise.resolve();
     });
 
+    fireEvent.press(screen.getByLabelText('展開更多紀錄與計畫'));
     fireEvent.press(screen.getByLabelText('查看2026/07/29的紀錄'));
     expect(screen.getAllByText('晚餐後').length).toBeGreaterThan(0);
     expect(screen.queryByText('睡前')).toBeNull();
@@ -961,6 +970,7 @@ describe('LongTermDetailScreen', () => {
     mockRecordCompletionContext.mockReturnValueOnce(correctionRequest.promise);
     const { unmount } = render(<LongTermDetailScreen />);
 
+    fireEvent.press(await screen.findByLabelText('展開更多紀錄與計畫'));
     fireEvent.press(await screen.findByLabelText('查看2026/07/29的紀錄'));
     fireEvent.press(screen.getByText('改成睡前'));
     unmount();
