@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen, within } from '@testing-library/react-native';
 import type {
   ChildProposal,
   ChildProposalPlanVersion,
@@ -80,10 +80,13 @@ describe('ParentProposalSection', () => {
     const onConfirm = jest.fn();
     render(<ParentProposalSection {...base} proposals={[item]} onConfirm={onConfirm} />);
 
-    expect(screen.getByTestId('proposal-card-p1')).toBeTruthy();
-    expect(screen.getByTestId('proposal-child-voice-p1')).toBeTruthy();
-    expect(screen.getByTestId('proposal-plan-p1')).toBeTruthy();
-    expect(screen.getByTestId('proposal-decision-p1')).toBeTruthy();
+    const proposalSurface = screen.getByTestId('parent-proposal-card');
+    const childVoiceBand = within(proposalSurface).getByTestId('proposal-child-voice-p1');
+    const growBookBand = within(proposalSurface).getByTestId('proposal-plan-p1');
+    const decisionBand = within(proposalSurface).getByTestId('proposal-decision-p1');
+    expect(proposalSurface.children[0]?.props.testID).toBe(childVoiceBand.props.testID);
+    expect(proposalSurface.children[1]?.props.testID).toBe(growBookBand.props.testID);
+    expect(proposalSurface.children[2]?.props.testID).toBe(decisionBand.props.testID);
     expect(screen.getByText('孩子的聲音')).toBeTruthy();
     expect(screen.getByText('我想兩週把這本書讀完')).toBeTruthy();
     expect(screen.getByText('因為同學說這本書很好看')).toBeTruthy();
@@ -152,10 +155,8 @@ describe('ParentProposalSection', () => {
     render(<ParentProposalSection {...base} proposals={[
       card('p1'), card('p2'), card('p3'), card('p4'),
     ]} />);
-    expect(screen.getByTestId('proposal-card-p1')).toBeTruthy();
-    expect(screen.getByTestId('proposal-card-p2')).toBeTruthy();
-    expect(screen.getByTestId('proposal-card-p3')).toBeTruthy();
-    expect(screen.queryByTestId('proposal-card-p4')).toBeNull();
+    expect(screen.getAllByTestId('parent-proposal-card')).toHaveLength(3);
+    expect(screen.queryByText('想法 p4')).toBeNull();
   });
 
   it('fresh AI plan 提供確認、調整與目前不適合三條窄路徑', () => {

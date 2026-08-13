@@ -97,7 +97,7 @@ export function ParentProposalSection({
               : '展開為什麼這樣整理';
 
             return (
-              <View key={card.id} style={styles.card} testID={`proposal-card-${card.id}`}>
+              <View key={card.id} style={styles.card} testID="parent-proposal-card">
               <View style={styles.childVoiceBand} testID={`proposal-child-voice-${card.id}`}>
                 <View style={styles.bandHead}>
                   <Text style={styles.bandEyebrow}>孩子的聲音</Text>
