@@ -240,7 +240,9 @@ describe('LongTermGoalDetailView', () => {
       now: 5,
     });
     expect(hero.getByText('第一週：先找到適合自己的閱讀節奏')).toBeTruthy();
-    expect(hero.getByText('今天繼續就好，已完成的閱讀都會保留')).toBeTruthy();
+    expect(
+      hero.queryByText('今天繼續就好，已完成的閱讀都會保留'),
+    ).toBeNull();
     expect(hero.queryByText('本週完成 1／5 次')).toBeNull();
     expect(screen.getByTestId('goal-hero').props.accessibilityLabel).toBeUndefined();
     expect(screen.queryByText('5%')).toBeNull();
@@ -560,7 +562,7 @@ describe('LongTermGoalDetailView', () => {
     expect(screen.getByText(longPlanWeek).props.numberOfLines).toBe(2);
     expect(screen.queryByText(longWeekProgress)).toBeNull();
     expect(screen.getByText(longFocus)).toBeTruthy();
-    expect(screen.getByText(longNext)).toBeTruthy();
+    expect(screen.queryByText(longNext)).toBeNull();
 
     const heroStyle = StyleSheet.flatten(screen.getByTestId('goal-hero').props.style);
     expect(heroStyle.minHeight).toBeGreaterThanOrEqual(150);

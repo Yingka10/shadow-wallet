@@ -323,9 +323,6 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
         <Text style={styles.focusText}>
           {presentation.focusText}
         </Text>
-        <Text style={styles.nextText}>
-          {presentation.nextText}
-        </Text>
       </View>
     </View>
   );
@@ -1183,13 +1180,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     fontWeight: '800',
-  },
-  nextText: {
-    marginTop: 3,
-    color: Colors.cream200,
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '700',
   },
   planNotice: {
     minHeight: 44,
