@@ -263,4 +263,3 @@ Expected: commands exit 0; no Gemini, AI, Parent Proposal, `src/lib/childProposa
 - [ ] **Step 3: Hand off real-device visual acceptance**
 
 Verify the Demo order Hero → Today → Progress → Review → More; Today remains focal; weekly Progress says `本週 X / 3`; no capacity diagnostic appears. Report any legacy ambiguous row without migration or reinterpretation.
-
