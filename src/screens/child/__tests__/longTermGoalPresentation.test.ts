@@ -123,8 +123,159 @@ function makeWeeklyFrequencyGoal(overrides: Partial<LongTermGoal> = {}): LongTer
 }
 
 describe('buildGoalPresentation', () => {
+  it('derives the Demo reading-looking plan entirely from structured fields', () => {
+    const task = makeTask({
+      name: '兩週讀完這本書',
+      category: 'D',
+      schedule_mode: 'weekly_frequency',
+      weekly_frequency: 3,
+      recurrence_days: null,
+      due_date: '2026-08-09',
+    }) as Task & {
+      progress_model: 'weekly_rhythm';
+      next_step: string;
+    };
+    task.progress_model = 'weekly_rhythm';
+    task.next_step = '先讀第一章';
+    const goal = makeGoal({
+      total_days: 14,
+      active_days: null,
+      started_at: '2026-07-27',
+      end_date: '2026-08-09',
+      preferred_time_window: null,
+    });
+    const completions = Array.from({ length: 6 }, (_, index) => makeCompletion(
+      `demo-${index}`,
+      `2026-07-${String(27 + index).padStart(2, '0')}T19:00:00+08:00`,
+      null,
+    ));
+
+    const result = buildGoalPresentation(
+      task,
+      goal,
+      completions,
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.goalKind).toBe('habit');
+    expect(result.progression).toBe('weekly_rhythm');
+    expect(result.categoryLabel).toBe('D學習與技能');
+    expect(result.weekProgressLabel).toContain('3');
+    expect(result.weekTarget).toBe(3);
+    expect(result.planState).toBe('active');
+    expect(result.completionConditionLabel).not.toContain('14');
+    expect(result.planNotice).toBeNull();
+    expect(result.todayAction).toBe('先讀第一章');
+  });
+
+  it('keeps structured Demo presentation invariant when only its name changes', () => {
+    const structured = {
+      category: 'D' as const,
+      schedule_mode: 'weekly_frequency' as const,
+      weekly_frequency: 3,
+      recurrence_days: null,
+      due_date: '2026-08-09',
+      progress_model: 'weekly_rhythm' as const,
+      next_step: '先讀第一章',
+    };
+    const goal = makeGoal({ total_days: 14, active_days: null, end_date: '2026-08-09' });
+    const now = dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei');
+    const demo = buildGoalPresentation(
+      makeTask({ name: '兩週讀完這本書', ...structured } as Task), goal, [], now,
+    );
+    const renamed = buildGoalPresentation(
+      makeTask({ name: '自主閱讀計畫', ...structured } as Task), goal, [], now,
+    );
+
+    expect({ ...demo, headerTitle: undefined }).toEqual({ ...renamed, headerTitle: undefined });
+  });
+
   it.each([
-    ['reading_habit', makeTask(), makeGoal()],
+    ['A', 'A生活習慣'],
+    ['B', 'B家庭參與'],
+    ['C', 'C自主挑戰'],
+    ['D', 'D學習與技能'],
+  ] as const)('maps category %s without consulting the goal name', (category, expected) => {
+    const result = buildGoalPresentation(
+      makeTask({ category, name: '任意名稱', long_term_type: 'challenge' }),
+      makeGoal({ goal_type: 'challenge' }),
+      [],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.categoryLabel).toBe(expected);
+  });
+
+  it('keeps an unplanned habit without a synthesized schedule or progression', () => {
+    const result = buildGoalPresentation(
+      makeTask({ recurrence_days: null }),
+      makeGoal({ active_days: null }),
+      [],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.planState).toBe('unplanned');
+    expect(result.progression).toBeNull();
+    expect(result.weekTarget).toBe(0);
+    expect(result.weekDays.every((day) => day.state === 'unscheduled')).toBe(true);
+  });
+
+  it.each([
+    ['skill', makeTask(), makeGoal({ goal_type: 'skill' }), 'staged_skill'],
+    ['challenge values', makeTask(), makeGoal({ goal_type: 'challenge', current_value: 1, target_value: 2 }), 'accumulation'],
+    ['challenge no values', makeTask(), makeGoal({ goal_type: 'challenge' }), 'challenge'],
+    ['weekly rhythm', makeTask({ schedule_mode: 'weekly_frequency', weekly_frequency: 2 }), makeGoal(), 'weekly_rhythm'],
+    ['fixed days', makeTask({ recurrence_days: [1, 3] }), makeGoal({ active_days: [1, 3] }), 'fixed_days'],
+  ] as const)('maps structured progression for %s', (_name, task, goal, expected) => {
+    const result = buildGoalPresentation(
+      task,
+      goal,
+      [],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.progression).toBe(expected);
+  });
+
+  it('exposes preferred-time support only from structured capability', () => {
+    const withoutSupport = buildGoalPresentation(
+      makeTask({ name: '晚上閱讀', preferred_time: null }),
+      makeGoal({ preferred_time_window: null }),
+      [],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+    const withSupport = buildGoalPresentation(
+      makeTask({ preferred_time: 'after_dinner' }),
+      makeGoal({ preferred_time_window: null }),
+      [],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+    const withSharedPlanSupport = buildGoalPresentation(
+      makeTask({ preferred_time: null }),
+      makeGoal({ preferred_time_window: null }),
+      [],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+      { sharedPlanSupportsPreferredTimeWindow: true },
+    );
+
+    expect(withoutSupport.supportsPreferredTimeWindow).toBe(false);
+    expect(withSupport.supportsPreferredTimeWindow).toBe(true);
+    expect(withSharedPlanSupport.supportsPreferredTimeWindow).toBe(true);
+  });
+
+  it('uses completion description before a progression action or task name', () => {
+    const result = buildGoalPresentation(
+      makeTask({ name: '名稱備援', completion_description: '先準備練習材料' }),
+      makeGoal({ motivation_note: '這個不應覆蓋完成說明' }),
+      [],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.todayAction).toBe('先準備練習材料');
+  });
+
+  it.each([
+    ['habit', makeTask(), makeGoal()],
     [
       'habit',
       makeTask({ name: '每天整理書包' }),
@@ -318,12 +469,11 @@ describe('buildGoalPresentation', () => {
     );
     expect(result.weekSummary).not.toContain('自己開始');
     expect(result.nextReward).toBeNull();
-    expect(result.milestones).toEqual([]);
-    expect(result.nextText).toBe('今天繼續就好，已完成的閱讀都會保留');
+    expect(result.milestones.some((item) => item.id === 'final-review')).toBe(false);
+    expect(result.nextText).toBe('下一次繼續完成「自主閱讀計畫」就好');
     expect(result.canCompleteToday).toBe(true);
     expect(result.todayStatusText).toBeNull();
     expect(result.planNotice).toBeNull();
-    expect(result.isReadingPlan).toBe(true);
   });
 
   it('marks only the real recurrence days as scheduled', () => {
@@ -514,7 +664,7 @@ describe('buildGoalPresentation', () => {
     ]);
   });
 
-  it('keeps reading milestones hidden while retaining real records and plan details', () => {
+  it('keeps only persisted rhythm checkpoints while retaining real records and plan details', () => {
     const result = buildGoalPresentation(
       makeTask(),
       makeGoal(),
@@ -527,7 +677,7 @@ describe('buildGoalPresentation', () => {
       dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
     );
 
-    expect(result.milestones).toEqual([]);
+    expect(result.milestones.some((item) => item.id === 'final-review')).toBe(false);
     expect(result.nextReward).toBeNull();
     expect(result.recentRecords).toEqual([
       {
@@ -555,7 +705,7 @@ describe('buildGoalPresentation', () => {
     expect(JSON.stringify(result.recentRecords)).not.toContain('self_started');
   });
 
-  it('does not infer reading checkpoint completion from current_day or completion rows', () => {
+  it('keeps persisted checkpoints planned without inferring completion from current_day or rows', () => {
     const result = buildGoalPresentation(
       makeTask(),
       makeGoal({ current_day: 5, checkpoint_rewards: { '1': 10, '5': 20 } }),
@@ -563,7 +713,7 @@ describe('buildGoalPresentation', () => {
       dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
     );
 
-    expect(result.milestones).toEqual([]);
+    expect(result.milestones.every((item) => item.status === 'planned')).toBe(true);
     expect(result.nextReward).toBeNull();
     expect(result.nextText).not.toMatch(/里程碑|回饋已記下|成長幣/);
   });
@@ -617,7 +767,6 @@ describe('buildGoalPresentation', () => {
     expect(result.todayAction).toBe('這一階段先練習：雙手合奏');
     expect(result.weekTarget).toBe(0);
     expect(result.weekProgressLabel).toBe('依自己的節奏練習');
-    expect(result.sectionOrder).toEqual(['hero', 'today', 'week', 'rewards', 'review']);
     expect(result.weekDays).toHaveLength(7);
     expect(result.weekDays.every((day) => day.state === 'unscheduled')).toBe(true);
     expect(result.weekSummary).not.toContain('0／7');
@@ -657,7 +806,6 @@ describe('buildGoalPresentation', () => {
     expect(result.canCompleteToday).toBe(false);
     expect(result.todayTitle).toBe('目前階段');
     expect(result.todayStatusText).toBe('這個階段由家長確認完成');
-    expect(result.isReadingPlan).toBe(false);
   });
 
   it('uses challenge values consistently for progress and completion meaning', () => {
@@ -689,12 +837,11 @@ describe('buildGoalPresentation', () => {
     expect(result.weekSummary).toBe('累積進度會在家長確認後更新。');
     expect(result.milestones[0].title).toBe('已累積 25 頁');
     expect(result.milestones[result.milestones.length - 1].title).toBe('達到 100 頁');
-    expect(result.categoryLabel).toBe('自主挑戰');
+    expect(result.categoryLabel).toBe('D學習與技能');
     expect(result.canCompleteToday).toBe(false);
     expect(result.todayStatusText).toBe('累積進度由家長一起確認');
     expect(result.weekTarget).toBe(0);
     expect(result.weekDays.every((day) => day.state === 'unscheduled')).toBe(true);
-    expect(result.isReadingPlan).toBe(false);
   });
 
   it('labels a non-reading challenge as an autonomous challenge', () => {
@@ -716,7 +863,7 @@ describe('buildGoalPresentation', () => {
       dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
     );
 
-    expect(result.categoryLabel).toBe('自主挑戰');
+    expect(result.categoryLabel).toBe('D學習與技能');
     expect(result.overallLabel).toBe('8 / 20 公里');
     expect(result.canCompleteToday).toBe(false);
     expect(result.weekTarget).toBe(0);
@@ -859,11 +1006,10 @@ describe('buildGoalPresentation', () => {
       dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
     );
 
-    expect(result.categoryLabel).toBe('家庭參與');
+    expect(result.categoryLabel).toBe('D學習與技能');
     expect(result.weekTarget).toBe(1);
     expect(result.totalWeeks).toBe(4);
     expect(result.weekDays).toHaveLength(7);
-    expect(result.sectionOrder).toEqual(['hero', 'today', 'week', 'rewards', 'review']);
   });
 
   it('does not offer completion on a rest day', () => {
@@ -1077,7 +1223,7 @@ describe('buildGoalPresentation', () => {
     (_type, task, goal) => {
       const result = buildGoalPresentation(
         task,
-        { ...goal, active_days: [] },
+        { ...goal, active_days: [], checkpoint_rewards: null },
         [],
         dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
       );
@@ -1089,7 +1235,7 @@ describe('buildGoalPresentation', () => {
       expect(result.weekLabel).toBe('尚未安排週期');
       expect(result.planPeriodLabel).toBe('2026-07-27 ～ 尚未安排執行日期');
       expect(result.focusText).toBe('先和家人一起安排適合的執行日期');
-      if (result.goalKind === 'reading_habit') {
+      if (result.milestones.length === 0) {
         expect(result.milestones).toEqual([]);
       } else {
         expect(result.milestones.at(-1)?.title).toBe('安排好週期後一起回顧');

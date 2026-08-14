@@ -12,7 +12,6 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const TZ = 'Asia/Taipei';
-const MONDAY_TO_FRIDAY = [1, 2, 3, 4, 5];
 const ALL_WEEK_DAYS = [1, 2, 3, 4, 5, 6, 0];
 const DAY_LABELS: Record<number, string> = {
   0: '日',
@@ -59,11 +58,17 @@ export type GoalRecentRecord = {
 };
 
 export type GoalKind =
-  | 'reading_habit'
   | 'habit'
   | 'skill'
   | 'challenge'
   | 'family';
+
+export type GoalProgressionType =
+  | 'weekly_rhythm'
+  | 'fixed_days'
+  | 'staged_skill'
+  | 'accumulation'
+  | 'challenge';
 
 export type GoalPlanState =
   | 'active'
@@ -82,6 +87,7 @@ export type GoalPresentation = {
   weekTarget: number;
   totalWeeks: number;
   goalKind: GoalKind;
+  progression: GoalProgressionType | null;
   planState: GoalPlanState;
   categoryLabel: string;
   overallLabel: string;
@@ -93,8 +99,8 @@ export type GoalPresentation = {
   todayAction: string;
   todayStatusText?: string | null;
   preferredTimeWindow: PreferredTimeWindow | null;
+  supportsPreferredTimeWindow: boolean;
   canCompleteToday: boolean;
-  isReadingPlan: boolean;
   weekDays: GoalDayStatus[];
   weekSummary: string;
   nextReward: { threshold: number; coin: number } | null;
@@ -106,7 +112,22 @@ export type GoalPresentation = {
   finalRewardText: string;
   reviewTitle: string;
   reviewPrompt: string;
-  sectionOrder: ['hero', 'today', 'week', 'rewards', 'review'];
+};
+
+export type GoalPresentationCapabilities = {
+  sharedPlanSupportsPreferredTimeWindow?: boolean;
+};
+
+type StructuredPresentationTask = Task & {
+  progress_model?: string | null;
+  next_step?: string | null;
+  supports_preferred_time_window?: boolean | null;
+};
+
+type StructuredPresentationGoal = LongTermGoal & {
+  progress_model?: string | null;
+  next_step?: string | null;
+  supports_preferred_time_window?: boolean | null;
 };
 
 function weekStart(now: Dayjs): Dayjs {
@@ -155,12 +176,67 @@ function getWeeklyFrequency(task: Task): number | null {
     : null;
 }
 
+function getProgressModel(task: Task, goal: LongTermGoal): string | null {
+  const taskModel = (task as StructuredPresentationTask).progress_model;
+  const goalModel = (goal as StructuredPresentationGoal).progress_model;
+  return goalModel?.trim() || taskModel?.trim() || null;
+}
+
+function getProgression(
+  task: Task,
+  goal: LongTermGoal,
+  weeklyFrequency: number | null,
+  activeDays: number[],
+): GoalProgressionType | null {
+  if (goal.goal_type === 'skill') return 'staged_skill';
+  if (goal.goal_type === 'challenge') {
+    return Number.isFinite(goal.current_value) && Number.isFinite(goal.target_value)
+      && Number(goal.target_value) > 0
+      ? 'accumulation'
+      : 'challenge';
+  }
+
+  if (getProgressModel(task, goal) === 'weekly_rhythm' || weeklyFrequency !== null) {
+    return 'weekly_rhythm';
+  }
+
+  return activeDays.length > 0 ? 'fixed_days' : null;
+}
+
+function getCategoryLabel(task: Task, goalKind: GoalKind): string {
+  const labels: Record<string, string> = {
+    A: 'A生活習慣',
+    B: 'B家庭參與',
+    C: 'C自主挑戰',
+    D: 'D學習與技能',
+  };
+  const category = String(task.category ?? '').trim();
+  if (labels[category]) return labels[category];
+
+  return goalKind === 'family'
+    ? labels.B
+    : goalKind === 'challenge'
+      ? labels.C
+      : goalKind === 'skill'
+        ? labels.D
+        : labels.A;
+}
+
+function isPreferredTimeWindow(value: unknown): value is PreferredTimeWindow {
+  return value === 'after_dinner' || value === 'before_bed';
+}
+
+function getStructuredNextStep(task: Task, goal: LongTermGoal): string | null {
+  const goalNextStep = (goal as StructuredPresentationGoal).next_step?.trim();
+  const taskNextStep = (task as StructuredPresentationTask).next_step?.trim();
+  return goalNextStep || taskNextStep || task.completion_description?.trim() || null;
+}
+
 function buildFlexibleWeekSummary(
-  isReadingHabit: boolean,
   completed: number,
   target: number,
 ): string {
-  const activity = isReadingHabit ? '閱讀' : '完成';
+  const activity = '完成';
   const remaining = Math.max(target - completed, 0);
 
   if (remaining === 0) {
@@ -232,7 +308,6 @@ function buildWeekDays(
 function getActiveDays(
   task: Task,
   goal: LongTermGoal,
-  isReadingHabit: boolean,
   isSkill: boolean,
   isChallenge: boolean,
 ): number[] {
@@ -241,7 +316,7 @@ function getActiveDays(
   const configuredDays =
     goal.active_days
     ?? task.recurrence_days
-    ?? (isReadingHabit ? MONDAY_TO_FRIDAY : ALL_WEEK_DAYS);
+    ?? [];
 
   return Array.from(
     new Set(configuredDays.filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)),
@@ -340,11 +415,7 @@ function getCurrentSkillStage(goal: LongTermGoal): string {
 
 function buildRhythmMilestones(
   goal: LongTermGoal,
-  totalWeeks: number,
-  isReadingHabit: boolean,
 ): GoalMilestone[] {
-  if (isReadingHabit) return [];
-
   const checkpoints = Object.entries(goal.checkpoint_rewards ?? {})
     .map(([threshold, coin]) => ({
       threshold: Number(threshold),
@@ -360,6 +431,10 @@ function buildRhythmMilestones(
       : null,
     status: 'planned',
   }));
+  return milestones;
+
+  /* Legacy synthetic final-review milestone intentionally removed.
+
   const chineseWeekCounts: Record<number, string> = {
     1: '一',
     2: '二',
@@ -384,6 +459,7 @@ function buildRhythmMilestones(
   });
 
   return milestones;
+  */
 }
 
 function buildSkillMilestones(
@@ -520,22 +596,20 @@ export function buildGoalPresentation(
   goal: LongTermGoal,
   completions: GoalCompletionRecord[],
   now = dayjs().tz(TZ),
+  capabilities: GoalPresentationCapabilities = {},
 ): GoalPresentation {
-  const isReadingPlan = task.name.includes('閱讀');
   const isSkill = goal.goal_type === 'skill';
   // DB 的值是 'responsibility'；孩子端對外仍叫「家庭」（見 goalKind）。
   const isFamily = goal.goal_type === 'responsibility';
   const isChallenge = goal.goal_type === 'challenge';
-  const isReadingHabit = isReadingPlan && !isSkill && !isFamily && !isChallenge;
-  const goalKind: GoalKind = isReadingHabit
-    ? 'reading_habit'
-    : isSkill
-      ? 'skill'
-      : isFamily
-        ? 'family'
-        : isChallenge
-          ? 'challenge'
-          : 'habit';
+  const isRhythmGoal = !isSkill && !isChallenge && !isFamily;
+  const goalKind: GoalKind = isSkill
+    ? 'skill'
+    : isFamily
+      ? 'family'
+      : isChallenge
+        ? 'challenge'
+        : 'habit';
   const hasChallengeValues =
     isChallenge
     && Number.isFinite(goal.current_value)
@@ -547,7 +621,9 @@ export function buildGoalPresentation(
     weeklyFrequency !== null
     && !isSkill
     && !isChallenge;
-  const activeDays = getActiveDays(task, goal, isReadingHabit, isSkill, isChallenge);
+  const activeDays = getActiveDays(task, goal, isSkill, isChallenge);
+  const progression = getProgression(task, goal, weeklyFrequency, activeDays);
+  const progressModel = getProgressModel(task, goal);
   const planStart = getPlanStart(goal, task, now);
   const dueDateEnd = task.due_date
     ? getValidDueDate(planStart, task.due_date)
@@ -560,6 +636,12 @@ export function buildGoalPresentation(
       ? planStart.add(goal.total_days - 1, 'day')
       : null;
   const planEnd = goalEnd ?? dueDateEnd ?? challengeEnd;
+  const hasExplicitRhythmPeriod =
+    progression === 'weekly_rhythm'
+    && progressModel === 'weekly_rhythm'
+    && weeklyFrequency !== null
+    && getValidStartDate(goal.started_at) !== null
+    && (goalEnd !== null || dueDateEnd !== null);
   const rhythmCompletions = validRhythmCompletions(
     completions,
     activeDays,
@@ -635,7 +717,7 @@ export function buildGoalPresentation(
     : isChallenge
       ? getNextCheckpoint(goal, current)
       : null;
-  const hasReachedTarget = current >= target;
+  const hasReachedTarget = !hasExplicitRhythmPeriod && current >= target;
   const isFuture = today.isBefore(planStart, 'day');
   const isExpired = planEnd !== null && today.isAfter(planEnd, 'day');
   const hasEmptyDailySchedule =
@@ -694,6 +776,7 @@ export function buildGoalPresentation(
       : null;
   const planNotice =
     (planState === 'active' || planState === 'unplanned')
+    && !hasExplicitRhythmPeriod
     && scheduledCapacity !== null
     && scheduledCapacity < target
       ? `目前期間最多安排 ${scheduledCapacity} 次，和 ${target} 次目標不一致，可以和家人一起調整。`
@@ -703,12 +786,14 @@ export function buildGoalPresentation(
     : hasUnplannedCycle
       ? '尚未安排週期'
       : `第 ${currentWeek} 週／共 ${totalWeeks} 週`;
-  const completionConditionLabel = isSkill
+  const completionConditionLabel = hasExplicitRhythmPeriod
+    ? '依每週節奏完成'
+    : isSkill
     ? `完成 ${target} 個階段`
     : hasChallengeValues
       ? `累積 ${target}${challengeUnit ? ` ${challengeUnit}` : ''}`
       : `完成 ${target} 次`;
-  const adjustableItemsLabel = isReadingHabit
+  const adjustableItemsLabel = isRhythmGoal
     ? '閱讀時段、每週次數、閱讀方式或內容'
     : isSkill
       ? '練習時段、每週次數、階段內容'
@@ -719,17 +804,23 @@ export function buildGoalPresentation(
     ? buildSkillMilestones(goal, current, target)
     : hasChallengeValues
       ? buildChallengeMilestones(goal, current, target, challengeUnit)
-      : buildRhythmMilestones(
-          goal,
-          totalWeeks,
-          isReadingHabit,
-        );
+      : buildRhythmMilestones(goal);
+  const preferredTimeWindow = isPreferredTimeWindow(goal.preferred_time_window)
+    ? goal.preferred_time_window
+    : isPreferredTimeWindow(task.preferred_time)
+      ? task.preferred_time
+      : null;
+  const supportsPreferredTimeWindow =
+    preferredTimeWindow !== null
+    || (goal as StructuredPresentationGoal).supports_preferred_time_window === true
+    || (task as StructuredPresentationTask).supports_preferred_time_window === true
+    || capabilities.sharedPlanSupportsPreferredTimeWindow === true;
 
   return {
     headerTitle: task.name,
     weekLabel: hasUnplannedCycle
       ? '尚未安排週期'
-      : isReadingHabit
+      : isRhythmGoal
       ? `第 ${currentWeek} 週`
       : isSkill
         ? `第 ${Math.min(current + 1, target)} 階段`
@@ -746,23 +837,30 @@ export function buildGoalPresentation(
     weekTarget,
     totalWeeks,
     goalKind,
+    progression,
     planState,
-    categoryLabel: isChallenge
+    categoryLabel: getCategoryLabel(task, goalKind),
+    /*
       ? '自主挑戰'
-      : isReadingPlan || isSkill
+      : isSkill
         ? '學習與技能'
         : isFamily
           ? '家庭參與'
           : '習慣養成',
-    overallLabel: isSkill
+    */
+    overallLabel: hasExplicitRhythmPeriod
+      ? planWeekLabel
+      : isSkill
       ? `第 ${current} / ${target} 階段`
       : hasChallengeValues
         ? `${current} / ${target}${challengeUnit ? ` ${challengeUnit}` : ''}`
         : `${current} / ${target} 次`,
-    overallPercent,
+    overallPercent: hasExplicitRhythmPeriod && totalWeeks > 0
+      ? Math.round((currentWeek / totalWeeks) * 100)
+      : overallPercent,
     focusText: hasUnplannedCycle
       ? '先和家人一起安排適合的執行日期'
-      : isReadingHabit
+      : isRhythmGoal
       ? currentWeek === 1
         ? '第 1 週：先找到適合自己的閱讀節奏'
         : `第 ${currentWeek} 週：繼續找到適合自己的閱讀節奏`
@@ -773,7 +871,7 @@ export function buildGoalPresentation(
           : isFamily
             ? '每一次參與，都讓家裡的節奏更穩一點'
             : '先找到適合自己的生活節奏',
-    nextText: isReadingHabit
+    nextText: progression === 'weekly_rhythm'
       ? todayIsActive
         ? '今天繼續就好，已完成的閱讀都會保留'
         : '下一次繼續就好，已完成的閱讀都會保留'
@@ -786,7 +884,7 @@ export function buildGoalPresentation(
           : `下一次繼續完成「${task.name}」就好`,
     planNotice,
     todayTitle,
-    todayAction: isReadingHabit
+    todayAction: getStructuredNextStep(task, goal) ?? (isRhythmGoal
       ? goal.motivation_note?.trim()
         || (task.base_time_min > 0
           ? `${task.name} ${task.base_time_min} 分鐘，今天繼續就好`
@@ -797,15 +895,15 @@ export function buildGoalPresentation(
           ? hasChallengeValues
             ? `已累積 ${current}${challengeUnit ? ` ${challengeUnit}` : ''}，由家長確認後更新`
             : '這項累積進度由家長確認後更新'
-          : task.name,
+          : task.name),
     todayStatusText,
-    preferredTimeWindow: goal.preferred_time_window,
+    preferredTimeWindow,
+    supportsPreferredTimeWindow,
     canCompleteToday,
-    isReadingPlan: isReadingHabit,
     weekDays,
     weekSummary: isFlexibleWeeklyRhythm
-      ? buildFlexibleWeekSummary(isReadingHabit, weekCompleted, weekTarget)
-      : isReadingHabit
+      ? buildFlexibleWeekSummary(weekCompleted, weekTarget)
+      : isRhythmGoal
       ? `這週已閱讀 ${weeklyCompletions.length} 次。少一天沒有關係，找到適合自己的節奏更重要。`
       : isSkill
         ? '這週可以依自己的節奏，繼續目前的練習階段。'
@@ -826,17 +924,16 @@ export function buildGoalPresentation(
     adjustableItemsLabel,
     finalRewardText: hasUnplannedCycle
       ? '安排好週期後，再一起回顧這段計畫'
-      : isReadingHabit
+      : isRhythmGoal
         ? `第 ${totalWeeks} 週結束後一起回顧，可以繼續、調整閱讀方式，或讓計畫先告一段落`
         : isSkill
           ? '完成最後階段後，一起留下這段學習成果'
           : '完成旅程後，一起選一個值得記住的時刻',
-    reviewTitle: isReadingHabit ? '週末一起回顧' : '一起回顧這段成長',
-    reviewPrompt: isReadingHabit
+    reviewTitle: isRhythmGoal ? '週末一起回顧' : '一起回顧這段成長',
+    reviewPrompt: isRhythmGoal
       ? '哪一本最喜歡？晚餐後還是睡前比較適合？'
       : isSkill
         ? '哪一段練習最有感？下一步想怎麼調整？'
         : '這段時間哪裡最順？下一步想怎麼調整？',
-    sectionOrder: ['hero', 'today', 'week', 'rewards', 'review'],
   };
 }
