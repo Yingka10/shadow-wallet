@@ -14,6 +14,10 @@ import { mapPostgresErrorCode } from '../parentTaskCreationService';
 import { CHILD_PROPOSAL_STATUSES } from './types';
 import { buildDirectConfirmCommand } from './directConfirm';
 import {
+  buildChildPlanConfirmCommand,
+  type ConfirmChildPlanningProposalResult,
+} from '../childPlanning/parentAgreement';
+import {
   buildAcceptReviewCommand,
   buildCloseUnsuitableCommand,
   buildRequestChangesCommand,
@@ -69,6 +73,13 @@ export const REQUEST_CHILD_PROPOSAL_CHANGES_RPC = 'request_child_proposal_change
 export const CLOSE_CHILD_PROPOSAL_UNSUITABLE_RPC = 'close_child_proposal_unsuitable_v1';
 export const ACCEPT_CHILD_PROPOSAL_ADJUSTMENT_RPC = 'accept_child_proposal_adjustment_v1';
 export const DECLINE_CHILD_PROPOSAL_ADJUSTMENT_RPC = 'decline_child_proposal_adjustment_v1';
+/**
+ * P1-A4A：家長同意孩子已經確認且完整的計畫。
+ *
+ * ⚠️ 是 CONFIRM_CHILD_PROPOSAL_RPC 的 **sibling**，不是它的替代。
+ *    AI-authored 的提案永遠走那一支，一個行為都沒改。
+ */
+export const CONFIRM_CHILD_PLANNING_PROPOSAL_RPC = 'confirm_child_planning_proposal_v1';
 
 /**
  * 只有這六支。型別上就不接受任意字串 —— 打錯名字要在編譯期就被抓到，
@@ -81,6 +92,7 @@ type ChildProposalRpcName =
   | typeof RECORD_CHILD_PROPOSAL_TRIAL_RPC
   | typeof CREATE_CHILD_PROPOSAL_ADJUSTMENT_RPC
   | typeof CONFIRM_CHILD_PROPOSAL_RPC
+  | typeof CONFIRM_CHILD_PLANNING_PROPOSAL_RPC
   | typeof REVISE_CHILD_PROPOSAL_PLAN_RPC
   | typeof ACCEPT_CHILD_PROPOSAL_PLAN_RPC
   | typeof REQUEST_CHILD_PROPOSAL_CHANGES_RPC
@@ -384,6 +396,54 @@ export class SupabaseChildProposalService {
       ok: true,
       proposalId,
       planVersionId,
+      taskId,
+      relatedIds: Array.isArray(result.payload.relatedIds)
+        ? result.payload.relatedIds.filter((id): id is string => typeof id === 'string')
+        : [],
+      confirmedReward: result.payload.confirmedReward,
+      idempotentReplay: result.payload.idempotentReplay === true,
+    };
+  }
+
+  /**
+   * P1-A4A：家長同意孩子已經確認且完整的計畫。
+   *
+   * ⚠️ 與 confirmDirect 是**兩支**，不是一支帶旗標的。路由由
+   *    resolveConfirmRoute 決定，而且只看 authorship 與 lineage。
+   */
+  async confirmChildPlanAgreement(
+    card: ParentProposalCardData,
+    childAgeGroup: string,
+  ): Promise<ConfirmChildPlanningProposalResult> {
+    const built = buildChildPlanConfirmCommand(card, childAgeGroup);
+    if (built.ok !== true) return built;
+
+    const fallback = '建立共同約定失敗';
+    const result = await callProposalRpc(
+      CONFIRM_CHILD_PLANNING_PROPOSAL_RPC, built.command, fallback,
+    );
+    if (result.ok !== true) return result;
+
+    const proposalId = requireId(result.payload, 'proposalId', fallback);
+    if (isFailure(proposalId)) return proposalId;
+    const planVersionId = requireId(result.payload, 'planVersionId', fallback);
+    if (isFailure(planVersionId)) return planVersionId;
+    const sourcePlanVersionId = requireId(result.payload, 'sourcePlanVersionId', fallback);
+    if (isFailure(sourcePlanVersionId)) return sourcePlanVersionId;
+    const taskId = requireId(result.payload, 'taskId', fallback);
+    if (isFailure(taskId)) return taskId;
+    if (!isConfirmedReward(result.payload.confirmedReward)) {
+      return {
+        ok: false, code: 'UNKNOWN', reason: 'CONFIRMED_REWARD_MISSING',
+        message: `${fallback}：共同版本缺少確認的回饋紀錄`,
+      };
+    }
+
+    return {
+      ok: true,
+      proposalId,
+      planVersionId,
+      sourcePlanVersionId,
       taskId,
       relatedIds: Array.isArray(result.payload.relatedIds)
         ? result.payload.relatedIds.filter((id): id is string => typeof id === 'string')

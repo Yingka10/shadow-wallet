@@ -654,3 +654,125 @@ AI policy helper 掛掉不可以把孩子已經確認的提案永遠鎖在 draft
 - 不建任務、不轉 active、不寫 confirmed reward、不碰錢包與 payout
 - 不做 milestone 完成／發放、不做 Dynamic Replan
 - 不換付費 provider、不加第三順位模型
+
+---
+
+## 12. P1-A4A：Parent Direct Agreement
+
+孩子確認過的完整計畫 → **家庭共同約定** ＋ 正式任務。
+
+```
+child formal plan (authored_by = 'child')
+        ↓  confirm_child_planning_proposal_v1（一個交易）
+parent agreement version (authored_by = 'parent')
+        adopted_from_plan_version_id = child formal plan
+canonical task（走既有 create_parent_task_v1）
+proposal → active
+```
+
+### 12.1 產品語意
+
+不是「家長批准 AI 計畫」，也不是「家長接管孩子的 Plan」：
+
+> 孩子已經確認「我要怎麼做到」；
+> 家長現在只確認這份**已經完整**的安排能不能成為家庭共同約定。
+
+### 12.2 兩條線，不是一支通用 function
+
+| | P0 Direct Confirm | P1 Parent Agreement |
+|---|---|---|
+| RPC | `confirm_child_proposal_v1` | `confirm_child_planning_proposal_v1` |
+| 收 | `authored_by = 'ai'` | `authored_by = 'child'` ＋ planning lineage |
+| 語意 | 採用 GrowBook 的建議 | 同意孩子的安排 |
+| 幣值錨點 | `ai_suggested_coin_amount` | `ai_snapshot.policy.sessionCoinReference` |
+
+把 legacy 的 `authored_by = 'ai'` 放寬成 `IN ('ai','child')` 會得到一支看似通用、
+其實語意分叉的 function —— 之後每加一個條件都要先問「這是哪一條的」。
+**legacy 一個字都沒改。**
+
+路由（`resolveConfirmRoute`）**只看 authorship 與 lineage**。不看 `plan_title`、
+不看 `ai_snapshot`、不看 `ai_model`：內容看起來像什麼，都不能決定一份計畫的 ownership。
+
+### 12.3 什麼叫「可以直接同意」
+
+全部成立才算：`status = proposed` ／ current = `expectedPlanVersionId` ／
+`authored_by = 'child'` ／ planning lineage 三欄齊全 ／
+`enrichment_status = 'enriched'` ／ `requires_parent_decision = []` ／
+正式任務需要的系統欄位全齊。
+
+缺任何一個 → `SHARED_DECISION_REQUIRED`，**不自動補值**。
+
+### 12.4 共同條件沒決定 ≠ 錯誤
+
+`requires_parent_decision = ['cadence','duration']` 時，A4A **不讓家長直接填**。
+孩子從來沒答應過那個新節奏 —— 那是 A4B 的協商流程。
+
+畫面顯示「還有安排要一起補充」，並用家長話列出缺什麼
+（`cadence` → 進行頻率、`session_size` → 每次大約做多久…），
+**不顯示假的「確認」按鈕**，也不說「還不能確認」——後者會讀成孩子的問題。
+
+### 12.5 家長這顆確認不能同時編計畫
+
+命令帶 `planTitle` / `nextStep` / `cadence*` / `duration*` / `estimatedMinutes` /
+`childConfirmedPlan` / `progressionKind` / `phases` / `targetValue` … 任何一個
+→ `CHILD_PLAN_NOT_CLIENT_SUPPLIED`，整筆拒絕。
+
+命令只有四個鍵：`schemaVersion` / `proposalId` / `expectedPlanVersionId` /
+`rewardDecision`。內容全部由 RPC 從孩子那一版逐欄複製。
+
+### 12.6 只有一份 canonical child plan
+
+共同版本**不複製** `child_confirmed_plan`。DB CHECK 本來就不允許
+（帶 planning lineage 的列 `authored_by` 必須是 `child`），而語意上更重要：
+複製一份的話，「孩子原本怎麼想」會有兩個答案。
+
+回查路徑：
+
+```
+task → proposal → current parent agreement version
+     → adopted_from_plan_version_id → child formal plan → child_confirmed_plan
+```
+
+這條 lineage 是之後 LongTerm Detail、Dynamic Next Step、
+「孩子原本怎麼想」的正式來源。
+
+### 12.7 Child-owned 欄位不可在確認時被改寫
+
+RPC 的驗證區塊逐欄比對兩件事：孩子那一版**沒有被動過**
+（`authored_by` / lineage / `child_confirmed_plan` / 內容欄位），
+以及共同版本的執行內容**逐欄等於**孩子那一版。confirm 時
+trim / rewrite / default / AI regenerate 一律不允許。
+
+### 12.8 Reward freshness
+
+家長可能是幾天後才按確認，所以 App 端用**現在的**政策重算一次
+（`evaluateTaskReward`，與 P0 完全同一條計算鏈，**沒有第二套 evaluator**），
+RPC 再驗那份判定與計畫上的證據一致。
+
+幣值的錨點是 A3 enrichment 記在 `ai_snapshot.policy.sessionCoinReference` 的
+session 價 —— 那是伺服器端存著、規則引擎產生的數字。A3 刻意不在 child formal
+plan 上存幣值，所以沒有這個錨點的話，呼叫端送什麼金額都沒有東西可以比對。
+
+- 政策／版本對不上 → `POLICY_CHANGED`，**不靜靜改掉計畫上的證據**
+- `finalAmount ≠ suggestedAmount` → 拒絕（家長不自由輸入金額）
+- `payoutType ≠ per_completion` → 拒絕（staged 不是 per_milestone，
+  accumulation 不是 final_completion；那兩種目前沒有結算路徑）
+- B 類 ＋ `coin_eligible` → 拒絕
+
+孩子的 canonical plan 本身不受政策變動影響。
+
+### 12.9 原子性、冪等、stale
+
+一個交易：鎖提案 → 鎖 child plan → 驗證 → 建共同版本 → 建任務 →
+寫 confirmed reward 快照 → supersede → 轉 active → 回寫 task_id。
+任何一步失敗全 rollback（`P0001` subtransaction）。
+
+冪等靠 **lineage** 對帳（`adopted_from_plan_version_id = expectedPlanVersionId`），
+不是「這份提案剛好是 active」；對不上的 active 是另一次確認，回 `STALE_PLAN_VERSION`。
+current version 換掉了也回 `STALE_PLAN_VERSION`。
+
+### 12.10 這一包不做
+
+家長新增／修改 cadence、duration、next step；孩子二次 review；
+A4B 共同條件協商；LongTermDetail redesign；WP2 merge；Dynamic Replan；
+付費 provider cutover。

@@ -262,6 +262,20 @@ export type ChildProposal = {
   updated_at: string;
 };
 
+/**
+ * 還沒決定、而且屬於家庭共同條件的欄位（P1-A3 寫入，P1-A4A 讀）。
+ *
+ * 這裡與 `childPlanning/formalPlan` 的 `RequiresParentDecision` 是同一組值。
+ * 兩邊各宣告一次是刻意的：childProposal 不 import childPlanning，
+ * 否則 P0 的提案契約會開始依賴 P1 的規劃契約。由 parity 測試釘住同值。
+ */
+export type ChildPlanSharedDecision =
+  | 'cadence'
+  | 'session_size'
+  | 'duration'
+  | 'reward'
+  | 'purpose_category';
+
 export type ChildProposalPlanVersion = {
   id: string;
   proposal_id: string;
@@ -319,8 +333,35 @@ export type ChildProposalPlanVersion = {
   ai_snapshot: unknown | null;
   ai_model: string | null;
   ai_request_id: string | null;
-  /** Parent adoption 指向被採用的 AI version；不重用 ai_request_id。 */
+  /**
+   * Parent adoption 指向被採用的來源 version；不重用 ai_request_id。
+   *
+   * 兩條線都用它，而且**只用它**：
+   *   P0  parent agreement → 被採用的 AI version
+   *   P1  parent agreement → 孩子確認過的 child formal version（P1-A4A）
+   * 再造第二條 parent-source lineage 等於讓「這一版從哪來」有兩個答案。
+   */
   adopted_from_plan_version_id: string | null;
+
+  // ── P1-A3 Planning lineage ─────────────────────────────────────────────
+  //
+  // 四欄同進同出（DB CHECK）。有 lineage 的列 authored_by 一定是 'child'，
+  // 所以 parent agreement version 上這四欄永遠是 null / 空 —— 孩子確認過的
+  // canonical 計畫只有一份，家長那一版透過 adopted_from_plan_version_id 指回去。
+
+  /** 這一版正式計畫是從哪一場孩子確認過的規劃對話來的。 */
+  source_planning_session_id: string | null;
+  planning_schema_version: number | null;
+  /**
+   * 孩子確認過的 canonical 計畫（含 progression 結構與逐欄 provenance）。
+   *
+   * ⚠️ 這是產品資料，**不是** ai_snapshot 那種稽核快照。
+   */
+  child_confirmed_plan: unknown | null;
+  /** 還沒決定、而且屬於家庭共同條件的欄位。空陣列不代表可以直接確認。 */
+  requires_parent_decision: ChildPlanSharedDecision[];
+  /** enriched = 政策欄位算完了；unavailable = 當時 policy helper 不可用。 */
+  enrichment_status: 'enriched' | 'unavailable' | null;
   /**
    * AI 建議的幣值。**永遠不是最終值。**
    *

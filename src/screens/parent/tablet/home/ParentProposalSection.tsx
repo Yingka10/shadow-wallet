@@ -122,9 +122,50 @@ export function ParentProposalSection({
                 </View>
               </View>
 
+              {/*
+                P1：孩子自己規劃並確認過的安排。上半部是「孩子想怎麼做」，
+                下半部（planBlock）是「家庭要一起約定什麼」。兩半分開，
+                家長才看得出來哪些是孩子決定的、哪些是現在要一起談的。
+              */}
+              {card.childPlan ? (
+                <View style={styles.childPlanBlock} testID={`child-plan-${card.id}`}>
+                  <Text style={styles.childPlanEyebrow}>孩子想怎麼做</Text>
+                  {card.childPlan.desiredOutcome && (
+                    <Text style={styles.planTitle}>{card.childPlan.desiredOutcome}</Text>
+                  )}
+                  {card.childPlan.actionPlanSummary && (
+                    <Text style={styles.detailText}>{card.childPlan.actionPlanSummary}</Text>
+                  )}
+                  {card.childPlan.shape && (
+                    <Text style={styles.detailText}>{card.childPlan.shape}</Text>
+                  )}
+                  {card.childPlan.nextAction && (
+                    <View style={styles.detailBlock}>
+                      <Text style={styles.detailLabel}>他想先做的第一件事</Text>
+                      <Text style={styles.detailText}>{card.childPlan.nextAction}</Text>
+                    </View>
+                  )}
+                </View>
+              ) : null}
+
+              {/*
+                還有共同條件沒決定 —— **不顯示一顆假的「確認」**。
+                孩子把「怎麼做到」想得很清楚，缺的是家庭要一起說定的事。
+              */}
+              {card.sharedDecisions.length > 0 ? (
+                <View style={styles.sharedTermsBlock} testID={`shared-terms-${card.id}`}>
+                  <Text style={styles.childPlanEyebrow}>還有安排要一起補充</Text>
+                  {card.sharedDecisions.map(item => (
+                    <Text key={item} style={styles.detailText}>・{item}</Text>
+                  ))}
+                </View>
+              ) : null}
+
               {card.planTitle ? (
                 <View style={styles.planBlock}>
-                  <Text style={styles.planEyebrow}>GrowBook 幫忙整理</Text>
+                  <Text style={styles.planEyebrow}>
+                    {card.childPlan ? '家庭約定' : 'GrowBook 幫忙整理'}
+                  </Text>
                   <Text style={styles.planTitle}>{card.planTitle}</Text>
                   {card.planSummary && <Text style={styles.detailText}>{card.planSummary}</Text>}
                   <View style={styles.summaryRow}>
@@ -178,9 +219,14 @@ export function ParentProposalSection({
                 <View style={styles.actions}>
                   {card.canConfirm && (
                     <TouchableOpacity style={styles.confirmButton} onPress={() => onConfirm(source)} activeOpacity={0.8}>
-                      <Text style={styles.confirmButtonText}>確認這個計畫</Text>
+                      <Text style={styles.confirmButtonText}>{card.confirmLabel}</Text>
                     </TouchableOpacity>
                   )}
+                  {/*
+                    調整只給 legacy 那兩個狀態。P1-A4A 不開家長編輯 ——
+                    改 cadence / duration / next step 都是 A4B 的協商流程，
+                    在這裡直接讓家長改，等於孩子沒答應過就成立了。
+                  */}
                   {(card.state === 'fresh_ai' || card.state === 'child_revisit') && onRevise && (
                     <TouchableOpacity style={styles.secondaryButton} onPress={() => setEditCard(source)} activeOpacity={0.8}>
                       <Text style={styles.secondaryButtonText}>{card.state === 'child_revisit' ? '再調整一下' : '調整一下'}</Text>
@@ -342,6 +388,27 @@ const styles = StyleSheet.create({
     padding: ParentSpacing[4],
     borderRadius: ParentRadii.md,
     backgroundColor: ParentColors.bgSurfaceWarm,
+  },
+  // 孩子那一半用左側色條而不是另一個底色塊：兩個並排的色塊會讓
+  // 「孩子想的」與「一起約定的」看起來像兩張卡片，但它們是同一件事的兩面。
+  childPlanBlock: {
+    gap: ParentSpacing[2],
+    paddingLeft: ParentSpacing[4],
+    paddingVertical: ParentSpacing[2],
+    borderLeftWidth: 3,
+    borderLeftColor: ParentColors.accent,
+  },
+  sharedTermsBlock: {
+    gap: ParentSpacing[1],
+    padding: ParentSpacing[4],
+    borderRadius: ParentRadii.md,
+    backgroundColor: ParentColors.bgSurfaceWarm,
+  },
+  childPlanEyebrow: {
+    fontFamily: ParentFonts.body,
+    fontSize: ParentFontSizes.xs,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgSecondary,
   },
   planEyebrow: {
     fontFamily: ParentFonts.body,

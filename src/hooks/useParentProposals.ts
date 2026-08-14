@@ -4,11 +4,12 @@ import {
   type ParentProposalCardData,
   type ParentProposalMaterialEdits,
 } from '../lib/childProposal';
+import { resolveConfirmRoute } from '../lib/childPlanning/parentAgreement';
 
 export type ParentProposalReader = Pick<SupabaseChildProposalService, 'listProposedForParent'>
   & Partial<Pick<
     SupabaseChildProposalService,
-    'confirmDirect' | 'revisePlan' | 'closeUnsuitable'
+    'confirmDirect' | 'confirmChildPlanAgreement' | 'revisePlan' | 'closeUnsuitable'
   >>;
 
 const defaultReader = new SupabaseChildProposalService();
@@ -75,20 +76,30 @@ export function useParentProposals(
     const currentAction = ++actionRequestId.current;
     setConfirmError(null);
     setSuccessMessage(null);
-    if (!reader.confirmDirect || !childAgeGroup) {
+
+    // 路由只看 authorship 與 lineage。兩條線是兩支 RPC，語意不同 ——
+    // 合成一支帶旗標的，每加一個條件都要先問「這是哪一條的」。
+    const route = resolveConfirmRoute(card);
+    const confirm = route === 'child_planning_plan'
+      ? reader.confirmChildPlanAgreement
+      : route === 'legacy_ai_plan'
+        ? reader.confirmDirect
+        : undefined;
+
+    if (!confirm || !childAgeGroup) {
       setConfirmError('目前還不能確認這個計畫，請重新整理後再試。');
       return;
     }
 
     setConfirmingProposalId(card.proposal.id);
     try {
-      const result = await reader.confirmDirect(card, childAgeGroup);
+      const result = await confirm.call(reader, card, childAgeGroup);
       if (actionRequestId.current !== currentAction) return;
       if (result.ok !== true) {
         setConfirmError(result.message);
         return;
       }
-      setSuccessMessage('已經一起確認好了');
+      setSuccessMessage(route === 'child_planning_plan' ? '已經一起說定了' : '已經一起確認好了');
       await refresh();
     } catch (caught) {
       setConfirmError(caught instanceof Error ? caught.message : '建立共同計畫失敗');

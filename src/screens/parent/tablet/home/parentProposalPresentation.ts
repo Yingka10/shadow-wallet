@@ -1,5 +1,12 @@
 import { isDirectConfirmablePlan } from '../../../../lib/childProposal/directConfirm';
+import {
+  childPlanSharedDecisions,
+  isChildPlanDirectConfirmable,
+  resolveConfirmRoute,
+} from '../../../../lib/childPlanning/parentAgreement';
 import { formatPreferredTime } from '../../../../lib/childProposal/materialDiff';
+import { childPlanCardSummary, sharedDecisionLabels } from './childPlanSummary';
+import type { ChildPlanCardSummary } from './childPlanSummary';
 import type {
   ChildProposal,
   ChildProposalPlanVersion,
@@ -21,7 +28,15 @@ const REWARD_HOPE_COPY: Record<ChildRewardPreference, string> = {
 };
 
 export type ParentProposalViewModel = {
-  state: 'fresh_ai' | 'waiting_child' | 'child_revisit' | 'unready';
+  state:
+    | 'fresh_ai'
+    | 'waiting_child'
+    | 'child_revisit'
+    /** P1：孩子自己規劃並確認過的完整安排，等家長同意。 */
+    | 'child_plan'
+    /** P1：孩子的安排成立，但還有家庭共同條件要一起決定（A4B）。 */
+    | 'child_plan_needs_terms'
+    | 'unready';
   id: string;
   title: string;
   statusLabel: string;
@@ -41,6 +56,20 @@ export type ParentProposalViewModel = {
   rewardSuggestionLabel: string | null;
   canConfirm: boolean;
   waitingMessage: string | null;
+
+  // ── P1-A4A ────────────────────────────────────────────────────────────
+  /**
+   * 孩子確認過的計畫。**只有 P1 版本才有值。**
+   *
+   * 它與下面那些扁平欄位（planTitle / planCadence…）是兩半：
+   * 這一半是「孩子想怎麼做」，那一半是「家庭要一起約定什麼」。
+   * 家長要看得出來哪些是孩子決定的、哪些是現在要一起談的。
+   */
+  childPlan: ChildPlanCardSummary | null;
+  /** 還要一起補充的安排，家長讀得懂的說法。空陣列＝沒有。 */
+  sharedDecisions: string[];
+  /** 主要按鈕的字。P1 是「確認這份約定」，不是「採用 AI 建議」。 */
+  confirmLabel: string;
 };
 
 export function formatProposalCadence(proposal: ChildProposal): string {
@@ -70,28 +99,51 @@ export function presentParentProposal(
 ): ParentProposalViewModel {
   const { proposal, currentPlanVersion: plan } = card;
   const motivation = proposal.child_original_motivation?.trim();
-  const canConfirm = isDirectConfirmablePlan(card);
+  const route = resolveConfirmRoute(card);
+
+  // P1 與 legacy 是兩條線。canConfirm 只在自己那一條上有意義 ——
+  // 用一個布林同時代表兩種確認，之後每個讀它的人都要再問一次「哪一種」。
+  const isChildPlan = route === 'child_planning_plan';
+  const pending = childPlanSharedDecisions(plan);
+  const childPlanReady = isChildPlan && isChildPlanDirectConfirmable(card);
+  const canConfirm = isChildPlan ? childPlanReady : isDirectConfirmablePlan(card);
+
   const isParentReview = plan?.authored_by === 'parent' && plan.requires_child_review === true;
   const state: ParentProposalViewModel['state'] =
     proposal.status === 'needs_child_review' && isParentReview
       ? 'waiting_child'
       : proposal.status === 'proposed' && isParentReview
         ? 'child_revisit'
-        : canConfirm
-          ? 'fresh_ai'
-          : 'unready';
+        : isChildPlan
+          ? (childPlanReady ? 'child_plan' : 'child_plan_needs_terms')
+          : canConfirm
+            ? 'fresh_ai'
+            : 'unready';
   const statusLabel = state === 'waiting_child'
     ? '等孩子看看'
     : state === 'child_revisit'
       ? '孩子想再一起聊聊'
-      : plan ? 'GrowBook 已經整理好' : '等你們一起看看';
+      : state === 'child_plan'
+        ? '孩子已經想好怎麼做'
+        : state === 'child_plan_needs_terms'
+          ? '還有安排要一起補充'
+          : plan ? 'GrowBook 已經整理好' : '等你們一起看看';
   const waitingMessage = state === 'waiting_child'
     ? '等孩子看看新的安排是不是也想試試看'
     : state === 'child_revisit'
       ? '孩子想再一起聊聊'
-      : canConfirm ? null : 'GrowBook 還在整理，目前先看看孩子的原始想法';
+      : state === 'child_plan'
+        ? null
+        : state === 'child_plan_needs_terms'
+          // 不說「還不能確認」—— 孩子把「怎麼做到」想得很清楚，
+          // 缺的是家庭共同條件，而那本來就不該由他一個人決定。
+          ? '孩子的想法已經很完整，還有幾件要一起說定'
+          : canConfirm ? null : 'GrowBook 還在整理，目前先看看孩子的原始想法';
   return {
     state,
+    childPlan: isChildPlan ? childPlanCardSummary(plan) : null,
+    sharedDecisions: sharedDecisionLabels(pending),
+    confirmLabel: isChildPlan ? '確認這份約定' : '確認這個計畫',
     id: proposal.id,
     title: `${childName}有一個新的挑戰想法`,
     statusLabel,
@@ -101,7 +153,9 @@ export function presentParentProposal(
     rewardHope: REWARD_HOPE_COPY[proposal.child_reward_preference],
     planTitle: plan?.plan_title ?? null,
     // Parent revision 保留 summary 作 provenance，但 current authority 只看 structured fields。
-    planSummary: state === 'fresh_ai' ? plan?.plan_summary ?? null : null,
+    planSummary: state === 'fresh_ai' || state === 'child_plan'
+      ? plan?.plan_summary ?? null
+      : null,
     planCadence: plan ? formatPlanCadence(plan) : null,
     estimatedTime: plan?.estimated_minutes
       ? `每次約 ${plan.estimated_minutes} 分鐘`

@@ -63,6 +63,21 @@ function policyChanged(message: string): ChildProposalFailure {
   return { ok: false, code: 'POLICY_CHANGED', reason: 'POLICY_CHANGED', message };
 }
 
+/**
+ * 把 plan version 攤成 canonical evaluator 吃得下的命令。
+ *
+ * ⚠️ 這支是 **export 出去給 P1-A4A 重用的**（P1-A4A §10：不要第二套
+ *    coin/reward evaluator）。兩條線的「怎麼算」必須完全一樣 ——
+ *    差別只在「拿算出來的結果去跟什麼比對」，而那一段在各自的模組裡。
+ *
+ * 它不寫 DB、不判斷可不可以確認，只做欄位攤平。
+ */
+export function planEvaluationCommand(
+  card: ParentProposalCardData,
+): CreateParentTaskCommandBase {
+  return evaluationCommand(card);
+}
+
 function evaluationCommand(card: ParentProposalCardData): CreateParentTaskCommandBase {
   const { proposal, currentPlanVersion: plan } = card;
   if (!plan || !plan.purpose_category || !plan.duration_type || !plan.reward_policy) {

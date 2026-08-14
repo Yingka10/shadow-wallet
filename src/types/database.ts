@@ -1330,6 +1330,12 @@ export interface Database {
         Args: { p_command: object };
         Returns: unknown;
       };
+      // P1-A4A：家長同意孩子已經確認且完整的計畫 → 共同約定版本 ＋ 正式任務。
+      // confirm_child_proposal_v1 的 sibling，那一支只收 AI-authored。
+      confirm_child_planning_proposal_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
       mark_task_atomic: {
         Args: {
           p_task_id: string;
