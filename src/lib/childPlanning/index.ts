@@ -17,6 +17,8 @@ export {
   ChildPlanningSessionService,
   RECORD_PLANNING_ROUND_RPC,
   START_PLANNING_SESSION_RPC,
+  SUBMIT_WITHOUT_PLANNING_RPC,
+  type SubmitWithoutPlanningResult,
   type ChildPlanningSessionFailure,
   type ChildPlanningSessionFailureCode,
   type ChildPlanningSessionResult,

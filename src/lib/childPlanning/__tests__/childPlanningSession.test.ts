@@ -3,8 +3,10 @@
 // 這三條在畫面上看不出來（畫面只會少一顆按鈕），所以只能在這裡釘住。
 
 import {
+  abandonChildPlanningSession,
   canRequestPlanningRound,
   childPlanningSessionExits,
+  isTerminalPlanningStatus,
   confirmChildPlan,
   createChildPlanningSession,
   recordChildResponse,
@@ -226,5 +228,69 @@ describe('孩子回話之後回到 in_progress', () => {
       '第一句',
       '第二句',
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1-A2 Correction — abandoned 是第二個終點
+// ---------------------------------------------------------------------------
+
+describe('孩子選擇不規劃、直接送出', () => {
+  it('in_progress → abandoned', () => {
+    const outcome = abandonChildPlanningSession(run(createChildPlanningSession(), [CHOICE]));
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.state.status).toBe('abandoned');
+    // 放棄的對話裡不會有一份「他確認過的計畫」。
+    expect(outcome.state.confirmedPlan).toBeNull();
+  });
+
+  it('ready → abandoned（他看過計畫但選擇不用它）', () => {
+    const outcome = abandonChildPlanningSession(run(createChildPlanningSession(), [READY]));
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.state.status).toBe('abandoned');
+    expect(outcome.state.confirmedPlan).toBeNull();
+  });
+
+  it('已經確認過的不能被當成沒規劃送出', () => {
+    const confirmed = confirmChildPlan(run(createChildPlanningSession(), [READY]));
+    if (!confirmed.ok) throw new Error('expected confirm to succeed');
+
+    // 偷走一份他同意過的計畫，等於讓它從來沒發生過。
+    expect(abandonChildPlanningSession(confirmed.state)).toEqual({
+      ok: false,
+      reason: 'SESSION_CONFIRMED',
+    });
+  });
+
+  it('放棄之後不能再打模型、不能再回話、不能確認、也不能再放棄一次', () => {
+    const abandoned = abandonChildPlanningSession(run(createChildPlanningSession(), [CHOICE]));
+    if (!abandoned.ok) throw new Error('expected abandon to succeed');
+    const state = abandoned.state;
+
+    expect(canRequestPlanningRound(state)).toBe(false);
+    expect(recordPlanningResult(state, READY)).toEqual({
+      ok: false,
+      reason: 'SESSION_ABANDONED',
+    });
+    expect(recordChildResponse(state, { type: 'custom_choice', answer: '再想想' })).toEqual({
+      ok: false,
+      reason: 'SESSION_ABANDONED',
+    });
+    expect(confirmChildPlan(state)).toEqual({ ok: false, reason: 'SESSION_ABANDONED' });
+    expect(abandonChildPlanningSession(state)).toEqual({
+      ok: false,
+      reason: 'SESSION_ABANDONED',
+    });
+  });
+
+  it('兩個終點都算終點', () => {
+    expect(isTerminalPlanningStatus('child_confirmed')).toBe(true);
+    expect(isTerminalPlanningStatus('abandoned')).toBe(true);
+    expect(isTerminalPlanningStatus('in_progress')).toBe(false);
+    expect(isTerminalPlanningStatus('ready')).toBe(false);
   });
 });

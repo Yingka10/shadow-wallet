@@ -456,3 +456,38 @@ P1 計畫，而家長會看到背景跑出來的另一份 P0 草稿 —— 兩�
 - 不改 P0-3 Plan Draft 的任何行為（AI mode 關掉時走的是一模一樣的兩步送出）
 - 不碰 Direct Confirm、reward、payout、LongTerm UI、WP2
 - 不把 provider 概念帶進契約、持久化或孩子端畫面（由 provider-neutrality 測試掃描）
+
+### 10.7 Correction：session 的第二個終點
+
+第一版漏了一個真實的漏洞：孩子按「先把想法送給爸媽」時提案變成 `proposed`，
+但那場 session 還停在 `in_progress` / `ready` —— 一份「進行中的規劃」掛在一個
+已經送出去的提案上，還佔著「一個提案只有一場對話」的位子、還收得了新的一輪。
+
+所以 status 多了第四個值：
+
+```
+in_progress ─┬─→ ready ─→ child_confirmed   （他確認了這份計畫）
+             └─────────→ abandoned          （他選擇不規劃，直接送出原始提案）
+```
+
+`abandoned` 不是失敗，是一個孩子做的決定。它不得有 `confirmed_plan`／
+`child_confirmed_at`，不再接受任何一輪，而且**不可以轉回去**。
+
+**離開必須是原子的。** 由 App 先 abandon 再 transition 的話，中間斷掉會留下
+「已放棄但沒送出」或「已送出但規劃還開著」，而那兩步之間正好是孩子按下按鈕、
+畫面在轉圈的那一刻。所以新增 `submit_child_proposal_without_planning_v1`：
+同一交易內鎖提案 ＋ 鎖 session ＋ 放棄 ＋ `draft → proposed` ＋ 寫 status event，
+支援冪等重送，沒有 session 也完全合法。
+
+已經 `child_confirmed` 的 session **一律拒絕**（`PLANNING_ALREADY_CONFIRMED`）——
+偷走一份孩子同意過的計畫，等於讓它從來沒發生過。要送出已確認的計畫是 P1-A3 的橋。
+
+### 10.8 Correction：start 失敗不再自動送出
+
+`start` 回 `PERSISTENCE_FAILED` 時，App **無法知道** DB 有沒有其實已經建好那場
+對話（回應可能是在 commit 之後掉的）。舊寫法「開不起來就自動送出」等於在一個
+可能已經開好對話的提案上直接推去 `proposed`，而孩子從頭到尾沒有選過。
+
+改成把選擇交回孩子：再試一次 ／ 我自己想 ／ 先把想法送給爸媽。
+前兩者重用**同一個** `clientRequestId`，讓 start RPC 自己做冪等對帳；
+第三個走上面那支 atomic RPC。

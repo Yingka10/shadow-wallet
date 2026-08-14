@@ -8,6 +8,7 @@ import {
   ChildPlanningSessionService,
   RECORD_PLANNING_ROUND_RPC,
   START_PLANNING_SESSION_RPC,
+  SUBMIT_WITHOUT_PLANNING_RPC,
   type PlanningSessionRpc,
 } from '../childPlanningSessionService';
 import type { ChildGoalPlanningResult } from '../types';
@@ -177,5 +178,106 @@ describe('壞掉的回覆一律當失敗', () => {
     const result = await new ChildPlanningSessionService(rpc).start({ proposalId: 'p' });
 
     expect(result).toEqual({ ok: false, code: 'PERSISTENCE_FAILED', message: '找不到函式' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1-A2 Correction — 不規劃直接送出
+// ---------------------------------------------------------------------------
+
+describe('不規劃、直接送給爸媽', () => {
+  it('走的是 atomic RPC，一次呼叫做完放棄與送出', async () => {
+    const { rpc, calls } = stub({
+      ok: true,
+      proposalId: 'proposal-1',
+      fromStatus: 'draft',
+      toStatus: 'proposed',
+      sessionId: 'session-1',
+      sessionStatus: 'abandoned',
+      idempotentReplay: false,
+    });
+
+    const result = await new ChildPlanningSessionService(rpc).submitWithoutPlanning({
+      proposalId: 'proposal-1',
+    });
+
+    // 一次。分兩次做的話，中間斷掉會留下「已放棄但沒送出」。
+    expect(calls).toHaveLength(1);
+    expect(calls[0].name).toBe(SUBMIT_WITHOUT_PLANNING_RPC);
+    expect(calls[0].command).toEqual({ schemaVersion: 1, proposalId: 'proposal-1' });
+    expect(result).toEqual({
+      ok: true,
+      proposalId: 'proposal-1',
+      sessionStatus: 'abandoned',
+      idempotentReplay: false,
+    });
+  });
+
+  it('本來就沒有 session 也送得出去', async () => {
+    const { rpc } = stub({
+      ok: true,
+      proposalId: 'proposal-1',
+      toStatus: 'proposed',
+      sessionId: null,
+      sessionStatus: null,
+      idempotentReplay: false,
+    });
+
+    const result = await new ChildPlanningSessionService(rpc).submitWithoutPlanning({
+      proposalId: 'proposal-1',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.sessionStatus).toBeNull();
+  });
+
+  it('連點兩下 → 冪等，不是錯誤', async () => {
+    const { rpc } = stub({
+      ok: true,
+      proposalId: 'proposal-1',
+      toStatus: 'proposed',
+      sessionStatus: 'abandoned',
+      idempotentReplay: true,
+    });
+
+    const result = await new ChildPlanningSessionService(rpc).submitWithoutPlanning({
+      proposalId: 'proposal-1',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.idempotentReplay).toBe(true);
+  });
+
+  it('孩子已經確認過計畫 → 拒絕，不得把它當成沒規劃送出', async () => {
+    const { rpc } = stub({
+      ok: false,
+      code: 'POLICY_REJECTED',
+      reason: 'PLANNING_ALREADY_CONFIRMED',
+      message: '這份計畫孩子已經確認過了',
+    });
+
+    const result = await new ChildPlanningSessionService(rpc).submitWithoutPlanning({
+      proposalId: 'proposal-1',
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      code: 'POLICY_REJECTED',
+      reason: 'PLANNING_ALREADY_CONFIRMED',
+      message: '這份計畫孩子已經確認過了',
+    });
+  });
+
+  it('RPC 說 ok 但狀態不是 proposed → 當失敗', async () => {
+    // 靜靜通過會讓孩子看到一個假的成功畫面。
+    const { rpc } = stub({ ok: true, proposalId: 'proposal-1', toStatus: 'draft' });
+
+    const result = await new ChildPlanningSessionService(rpc).submitWithoutPlanning({
+      proposalId: 'proposal-1',
+    });
+
+    expect(result.ok).toBe(false);
   });
 });

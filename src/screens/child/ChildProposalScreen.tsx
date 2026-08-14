@@ -96,7 +96,25 @@ type Phase =
    * migration 的 confirm RPC：現在就轉的話，孩子看的是 P1 計畫，
    * 而家長會看到背景跑出來的另一份 P0 草稿。
    */
-  | { kind: 'planning'; proposalId: string; sessionId: string; revision: number }
+  | {
+      kind: 'planning';
+      proposalId: string;
+      sessionId: string;
+      revision: number;
+      /** 孩子已經說過「我自己想」，別再問他一次開場那一題。 */
+      writeOwn?: boolean;
+    }
+  /**
+   * draft 已經建立，但規劃開不起來。
+   *
+   * ⚠️ 這裡**不可以**自動幫孩子送出。`PERSISTENCE_FAILED` 有可能是
+   *    「RPC 其實成功了，只是回應在路上掉了」—— App 分不出來。自動送出
+   *    等於在一個可能已經開好對話的提案上，直接把它推去 proposed。
+   *
+   *    正確的作法是把選擇交回孩子，而「再試一次」用同一個
+   *    clientRequestId，讓 start RPC 自己做冪等對帳。
+   */
+  | { kind: 'planningStartFailed'; proposalId: string }
   | { kind: 'success' };
 
 type ErrorState = { stage: SubmitStage; proposalId?: string } | null;
@@ -160,36 +178,100 @@ export default function ChildProposalScreen() {
   /**
    * legacy 送出：建立 draft → transition proposed → 成功頁 → 背景整理草稿。
    *
-   * 這一支同時是 P1 的逃生出口（「先把想法送給爸媽」）。已經建立過 draft
-   * 的話會帶 resumeProposalId，所以不會多一份提案。
+   * ⚠️ AI 關掉時走的就是這一支，**一個字都沒有變**。P1 有自己的出口
+   *    （sendWithoutPlanning），不共用這一支 —— 共用的話，legacy 路徑
+   *    會被 P1 的需求一點一點改掉，而它同時是換 provider 前的降級路徑。
    */
-  const submitToParents = useCallback(
-    async (resumeProposalId?: string) => {
+  const submitToParents = useCallback(async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const result = await submitChildProposal(
+        serviceRef.current,
+        toCreateCommand(draft, childId),
+        // 上一次是第二步失敗的話，重試只重送第二步 —— 不會多一份提案。
+        error?.stage === 'transition' ? error.proposalId : undefined,
+      );
+
+      if (result.ok) {
+        setPhase({ kind: 'success' });
+        generateChildProposalPlanDraftInBackground(
+          { client: planDraftClientSetup.client, port: serviceRef.current },
+          result.proposalId,
+        );
+        return;
+      }
+
+      setError({ stage: result.stage, proposalId: result.proposalId });
+    } finally {
+      setSubmitting(false);
+    }
+  }, [childId, draft, error, submitting]);
+
+  /**
+   * P1 的出口：不規劃，直接把想法送給爸媽。
+   *
+   * 走的是 atomic RPC —— 放棄規劃與送出提案在同一個交易裡。分兩次做的話，
+   * 中間斷掉會留下「已放棄但沒送出」或「已送出但規劃還開著」，
+   * 而那正好是孩子按下按鈕、畫面在轉圈的那一刻。
+   */
+  const sendWithoutPlanning = useCallback(
+    async (proposalId: string) => {
       if (submitting) return;
       setSubmitting(true);
-      setError(null);
       try {
-        const result = await submitChildProposal(
-          serviceRef.current,
-          toCreateCommand(draft, childId),
-          resumeProposalId ?? (error?.stage === 'transition' ? error.proposalId : undefined),
-        );
-
-        if (result.ok) {
-          setPhase({ kind: 'success' });
-          generateChildProposalPlanDraftInBackground(
-            { client: planDraftClientSetup.client, port: serviceRef.current },
-            result.proposalId,
-          );
+        const result = await planningServiceRef.current.submitWithoutPlanning({ proposalId });
+        if (!result.ok) {
+          // 送不出去就停在原地。**任何情況都不顯示成功畫面。**
+          setError({ stage: 'transition', proposalId });
+          setPhase({ kind: 'form', step: 'review' });
           return;
         }
 
-        setError({ stage: result.stage, proposalId: result.proposalId });
+        setPhase({ kind: 'success' });
+        // 送出之後 P0 的背景草稿照舊 —— 這條路徑的下游行為與 legacy 相同。
+        generateChildProposalPlanDraftInBackground(
+          { client: planDraftClientSetup.client, port: serviceRef.current },
+          proposalId,
+        );
       } finally {
         setSubmitting(false);
       }
     },
-    [childId, draft, error, submitting],
+    [submitting],
+  );
+
+  /**
+   * 規劃開不起來之後的「再試一次」。
+   *
+   * ⚠️ 重用**同一個** clientRequestId。上一次很可能其實已經在 DB 建好了
+   *    （回應在 commit 之後掉了），換一把新的 id 會真的開出第二場對話。
+   */
+  const retryStartPlanning = useCallback(
+    async (proposalId: string, writeOwn = false) => {
+      if (submitting) return;
+      setSubmitting(true);
+      try {
+        const session = await planningServiceRef.current.start({
+          proposalId,
+          clientRequestId: planningAttemptRef.current,
+        });
+        // 還是開不起來就留在原地。三條路仍然在，他可以再按一次或送出去。
+        if (!session.ok) return;
+
+        setPhase({
+          kind: 'planning',
+          proposalId,
+          sessionId: session.sessionId,
+          revision: session.revision,
+          writeOwn,
+        });
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [submitting],
   );
 
   const handleSubmit = useCallback(async () => {
@@ -218,9 +300,10 @@ export default function ChildProposalScreen() {
         });
 
         if (!session.ok) {
-          // 對話開不起來就退回 legacy —— 想法已經存好了，
-          // 孩子仍然送得出去，這一點不受 AI 影響。
-          await submitToParents(created.proposalId);
+          // ⚠️ **不自動送出。** 想法已經存好了，但這一刻 App 不知道
+          //    對話到底有沒有被建立（回應可能是在 commit 之後掉的）。
+          //    把選擇交回孩子：再試一次／自己想／送給爸媽。
+          setPhase({ kind: 'planningStartFailed', proposalId: created.proposalId });
           return;
         }
 
@@ -337,11 +420,67 @@ export default function ChildProposalScreen() {
           <ChildGoalPlanningFlow
             ports={planningPorts}
             initialRevision={planning.revision}
+            startInWriteOwn={planning.writeOwn === true}
             // AI 掛掉不可以連帶讓孩子的想法送不出去 —— 走既有的兩步送出，
             // 帶著已經建立的 proposalId，所以不會多一份提案。
-            onSendToParents={() => void submitToParents(planning.proposalId)}
+            onSendToParents={() => void sendWithoutPlanning(planning.proposalId)}
             onDone={() => navigation.goBack()}
           />
+        </SafeAreaView>
+      </View>
+    );
+  }
+
+  // ── 規劃開不起來 ────────────────────────────────────────────────────────
+  //
+  // 想法已經存好了，所以這一頁不是失敗，是一個選擇。三條路都在，
+  // 而且**沒有一條是系統替他選的**。
+  if (phase.kind === 'planningStartFailed') {
+    const failedProposalId = phase.proposalId;
+    return (
+      <View style={webScreen}>
+        <GradientBackground />
+        <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+          <View testID="planning-start-failed" style={styles.successWrap}>
+            <Text style={styles.successTitle}>{PLANNING_COPY.unavailable.title}</Text>
+            <Text style={styles.successBody}>{PLANNING_COPY.unavailable.hint}</Text>
+
+            <TouchableOpacity
+              testID="planning-start-retry"
+              style={styles.primaryBtn}
+              onPress={() => void retryStartPlanning(failedProposalId)}
+              disabled={submitting}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+            >
+              <Text style={styles.primaryBtnText}>{PLANNING_COPY.unavailable.retry}</Text>
+            </TouchableOpacity>
+
+            {/* 「我自己想」也要先有一場對話才存得住他寫的東西 ——
+                所以它一樣走冪等的 start，只是進去之後直接跳到輸入那一頁，
+                不會再問他一次「你已經想到要怎麼開始了嗎」。 */}
+            <TouchableOpacity
+              testID="planning-start-write-own"
+              style={styles.skipBtn}
+              onPress={() => void retryStartPlanning(failedProposalId, true)}
+              disabled={submitting}
+              activeOpacity={0.72}
+              accessibilityRole="button"
+            >
+              <Text style={styles.skipText}>{PLANNING_COPY.unavailable.self}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              testID="planning-start-send"
+              style={styles.skipBtn}
+              onPress={() => void sendWithoutPlanning(failedProposalId)}
+              disabled={submitting}
+              activeOpacity={0.72}
+              accessibilityRole="button"
+            >
+              <Text style={styles.skipText}>{PLANNING_COPY.unavailable.send}</Text>
+            </TouchableOpacity>
+          </View>
         </SafeAreaView>
       </View>
     );

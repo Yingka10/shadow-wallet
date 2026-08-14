@@ -1319,6 +1319,11 @@ export interface Database {
         Args: { p_command: object };
         Returns: unknown;
       };
+      // 放棄規劃 ＋ draft → proposed，同一個交易。
+      submit_child_proposal_without_planning_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
       mark_task_atomic: {
         Args: {
           p_task_id: string;

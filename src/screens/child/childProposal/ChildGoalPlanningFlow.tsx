@@ -74,6 +74,13 @@ export type ChildGoalPlanningFlowProps = {
   ports: PlanningFlowPorts;
   /** 這場對話開始時的 session revision（剛開好的是 0）。 */
   initialRevision: number;
+  /**
+   * 直接進「我自己寫怎麼開始」，跳過開場那一題。
+   *
+   * 用在孩子已經表達過「我自己想」的時候（例如規劃開不起來那一頁）——
+   * 再問他一次「你已經想到要怎麼開始了嗎」，等於沒有在聽。
+   */
+  startInWriteOwn?: boolean;
   /** 「先把想法送給爸媽」—— 走既有的 legacy 送出。 */
   onSendToParents: () => void;
   /** 孩子確認完、按下「知道了」。 */
@@ -104,17 +111,20 @@ type Phase =
 export default function ChildGoalPlanningFlow({
   ports,
   initialRevision,
+  startInWriteOwn = false,
   onSendToParents,
   onDone,
 }: ChildGoalPlanningFlowProps) {
   const [session, setSession] = useState<ChildPlanningSessionState>(createChildPlanningSession);
   const [revision, setRevision] = useState(initialRevision);
-  const [phase, setPhase] = useState<Phase>({ kind: 'opening' });
+  const [phase, setPhase] = useState<Phase>(
+    startInWriteOwn ? { kind: 'conversation' } : { kind: 'opening' },
+  );
 
   const [openingChoice, setOpeningChoice] = useState<OpeningChoice | null>(null);
   const [approach, setApproach] = useState('');
   const [answer, setAnswer] = useState('');
-  const [writingOwn, setWritingOwn] = useState(false);
+  const [writingOwn, setWritingOwn] = useState(startInWriteOwn);
 
   const exits = useMemo(() => childPlanningSessionExits(session), [session]);
 
