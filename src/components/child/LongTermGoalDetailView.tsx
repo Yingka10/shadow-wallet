@@ -339,35 +339,6 @@ type TodayStepCardProps = Pick<
   | 'onOpenRecord'
 >;
 
-function isFlexibleReadingRhythm(presentation: GoalPresentation): boolean {
-  return presentation.goalKind === 'reading_habit'
-    && presentation.weekTarget > 0
-    && !presentation.weekDays.some((day) => day.isScheduled);
-}
-
-function TodayWeekRhythm({
-  completed,
-  target,
-}: {
-  completed: number;
-  target: number;
-}) {
-  const remaining = Math.max(target - completed, 0);
-
-  return (
-    <View style={styles.todayWeekRhythm}>
-      <Text style={styles.todayWeekRhythmLabel}>
-        本週 {completed} / {target}
-      </Text>
-      <Text style={styles.todayWeekRhythmCopy}>
-        {remaining > 0
-          ? `再 ${remaining} 次，就完成這週的節奏。`
-          : '這週的節奏完成了。'}
-      </Text>
-    </View>
-  );
-}
-
 function CompletedTodayState({
   presentation,
   completion,
@@ -437,12 +408,8 @@ function TodayStepCard({
   const completionPendingRef = useRef(false);
   const completed = isCompletedToday;
   const busy = checking || completing;
-  const isReadingPlan = presentation.goalKind === 'reading_habit';
-  const showReadingTimeControls =
-    isReadingPlan && presentation.canCompleteToday;
-  const showTodayWeekRhythm =
-    presentation.planState === 'active'
-    && isFlexibleReadingRhythm(presentation);
+  const showTimeControls =
+    presentation.supportsPreferredTimeWindow && presentation.canCompleteToday;
   const todayCompletion = isCompletedToday
     ? presentation.recentRecords[0]
     : undefined;
@@ -479,13 +446,13 @@ function TodayStepCard({
         <View style={styles.actionHead}>
           <View style={styles.actionIcon}>
             <DetailIcon
-              name={isReadingPlan ? 'book' : 'sprout'}
+              name="sprout"
               color={Colors.leaf700}
             />
           </View>
           <View style={styles.actionCopy}>
             <Text style={styles.actionTitle}>{presentation.todayAction}</Text>
-            {showReadingTimeControls ? (
+            {showTimeControls ? (
               <View style={styles.scheduleRow}>
                 <View style={styles.scheduleLabel}>
                   <DetailIcon name="clock" size={16} color={Colors.fgMuted} />
@@ -544,14 +511,12 @@ function TodayStepCard({
           <View style={styles.explanationBody}>
             <Text style={styles.explanationText}>{presentation.focusText}</Text>
             <Text style={styles.explanationHint}>
-              {isReadingPlan
-                ? '不知道選哪一本時，可以先從最想翻開的那一本開始。'
-                : '先完成今天最小的一步，覺得不合適時再和家人一起調整。'}
+              先完成今天最小的一步，覺得不合適時再和家人一起調整。
             </Text>
           </View>
         ) : null}
 
-        {showReadingTimeControls && showTimeOptions && !completed ? (
+        {showTimeControls && showTimeOptions && !completed ? (
           <View testID="time-options" style={styles.timeOptions}>
             {([
               ['after_dinner', '晚餐後'],
@@ -597,11 +562,7 @@ function TodayStepCard({
             disabled={busy}
             onPress={() => void handleComplete()}
             accessibilityRole="button"
-            accessibilityLabel={
-              isReadingPlan
-                ? '記錄今天的閱讀'
-                : '記下今天的完成'
-            }
+            accessibilityLabel="記下今天的完成"
             accessibilityState={{ disabled: busy }}
             activeOpacity={0.78}
           >
@@ -615,9 +576,7 @@ function TodayStepCard({
               <>
                 <DetailIcon name="check" size={19} color={Colors.bgSurface} />
                 <Text style={styles.completeButtonText}>
-                  {isReadingPlan
-                    ? '記錄今天的閱讀'
-                    : '記下今天的完成'}
+                  記下今天的完成
                 </Text>
               </>
             )}
@@ -636,12 +595,6 @@ function TodayStepCard({
           <Text accessibilityRole="alert" style={styles.completionError}>
             {completionError}
           </Text>
-        ) : null}
-        {showTodayWeekRhythm ? (
-          <TodayWeekRhythm
-            completed={presentation.weekCompleted}
-            target={presentation.weekTarget}
-          />
         ) : null}
       </View>
     </View>
@@ -684,39 +637,22 @@ function DayStatusGlyph({ state }: { state: GoalDayStatus['state'] }) {
   );
 }
 
-function WeekProgressCard({
+function ProgressCard({
   presentation,
 }: {
   presentation: GoalPresentation;
 }) {
-  if (isFlexibleReadingRhythm(presentation)) return null;
-
-  const showsDailySchedule =
-    presentation.planState === 'active'
-    && presentation.weekTarget > 0
-    && presentation.weekDays.some((day) => day.isScheduled)
-    && (
-      presentation.goalKind === 'reading_habit'
-      || presentation.goalKind === 'habit'
-      || presentation.goalKind === 'family'
-    );
-  const showsOverallProgress =
-    presentation.planState === 'active'
-    && (
-      presentation.goalKind === 'skill'
-      || presentation.goalKind === 'challenge'
-    );
-  const compactPrimaryText = showsOverallProgress
-    ? presentation.overallLabel
-    : presentation.todayStatusText ?? presentation.weekProgressLabel;
+  const progression = presentation.progression;
+  const showsDailySchedule = progression === 'fixed_days';
+  const showsWeeklyRhythm = progression === 'weekly_rhythm';
+  const showsStage = progression === 'staged_skill';
+  const showsAccumulation = progression === 'accumulation';
+  const showsChallenge = progression === 'challenge';
 
   return (
     <View>
-      <SectionHeading
-        icon="calendar"
-        title={showsDailySchedule ? '本週安排' : '本週進度'}
-      />
-      <View testID="goal-week" style={styles.card}>
+      <SectionHeading icon="calendar" title="進度" />
+      <View testID="goal-progress" style={styles.card}>
         {showsDailySchedule ? (
           <View style={styles.weekRow}>
             {presentation.weekDays.map((day) => (
@@ -756,22 +692,34 @@ function WeekProgressCard({
               </View>
             ))}
           </View>
-        ) : (
+        ) : showsWeeklyRhythm ? (
           <View style={styles.compactWeekProgress}>
             <Text style={styles.compactWeekLabel}>
-              {compactPrimaryText}
+              本週 {presentation.weekCompleted} / {presentation.weekTarget}
             </Text>
-            {showsOverallProgress ? (
+          </View>
+        ) : showsStage || showsAccumulation || showsChallenge ? (
+          <View style={styles.compactWeekProgress}>
+            <Text style={styles.compactWeekLabel}>{presentation.overallLabel}</Text>
+            <Text style={styles.compactWeekMeta}>{presentation.nextText}</Text>
+            {showsChallenge ? (
               <Text style={styles.compactWeekMeta}>
                 {presentation.weekProgressLabel}
               </Text>
             ) : null}
+          </View>
+        ) : (
+          <View style={styles.compactWeekProgress}>
+            <Text style={styles.compactWeekLabel}>尚未安排</Text>
           </View>
         )}
         <View style={styles.weekInsight}>
           <DetailIcon name="sprout" size={16} color={Colors.leaf700} />
           <Text style={styles.weekInsightText}>{presentation.weekSummary}</Text>
         </View>
+        {presentation.milestones.length > 0 ? (
+          <MilestoneTimeline milestones={presentation.milestones} />
+        ) : null}
       </View>
     </View>
   );
@@ -803,9 +751,7 @@ function MilestoneTimeline({
   milestones: GoalMilestone[];
 }) {
   return (
-    <View>
-      <SectionHeading icon="milestone" title="成長里程碑" />
-      <View testID="goal-rewards" style={styles.timeline}>
+    <View testID="goal-milestones" style={styles.timeline}>
         {milestones.map((milestone, index) => (
           <View key={milestone.id} style={styles.timelineRow}>
             <View style={styles.timelineRail}>
@@ -866,7 +812,6 @@ function MilestoneTimeline({
             </View>
           </View>
         ))}
-      </View>
     </View>
   );
 }
@@ -1046,64 +991,73 @@ export default function LongTermGoalDetailView({
     <ScrollView
       testID="long-term-detail-scroll"
       style={[styles.scroll, webMouseDraggableScroll]}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-    >
-      <GoalHero presentation={presentation} />
-      {visiblePlanNotice ? (
-        <PlanNotice notice={visiblePlanNotice} />
-      ) : null}
-      <TodayStepCard
-        presentation={presentation}
-        isCompletedToday={isCompletedToday}
-        checking={checking}
-        onComplete={onComplete}
-        onSelectTimeWindow={onSelectTimeWindow}
-        onOpenRecord={onOpenRecord}
-      />
-      <WeekProgressCard presentation={presentation} />
-      {presentation.milestones.length > 0 ? (
-        <MilestoneTimeline milestones={presentation.milestones} />
-      ) : null}
-      <ReviewCard
-        presentation={presentation}
-        onOpenReview={onOpenReview}
-        pendingTimeAdjustmentNotice={pendingTimeAdjustmentNotice}
-      />
-      <TouchableOpacity
-        style={styles.supportingDetailsToggle}
-        accessibilityRole="button"
-        accessibilityLabel={
-          showSupportingDetails
-            ? '收合更多紀錄與計畫'
-            : '展開更多紀錄與計畫'
-        }
-        accessibilityState={{ expanded: showSupportingDetails }}
-        onPress={() => setShowSupportingDetails((visible) => !visible)}
-        activeOpacity={0.72}
-      >
-        <Text style={styles.supportingDetailsLabel}>更多紀錄與計畫</Text>
-        <View
-          style={[
-            styles.supportingDetailsChevron,
-            showSupportingDetails && styles.supportingDetailsChevronExpanded,
-          ]}
+    contentContainerStyle={styles.content}
+    showsVerticalScrollIndicator={false}
+  >
+    <View testID="goal-shell" style={styles.shell}>
+      <View testID="goal-current-position">
+        <GoalHero presentation={presentation} />
+        {visiblePlanNotice ? (
+          <PlanNotice notice={visiblePlanNotice} />
+        ) : null}
+      </View>
+      <View testID="goal-today-section">
+        <TodayStepCard
+          presentation={presentation}
+          isCompletedToday={isCompletedToday}
+          checking={checking}
+          onComplete={onComplete}
+          onSelectTimeWindow={onSelectTimeWindow}
+          onOpenRecord={onOpenRecord}
+        />
+      </View>
+      <View testID="goal-progress-section">
+        <ProgressCard presentation={presentation} />
+      </View>
+      <View testID="goal-review-section">
+        <ReviewCard
+          presentation={presentation}
+          onOpenReview={onOpenReview}
+          pendingTimeAdjustmentNotice={pendingTimeAdjustmentNotice}
+        />
+      </View>
+      <View testID="goal-more">
+        <TouchableOpacity
+          style={styles.supportingDetailsToggle}
+          accessibilityRole="button"
+          accessibilityLabel={
+            showSupportingDetails
+              ? '收合更多紀錄與計畫'
+              : '展開更多紀錄與計畫'
+          }
+          accessibilityState={{ expanded: showSupportingDetails }}
+          onPress={() => setShowSupportingDetails((visible) => !visible)}
+          activeOpacity={0.72}
         >
-          <DetailIcon name="chevron" size={18} color={Colors.fgMuted} />
-        </View>
-      </TouchableOpacity>
-      {showSupportingDetails ? (
-        <>
-          <RecentRecords
-            records={recentRecords}
-            onOpenRecord={onOpenRecord}
-          />
-          <PlanDetailsEntry
-            presentation={presentation}
-            onOpenDetails={onOpenDetails}
-          />
-        </>
-      ) : null}
+          <Text style={styles.supportingDetailsLabel}>更多紀錄與計畫</Text>
+          <View
+            style={[
+              styles.supportingDetailsChevron,
+              showSupportingDetails && styles.supportingDetailsChevronExpanded,
+            ]}
+          >
+            <DetailIcon name="chevron" size={18} color={Colors.fgMuted} />
+          </View>
+        </TouchableOpacity>
+        {showSupportingDetails ? (
+          <>
+            <RecentRecords
+              records={recentRecords}
+              onOpenRecord={onOpenRecord}
+            />
+            <PlanDetailsEntry
+              presentation={presentation}
+              onOpenDetails={onOpenDetails}
+            />
+          </>
+        ) : null}
+      </View>
+    </View>
     </ScrollView>
   );
 }
@@ -1115,6 +1069,8 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 14,
     paddingBottom: 44,
+  },
+  shell: {
     gap: 14,
   },
   hero: {
