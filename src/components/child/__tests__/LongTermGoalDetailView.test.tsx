@@ -923,8 +923,9 @@ describe('LongTermGoalDetailView', () => {
 
     const today = within(screen.getByTestId('goal-today'));
     const progress = within(screen.getByTestId('goal-progress'));
+    expect(today.queryByText('本週 2 / 3')).toBeNull();
     expect(progress.getByText('本週 2 / 3')).toBeTruthy();
-    expect(screen.getByTestId('goal-progress')).toBeTruthy();
+    expect(screen.getAllByText('本週 2 / 3')).toHaveLength(1);
 
     const hero = within(screen.getByTestId('goal-hero'));
     expect(hero.queryByText(/本週.*2.*3/)).toBeNull();
@@ -947,6 +948,45 @@ describe('LongTermGoalDetailView', () => {
     expect(week.getByTestId('goal-day-caption-1')).toBeTruthy();
     expect(week.getByTestId('goal-day-caption-5')).toBeTruthy();
   });
+
+  it.each([
+    ['paused', '計畫暫停中'],
+    ['completed', '這段計畫已完成'],
+  ] as const)(
+    'does not expose active fixed-day states when the plan is %s',
+    (planState, statusText) => {
+      renderView(makePresentation({
+        progression: 'fixed_days',
+        planState,
+        todayStatusText: statusText,
+        canCompleteToday: false,
+        weekDays: [
+          {
+            day: 2,
+            label: '二',
+            isoDate: '2026-07-28',
+            isScheduled: true,
+            state: 'today',
+          },
+          {
+            day: 3,
+            label: '三',
+            isoDate: '2026-07-29',
+            isScheduled: true,
+            state: 'upcoming',
+          },
+        ],
+      }));
+
+      const today = within(screen.getByTestId('goal-today'));
+      const progress = within(screen.getByTestId('goal-progress'));
+      expect(today.getByText(statusText)).toBeTruthy();
+      expect(progress.getByText(statusText)).toBeTruthy();
+      expect(progress.queryByTestId('goal-day-caption-2')).toBeNull();
+      expect(screen.queryByLabelText('星期二，今天待完成')).toBeNull();
+      expect(screen.queryByLabelText('星期三，尚未到')).toBeNull();
+    },
+  );
 
   it.each([
     [

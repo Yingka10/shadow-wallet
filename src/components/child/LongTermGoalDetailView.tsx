@@ -39,7 +39,6 @@ type Props = {
 
 type IconName =
   | 'sprout'
-  | 'book'
   | 'calendar'
   | 'milestone'
   | 'conversation'
@@ -112,20 +111,6 @@ function DetailIcon({
         <Path d="M12 13C8 13 5 11 5 7c4 0 7 2 7 6Z" {...common} />
         <Path d="M12 10c0-4 3-6 7-6 0 4-3 6-7 6Z" {...common} />
         <Path d="M6 20h12" {...common} />
-      </Svg>
-    );
-  }
-
-  if (name === 'book') {
-    return (
-      <Svg
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        accessibilityElementsHidden
-      >
-        <Path d="M4 5.5c3.5-.7 6.2.2 8 2.1v11c-1.8-1.9-4.5-2.8-8-2.1v-11Z" {...common} />
-        <Path d="M20 5.5c-3.5-.7-6.2.2-8 2.1v11c1.8-1.9 4.5-2.8 8-2.1v-11Z" {...common} />
       </Svg>
     );
   }
@@ -643,7 +628,8 @@ function ProgressCard({
   presentation: GoalPresentation;
 }) {
   const progression = presentation.progression;
-  const showsDailySchedule = progression === 'fixed_days';
+  const showsDailySchedule =
+    progression === 'fixed_days' && presentation.planState === 'active';
   const showsWeeklyRhythm = progression === 'weekly_rhythm';
   const showsStage = progression === 'staged_skill';
   const showsAccumulation = progression === 'accumulation';
@@ -691,6 +677,12 @@ function ProgressCard({
                 </Text>
               </View>
             ))}
+          </View>
+        ) : progression === 'fixed_days' ? (
+          <View style={styles.compactWeekProgress}>
+            <Text style={styles.compactWeekLabel}>
+              {presentation.todayStatusText ?? presentation.weekSummary}
+            </Text>
           </View>
         ) : showsWeeklyRhythm ? (
           <View style={styles.compactWeekProgress}>
@@ -995,7 +987,7 @@ export default function LongTermGoalDetailView({
     showsVerticalScrollIndicator={false}
   >
     <View testID="goal-shell" style={styles.shell}>
-      <View testID="goal-current-position">
+      <View testID="goal-current-position" style={styles.currentPosition}>
         <GoalHero presentation={presentation} />
         {visiblePlanNotice ? (
           <PlanNotice notice={visiblePlanNotice} />
@@ -1021,7 +1013,7 @@ export default function LongTermGoalDetailView({
           pendingTimeAdjustmentNotice={pendingTimeAdjustmentNotice}
         />
       </View>
-      <View testID="goal-more">
+      <View testID="goal-more" style={styles.more}>
         <TouchableOpacity
           style={styles.supportingDetailsToggle}
           accessibilityRole="button"
@@ -1071,6 +1063,12 @@ const styles = StyleSheet.create({
     paddingBottom: 44,
   },
   shell: {
+    gap: 14,
+  },
+  currentPosition: {
+    gap: 14,
+  },
+  more: {
     gap: 14,
   },
   hero: {
@@ -1420,25 +1418,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '700',
     textAlign: 'center',
-  },
-  todayWeekRhythm: {
-    marginTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: Colors.leaf100,
-    paddingTop: 11,
-  },
-  todayWeekRhythmLabel: {
-    color: Colors.leaf700,
-    fontSize: 15,
-    lineHeight: 21,
-    fontWeight: '900',
-  },
-  todayWeekRhythmCopy: {
-    marginTop: 2,
-    color: Colors.fgSecondary,
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: '700',
   },
   weekRow: {
     flexDirection: 'row',
