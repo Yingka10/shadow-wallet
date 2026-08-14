@@ -16,19 +16,29 @@ changes, rewards, settlement changes, or a P0 state-machine rewrite.
 
 `GoalPresentation` will separate the domain category from progression:
 
-- `goalKind` remains a domain shape: habit, skill, family/responsibility, or
-  challenge. `reading_habit` and `isReadingPlan` are removed.
+- `goalKind` is strictly the child UI literal union `habit | skill | family |
+  challenge`. The DB value `responsibility` maps to child-facing `family` in
+  the mapper. `reading_habit` and `isReadingPlan` are removed.
 - `progression` is a presentation-only discriminator with `weekly_rhythm`,
-  `fixed_days`, `staged_skill`, `accumulation`, and `challenge`.
+  `fixed_days`, `staged_skill`, `accumulation`, and `challenge`; it may be
+  `null` for legacy unplanned habit/family rows.
 - `supportsPreferredTimeWindow` is an explicit capability for the existing
-  shared-plan preferred-time channel. It is inferred from structured state,
-  never from a title or task name.
+  preferred-time UI. It is inferred from structured state, never from a title
+  or task name. It is not authorization to submit a shared-plan adjustment.
+
+`categoryLabel` comes from structured `task.category`, never from `goalKind`,
+progression, or task name: A → `生活習慣`, B → `家庭參與`, C → `自主挑戰`, and
+D → `學習與技能`. Only a legacy row without a reliable category may use the
+existing non-name fallback.
 
 Progression precedence is: skill → `staged_skill`; challenge with valid current
 and target values → `accumulation`; other challenge → `challenge`; habit or
 responsibility with `progress_model === 'weekly_rhythm'` → `weekly_rhythm`;
 then `schedule_mode === 'weekly_frequency'` → `weekly_rhythm`; then fixed
-weekday evidence → `fixed_days`. No textual heuristic is permitted.
+weekday evidence → `fixed_days`. A habit/family row with none of this evidence
+has `progression: null`; `planState` remains a separate dimension and its
+unplanned Progress content says `尚未安排` without inventing weekday state or a
+sixth progression type. No textual heuristic is permitted.
 
 For legacy rows that lack canonical evidence, the mapper preserves existing
 completion-target meaning. It may use `weekly_frequency` to select the visual
@@ -67,14 +77,21 @@ Milestones/checkpoints, when real, live inside Progress and do not create a
 parallel major section. Together Review, review sheets, completion history,
 plan details, and the collapsed More section stay in place.
 
+Only persisted or otherwise structured real checkpoints belong in Progress. A
+generated `X 週後一起回顧` is review information, not a milestone, and stays in
+Together Review. The stale `sectionOrder` contract is removed rather than
+retaining `week` or `rewards` as parallel sections.
+
 ## Weekly-rhythm semantics
 
 For canonical weekly rhythm, duration and completion capacity are separate. A
 14-day plan at three sessions per week is a two-week plan with about six rhythm
 slots, not a fourteen-completion target. Its condition label will communicate
 the plan period and frequency (for example, `2 週計畫 · 每週 3 次`). If a
-reliable covered-week capacity exists, Hero progress may use it; otherwise it
-uses an honest non-invented expression. The primary functional progress remains
+reliable covered-week capacity exists, it is display metadata only: it must not
+be supplied as the terminal target used by `hasReachedTarget` or otherwise make
+the plan complete early. Hero represents honest plan position (for example,
+week 1 of 2 or elapsed period); the primary behavioral progress remains
 `本週 X / 3`.
 
 The capacity diagnostic (`6` scheduled versus `14` target) is internal and
@@ -82,11 +99,19 @@ will not enter `planNotice`, the main child shell, or the details sheet.
 
 ## Shared-plan safety
 
-The existing preferred-time RPC gate remains unchanged in effect: a shared plan
-must exist and support preferred-time adjustment; the child must select a valid
-different `after_dinner` or `before_bed` value; there must be no pending request
-and no in-flight submission. The only replacement is from name-based
-`reading_habit` eligibility to the explicit structured capability.
+`supportsPreferredTimeWindow` only enables the narrow `after_dinner` /
+`before_bed` review and correction UI. It has structured evidence when an
+accepted goal window, supported task preferred time, or known shared-plan
+context provides one. Without this presentation capability, review uses the
+progression/domain-neutral flow; weekly rhythm alone never selects a
+preferred-time review.
+
+The existing preferred-time RPC gate remains unchanged in effect. Submission
+still requires actual `sharedPlanTimeAdjustment` hook context (not merely
+`supportsPreferredTimeWindow`), a shared plan that supports adjustment, a valid
+different `after_dinner` or `before_bed` value, no pending request, and no
+in-flight submission. The only replacement is from name-based `reading_habit`
+eligibility to the explicit structured capability for UI selection.
 
 Pending, submitted, failure-draft, and no-clawback behavior is preserved. In
 particular, the UI must continue to say the request is awaiting parent
@@ -104,7 +129,9 @@ rewritten.
 Tests will add:
 
 - a structured Demo `兩週讀完這本書` weekly-rhythm fixture with category D,
-  weekly frequency three, a 14-day duration/end, and `next_step`;
+  `progress_model = 'weekly_rhythm'`, `schedule_mode =
+  'weekly_frequency'`, `weekly_frequency = 3`, explicit start/end forming a
+  14-day period, and `next_step`;
 - a name-invariance pair with identical structured fields and different names;
 - the five-progression common-shell matrix;
 - weekly duration/denominator and no-capacity-warning assertions;
