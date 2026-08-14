@@ -89,12 +89,55 @@ describe('callGeminiWithModel 回真正回答的那個 model', () => {
     warn.mockRestore();
   });
 
-  it('404 也會換 model；其他錯誤直接拋出，不吞', async () => {
+  it('首選 404 → 一樣換下一個', async () => {
+    let call = 0;
+    fetchImpl = async () => {
+      call += 1;
+      return call === 1 ? errorResponse(404) : geminiResponse('from fallback');
+    };
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { callGeminiWithModel } = load();
+    const result = await callGeminiWithModel('prompt');
+
+    // 404 是「這個 model 對這把 key 不存在／已下架」—— 換一個是有意義的。
+    expect(result).toEqual({ text: 'from fallback', model: 'gemini-flash-lite-latest' });
+    expect(fetchCalls).toHaveLength(2);
+    warn.mockRestore();
+  });
+
+  it('兩個都掛 → 拋**最後一個** model 的真實錯誤，而不是第一個', async () => {
+    let call = 0;
+    fetchImpl = async () => errorResponse((call += 1) === 1 ? 429 : 404);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { callGeminiWithModel } = load();
+    const rejection = callGeminiWithModel('prompt');
+
+    // 拋第一個的話，log 會說「配額用盡」，而實際上是最後那一跳 404。
+    await expect(rejection).rejects.toThrow('404');
+    await expect(rejection).rejects.not.toThrow('429');
+    expect(fetchCalls).toHaveLength(2);
+    warn.mockRestore();
+  });
+
+  it('其他 HTTP 錯誤直接拋出，不吞、不換 model', async () => {
     fetchImpl = async () => errorResponse(500);
     const { callGeminiWithModel } = load();
 
     await expect(callGeminiWithModel('prompt')).rejects.toThrow('500');
     // 500 不是配額問題 —— 換 model 沒有意義，也會多花一次請求。
+    expect(fetchCalls).toHaveLength(1);
+  });
+
+  it('網路層失敗也不換 model', async () => {
+    fetchImpl = async () => {
+      throw new TypeError('network request failed');
+    };
+    const { callGeminiWithModel } = load();
+
+    // 連不出去的話，換 model 只是把同一個網路問題再撞一次。
+    await expect(callGeminiWithModel('prompt')).rejects.toThrow('network request failed');
     expect(fetchCalls).toHaveLength(1);
   });
 });
@@ -271,6 +314,71 @@ describe('timeout 預算由呼叫端決定，預設不變', () => {
     const { callGeminiWithModel } = load();
     await expect(callGeminiWithModel('prompt', true, 15_000))
       .rejects.toThrow(/timed out after 15000ms/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-08-14：第三順位 gemini-2.0-flash 已永久下架（實測固定 404、不在
+// ListModels 裡）。它留在鏈上的唯一效果是「前兩個撞配額時保證再浪費一次
+// 請求」。這一組釘住的是 **實際會被執行的那條鏈**，不只是原始碼字串 ——
+// 只比對字串的話，有人把 model 名稱搬到別的常數再組回來就抓不到。
+// ---------------------------------------------------------------------------
+
+describe('可執行的 model chain 就是這兩個', () => {
+  /** 從實際打出去的 URL 反推嘗試順序，比讀原始碼可靠。 */
+  function attemptedModels(): string[] {
+    return fetchCalls.map((url) => /models\/([^:]+):/.exec(url)?.[1] ?? url);
+  }
+
+  it('全部失敗時只嘗試兩個 model，沒有第三次請求', async () => {
+    fetchImpl = async () => errorResponse(429);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { callGeminiWithModel } = load();
+    await expect(callGeminiWithModel('prompt')).rejects.toThrow('429');
+
+    expect(attemptedModels()).toEqual(['gemini-flash-latest', 'gemini-flash-lite-latest']);
+    warn.mockRestore();
+  });
+
+  it('已下架的 gemini-2.0-flash 不在鏈上，也不在原始碼裡', async () => {
+    fetchImpl = async () => errorResponse(429);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { callGeminiWithModel } = load();
+    await expect(callGeminiWithModel('prompt')).rejects.toThrow();
+    expect(attemptedModels()).not.toContain('gemini-2.0-flash');
+    warn.mockRestore();
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const source = require('fs').readFileSync(
+      require('path').join(__dirname, '..', 'gemini.ts'),
+      'utf8',
+    ) as string;
+    // 註解裡寫「為什麼移除」是可以的，被 MODEL_CHAIN 讀到就不行。
+    const chainLine = /const MODEL_CHAIN = \[[^\]]*\]/.exec(source)?.[0] ?? '';
+    expect(chainLine).not.toContain('gemini-2.0-flash');
+  });
+
+  it('jsonMode 在 fallback 之後仍然生效', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    let call = 0;
+    fetchImpl = async (_url, init) => {
+      bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      call += 1;
+      return call === 1 ? errorResponse(429) : geminiResponse('{}');
+    };
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { callGeminiWithModel } = load();
+    const result = await callGeminiWithModel('prompt', true);
+
+    // 第二跳掉了 responseMimeType 的話，回來的會是帶 ``` 的散文，
+    // parseJson 直接炸掉 —— 而且只在首選撞配額那天才會發生。
+    expect(result.model).toBe('gemini-flash-lite-latest');
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1].generationConfig).toEqual({ responseMimeType: 'application/json' });
+    warn.mockRestore();
   });
 });
 

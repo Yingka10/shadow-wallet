@@ -10,10 +10,19 @@ const GEMINI_URL = (model: string) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`;
 
 // 依序嘗試的 model 鏈：某個配額用盡（429）或不存在（404）時自動換下一個。
-// 用 *-latest 別名當首選：它永遠指向 Google 當前可用的 flash，
-// 不會被「舊 model 對新用戶下架」咬到（gemini-2.5-flash 已對新 key 下架）。
-// 目前 gemini-flash-latest 實際指向 gemini-3.6-flash。
-const MODEL_CHAIN = ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-2.0-flash'];
+// 用 *-latest 別名：它們永遠指向 Google 當前可用的 flash，不會被
+// 「舊 model 對新用戶下架」咬到（gemini-2.5-flash 已對新 key 下架）。
+// 別名實際指向哪一個 model 由 Google 決定、會隨時間改變，所以這裡不寫死 ——
+// 想知道當下是誰，看呼叫端記下來的 model 名稱（見 callGeminiWithModel）。
+//
+// 2026-08-14：第三順位 gemini-2.0-flash 移除。它已永久下架，實測固定回
+// 404 no longer available，也不在這把 key 的 ListModels 清單裡 —— 留著等於
+// 前兩個撞配額時最後一跳保證失敗，只是多花一次請求換一個更難讀的錯誤。
+//
+// 現在刻意只有兩個。要補第三順位的話，候選必須先在**當前 project/key**
+// 上做過真實 capability smoke（一般呼叫 + JSON mode 都成功）才能加進來，
+// 不能因為它出現在 model 清單或文件上就直接採用。
+const MODEL_CHAIN = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
 
 // 沒有這個限制的話，Gemini 端網路卡住時 fetch 可能懸著不回應很久（遠超正常
 // TCP timeout），家長會看著顧問聊天/週報轉圈轉很久才等到 fallback。硬性中斷
@@ -75,7 +84,7 @@ async function callGeminiOnce(
  * model 名稱要帶回去的理由：MODEL_CHAIN 會 fallback，所以「這段文字是誰寫的」
  * 不是固定的。要把它存進稽核紀錄（例如計畫版本的 ai_model）的呼叫端，
  * 必須拿到真的那一個，不能寫死首選 —— 否則紀錄會說是 flash-latest 寫的，
- * 而實際上那天首選掛了、答案來自 2.0-flash。
+ * 而實際上那天首選掛了、答案來自 lite。
  *
  * 設 Edge Function secret `FORCE_AI_FALLBACK=true` 可以直接跳過 Gemini、
  * 立刻進入呼叫端既有的 fallback 路徑——排練 Demo Q&A、或想在沒有網路的
