@@ -832,12 +832,6 @@ describe('buildGoalPresentation', () => {
         detail: '成長幣 +40',
         status: 'upcoming',
       },
-      {
-        id: 'final-review',
-        title: '完成計畫後一起回顧',
-        detail: '可以繼續、調整，或讓計畫先告一段落。',
-        status: 'upcoming',
-      },
     ]);
     expect(result.canCompleteToday).toBe(false);
     expect(result.todayTitle).toBe('目前階段');
@@ -871,14 +865,108 @@ describe('buildGoalPresentation', () => {
     expect(result.todayTitle).toBe('目前的累積進度');
     expect(result.todayAction).toBe('已累積 25 頁，由家長確認後更新');
     expect(result.weekSummary).toBe('累積進度會在家長確認後更新。');
-    expect(result.milestones[0].title).toBe('已累積 25 頁');
-    expect(result.milestones[result.milestones.length - 1].title).toBe('達到 100 頁');
+    // 累積進度本來就由 Progress 自己畫；沒有持久化節點就不該有時間軸。
+    expect(result.milestones).toEqual([]);
     expect(result.categoryLabel).toBe('學習與技能');
     expect(result.canCompleteToday).toBe(false);
     expect(result.todayStatusText).toBe('累積進度由家長一起確認');
     expect(result.weekTarget).toBe(0);
     expect(result.weekDays.every((day) => day.state === 'unscheduled')).toBe(true);
   });
+
+  it('keeps only the persisted checkpoints for an accumulation plan', () => {
+    const result = buildGoalPresentation(
+      makeTask({
+        id: 'task-pages',
+        name: '閱讀一百頁',
+        long_term_type: 'challenge',
+      }),
+      makeGoal({
+        id: 'goal-pages',
+        task_id: 'task-pages',
+        goal_type: 'challenge',
+        target_value: 100,
+        current_value: 25,
+        value_unit: '頁',
+        checkpoint_rewards: { '20': 10, '60': 20 },
+      }),
+      [],
+      dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.progression).toBe('accumulation');
+    expect(result.milestones).toEqual([
+      {
+        id: 'checkpoint-20',
+        title: '累積 20 頁',
+        detail: '成長幣 +10',
+        status: 'completed',
+      },
+      {
+        id: 'checkpoint-60',
+        title: '累積 60 頁',
+        detail: '成長幣 +20',
+        status: 'next',
+      },
+    ]);
+  });
+
+  it.each([
+    [
+      'staged_skill',
+      makeTask(),
+      makeGoal({
+        goal_type: 'skill',
+        level_count: 2,
+        current_level: 1,
+        level_definitions: [
+          { id: 'level-1', name: '基礎', coin: 10 },
+          { id: 'level-2', name: '進階', coin: 20 },
+        ],
+      }),
+    ],
+    [
+      'accumulation',
+      makeTask(),
+      makeGoal({
+        goal_type: 'challenge',
+        current_value: 1,
+        target_value: 2,
+        checkpoint_rewards: { '1': 10 },
+      }),
+    ],
+    [
+      'challenge',
+      makeTask(),
+      makeGoal({ goal_type: 'challenge', checkpoint_rewards: { '1': 10 } }),
+    ],
+    [
+      'weekly_rhythm',
+      makeTask({ schedule_mode: 'weekly_frequency', weekly_frequency: 2 }),
+      makeGoal({ checkpoint_rewards: { '5': 10 } }),
+    ],
+    [
+      'fixed_days',
+      makeTask({ recurrence_days: [1, 3] }),
+      makeGoal({ active_days: [1, 3], checkpoint_rewards: { '5': 10 } }),
+    ],
+  ] as const)(
+    'never synthesizes a review milestone for %s progression',
+    (_name, task, goal) => {
+      const result = buildGoalPresentation(
+        task,
+        goal,
+        [],
+        dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+      );
+
+      expect(result.milestones.some((item) => item.id === 'final-review')).toBe(false);
+      expect(result.milestones.some((item) => item.id === 'challenge-progress')).toBe(false);
+      expect(result.milestones.some((item) => /回顧/.test(item.title))).toBe(false);
+      // 回顧仍然存在，只是它屬於 Together Review，不屬於 Progress。
+      expect(result.finalRewardText).not.toBe('');
+    },
+  );
 
   it('labels a non-reading challenge as an autonomous challenge', () => {
     const result = buildGoalPresentation(
@@ -1271,11 +1359,7 @@ describe('buildGoalPresentation', () => {
       expect(result.weekLabel).toBe('尚未安排週期');
       expect(result.planPeriodLabel).toBe('2026-07-27 ～ 尚未安排執行日期');
       expect(result.focusText).toBe('先和家人一起安排適合的執行日期');
-      if (result.milestones.length === 0) {
-        expect(result.milestones).toEqual([]);
-      } else {
-        expect(result.milestones.at(-1)?.title).toBe('安排好週期後一起回顧');
-      }
+      expect(result.milestones).toEqual([]);
       expect(result.finalRewardText).toBe('安排好週期後，再一起回顧這段計畫');
       expect(result.weekDays.every((day) => day.state === 'unscheduled')).toBe(true);
       expect(result.canCompleteToday).toBe(false);

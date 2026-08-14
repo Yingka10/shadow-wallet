@@ -34,10 +34,12 @@ const TRUSTED_MILESTONES: GoalPresentation['milestones'] = [
     detail: '成長幣 +10',
     status: 'next',
   },
+  // 只放真實 / 持久化的節點。合成的「一起回顧」屬於 Together Review，
+  // mapper 已經不會產出這種列，fixture 也不該再假裝它存在。
   {
-    id: 'final-review',
-    title: '四週後一起回顧',
-    detail: '可以繼續、調整閱讀方式，或讓計畫先告一段落。',
+    id: 'checkpoint-10',
+    title: '完成第 10 次閱讀',
+    detail: null,
     status: 'upcoming',
   },
 ];
@@ -743,18 +745,26 @@ describe('LongTermGoalDetailView', () => {
 
     expect(milestones.getByText('完成第 1 次閱讀')).toBeTruthy();
     expect(milestones.getByText('完成第 5 次閱讀')).toBeTruthy();
+    expect(milestones.getByText('完成第 10 次閱讀')).toBeTruthy();
     expect(milestones.getByText('成長幣 +10')).toBeTruthy();
     expect(milestones.getByText('已完成')).toBeTruthy();
     expect(milestones.getByText('下一個里程碑')).toBeTruthy();
     expect(milestones.getByText('尚未到')).toBeTruthy();
     expect(screen.queryByText('之後一起回顧')).toBeNull();
     expect(screen.queryByText('下一站')).toBeNull();
+    // 回顧只能出現在 Together Review，不能變成 Progress 的一列。
+    expect(milestones.queryByText(/回顧/)).toBeNull();
   });
 
-  it('does not render a milestone or reward section when no trustworthy state exists', () => {
-    renderView(makePresentation({ milestones: [], nextReward: null }));
+  it('does not render a milestone timeline when no persisted checkpoint exists', () => {
+    renderView(makePresentation({
+      progression: 'accumulation',
+      milestones: [],
+      nextReward: null,
+    }));
 
     expect(screen.getByTestId('goal-progress')).toBeTruthy();
+    expect(screen.queryByTestId('goal-milestones')).toBeNull();
   });
 
   it('labels habit and family checkpoint configuration as a planned node', () => {

@@ -457,20 +457,28 @@ function buildSkillMilestones(
     };
   });
 
-  milestones.push({
-    id: 'final-review',
-    title: '完成計畫後一起回顧',
-    detail: '可以繼續、調整，或讓計畫先告一段落。',
-    status: goal.status === 'completed' || current >= target ? 'completed' : 'upcoming',
-  });
-
+  /*
+    這裡**不**補一筆合成的「完成計畫後一起回顧」。Progress 只放真實存在的
+    結構化節點（level_definitions 的階段），回顧那件事屬於 Together Review，
+    由 finalRewardText 負責。合成節點會讓孩子以為計畫裡真的排了這一站。
+  */
   return milestones;
 }
 
+/*
+  累積型計畫的 Progress 只放**已經存在**的 checkpoint_rewards。
+
+  刻意不合成兩種節點：
+    - 「已累積 X」—— current/target 本來就由 Progress 自己畫出來，
+      再排成一個里程碑等於把同一個數字講兩次。
+    - 「達到 Y」＋回顧文案 —— 那是期滿回顧，屬於 Together Review。
+
+  沒有設 checkpoint_rewards 的計畫就沒有時間軸，這是誠實的：家長真的沒有
+  在計畫裡排任何節點。
+*/
 function buildChallengeMilestones(
   goal: LongTermGoal,
   current: number,
-  target: number,
   unit: string,
 ): GoalMilestone[] {
   const unitSuffix = unit ? ` ${unit}` : '';
@@ -482,40 +490,17 @@ function buildChallengeMilestones(
     .filter(({ threshold }) => Number.isFinite(threshold) && threshold > 0)
     .sort((left, right) => left.threshold - right.threshold);
   const nextCheckpoint = checkpoints.find(({ threshold }) => threshold > current)?.threshold;
-  const milestones: GoalMilestone[] = [
-    {
-      id: 'challenge-progress',
-      title: `已累積 ${current}${unitSuffix}`,
-      detail: null,
-      status: 'completed',
-    },
-  ];
 
-  for (const checkpoint of checkpoints) {
-    milestones.push({
-      id: `checkpoint-${checkpoint.threshold}`,
-      title: `累積 ${checkpoint.threshold}${unitSuffix}`,
-      detail: checkpoint.coin > 0 ? `成長幣 +${checkpoint.coin}` : null,
-      status: checkpoint.threshold <= current
-        ? 'completed'
-        : checkpoint.threshold === nextCheckpoint
-          ? 'next'
-          : 'upcoming',
-    });
-  }
-
-  milestones.push({
-    id: 'final-review',
-    title: `達到 ${target}${unitSuffix}`,
-    detail: '可以繼續、調整，或讓計畫先告一段落。',
-    status: goal.status === 'completed' || current >= target
+  return checkpoints.map((checkpoint): GoalMilestone => ({
+    id: `checkpoint-${checkpoint.threshold}`,
+    title: `累積 ${checkpoint.threshold}${unitSuffix}`,
+    detail: checkpoint.coin > 0 ? `成長幣 +${checkpoint.coin}` : null,
+    status: checkpoint.threshold <= current
       ? 'completed'
-      : nextCheckpoint === undefined
+      : checkpoint.threshold === nextCheckpoint
         ? 'next'
         : 'upcoming',
-  });
-
-  return milestones;
+  }));
 }
 
 function buildRecentRecords(
@@ -784,7 +769,7 @@ export function buildGoalPresentation(
   const milestones = isSkill
     ? buildSkillMilestones(goal, current, target)
     : hasChallengeValues
-      ? buildChallengeMilestones(goal, current, target, challengeUnit)
+      ? buildChallengeMilestones(goal, current, challengeUnit)
       : buildRhythmMilestones(goal);
   const preferredTimeWindow = isPreferredTimeWindow(goal.preferred_time_window)
     ? goal.preferred_time_window
