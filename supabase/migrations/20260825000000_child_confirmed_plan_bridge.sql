@@ -565,12 +565,17 @@ BEGIN
   --
   -- 這裡**不**捏資料。缺什麼就講缺什麼，Direct Confirm 暫時不能用是
   -- 可以接受的 —— 自己生一個 durationDays = 30 才是真的錯。
-  IF v_cadence_mode IS NULL THEN v_pending := v_pending || 'cadence'; END IF;
-  IF v_minutes IS NULL THEN v_pending := v_pending || 'session_size'; END IF;
-  IF v_duration IS NULL THEN v_pending := v_pending || 'duration'; END IF;
-  IF v_purpose IS NULL THEN v_pending := v_pending || 'purpose_category'; END IF;
+  -- array_append 而不是 `||`：後者對 text[] || 'literal' 是有歧義的，
+  -- Postgres 會挑 anyarray || anyarray 那個 overload，然後試著把
+  -- 'cadence' 解析成一個 array literal 並丟 22P02。
+  -- （staging acceptance 抓到的 —— 第一個案例剛好每一欄都有值，
+  --   一個分支都沒走到，所以本機測試全綠。）
+  IF v_cadence_mode IS NULL THEN v_pending := array_append(v_pending, 'cadence'); END IF;
+  IF v_minutes IS NULL THEN v_pending := array_append(v_pending, 'session_size'); END IF;
+  IF v_duration IS NULL THEN v_pending := array_append(v_pending, 'duration'); END IF;
+  IF v_purpose IS NULL THEN v_pending := array_append(v_pending, 'purpose_category'); END IF;
   IF v_eligibility <> 'allowed' OR v_policy IS NULL THEN
-    v_pending := v_pending || 'reward';
+    v_pending := array_append(v_pending, 'reward');
   END IF;
 
   SELECT COALESCE(MAX(v.version_no), 0) + 1 INTO v_version_no

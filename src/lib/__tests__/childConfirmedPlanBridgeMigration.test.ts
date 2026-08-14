@@ -183,9 +183,14 @@ describe('4. 節奏：孩子 > 孩子原提案 > 未決定', () => {
   });
 
   it('沒決定就列進 requires_parent_decision，不捏一個出來', () => {
-    expect(publish).toContain("v_pending := v_pending || 'cadence'");
-    expect(publish).toContain("v_pending := v_pending || 'duration'");
-    expect(publish).toContain("v_pending := v_pending || 'reward'");
+    expect(publish).toContain("array_append(v_pending, 'cadence')");
+    expect(publish).toContain("array_append(v_pending, 'duration')");
+    expect(publish).toContain("array_append(v_pending, 'reward')");
+    // `text[] || 'literal'` 在 PL/pgSQL 是有歧義的：Postgres 會挑
+    // anyarray || anyarray 那個 overload，然後把 'cadence' 當成 array literal
+    // 去解析並丟 22P02。staging acceptance 抓到的 —— 第一個案例剛好每一欄
+    // 都有值，一個分支都沒走到，所以本機測試當時全綠。
+    expect(publish).not.toMatch(/v_pending\s*\|\|/);
     // 自己生 durationDays = 30 / weeklyFrequency = 3 是這一包最想防的事。
     expect(publish).not.toMatch(/v_duration_days\s*:=\s*\d/);
   });
