@@ -106,6 +106,53 @@ describe('callGeminiWithModel 回真正回答的那個 model', () => {
     warn.mockRestore();
   });
 
+  it('首選 503 → 換下一個（該 model 過載，不是整個服務掛了）', async () => {
+    let call = 0;
+    fetchImpl = async () => {
+      call += 1;
+      return call === 1 ? errorResponse(503) : geminiResponse('from fallback');
+    };
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { callGeminiWithModel } = load();
+    const result = await callGeminiWithModel('prompt');
+
+    // 2026-08-14 實測：gemini-flash-latest 回 503 high demand，而
+    // gemini-flash-lite-latest 在同一秒是 200。少了這一條，整條鏈會在
+    // 第一跳就放棄，而第二順位明明是好的。
+    expect(result).toEqual({ text: 'from fallback', model: 'gemini-flash-lite-latest' });
+    expect(fetchCalls).toHaveLength(2);
+    warn.mockRestore();
+  });
+
+  it('503 之後 jsonMode 與自訂預算都還在', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const budgets: number[] = [];
+    const real = globalThis.setTimeout;
+    jest.spyOn(globalThis, 'setTimeout').mockImplementation(((
+      fn: () => void, ms?: number, ...rest: unknown[]
+    ) => {
+      if (typeof ms === 'number') budgets.push(ms);
+      return (real as unknown as (...a: unknown[]) => unknown)(fn, ms, ...rest);
+    }) as unknown as typeof globalThis.setTimeout);
+
+    let call = 0;
+    fetchImpl = async (_url, init) => {
+      bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      call += 1;
+      return call === 1 ? errorResponse(503) : geminiResponse('{}');
+    };
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { callGeminiWithModel } = load();
+    await callGeminiWithModel('prompt', true, 15_000);
+
+    expect(bodies[1].generationConfig).toEqual({ responseMimeType: 'application/json' });
+    expect(budgets).toEqual([15_000, 15_000]);
+    warn.mockRestore();
+    jest.restoreAllMocks();
+  });
+
   it('兩個都掛 → 拋**最後一個** model 的真實錯誤，而不是第一個', async () => {
     let call = 0;
     fetchImpl = async () => errorResponse((call += 1) === 1 ? 429 : 404);
@@ -121,12 +168,15 @@ describe('callGeminiWithModel 回真正回答的那個 model', () => {
     warn.mockRestore();
   });
 
-  it('其他 HTTP 錯誤直接拋出，不吞、不換 model', async () => {
-    fetchImpl = async () => errorResponse(500);
+  it.each([
+    [500, '伺服器自己壞了 —— 換 model 也是同一個後端'],
+    [400, '請求本身有問題 —— 換 model 只會再被拒絕一次'],
+    [403, '權限問題 —— 換 model 不會變得有權限'],
+  ])('%s 直接拋出，不吞、不換 model（%s）', async (status) => {
+    fetchImpl = async () => errorResponse(status);
     const { callGeminiWithModel } = load();
 
-    await expect(callGeminiWithModel('prompt')).rejects.toThrow('500');
-    // 500 不是配額問題 —— 換 model 沒有意義，也會多花一次請求。
+    await expect(callGeminiWithModel('prompt')).rejects.toThrow(String(status));
     expect(fetchCalls).toHaveLength(1);
   });
 
