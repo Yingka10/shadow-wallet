@@ -42,14 +42,26 @@ import {
   planDraftClientSetup,
 } from '../../lib/childProposal';
 import {
+  ChildPlanningSessionService,
+  buildChildGoalPlanningInput,
+  childGoalPlanningClientSetup,
+  childGoalPlanningUnavailable,
+} from '../../lib/childPlanning';
+import ChildGoalPlanningFlow, {
+  type PlanningFlowPorts,
+} from './childProposal/ChildGoalPlanningFlow';
+import { toPlanningRequest } from './childProposal/toPlanningRequest';
+import {
   CADENCE_OPTIONS,
   DAY_LABELS,
+  PLANNING_COPY,
   MAX_TIMES_PER_WEEK,
   MIN_TIMES_PER_WEEK,
   PROPOSAL_COPY,
   SEEN_AS_OPTIONS,
   canLeaveStep,
   canSubmit,
+  createChildProposalDraft,
   createEmptyDraft,
   describeCadence,
   describeSeenAs,
@@ -77,6 +89,14 @@ const STEP_ORDER: readonly ProposalStep[] = [...QUESTION_STEPS, 'review'];
 
 type Phase =
   | { kind: 'form'; step: ProposalStep }
+  /**
+   * P1：想法已經安全落成 draft，接下來一起想怎麼開始。
+   *
+   * 提案在這個階段**仍然是 draft** —— 這一包不轉 proposed。理由見
+   * migration 的 confirm RPC：現在就轉的話，孩子看的是 P1 計畫，
+   * 而家長會看到背景跑出來的另一份 P0 草稿。
+   */
+  | { kind: 'planning'; proposalId: string; sessionId: string; revision: number }
   | { kind: 'success' };
 
 type ErrorState = { stage: SubmitStage; proposalId?: string } | null;
@@ -96,6 +116,18 @@ export default function ChildProposalScreen() {
   // service 只建一次。每次 render 都 new 一個會讓它變成新的識別，
   // 之後如果有人把它放進 dependency array 就會無限重跑。
   const serviceRef = useRef(new SupabaseChildProposalService());
+  const planningServiceRef = useRef(new ChildPlanningSessionService());
+  // 同一次「開始規劃」的識別碼。連點兩下不會生出兩場對話。
+  const planningAttemptRef = useRef<string>(`${Date.now()}-${Math.random().toString(16).slice(2)}`);
+
+  /**
+   * 這個環境有沒有 Goal Planning。
+   *
+   * ⚠️ 這是 P1 與 legacy 的**唯一**分岔點。關掉時下面的 handleSubmit
+   *    走的是一模一樣的兩步送出，一個字都沒有變 —— 那條路徑同時也是
+   *    之後換付費 provider 前的降級路徑。
+   */
+  const planningEnabled = childGoalPlanningClientSetup.client !== null;
 
   const step = phase.kind === 'form' ? phase.step : null;
   const stepIndex = step ? STEP_ORDER.indexOf(step) : -1;
@@ -125,8 +157,84 @@ export default function ChildProposalScreen() {
     goTo(STEP_ORDER[stepIndex - 1]);
   }, [goTo, navigation, stepIndex]);
 
+  /**
+   * legacy 送出：建立 draft → transition proposed → 成功頁 → 背景整理草稿。
+   *
+   * 這一支同時是 P1 的逃生出口（「先把想法送給爸媽」）。已經建立過 draft
+   * 的話會帶 resumeProposalId，所以不會多一份提案。
+   */
+  const submitToParents = useCallback(
+    async (resumeProposalId?: string) => {
+      if (submitting) return;
+      setSubmitting(true);
+      setError(null);
+      try {
+        const result = await submitChildProposal(
+          serviceRef.current,
+          toCreateCommand(draft, childId),
+          resumeProposalId ?? (error?.stage === 'transition' ? error.proposalId : undefined),
+        );
+
+        if (result.ok) {
+          setPhase({ kind: 'success' });
+          generateChildProposalPlanDraftInBackground(
+            { client: planDraftClientSetup.client, port: serviceRef.current },
+            result.proposalId,
+          );
+          return;
+        }
+
+        setError({ stage: result.stage, proposalId: result.proposalId });
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [childId, draft, error, submitting],
+  );
+
   const handleSubmit = useCallback(async () => {
     if (submitting || !canSubmit(draft)) return;
+
+    // ── P1：先把想法安全存成 draft，再一起想怎麼開始 ──────────────────
+    //
+    // 只建立、不送出。規劃會失敗（逾時、孩子中途離開、網路斷），
+    // 而那些都不可以讓他剛剛打的那段話消失。
+    if (planningEnabled) {
+      setSubmitting(true);
+      setError(null);
+      try {
+        const created = await createChildProposalDraft(
+          serviceRef.current,
+          toCreateCommand(draft, childId),
+        );
+        if (!created.ok) {
+          setError({ stage: created.stage, proposalId: created.proposalId });
+          return;
+        }
+
+        const session = await planningServiceRef.current.start({
+          proposalId: created.proposalId,
+          clientRequestId: planningAttemptRef.current,
+        });
+
+        if (!session.ok) {
+          // 對話開不起來就退回 legacy —— 想法已經存好了，
+          // 孩子仍然送得出去，這一點不受 AI 影響。
+          await submitToParents(created.proposalId);
+          return;
+        }
+
+        setPhase({
+          kind: 'planning',
+          proposalId: created.proposalId,
+          sessionId: session.sessionId,
+          revision: session.revision,
+        });
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
 
     setSubmitting(true);
     setError(null);
@@ -158,7 +266,47 @@ export default function ChildProposalScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [childId, draft, error, submitting]);
+  }, [childId, draft, error, planningEnabled, submitToParents, submitting]);
+
+  /**
+   * planning flow 需要的三件事。
+   *
+   * requestPlan 讀的是**資料庫那一列**，不是畫面上的草稿：提案一旦建立，
+   * 畫面上那份就不再是權威（與 P0-3 的 generatePlanDraft 同一個理由）。
+   */
+  const planning = phase.kind === 'planning' ? phase : null;
+
+  const planningPorts: PlanningFlowPorts = useMemo(() => {
+    const proposalId = planning?.proposalId ?? null;
+    const sessionId = planning?.sessionId ?? '';
+
+    return {
+      async requestPlan(request) {
+        const client = childGoalPlanningClientSetup.client;
+        if (client === null || proposalId === null) {
+          return childGoalPlanningUnavailable('SERVICE_DISABLED');
+        }
+
+        const proposal = await serviceRef.current.getProposal(proposalId);
+        const ageGroup = proposal
+          ? await serviceRef.current.getChildAgeGroup(proposal.child_id)
+          : null;
+        if (proposal === null || ageGroup === null) {
+          return childGoalPlanningUnavailable('INVALID_INPUT');
+        }
+
+        const input = buildChildGoalPlanningInput(
+          toPlanningRequest(proposal, { ageGroup, ...request }),
+        );
+        // 組不出 input 代表這一輪本來就產不出可用的計畫 —— 不花那次呼叫。
+        if (input === null) return childGoalPlanningUnavailable('INVALID_INPUT');
+
+        return client.requestPlan(input);
+      },
+      recordRound: (args) => planningServiceRef.current.recordRound({ ...args, sessionId }),
+      confirm: (args) => planningServiceRef.current.confirm({ ...args, sessionId }),
+    };
+  }, [planning?.proposalId, planning?.sessionId]);
 
   const summary = useMemo(
     () => ({
@@ -173,6 +321,31 @@ export default function ChildProposalScreen() {
     }),
     [draft],
   );
+
+  // ── 一起想怎麼開始（P1）────────────────────────────────────────────────
+  //
+  // ⚠️ 這一頁結束時提案**仍然是 draft**。孩子確認的是「我願意先這樣試」，
+  //    不是「送出給爸媽」—— 後者是下面那顆逃生按鈕，或 P1-A3 的橋。
+  if (planning !== null) {
+    return (
+      <View style={webScreen}>
+        <GradientBackground />
+        <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+          <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+            <Text style={styles.headerTitle}>{PLANNING_COPY.flowTitle}</Text>
+          </View>
+          <ChildGoalPlanningFlow
+            ports={planningPorts}
+            initialRevision={planning.revision}
+            // AI 掛掉不可以連帶讓孩子的想法送不出去 —— 走既有的兩步送出，
+            // 帶著已經建立的 proposalId，所以不會多一份提案。
+            onSendToParents={() => void submitToParents(planning.proposalId)}
+            onDone={() => navigation.goBack()}
+          />
+        </SafeAreaView>
+      </View>
+    );
+  }
 
   // ── 成功頁 ────────────────────────────────────────────────────────────────
   if (phase.kind === 'success') {

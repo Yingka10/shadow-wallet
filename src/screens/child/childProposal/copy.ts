@@ -15,6 +15,104 @@
 
 import type { CadenceKind, SeenAsChoice } from './types';
 
+/**
+ * 「一起想怎麼開始」的文案（P1-A2）。
+ *
+ * ⚠️ 這一段跟四個問題**不是同一件事**，所以文案也不共用：
+ *
+ *    四個問題在問「你想做什麼」。這裡在幫他把想法變成「明天真的做得到的
+ *    第一步」。同一句話用在兩個地方，孩子會以為自己被重複問了。
+ *
+ * 三條規則與 PROPOSAL_COPY 相同（不出現審核語言、不出現工程名詞、
+ * 不出現 AI/分類/幣值），另外多一條**只屬於這一段**的：
+ *
+ *   · 不可以出現「推薦」「最適合」「建議你」——
+ *     選項是平等的，替他挑就不是讓他選了。
+ */
+export const PLANNING_COPY = {
+  flowTitle: '一起想怎麼開始',
+
+  /** 開場只問一題。不要把方法、頻率、份量、時段一次問成一張表。 */
+  opening: {
+    question: '你已經想到要怎麼開始了嗎？',
+    hint: '沒想到也沒關係，我們一起想',
+    options: {
+      /** → organize_only：我自己想好了，只要幫我整理。 */
+      hasOwnIdea: '我有自己的想法',
+      /** → give_me_options：我想看幾種做法再挑。 */
+      wantOptions: '我還不知道，想看看幾種方式',
+      /** → first_step_only：先告訴我第一步就好。 */
+      firstStepOnly: '我想先想第一步就好',
+    },
+    approachQuestion: '你原本想怎麼做？',
+    approachPlaceholder: '例如：每天睡前讀 15 分鐘',
+    next: '好，開始吧',
+  },
+
+  /**
+   * 等待。
+   *
+   * ⚠️ 不要假的進度百分比，也不要「還有 3 秒」——
+   *    實測有偶發的 20-30 秒長尾，講了就是騙他。
+   */
+  requesting: {
+    title: 'GrowBook 正在幫你整理剛剛的想法…',
+    hint: '有時候要等一下下',
+    /** 等待中也看得到的出路。孩子不必等到逾時才知道自己可以走。 */
+    escapeSelf: '先不等，我自己寫',
+    escapeSend: '先把想法送給爸媽',
+  },
+
+  clarification: {
+    hint: '回答完我們就繼續',
+    placeholder: '用你自己的話說就好',
+    next: '這樣',
+  },
+
+  choice: {
+    hint: '這幾種都可以，選一個你想先試的',
+    /** 永遠在最後一個位置，而且永遠存在。 */
+    custom: '我自己想',
+    customQuestion: '你想怎麼開始？',
+    customPlaceholder: '例如：每天早上先讀一章',
+    customNext: '就這樣',
+  },
+
+  ready: {
+    title: '這是不是你願意先這樣試的方式？',
+    outcomeLabel: '我想做到',
+    summaryLabel: '我準備先這樣做',
+    nextActionLabel: '第一個小步驟',
+    cadenceLabel: '多久做一次',
+    sessionSizeLabel: '一次做多少',
+    focusLabel: '目前先處理什麼',
+    /** ⚠️ 「可能」兩個字不能拿掉：階段是暫定路線，不是正式課程。 */
+    phasesLabel: '之後可能的幾個階段',
+    targetLabel: '目標總量',
+    currentLabel: '目前從哪裡開始',
+    confirm: '就照這樣開始',
+    revise: '我想改一下',
+  },
+
+  /** AI 掛掉時孩子看到的。**三條路都要在**，不可以只剩「再試一次」。 */
+  unavailable: {
+    title: '這次沒有整理成功',
+    hint: '不是你的問題，剛剛沒接上',
+    retry: '再試一次',
+    self: '我自己寫怎麼開始',
+    send: '先把想法送給爸媽',
+    /** 三輪問完了。語氣是「換你決定」，不是「你講不清楚」。 */
+    exhaustedTitle: '這次先由你來決定吧',
+    exhaustedHint: '想好怎麼開始，或先把想法送給爸媽都可以',
+  },
+
+  confirmed: {
+    title: '好，就這樣開始',
+    body: '這是你自己決定的方式，之後都還可以再調整。',
+    done: '知道了',
+  },
+} as const;
+
 export const PROPOSAL_COPY = {
   /** 孩子端首頁的入口。刻意不叫「新增任務」—— 那是家長的語言。 */
   entry: '我想試試看',

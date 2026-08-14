@@ -369,3 +369,90 @@ P0-3 計畫草稿），所以它該有自己的決定與回歸測試，不該在
 `EXPO_PUBLIC_CHILD_GOAL_PLANNING_AI_MODE`（自己的開關，**沒有**與 P0-3 共用）。
 `fake` 一律降成 `off` —— 一份模型從來沒跑過、但長得像 AI 產出的計畫，
 之後沒有人分得出來。
+
+---
+
+## 10. P1-A2：多輪對話與 Planning Session
+
+P1-A1 的邊界（第 8 節）在這一包被移動了兩格：**接上 Child Proposal 的 draft 階段**，
+以及**有了自己的 persistence**。其餘邊界原封不動。
+
+### 10.1 對話的答案有自己的位置
+
+P1-A1 的 input 只有四個內容欄位，於是多輪對話的答案無處可放。唯一可行的作法是寫回
+既有欄位 —— 而那正是這份契約整包在防的事：
+
+> AI 問「你最想在哪件事變厲害？」孩子答「我想把英文口說變好」。
+> 那句話一旦寫進 `childOriginalGoal`，他的原話就被 AI 的提問改掉了，
+> 而且事後沒有任何地方看得出來。
+
+所以新增 `responses: ChildPlanningResponse[]`，只 append：
+
+| type | 意義 | 證據強度 |
+|---|---|---|
+| `clarification_answer` | 他回答了一題（逐字保留問題與答案） | 他的原話 |
+| `choice_selection` | 他從選項裡挑了一個 | 文字是 AI 的、**決定是他的** |
+| `custom_choice` | 他說「我自己想」並自己輸入 | 他的原話 |
+
+四個內容欄位一個字都不動。「原話不可覆寫」因此是**結構性**的，不靠呼叫端自律
+（DB 那一側另有 trigger）。
+
+### 10.2 provenance 拆成兩欄
+
+- `childStatedApproach` —— 他**自己打的字**。挑走的選項不算，寫進來等於宣稱那句話是他講的。
+- `childChosenOption` —— 他挑走的選項，逐字 ＋ id。
+- `fields.approach` —— 方法的來源。**永遠不會是 `ai_suggested`**：
+  他自己打的是 `child_stated`，他挑的是 `derived_from_child`，還沒決定是 `undecided`。
+
+「他挑過沒有」由對話紀錄決定，不由模型自陳：真的挑過就一定標成 `child_chose_option`
+（模型忘了標也一樣），沒挑過就不准標。
+
+### 10.3 對話有盡頭
+
+| 常數 | 值 | 擋什麼 |
+|---|---|---|
+| `CHILD_GOAL_PLANNING_MAX_ROUNDS` | 3 | 孩子被問幾次。**逾時不算** —— 那不是他講得不清楚。 |
+| `CHILD_GOAL_PLANNING_MAX_ATTEMPTS` | 5 | 打了幾次模型。「再試一次」的盡頭。 |
+
+三輪問完之後不再問第四題，改為把主導權交回孩子：「我自己寫怎麼開始」與
+「先把想法送給爸媽」。這兩條在型別上是字面量 `true`（`ChildPlanningSessionExits`），
+所以把它們藏起來的畫面寫不出來。
+
+次數由 **RPC 自己加**，不收呼叫端的值 —— 收的話上限就只是一個建議。
+
+### 10.4 Planning Session ≠ Plan Version
+
+`child_goal_planning_sessions` 存的是**計畫成形之前孩子在想什麼**。它刻意不是
+`child_proposal_plan_versions`：後者是正式共同計畫的生命週期（家長會看到、
+Direct Confirm 會讀、`confirmed_reward` 掛在上面）。一場還在問「你想先怎麼開始？」
+的對話放進去，等於讓一個沒有人同意過的東西出現在那條線上。
+
+不變式（全部在 DB，不在畫面）：
+
+- **A** 一個 proposal 同時只有一場進行中的對話（partial unique index，不是先查再寫）
+- **B** 只有 `proposal.status = 'draft'` 可以規劃
+- **C** `child_confirmed` 之後 `confirmed_plan` 不可變；對話只能變長；`revision` 不可倒退
+- **D** 授權沿用 `assert_child_in_caller_family`，沒有另一套
+- **E** `client_request_id` 決定於任何狀態檢查之前 —— 連點兩下不會生出兩場
+
+`confirmed_plan` 由 RPC 從 `latest_result` 複製，**命令裡沒有計畫這個東西**
+（與 `confirmed_reward` 從 `tasks` 複製同一個理由）。
+
+### 10.5 這一包停在 draft
+
+孩子確認計畫之後：
+
+```
+planning session : child_confirmed
+child_proposal   : draft        ← 沒有變
+```
+
+不建立 Plan Version、不轉 `proposed`、不碰幣值。正式 Plan Version 需要分類、
+完成標準、資格與定價，那是 P1-A3 的 policy enrichment。現在就轉的話，孩子看的是
+P1 計畫，而家長會看到背景跑出來的另一份 P0 草稿 —— 兩份「真正的計畫」不可以同時存在。
+
+### 10.6 仍然不做
+
+- 不改 P0-3 Plan Draft 的任何行為（AI mode 關掉時走的是一模一樣的兩步送出）
+- 不碰 Direct Confirm、reward、payout、LongTerm UI、WP2
+- 不把 provider 概念帶進契約、持久化或孩子端畫面（由 provider-neutrality 測試掃描）

@@ -1,15 +1,28 @@
-// GrowBook — Child Goal Planning contract（P1-A1）
+// GrowBook — Child Goal Planning contract（P1-A1 / P1-A2）
 //
-// 這個 barrel 只匯出契約與純函式。它**沒有**匯出任何會改變 production
-// 行為的東西：沒有 DB 存取、沒有畫面、也沒有掛進 Child Proposal 流程。
-// 契約穩定之前，這個模組對 App 的其他部分應該是「可以 import，但沒有人
-// 非 import 不可」。
+// 這個 barrel 匯出契約、純函式，以及 P1-A2 的 session 狀態機與持久化。
+//
+// 它**不認識 ChildProposal**，而且要保持這樣：兩者的接線住在畫面那一層
+// 的 toPlanningRequest.ts。之後換 provider、或 planning 改接別的來源時，
+// 要改的只有那一個檔案。
 //
 // source of truth：docs/CHILD_GOAL_PLANNING_CONTRACT.md
 
 export * from './types';
 export * from './planGuards';
 export * from './buildChildGoalPlanningInput';
+export * from './childPlanningSession';
+export {
+  CONFIRM_PLANNING_SESSION_RPC,
+  ChildPlanningSessionService,
+  RECORD_PLANNING_ROUND_RPC,
+  START_PLANNING_SESSION_RPC,
+  type ChildPlanningSessionFailure,
+  type ChildPlanningSessionFailureCode,
+  type ChildPlanningSessionResult,
+  type ChildPlanningSessionSnapshot,
+  type PlanningSessionRpc,
+} from './childPlanningSessionService';
 export {
   childGoalPlanningUnavailable,
   validateChildGoalPlanningResult,
