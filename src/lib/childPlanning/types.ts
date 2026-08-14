@@ -52,6 +52,20 @@ export const CHILD_GOAL_PLANNING_REQUEST_TYPE = 'childGoalPlanning';
  */
 export const CHILD_GOAL_PLANNING_MAX_ROUNDS = 3;
 
+/**
+ * 一場 session 最多打幾次模型 —— **含失敗的那幾次**。
+ *
+ * 與上面那個是兩件事，刻意分開：
+ *
+ *   MAX_ROUNDS    「問了孩子幾次」。這是產品上限，逾時不該算在孩子頭上 ——
+ *                  一次 SERVICE_ERROR 又不是他講得不清楚。
+ *   MAX_ATTEMPTS  「打了幾次模型」。這是成本與迴圈上限：服務掛著的時候
+ *                  「再試一次」不可以按到天荒地老。
+ *
+ * 差額（5 - 3 = 2）就是允許重試的次數。
+ */
+export const CHILD_GOAL_PLANNING_MAX_ATTEMPTS = 5;
+
 export type ChildPlanAgeGroup = '2-4' | '4-6' | '6-9' | '9-12';
 
 // ---------------------------------------------------------------------------

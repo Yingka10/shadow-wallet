@@ -1306,6 +1306,19 @@ export interface Database {
         Args: { p_from: string; p_to: string; p_actor_role?: string | null };
         Returns: boolean;
       };
+      // P1-A2：孩子的目標規劃對話。與 Plan Version 是兩條線。
+      start_child_goal_planning_session_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      record_child_goal_planning_round_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      confirm_child_goal_planning_session_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
       mark_task_atomic: {
         Args: {
           p_task_id: string;
