@@ -163,9 +163,10 @@ describe('buildGoalPresentation', () => {
     expect(result.goalKind).toBe('habit');
     expect(result.progression).toBe('weekly_rhythm');
     expect(result.categoryLabel).toBe('D學習與技能');
-    expect(result.weekProgressLabel).toContain('3');
+    expect(result.weekProgressLabel).toBe('本週完成 3／3 次');
     expect(result.weekTarget).toBe(3);
     expect(result.planState).toBe('active');
+    expect(result.overallLabel).toBe(result.planWeekLabel);
     expect(result.completionConditionLabel).not.toContain('14');
     expect(result.planNotice).toBeNull();
     expect(result.todayAction).toBe('先讀第一章');
