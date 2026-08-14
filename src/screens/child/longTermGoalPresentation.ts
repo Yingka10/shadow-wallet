@@ -184,7 +184,6 @@ function getProgressModel(task: Task, goal: LongTermGoal): string | null {
 function getProgression(
   task: Task,
   goal: LongTermGoal,
-  weeklyFrequency: number | null,
   activeDays: number[],
 ): GoalProgressionType | null {
   if (goal.goal_type === 'skill') return 'staged_skill';
@@ -207,10 +206,10 @@ function getProgression(
 
 function getCategoryLabel(task: Task, goalKind: GoalKind): string {
   const labels: Record<string, string> = {
-    A: 'A生活習慣',
-    B: 'B家庭參與',
-    C: 'C自主挑戰',
-    D: 'D學習與技能',
+    A: '生活習慣',
+    B: '家庭參與',
+    C: '自主挑戰',
+    D: '學習與技能',
   };
   const category = String(task.category ?? '').trim();
   if (labels[category]) return labels[category];
@@ -433,34 +432,6 @@ function buildRhythmMilestones(
     status: 'planned',
   }));
   return milestones;
-
-  /* Legacy synthetic final-review milestone intentionally removed.
-
-  const chineseWeekCounts: Record<number, string> = {
-    1: '一',
-    2: '二',
-    3: '三',
-    4: '四',
-    5: '五',
-    6: '六',
-    7: '七',
-    8: '八',
-    9: '九',
-    10: '十',
-  };
-  const weekCount = chineseWeekCounts[totalWeeks] ?? String(totalWeeks);
-
-  milestones.push({
-    id: 'final-review',
-    title: totalWeeks === 0
-      ? '安排好週期後一起回顧'
-      : `${weekCount}週後一起回顧`,
-    detail: '可以繼續、調整，或讓計畫先告一段落。',
-    status: 'planned',
-  });
-
-  return milestones;
-  */
 }
 
 function buildSkillMilestones(
@@ -623,7 +594,7 @@ export function buildGoalPresentation(
     && !isSkill
     && !isChallenge;
   const activeDays = getActiveDays(task, goal, isSkill, isChallenge);
-  const progression = getProgression(task, goal, weeklyFrequency, activeDays);
+  const progression = getProgression(task, goal, activeDays);
   const progressModel = getProgressModel(task, goal);
   const planStart = getPlanStart(goal, task, now);
   const dueDateEnd = task.due_date
@@ -797,7 +768,7 @@ export function buildGoalPresentation(
       ? '尚未安排週期'
       : `第 ${currentWeek} 週／共 ${totalWeeks} 週`;
   const completionConditionLabel = hasExplicitRhythmPeriod
-    ? '依每週節奏完成'
+    ? `${totalWeeks} 週計畫 · 每週 ${weeklyFrequency} 次`
     : isSkill
     ? `完成 ${target} 個階段`
     : hasChallengeValues
@@ -850,14 +821,6 @@ export function buildGoalPresentation(
     progression,
     planState,
     categoryLabel: getCategoryLabel(task, goalKind),
-    /*
-      ? '自主挑戰'
-      : isSkill
-        ? '學習與技能'
-        : isFamily
-          ? '家庭參與'
-          : '習慣養成',
-    */
     overallLabel: hasExplicitRhythmPeriod
       ? planWeekLabel
       : isSkill

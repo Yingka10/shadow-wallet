@@ -162,12 +162,12 @@ describe('buildGoalPresentation', () => {
 
     expect(result.goalKind).toBe('habit');
     expect(result.progression).toBe('weekly_rhythm');
-    expect(result.categoryLabel).toBe('D學習與技能');
+    expect(result.categoryLabel).toBe('學習與技能');
     expect(result.weekProgressLabel).toBe('本週完成 3／3 次');
     expect(result.weekTarget).toBe(3);
     expect(result.planState).toBe('active');
     expect(result.overallLabel).toBe(result.planWeekLabel);
-    expect(result.completionConditionLabel).not.toContain('14');
+    expect(result.completionConditionLabel).toBe('2 週計畫 · 每週 3 次');
     expect(result.planNotice).toBeNull();
     expect(result.todayAction).toBe('先讀第一章');
   });
@@ -195,10 +195,10 @@ describe('buildGoalPresentation', () => {
   });
 
   it.each([
-    ['A', 'A生活習慣'],
-    ['B', 'B家庭參與'],
-    ['C', 'C自主挑戰'],
-    ['D', 'D學習與技能'],
+    ['A', '生活習慣'],
+    ['B', '家庭參與'],
+    ['C', '自主挑戰'],
+    ['D', '學習與技能'],
   ] as const)('maps category %s without consulting the goal name', (category, expected) => {
     const result = buildGoalPresentation(
       makeTask({ category, name: '任意名稱', long_term_type: 'challenge' }),
@@ -873,7 +873,7 @@ describe('buildGoalPresentation', () => {
     expect(result.weekSummary).toBe('累積進度會在家長確認後更新。');
     expect(result.milestones[0].title).toBe('已累積 25 頁');
     expect(result.milestones[result.milestones.length - 1].title).toBe('達到 100 頁');
-    expect(result.categoryLabel).toBe('D學習與技能');
+    expect(result.categoryLabel).toBe('學習與技能');
     expect(result.canCompleteToday).toBe(false);
     expect(result.todayStatusText).toBe('累積進度由家長一起確認');
     expect(result.weekTarget).toBe(0);
@@ -899,7 +899,7 @@ describe('buildGoalPresentation', () => {
       dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
     );
 
-    expect(result.categoryLabel).toBe('D學習與技能');
+    expect(result.categoryLabel).toBe('學習與技能');
     expect(result.overallLabel).toBe('8 / 20 公里');
     expect(result.canCompleteToday).toBe(false);
     expect(result.weekTarget).toBe(0);
@@ -1042,7 +1042,7 @@ describe('buildGoalPresentation', () => {
       dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
     );
 
-    expect(result.categoryLabel).toBe('D學習與技能');
+    expect(result.categoryLabel).toBe('學習與技能');
     expect(result.weekTarget).toBe(1);
     expect(result.totalWeeks).toBe(4);
     expect(result.weekDays).toHaveLength(7);
