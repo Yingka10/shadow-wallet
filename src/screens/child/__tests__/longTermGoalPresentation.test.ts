@@ -131,6 +131,7 @@ describe('buildGoalPresentation', () => {
       weekly_frequency: 3,
       recurrence_days: null,
       due_date: '2026-08-09',
+      completion_description: '不應覆蓋下一步',
     }) as Task & {
       progress_model: 'weekly_rhythm';
       next_step: string;
@@ -144,9 +145,11 @@ describe('buildGoalPresentation', () => {
       end_date: '2026-08-09',
       preferred_time_window: null,
     });
-    const completions = Array.from({ length: 6 }, (_, index) => makeCompletion(
+    const completions = Array.from({ length: 14 }, (_, index) => makeCompletion(
       `demo-${index}`,
-      `2026-07-${String(27 + index).padStart(2, '0')}T19:00:00+08:00`,
+      dayjs.tz('2026-07-27T19:00:00', 'Asia/Taipei')
+        .add(index, 'day')
+        .format('YYYY-MM-DDTHH:mm:ssZ'),
       null,
     ));
 
@@ -235,6 +238,38 @@ describe('buildGoalPresentation', () => {
     );
 
     expect(result.progression).toBe(expected);
+  });
+
+  it.each([null, 0, 8])(
+    'keeps weekly-frequency progression when its frequency is invalid: %s',
+    (weekly_frequency) => {
+      const result = buildGoalPresentation(
+        makeTask({
+          schedule_mode: 'weekly_frequency',
+          weekly_frequency,
+          recurrence_days: [1, 3],
+        }),
+        makeGoal({ active_days: [1, 3] }),
+        [],
+        dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+      );
+
+      expect(result.progression).toBe('weekly_rhythm');
+    },
+  );
+
+  it('uses neutral copy for a non-reading habit', () => {
+    const result = buildGoalPresentation(
+      makeTask({ name: '整理書包', category: 'A', recurrence_days: [1] }),
+      makeGoal({ active_days: [1], motivation_note: null }),
+      [],
+      dayjs.tz('2026-07-27T12:00:00', 'Asia/Taipei'),
+    );
+
+    expect(result.adjustableItemsLabel).toBe('執行時段、每週次數與做法');
+    expect(result.focusText).toBe('第 1 週：找到適合自己的執行節奏');
+    expect(result.weekSummary).toBe('這週已完成 0 次。少一天沒有關係，找到適合自己的節奏更重要。');
+    expect(result.reviewPrompt).toBe('這週哪一點最順？下週想怎麼調整？');
   });
 
   it('exposes preferred-time support only from structured capability', () => {
@@ -463,9 +498,9 @@ describe('buildGoalPresentation', () => {
       isScheduled: true,
       state: 'completed',
     });
-    expect(result.todayAction).toBe('自己選一本喜歡的書，閱讀 15 分鐘');
+    expect(result.todayAction).toBe('安排 15 分鐘完成這一步');
     expect(result.weekSummary).toBe(
-      '這週已閱讀 3 次。少一天沒有關係，找到適合自己的節奏更重要。',
+      '這週已完成 3 次。少一天沒有關係，找到適合自己的節奏更重要。',
     );
     expect(result.weekSummary).not.toContain('自己開始');
     expect(result.nextReward).toBeNull();
@@ -701,7 +736,7 @@ describe('buildGoalPresentation', () => {
     ]);
     expect(result.planPeriodLabel).toBe('2026-07-27 ～ 2026-08-23（共 4 週）');
     expect(result.completionConditionLabel).toBe('完成 20 次');
-    expect(result.adjustableItemsLabel).toBe('閱讀時段、每週次數、閱讀方式或內容');
+    expect(result.adjustableItemsLabel).toBe('執行時段、每週次數與做法');
     expect(JSON.stringify(result.recentRecords)).not.toContain('self_started');
   });
 
@@ -726,7 +761,7 @@ describe('buildGoalPresentation', () => {
       dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
     );
 
-    expect(result.todayAction).toBe('親子閱讀時間 15 分鐘，今天繼續就好');
+    expect(result.todayAction).toBe('安排 15 分鐘完成這一步');
     expect(result.todayAction).not.toMatch(/里程碑|第 \d+ 次/);
   });
 
@@ -945,7 +980,7 @@ describe('buildGoalPresentation', () => {
     expect(result.weekTarget).toBe(2);
     expect(result.weekProgressLabel).toBe('本週完成 2／2 次');
     expect(result.weekSummary).toBe(
-      '這週已閱讀 2 次。少一天沒有關係，找到適合自己的節奏更重要。',
+      '這週已完成 2 次。少一天沒有關係，找到適合自己的節奏更重要。',
     );
     expect(result.weekDays.find((day) => day.day === 1)?.state).toBe('completed');
     expect(result.weekDays.find((day) => day.day === 2)?.state).toBe('unscheduled');
@@ -968,7 +1003,7 @@ describe('buildGoalPresentation', () => {
       '目前期間最多安排 10 次，和 20 次目標不一致，可以和家人一起調整。',
     );
     expect(result.finalRewardText).toBe(
-      '第 2 週結束後一起回顧，可以繼續、調整閱讀方式，或讓計畫先告一段落',
+      '第 2 週結束後一起回顧，可以繼續、調整做法，或讓計畫先告一段落',
     );
   });
 
@@ -1199,7 +1234,7 @@ describe('buildGoalPresentation', () => {
 
     expect(result.planWeekLabel).toBe('第 2 週／共 4 週');
     expect(result.weekLabel).toBe('第 2 週');
-    expect(result.focusText).toBe('第 2 週：繼續找到適合自己的閱讀節奏');
+    expect(result.focusText).toBe('第 2 週：繼續找到適合自己的執行節奏');
   });
 
   it.each([

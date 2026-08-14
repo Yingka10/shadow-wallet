@@ -126,7 +126,6 @@ type StructuredPresentationTask = Task & {
 
 type StructuredPresentationGoal = LongTermGoal & {
   progress_model?: string | null;
-  next_step?: string | null;
   supports_preferred_time_window?: boolean | null;
 };
 
@@ -196,7 +195,10 @@ function getProgression(
       : 'challenge';
   }
 
-  if (getProgressModel(task, goal) === 'weekly_rhythm' || weeklyFrequency !== null) {
+  if (
+    getProgressModel(task, goal) === 'weekly_rhythm'
+    || task.schedule_mode === 'weekly_frequency'
+  ) {
     return 'weekly_rhythm';
   }
 
@@ -226,10 +228,9 @@ function isPreferredTimeWindow(value: unknown): value is PreferredTimeWindow {
   return value === 'after_dinner' || value === 'before_bed';
 }
 
-function getStructuredNextStep(task: Task, goal: LongTermGoal): string | null {
-  const goalNextStep = (goal as StructuredPresentationGoal).next_step?.trim();
+function getStructuredNextStep(task: Task): string | null {
   const taskNextStep = (task as StructuredPresentationTask).next_step?.trim();
-  return goalNextStep || taskNextStep || task.completion_description?.trim() || null;
+  return taskNextStep || task.completion_description?.trim() || null;
 }
 
 function buildFlexibleWeekSummary(
@@ -768,6 +769,15 @@ export function buildGoalPresentation(
     todayTitle = '今天不用記錄';
     todayStatusText = '今天不用記錄，照自己的節奏休息';
   }
+  const progressionAction = isRhythmGoal && task.base_time_min > 0
+    ? `安排 ${task.base_time_min} 分鐘完成這一步`
+    : isSkill
+      ? `這一階段先練習：${currentStage}`
+      : isChallenge
+        ? hasChallengeValues
+          ? `已累積 ${current}${challengeUnit ? ` ${challengeUnit}` : ''}，由家長確認後更新`
+          : '這項累積進度由家長確認後更新'
+        : null;
   const scheduledCapacity =
     planEnd !== null && (goal.goal_type === 'habit' || goal.goal_type === 'responsibility')
       ? isFlexibleWeeklyRhythm
@@ -794,7 +804,7 @@ export function buildGoalPresentation(
       ? `累積 ${target}${challengeUnit ? ` ${challengeUnit}` : ''}`
       : `完成 ${target} 次`;
   const adjustableItemsLabel = isRhythmGoal
-    ? '閱讀時段、每週次數、閱讀方式或內容'
+    ? '執行時段、每週次數與做法'
     : isSkill
       ? '練習時段、每週次數、階段內容'
       : isFamily
@@ -862,8 +872,8 @@ export function buildGoalPresentation(
       ? '先和家人一起安排適合的執行日期'
       : isRhythmGoal
       ? currentWeek === 1
-        ? '第 1 週：先找到適合自己的閱讀節奏'
-        : `第 ${currentWeek} 週：繼續找到適合自己的閱讀節奏`
+        ? '第 1 週：找到適合自己的執行節奏'
+        : `第 ${currentWeek} 週：繼續找到適合自己的執行節奏`
       : isSkill
         ? `目前階段：${currentStage}`
         : hasChallengeValues
@@ -873,8 +883,8 @@ export function buildGoalPresentation(
             : '先找到適合自己的生活節奏',
     nextText: progression === 'weekly_rhythm'
       ? todayIsActive
-        ? '今天繼續就好，已完成的閱讀都會保留'
-        : '下一次繼續就好，已完成的閱讀都會保留'
+        ? '今天繼續就好，已完成的努力都會保留'
+        : '下一次繼續就好，已完成的努力都會保留'
       : isSkill && nextSkillLevel
         ? `下一個里程碑：${String(nextSkillLevel.name ?? `第 ${current + 1} 階段`)}`
         : nextReward
@@ -884,18 +894,7 @@ export function buildGoalPresentation(
           : `下一次繼續完成「${task.name}」就好`,
     planNotice,
     todayTitle,
-    todayAction: getStructuredNextStep(task, goal) ?? (isRhythmGoal
-      ? goal.motivation_note?.trim()
-        || (task.base_time_min > 0
-          ? `${task.name} ${task.base_time_min} 分鐘，今天繼續就好`
-          : `${task.name}，今天繼續就好`)
-      : isSkill
-        ? `這一階段先練習：${currentStage}`
-        : isChallenge
-          ? hasChallengeValues
-            ? `已累積 ${current}${challengeUnit ? ` ${challengeUnit}` : ''}，由家長確認後更新`
-            : '這項累積進度由家長確認後更新'
-          : task.name),
+    todayAction: getStructuredNextStep(task) ?? progressionAction ?? task.name,
     todayStatusText,
     preferredTimeWindow,
     supportsPreferredTimeWindow,
@@ -904,7 +903,7 @@ export function buildGoalPresentation(
     weekSummary: isFlexibleWeeklyRhythm
       ? buildFlexibleWeekSummary(weekCompleted, weekTarget)
       : isRhythmGoal
-      ? `這週已閱讀 ${weeklyCompletions.length} 次。少一天沒有關係，找到適合自己的節奏更重要。`
+      ? `這週已完成 ${weeklyCompletions.length} 次。少一天沒有關係，找到適合自己的節奏更重要。`
       : isSkill
         ? '這週可以依自己的節奏，繼續目前的練習階段。'
         : isChallenge
@@ -925,13 +924,13 @@ export function buildGoalPresentation(
     finalRewardText: hasUnplannedCycle
       ? '安排好週期後，再一起回顧這段計畫'
       : isRhythmGoal
-        ? `第 ${totalWeeks} 週結束後一起回顧，可以繼續、調整閱讀方式，或讓計畫先告一段落`
+        ? `第 ${totalWeeks} 週結束後一起回顧，可以繼續、調整做法，或讓計畫先告一段落`
         : isSkill
           ? '完成最後階段後，一起留下這段學習成果'
           : '完成旅程後，一起選一個值得記住的時刻',
     reviewTitle: isRhythmGoal ? '週末一起回顧' : '一起回顧這段成長',
     reviewPrompt: isRhythmGoal
-      ? '哪一本最喜歡？晚餐後還是睡前比較適合？'
+      ? '這週哪一點最順？下週想怎麼調整？'
       : isSkill
         ? '哪一段練習最有感？下一步想怎麼調整？'
         : '這段時間哪裡最順？下一步想怎麼調整？',
