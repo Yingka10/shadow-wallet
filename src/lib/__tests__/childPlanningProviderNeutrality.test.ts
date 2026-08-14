@@ -70,6 +70,14 @@ describe('planning 契約與 session 不認識任何 provider', () => {
     expectNoProviderMarkers(name, read('src', 'lib', 'childPlanning', name));
   });
 
+  // P1-A3 的 formal plan bridge 住在子目錄，上面那個 glob 掃不到它。
+  const bridgeFiles = readdirSync(join(ROOT, 'src', 'lib', 'childPlanning', 'formalPlan'))
+    .filter((name) => name.endsWith('.ts'));
+
+  it.each(bridgeFiles)('formalPlan/%s', (name) => {
+    expectNoProviderMarkers(name, read('src', 'lib', 'childPlanning', 'formalPlan', name));
+  });
+
   it('連 client 也只認識「ai-proxy」這個 Function 名稱，不認識模型', () => {
     const source = codeOnly(read('src', 'lib', 'childPlanning', 'childGoalPlanningClient.ts'));
     expect(source).toContain("AI_PROXY_FUNCTION_NAME = 'ai-proxy'");
@@ -86,6 +94,13 @@ describe('持久化不認識任何 provider', () => {
     expectNoProviderMarkers(
       'migration',
       read('supabase', 'migrations', '20260822000000_child_goal_planning_sessions.sql'),
+    );
+  });
+
+  it('正式 Plan Bridge 的 schema', () => {
+    expectNoProviderMarkers(
+      'bridge migration',
+      read('supabase', 'migrations', '20260825000000_child_confirmed_plan_bridge.sql'),
     );
   });
 

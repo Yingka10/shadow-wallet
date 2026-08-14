@@ -42,6 +42,7 @@ import {
   type ChildPlanningSessionSnapshot,
   type ChildPlanningSessionResult,
   type ChildPlanningSupportPreference,
+  type PublishFormalPlanResult,
 } from '../../../lib/childPlanning';
 import { PLANNING_COPY } from './copy';
 
@@ -68,6 +69,14 @@ export type PlanningFlowPorts = {
     result: ChildGoalPlanningResult;
   }): Promise<ChildPlanningSessionResult>;
   confirm(args: { expectedRevision: number }): Promise<ChildPlanningSessionResult>;
+  /**
+   * 把孩子確認過的計畫變成正式提案版本（P1-A3）。
+   *
+   * ⚠️ 這是**確認之後的另一件事**，不是同一件。確認是「這份計畫我同意」，
+   *    送出是「請爸媽看」。合成一步的話，送出失敗會看起來像確認失敗，
+   *    而孩子會以為他剛剛點的頭沒有算數 —— 但那份計畫已經安全地存下來了。
+   */
+  publish(): Promise<PublishFormalPlanResult>;
 };
 
 export type ChildGoalPlanningFlowProps = {
@@ -106,7 +115,14 @@ type Phase =
   | { kind: 'opening' }
   | { kind: 'requesting' }
   | { kind: 'conversation' }
-  | { kind: 'confirmed' };
+  /**
+   * 孩子確認了。`sent` 說的是**那份計畫有沒有送到爸媽手上**。
+   *
+   * 兩個布林分開的理由：確認已經持久化了，送出可能還沒。把它們畫成
+   * 同一件事的話，送出失敗只剩兩種爛選擇 —— 顯示成功（騙他）或退回
+   * 對話（讓他以為剛剛的確認不算）。
+   */
+  | { kind: 'confirmed'; sent: boolean; sending: boolean };
 
 export default function ChildGoalPlanningFlow({
   ports,
@@ -181,6 +197,18 @@ export default function ChildGoalPlanningFlow({
     [approach, openingChoice, ports, revision, session],
   );
 
+  /**
+   * 送出正式版本。確認之後跑一次，失敗時可以再按。
+   *
+   * publish 在伺服器端是冪等的（同一場對話最多一個正式版本），所以
+   * 「其實已經成功了但回應掉了」的重試會拿回原本那一版，不會送出第二次。
+   */
+  const runPublish = useCallback(async () => {
+    setPhase({ kind: 'confirmed', sent: false, sending: true });
+    const published = await ports.publish();
+    setPhase({ kind: 'confirmed', sent: published.ok, sending: false });
+  }, [ports]);
+
   const handleConfirm = useCallback(async () => {
     const confirmed = confirmChildPlan(session);
     if (!confirmed.ok) return;
@@ -200,8 +228,9 @@ export default function ChildGoalPlanningFlow({
 
     setRevision((persisted as ChildPlanningSessionSnapshot).revision);
     setSession(confirmed.state);
-    setPhase({ kind: 'confirmed' });
-  }, [ports, revision, session]);
+    // 確認已經定案了 —— 接下來送出失敗也不會把他退回對話。
+    await runPublish();
+  }, [ports, revision, runPublish, session]);
 
   // ── 開場 ────────────────────────────────────────────────────────────────
   if (phase.kind === 'opening') {
@@ -287,11 +316,34 @@ export default function ChildGoalPlanningFlow({
 
   // ── 確認完 ──────────────────────────────────────────────────────────────
   if (phase.kind === 'confirmed') {
+    const { sent, sending } = phase;
     return (
       <View testID="planning-confirmed" style={styles.center}>
         <Text style={styles.waitTitle}>{PLANNING_COPY.confirmed.title}</Text>
-        <Text style={styles.hint}>{PLANNING_COPY.confirmed.body}</Text>
-        <Primary testID="planning-done" label={PLANNING_COPY.confirmed.done} onPress={onDone} />
+        <Text style={styles.hint}>
+          {sent ? PLANNING_COPY.confirmed.body : PLANNING_COPY.confirmed.notSentBody}
+        </Text>
+
+        {sending ? <ActivityIndicator color={Colors.accent} /> : null}
+
+        {/*
+          送出失敗時**不謊報**，但也不把他退回對話 —— 他已經確認過了，
+          那份計畫安全地存著。他只需要再按一次。
+        */}
+        {sent || sending ? null : (
+          <Primary
+            testID="planning-publish-retry"
+            label={PLANNING_COPY.confirmed.retrySend}
+            onPress={() => void runPublish()}
+          />
+        )}
+
+        <Primary
+          testID="planning-done"
+          label={PLANNING_COPY.confirmed.done}
+          disabled={sending}
+          onPress={onDone}
+        />
       </View>
     );
   }

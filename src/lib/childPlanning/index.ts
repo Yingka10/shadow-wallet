@@ -43,3 +43,22 @@ export {
   type ChildGoalPlanOutcome,
   type GenerateChildGoalPlanDeps,
 } from './generateChildGoalPlan';
+export {
+  ChildFormalPlanService,
+  PUBLISH_CHILD_CONFIRMED_PLAN_RPC,
+  PUBLISH_CHILD_CONFIRMED_PLAN_SCHEMA_VERSION,
+  REQUIRES_PARENT_DECISION_VALUES,
+  publishChildConfirmedPlan,
+  toChildPlanEnrichment,
+  type ChildPlanEnrichment,
+  type FormalPlanBridgePort,
+  type FormalPlanRpc,
+  type PublishChildConfirmedPlanArgs,
+  type PublishChildConfirmedPlanDeps,
+  type PublishChildConfirmedPlanInput,
+  type PublishFormalPlanFailure,
+  type PublishFormalPlanFailureCode,
+  type PublishFormalPlanResult,
+  type PublishFormalPlanSuccess,
+  type RequiresParentDecision,
+} from './formalPlan';

@@ -9,7 +9,8 @@
 //   · 孩子的原話不會被對話中的答案改掉
 //   · 選項旁邊永遠有「我自己想」
 //   · AI 掛掉時三條路都還在
-//   · 確認之後**提案仍然是 draft**
+//   · 確認與送出是**兩件事**：確認之後才把正式版本送給爸媽，
+//     而送出失敗不會把孩子退回對話（P1-A3）
 // ─────────────────────────────────────────────────────────────────────────
 
 import React from 'react';
@@ -91,6 +92,8 @@ type Harness = {
   requests: Parameters<PlanningFlowPorts['requestPlan']>[0][];
   rounds: Parameters<PlanningFlowPorts['recordRound']>[0][];
   confirms: Parameters<PlanningFlowPorts['confirm']>[0][];
+  /** P1-A3：確認之後把正式版本送給爸媽跑了幾次。 */
+  publishes: number;
   sendToParents: jest.Mock;
   done: jest.Mock;
 };
@@ -98,13 +101,14 @@ type Harness = {
 /** 依序回這些結果的替身。用光之後一直回最後一個。 */
 function harness(
   results: readonly ChildGoalPlanningResult[],
-  options: { persistFails?: boolean } = {},
+  options: { persistFails?: boolean; publishFails?: boolean } = {},
 ): Harness {
   const requests: Harness['requests'] = [];
   const rounds: Harness['rounds'] = [];
   const confirms: Harness['confirms'] = [];
   let index = 0;
   let revision = 0;
+  const state = { publishes: 0 };
 
   const ports: PlanningFlowPorts = {
     async requestPlan(request) {
@@ -142,9 +146,38 @@ function harness(
         idempotentReplay: false,
       };
     },
+    async publish() {
+      state.publishes += 1;
+      // 第一次失敗、之後成功 —— 「再送一次」真的要能救得回來。
+      if (options.publishFails && state.publishes === 1) {
+        return { ok: false, code: 'PERSISTENCE_FAILED', message: '沒辦法把計畫送給爸媽' };
+      }
+      return {
+        ok: true,
+        proposalId: 'proposal-1',
+        sessionId: 'session-1',
+        planVersionId: 'version-1',
+        versionNo: 1,
+        authoredBy: 'child',
+        proposalStatus: 'proposed',
+        requiresParentDecision: [],
+        enrichmentStatus: 'enriched',
+        idempotentReplay: false,
+      };
+    },
   };
 
-  return { ports, requests, rounds, confirms, sendToParents: jest.fn(), done: jest.fn() };
+  return {
+    ports,
+    requests,
+    rounds,
+    confirms,
+    get publishes() {
+      return state.publishes;
+    },
+    sendToParents: jest.fn(),
+    done: jest.fn(),
+  };
 }
 
 function renderFlow(h: Harness) {
@@ -211,8 +244,8 @@ describe('§8 支援強度由孩子選，不是 AI 自己決定', () => {
   });
 });
 
-describe('Case 1｜孩子已有完整方法 → ready → 確認', () => {
-  it('確認會存進 session，而且**不轉送提案**', async () => {
+describe('Case 1｜孩子已有完整方法 → ready → 確認 → 送出正式版本', () => {
+  it('確認會存進 session，然後才送出正式版本', async () => {
     const h = harness([READY]);
     const view = await openWith(h, 'has_own_idea', '平日睡前讀 15 分鐘');
 
@@ -221,8 +254,41 @@ describe('Case 1｜孩子已有完整方法 → ready → 確認', () => {
 
     await waitFor(() => expect(view.getByTestId('planning-confirmed')).toBeTruthy());
     expect(h.confirms).toEqual([{ expectedRevision: 1 }]);
-    // 這一包停在 draft：確認計畫**不是**送出給爸媽。
+    await waitFor(() => expect(h.publishes).toBe(1));
+    // 「先把想法送給爸媽」是**不規劃**那條出口，與這裡無關 ——
+    // 走錯的話，孩子確認過的計畫會被當成沒有規劃直接送出。
     expect(h.sendToParents).not.toHaveBeenCalled();
+    expect(view.getByText(PLANNING_COPY.confirmed.body)).toBeTruthy();
+  });
+
+  it('送出失敗**不謊報**，但也不把他退回對話', async () => {
+    const h = harness([READY], { publishFails: true });
+    const view = await openWith(h, 'has_own_idea', '平日睡前讀 15 分鐘');
+
+    await waitFor(() => expect(view.getByTestId('planning-ready')).toBeTruthy());
+    fireEvent.press(view.getByTestId('planning-confirm'));
+
+    // 他已經確認過了，那份計畫安全地存著 —— 退回對話等於讓他以為
+    // 剛剛點的頭不算數。
+    await waitFor(() => expect(view.getByTestId('planning-confirmed')).toBeTruthy());
+    expect(view.getByText(PLANNING_COPY.confirmed.notSentBody)).toBeTruthy();
+    expect(view.queryByText(PLANNING_COPY.confirmed.body)).toBeNull();
+    expect(h.confirms).toHaveLength(1);
+  });
+
+  it('「再送一次」救得回來，而且不會重新確認一次', async () => {
+    const h = harness([READY], { publishFails: true });
+    const view = await openWith(h, 'has_own_idea', '平日睡前讀 15 分鐘');
+
+    await waitFor(() => expect(view.getByTestId('planning-ready')).toBeTruthy());
+    fireEvent.press(view.getByTestId('planning-confirm'));
+    await waitFor(() => expect(view.getByTestId('planning-publish-retry')).toBeTruthy());
+
+    fireEvent.press(view.getByTestId('planning-publish-retry'));
+    await waitFor(() => expect(view.getByText(PLANNING_COPY.confirmed.body)).toBeTruthy());
+    expect(h.publishes).toBe(2);
+    // 確認只發生過一次 —— 重試的是送出，不是那個決定。
+    expect(h.confirms).toHaveLength(1);
   });
 
   it('預覽只給孩子需要決定的那幾件事', async () => {

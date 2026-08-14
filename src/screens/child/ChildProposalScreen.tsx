@@ -42,10 +42,12 @@ import {
   planDraftClientSetup,
 } from '../../lib/childProposal';
 import {
+  ChildFormalPlanService,
   ChildPlanningSessionService,
   buildChildGoalPlanningInput,
   childGoalPlanningClientSetup,
   childGoalPlanningUnavailable,
+  publishChildConfirmedPlan,
 } from '../../lib/childPlanning';
 import ChildGoalPlanningFlow, {
   type PlanningFlowPorts,
@@ -135,6 +137,7 @@ export default function ChildProposalScreen() {
   // 之後如果有人把它放進 dependency array 就會無限重跑。
   const serviceRef = useRef(new SupabaseChildProposalService());
   const planningServiceRef = useRef(new ChildPlanningSessionService());
+  const formalPlanServiceRef = useRef(new ChildFormalPlanService());
   // 同一次「開始規劃」的識別碼。連點兩下不會生出兩場對話。
   const planningAttemptRef = useRef<string>(`${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
@@ -388,6 +391,35 @@ export default function ChildProposalScreen() {
       },
       recordRound: (args) => planningServiceRef.current.recordRound({ ...args, sessionId }),
       confirm: (args) => planningServiceRef.current.confirm({ ...args, sessionId }),
+
+      /**
+       * 孩子確認過的計畫 → 正式提案版本（P1-A3）。
+       *
+       * enrichment 走既有的 P0 Plan Draft 基礎設施（分類 → 資格閘門 →
+       * coin policy），但**只取政策欄位** —— 標題、摘要、下一步、建議節奏
+       * 一個都不覆蓋孩子。掛掉也照樣送出，缺的欄位由 RPC 列進
+       * requires_parent_decision。
+       */
+      publish() {
+        if (proposalId === null) {
+          return Promise.resolve({
+            ok: false as const,
+            code: 'VALIDATION_FAILED' as const,
+            message: '沒有可以送出的提案',
+          });
+        }
+        return publishChildConfirmedPlan(
+          {
+            port: {
+              getProposal: (id) => serviceRef.current.getProposal(id),
+              getChildAgeGroup: (id) => serviceRef.current.getChildAgeGroup(id),
+              publish: (args) => formalPlanServiceRef.current.publish(args),
+            },
+            enrichmentClient: planDraftClientSetup.client,
+          },
+          { proposalId, sessionId },
+        );
+      },
     };
   }, [planning?.proposalId, planning?.sessionId]);
 

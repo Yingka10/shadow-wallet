@@ -491,3 +491,166 @@ in_progress ─┬─→ ready ─→ child_confirmed   （他確認了這份計
 改成把選擇交回孩子：再試一次 ／ 我自己想 ／ 先把想法送給爸媽。
 前兩者重用**同一個** `clientRequestId`，讓 start RPC 自己做冪等對帳；
 第三個走上面那支 atomic RPC。
+
+---
+
+## 11. P1-A3：Formal Plan Bridge
+
+孩子確認過的規劃 → **正式、可以交給家長看的 Plan Version**，並把提案送出。
+
+```
+planning session : child_confirmed
+        ↓  publish_child_confirmed_plan_v1（一個交易）
+plan version     : authored_by = 'child'
+                   source_planning_session_id = session.id
+                   child_confirmed_plan = 孩子點頭的那一份
+                   parent_confirmed_at = null / effective_at = null
+child_proposal   : draft → proposed
+        ↓
+       STOP    ← 家長最終確認、建任務、發幣都是 P1-A4 以後
+```
+
+### 11.1 做法的作者是孩子
+
+`authored_by = 'child'`，而且帶 planning lineage 的列在 CHECK 上寫不出別的作者。
+
+目前 P0 Direct Confirm 硬性要求 current plan 是 `authored_by='ai'`，所以這種版本送
+進去仍然會被 `PLAN_NOT_CONFIRMABLE` 擋下 —— **那是對的，這一輪不修它。** 原因不是
+功能壞掉，而是我們還沒有正式重新定義 Parent Confirmation 的語意。在那之前用一個
+假的 authorship 繞過去，等於把「這是孩子想的」從資料裡抹掉，只為了讓一個還沒設計
+好的按鈕變成可按。
+
+### 11.2 Canonical child plan 不會被壓平
+
+既有的扁平欄位（`plan_title` / `plan_summary` / `progress_model` / `next_step`）
+表達得了「每週三次、每次 15 分鐘」，但表達不了 staged 的階段、accumulation 的
+target、`goalControlType` 底下的可控行動，也表達不了逐欄 provenance。洗掉之後
+「做一本漫畫」與「暑假讀五本書」在資料上會長得一模一樣。
+
+所以正式版本多一份 `child_confirmed_plan jsonb` ＋ `planning_schema_version`。
+
+**它不是 `ai_snapshot`**：
+
+| 欄位 | 語意 |
+|---|---|
+| `child_confirmed_plan` | 已驗證、孩子確認過、產品的 canonical data |
+| `ai_snapshot` | 某一次模型／enrichment 回了什麼的稽核證據 |
+
+「AI snapshot 不能當 canonical source」這條原則完全沒有鬆動 —— 前者之所以是
+canonical，正是因為它不是模型的輸出，而是孩子在螢幕上看過並且點頭的那一份。
+
+### 11.3 計畫本體由伺服器複製
+
+命令裡出現 `plan` / `confirmedPlan` / `planTitle` / `planSummary` / `nextStep` /
+`desiredOutcome` / `actionPlanSummary` 任何一個鍵，整筆以
+`PLAN_NOT_CLIENT_SUPPLIED` 拒絕。RPC 自己從 `session.confirmed_plan` 讀。
+
+與 `confirm_child_goal_planning_session_v1` 從 `latest_result` 複製、
+`confirmed_reward` 從 `tasks` 複製同一條原則。
+
+### 11.4 孩子擁有的欄位怎麼對應
+
+| 正式欄位 | 來源 |
+|---|---|
+| `plan_title` | `desiredOutcome`（只去頭尾空白，**不重新命名、不截字**） |
+| `plan_summary` | `actionPlanSummary` |
+| `next_step` | `confirmed_plan.nextAction.text` |
+| `cadence_*` | 見 11.5 |
+| `preferred_time` | 孩子在提案上自己選的 |
+
+`next_step` 的內容規則（結果導向、系統語言、長度）在孩子看到這份計畫**之前**就
+跑過了 —— `planGuards` 對 `nextAction` 走的是既有的 `validateNextStep`，過不了的
+計畫根本不會變成 `ready`。RPC 只做長度與空值的防線，不重寫一份關鍵字清單。
+
+### 11.5 判準是 provenance，不是「這一欄有沒有值」
+
+契約允許模型在孩子沒表態時提一個節奏（provenance 會標 `ai_suggested`）。孩子按
+確認是同意**這份計畫的方向**，不是逐欄替每個細節拍板 —— 把 `ai_suggested` 的節奏
+直接寫進正式欄位，家長看到的會是一句「孩子想一週三次」，而他從來沒這樣說過。
+
+所以 cadence 與 session size 的順位是：
+
+```
+confirmed_plan 裡 provenance 為 child_stated / derived_from_child
+  > 孩子原提案上已選的 cadence
+    > 未決定 → requires_parent_decision
+```
+
+`session_size` 沒有孩子的證據時退回 enrichment 估的投入量（那是 GrowBook 政策層的
+數字，不會被說成是孩子的約定）。
+
+### 11.6 progressionKind ≠ progress_model ≠ payout
+
+```
+rhythm       ＋ long_term ＋（weekly_frequency / fixed_days） → progress_model = 'weekly_rhythm'
+rhythm       但條件不足                                       → null
+staged                                                        → null，階段留在 child_confirmed_plan
+accumulation                                                  → null，target 留在 child_confirmed_plan
+```
+
+`progress_model` 的 enum **沒有被擴充**。塞進去的話孩子畫面會出現一個沒有依據的
+「本週 0/0」。LongTerm UI 之後直接讀 planning structure。
+
+**完全沒有 progression → payout 的對應**：`staged` 不是 `per_milestone`，
+`accumulation` 不是 `final_completion`。`goalControlType` 也完全不參與回饋判定 ——
+它回答的是「成果控制得了嗎」，不是「發不發幣」。
+
+### 11.7 正式計畫可以有還沒決定的共同條件
+
+`requires_parent_decision text[]`，封閉列舉：
+`cadence` / `session_size` / `duration` / `reward` / `purpose_category`。
+
+孩子可以很清楚地知道「先決定故事 → 畫角色 → 畫頁面」，同時完全沒有決定一週幾次、
+多久完成、有沒有幣。那份計畫仍然成立 —— 沒有決定的是**家庭共同條件**。
+
+**不為了讓 Direct Confirm 過而捏資料。** 自己生一個 `durationDays = 30` 或
+`weeklyFrequency = 3` 才是真的錯；Direct Confirm 暫時不能用是可以接受的，
+哪些提案可以直接確認由 P1-A4 重新定義。
+
+### 11.8 P0 Plan Draft 只能當 enrichment evidence
+
+重用它的理由：分類、活動種類、投入量、資格與定價已經有一整套驗過的實作
+（`rewardEligibility` 八步閘門 → `coinPolicy` → policyVersion）。再造一套
+「P1 pricing AI」會有兩套會分岔的數字，而且新的那套沒有人驗過。
+
+| 可以用 | 不可以用 |
+|---|---|
+| `category` → `purpose_category` | `planTitle` |
+| `activityKind` → `canonicalCompletionDescription` 的固定句型 | `planSummary` |
+| `estimatedMinutes`（孩子沒講份量時） | `nextStepSuggestion` |
+| `durationType` / `durationDays` | AI 建議的 `cadence` |
+| 既有 deterministic policy 產出的 reward 判定 | 整份重新設計的計畫 |
+
+即使它們「看起來更漂亮」。三層防線：`ChildPlanEnrichment` 型別上沒有那些鍵、
+`toChildPlanEnrichment` 明確挑欄位不寫 spread、RPC 收到就以
+`ENRICHMENT_MAY_NOT_OVERRIDE_CHILD` 拒絕。
+
+幣值一個都不收（`REWARD_NOT_CLIENT_DECIDED`）。
+
+### 11.9 enrichment 掛掉不會把孩子鎖在 draft
+
+| 路徑 | 結果 |
+|---|---|
+| A｜enrichment 成功 | 正式計畫帶政策欄位，`enrichment_status = 'enriched'` |
+| B｜enrichment 不可用 | 只有孩子擁有的欄位，缺的列進 `requires_parent_decision`，`enrichment_status = 'unavailable'` |
+
+兩條路徑**都會送出**。B 不是「假裝成功」—— 它明確地說「這些還沒算」。
+AI policy helper 掛掉不可以把孩子已經確認的提案永遠鎖在 draft。
+
+### 11.10 冪等與原子性
+
+一場 `child_confirmed` 的對話最多產生**一個**正式版本（`source_planning_session_id`
+上的 partial unique index）。重送 publish 回同一個 `planVersionId`，而且冪等分支在
+**所有狀態檢查之前** —— 「其實已經成功了但回應掉了」的重試必須拿回原本那一版，
+不是撞到「提案已經是 proposed」然後看到紅字。
+
+確認與送出在畫面上是**兩件事**：確認已經持久化了，送出失敗時顯示「你決定的方式
+留下來了，還沒送到爸媽那裡」＋「再送一次」，**不把孩子退回對話** —— 退回等於讓他
+以為剛剛點的頭不算數。
+
+### 11.11 仍然不做
+
+- 不重寫 Direct Confirm 語意、不重畫家長端 UI、不動 LongTerm Detail、不 merge WP2
+- 不建任務、不轉 active、不寫 confirmed reward、不碰錢包與 payout
+- 不做 milestone 完成／發放、不做 Dynamic Replan
+- 不換付費 provider、不加第三順位模型

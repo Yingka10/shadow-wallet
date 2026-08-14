@@ -1324,6 +1324,12 @@ export interface Database {
         Args: { p_command: object };
         Returns: unknown;
       };
+      // P1-A3：孩子確認過的規劃 → child-authored 正式 Plan Version
+      // ＋ draft → proposed，同一個交易。計畫內容由 RPC 自己複製。
+      publish_child_confirmed_plan_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
       mark_task_atomic: {
         Args: {
           p_task_id: string;
