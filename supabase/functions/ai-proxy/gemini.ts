@@ -79,7 +79,8 @@ async function callGeminiOnce(
  * 兩支各自跑一次 MODEL_CHAIN 的話，重試策略會分岔，而
  * `FORCE_AI_FALLBACK` 這種「一定要對所有呼叫端生效」的開關就會漏掉一半。
  *
- * 遇到 429（配額）或 404（model 不存在）時換下一個 model；其他錯誤直接拋出。
+ * 遇到 429（配額）、404（model 不存在）或 503（該 model 過載）時換下一個
+ * model；其他錯誤直接拋出。
  *
  * model 名稱要帶回去的理由：MODEL_CHAIN 會 fallback，所以「這段文字是誰寫的」
  * 不是固定的。要把它存進稽核紀錄（例如計畫版本的 ai_model）的呼叫端，
@@ -117,7 +118,15 @@ export async function callGeminiWithModel(
     } catch (err) {
       lastErr = err;
       const msg = String(err);
-      if (!msg.includes('429') && !msg.includes('404')) throw err;
+      // 429 配額用盡、404 model 不存在、503 該 model 現在過載 ——
+      // 三者的共通點是「換一個 model 有機會成功」。
+      //
+      // 503 是 2026-08-14 加的：實測 gemini-flash-latest 回
+      // 「This model is currently experiencing high demand」而
+      // gemini-flash-lite-latest 在同一秒是 200。少了這一條，整條鏈會在
+      // 第一跳就放棄，而第二順位明明是好的 —— 所有呼叫端一起降級，
+      // 卻不是因為配額也不是因為 model 不見了。
+      if (!msg.includes('429') && !msg.includes('404') && !msg.includes('503')) throw err;
       console.warn(`[ai-proxy] model ${model} 失敗，改試下一個：${msg.slice(0, 100)}`);
     }
   }
