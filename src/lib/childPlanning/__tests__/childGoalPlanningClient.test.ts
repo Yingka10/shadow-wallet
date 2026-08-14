@@ -20,6 +20,7 @@ const INPUT: ChildGoalPlanningInput = {
   cadence: { mode: 'fixed_days', days: [1, 2, 3, 4, 5] },
   preferredTime: '睡前',
   planningSupportPreference: 'organize_only',
+  responses: [],
 };
 
 const GOOD_PLAN = {
@@ -37,7 +38,9 @@ const GOOD_PLAN = {
     provenance: {
       childOriginalGoal: '我想兩週讀完神奇樹屋',
       childStatedApproach: '平日睡前讀 15 分鐘',
+      childChosenOption: null,
       fields: {
+        approach: 'child_stated',
         cadence: 'child_stated',
         sessionSize: 'derived_from_child',
         preferredTime: 'child_stated',

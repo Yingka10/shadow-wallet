@@ -48,18 +48,72 @@ export type ChildPlanningSupportPreference =
   | 'give_me_options'
   | 'first_step_only';
 
+/**
+ * 孩子在對話中回過的一句話（P1-A2）。與 App 端鏡射，由 parity 測試釘住。
+ *
+ * 存在的理由：多輪對話的答案需要自己的位置。寫回 childOriginalGoal 的話，
+ * 孩子的原話會被 AI 的提問改掉，而且事後看不出來。
+ */
+export type ChildPlanningResponse =
+  | {
+      type: 'clarification_answer';
+      questionKind: ChildPlanClarificationKind;
+      question: string;
+      answer: string;
+    }
+  /** 文字是 AI 寫的，**決定是孩子做的**。兩件事分開記。 */
+  | { type: 'choice_selection'; optionId: string; optionText: string }
+  /** 孩子說「我自己想」並自己輸入 —— 這是他的原話。 */
+  | { type: 'custom_choice'; answer: string };
+
 export type ChildGoalPlanningInput = {
   schemaVersion: typeof CHILD_GOAL_PLANNING_SCHEMA_VERSION;
   ageGroup: ChildPlanAgeGroup;
   /** 孩子的原話。**只讀。** 這一層不會、也不能改寫它。 */
   childOriginalGoal: string;
   childOriginalMotivation: string | null;
-  /** 孩子自己已經想到的做法（含老師教的、課程安排的）。有值時只能整理。 */
+  /** 孩子在第一頁自己講的做法（含老師教的、課程安排的）。有值時只能整理。 */
   childApproach: string | null;
   cadence: ChildPlanCadence | null;
   preferredTime: string | null;
   planningSupportPreference: ChildPlanningSupportPreference | null;
+  /** 這場對話到目前為止孩子回過的話，依時間排序。第一輪是空陣列。 */
+  responses: ChildPlanningResponse[];
 };
+
+/** 方法是怎麼來的。與 App 端 ChildPlanApproachOrigin 鏡射。 */
+export type ChildPlanApproachOrigin =
+  | { text: string; origin: 'child_typed' }
+  | { text: string; origin: 'child_chose_option'; optionId: string }
+  | { text: null; origin: 'none' };
+
+/**
+ * 目前真正有效的「孩子的方法」。
+ *
+ * 規則只有一條：**時間上最後一次孩子自己決定的那個**。
+ * childApproach 來自第一頁，所以 responses 裡的任何選擇都比它晚。
+ */
+export function effectiveChildApproach(input: ChildGoalPlanningInput): ChildPlanApproachOrigin {
+  const responses = Array.isArray(input.responses) ? input.responses : [];
+  for (let i = responses.length - 1; i >= 0; i -= 1) {
+    const response = responses[i];
+    if (response.type === 'custom_choice') {
+      return { text: response.answer, origin: 'child_typed' };
+    }
+    if (response.type === 'choice_selection') {
+      return {
+        text: response.optionText,
+        origin: 'child_chose_option',
+        optionId: response.optionId,
+      };
+    }
+  }
+  const typed = input.childApproach;
+  if (typeof typed === 'string' && typed.trim().length > 0) {
+    return { text: typed.trim(), origin: 'child_typed' };
+  }
+  return { text: null, origin: 'none' };
+}
 
 // ---------------------------------------------------------------------------
 // 輸出（與 App 端契約鏡射，由 parity 測試釘住）
@@ -109,8 +163,13 @@ export type ChildPlanStartOption = { id: string; text: string };
 
 export type ChildPlanProvenance = {
   childOriginalGoal: string;
+  /** 孩子**自己打的字**。他挑走的 AI 選項不算這一欄，那在 childChosenOption。 */
   childStatedApproach: string | null;
+  /** 孩子從 needs_choice 挑走的選項，逐字 ＋ id。文字是 AI 的，決定是他的。 */
+  childChosenOption: { id: string; text: string } | null;
   fields: {
+    /** 永遠不會是 ai_suggested —— 模型只能給選項，不能替孩子決定方法。 */
+    approach: ChildPlanFieldSource;
     cadence: ChildPlanFieldSource;
     sessionSize: ChildPlanFieldSource;
     preferredTime: ChildPlanFieldSource;
@@ -204,6 +263,9 @@ export const CHILD_GOAL_PLANNING_LIMITS = {
   maxPhaseIdLength: 24,
   maxDoneWhenLength: 40,
   maxOptionLength: 40,
+  maxOptionIdLength: 24,
+  maxAnswerLength: 120,
+  maxResponses: 8,
   maxUnitLength: 8,
   maxModelLength: 80,
   minPhases: 2,
@@ -257,7 +319,36 @@ export function childGoalPlanningInputIsUsable(input: ChildGoalPlanningInput): b
   if (input.schemaVersion !== CHILD_GOAL_PLANNING_SCHEMA_VERSION) return false;
   if (typeof input.childOriginalGoal !== 'string') return false;
   if (input.childOriginalGoal.trim().length === 0) return false;
-  return AGE_GROUPS.includes(input.ageGroup);
+  if (!AGE_GROUPS.includes(input.ageGroup)) return false;
+
+  // responses 缺席當成第一輪（舊呼叫端相容）；有值就必須是合法陣列。
+  // 壞掉的對話紀錄比沒有更糟：模型會拿到一份少一句的歷史，然後合理地
+  // 把同一題再問一次。
+  if (input.responses === undefined || input.responses === null) return true;
+  if (!Array.isArray(input.responses)) return false;
+  if (input.responses.length > CHILD_GOAL_PLANNING_LIMITS.maxResponses) return false;
+  return input.responses.every((response) => {
+    if (response === null || typeof response !== 'object') return false;
+    if (response.type === 'clarification_answer') {
+      return (
+        CLARIFICATION_KINDS.includes(response.questionKind)
+        && typeof response.question === 'string'
+        && typeof response.answer === 'string'
+        && response.answer.trim().length > 0
+      );
+    }
+    if (response.type === 'choice_selection') {
+      return (
+        typeof response.optionId === 'string'
+        && typeof response.optionText === 'string'
+        && response.optionText.trim().length > 0
+      );
+    }
+    if (response.type === 'custom_choice') {
+      return typeof response.answer === 'string' && response.answer.trim().length > 0;
+    }
+    return false;
+  });
 }
 
 /**
@@ -271,8 +362,10 @@ export function childGoalPlanningInputIsUsable(input: ChildGoalPlanningInput): b
  */
 export function informationIsSufficient(input: ChildGoalPlanningInput): boolean {
   const hasCadence = input.cadence !== null && input.cadence !== undefined;
-  const hasApproach =
-    typeof input.childApproach === 'string' && input.childApproach.trim().length > 0;
+  // 孩子挑過選項、或自己輸入過，都算「他已經決定怎麼做」——
+  // 只看第一頁的 childApproach 的話，挑完選項的第二輪會被判成資訊不足，
+  // 於是模型可以合法地再問一次同樣的事。
+  const hasApproach = effectiveChildApproach(input).text !== null;
   return hasCadence && hasApproach;
 }
 
@@ -311,15 +404,43 @@ const SUPPORT_ZH: Record<ChildPlanningSupportPreference, string> = {
  *   · 「不要猜他的心理狀態」            → App 端 guard 一律擋掉
  *   · 「你不是教練」                    → App 端的領域權威 guard 擋掉
  */
+/**
+ * 這場對話到目前為止的逐字紀錄。
+ *
+ * 給模型看歷史的理由只有一個：**不要再問一次他已經回答過的事。**
+ * 不是為了讓它「記得聊天內容」——這不是 chatbot。
+ */
+export function describeConversationForPrompt(input: ChildGoalPlanningInput): string {
+  const responses = Array.isArray(input.responses) ? input.responses : [];
+  if (responses.length === 0) return '';
+
+  const lines = responses.map((response) => {
+    if (response.type === 'clarification_answer') {
+      return `你問：「${response.question}」／他答：「${response.answer}」`;
+    }
+    if (response.type === 'choice_selection') {
+      return `你給了幾個選項，他挑了：「${response.optionText}」`;
+    }
+    return `他說要自己想，然後寫下：「${response.answer}」`;
+  });
+
+  return `\n你們剛剛已經聊過這些（不要再問一次他答過的事）：\n${lines.map((l) => `- ${l}`).join('\n')}\n`;
+}
+
 export function buildChildGoalPlanningPrompt(input: ChildGoalPlanningInput): string {
   const L = CHILD_GOAL_PLANNING_LIMITS;
   const goal = input.childOriginalGoal.trim().slice(0, L.maxGoalLength);
   const motivation = (input.childOriginalMotivation ?? '').trim().slice(0, L.maxMotivationLength);
-  const approach = (input.childApproach ?? '').trim().slice(0, L.maxApproachLength);
+  // 有效方法：孩子挑過的選項／自己輸入的，都比第一頁那一欄新。
+  const chosen = effectiveChildApproach(input);
+  const approach = (chosen.text ?? '').slice(0, L.maxApproachLength);
   const sufficient = informationIsSufficient(input);
+  const conversation = describeConversationForPrompt(input);
 
   const approachRule = approach
-    ? `孩子已經自己想到做法了（「${approach}」）。**先整理他的方法**，不要換成另一套。`
+    ? `孩子已經決定做法了（「${approach}」`
+      + `${chosen.origin === 'child_chose_option' ? '——這是他從你上一輪的選項裡挑的' : ''}）。`
+      + '**先整理他的方法**，不要換成另一套。'
       + ' 這一輪不可以回 needs_choice —— 他已經決定怎麼做了。'
     : '孩子還沒說他打算怎麼做。如果從他的話裡看得出方向，就幫他整理成可執行的行動；'
       + '看得出目標但看不出做法，就回 needs_choice 給他 2-3 個可以挑的開始方式。';
@@ -345,8 +466,8 @@ export function buildChildGoalPlanningPrompt(input: ChildGoalPlanningInput): str
 
 孩子的原話：「${goal}」
 ${motivation ? `孩子說的原因：「${motivation}」` : '孩子沒有說原因。'}
-${approach ? `孩子自己想到的做法：「${approach}」` : '孩子沒有說他打算怎麼做。'}
-孩子的年齡段：${input.ageGroup}
+${approach ? `孩子目前決定的做法：「${approach}」` : '孩子沒有說他打算怎麼做。'}
+${conversation}孩子的年齡段：${input.ageGroup}
 孩子想的節奏：${describeCadenceForPrompt(input.cadence)}
 ${input.preferredTime ? `孩子想做的時段：${input.preferredTime}` : '孩子沒有說想在什麼時段做。'}
 孩子希望你幫多少：${input.planningSupportPreference ? SUPPORT_ZH[input.planningSupportPreference] : '他沒有特別說（預設：先整理，缺什麼才補）'}
@@ -796,10 +917,11 @@ export function composeChildGoalPlan(args: {
 }): ChildGoalPlan {
   const { input, understanding, model } = args;
 
-  const childApproach =
-    typeof input.childApproach === 'string' && input.childApproach.trim().length > 0
-      ? input.childApproach.trim()
-      : null;
+  // 「孩子目前的方法」＝ 第一頁打的字，或對話裡他挑／打的最後一個。
+  // 下游所有 derived_from_child 的判斷都靠它 —— 只看第一頁的話，
+  // 挑完選項的第二輪會把整份計畫標成 AI 想的。
+  const chosen = effectiveChildApproach(input);
+  const childApproach = chosen.text;
   const childPreferredTime =
     typeof input.preferredTime === 'string' && input.preferredTime.trim().length > 0
       ? input.preferredTime.trim()
@@ -852,10 +974,23 @@ export function composeChildGoalPlan(args: {
   const sessionSize = isRhythm ? understanding.sessionSize : null;
 
   const provenance: ChildPlanProvenance = {
-    // 孩子的原話與方法由這裡複製，模型碰不到這兩個欄位。
+    // 孩子的原話與方法由這裡複製，模型碰不到這幾個欄位。
     childOriginalGoal: input.childOriginalGoal.trim(),
-    childStatedApproach: childApproach,
+    // 只有他**自己打的字**才算「孩子講的方法」。挑走的選項在下一欄。
+    childStatedApproach: chosen.origin === 'child_typed' ? chosen.text : null,
+    childChosenOption:
+      chosen.origin === 'child_chose_option'
+        ? { id: chosen.optionId, text: chosen.text }
+        : null,
     fields: {
+      // 挑選項是 derived_from_child：文字是 AI 的，但決定是他的，
+      // 所以它是 child-owned，永遠不會落到 ai_suggested。
+      approach:
+        chosen.origin === 'child_typed'
+          ? 'child_stated'
+          : chosen.origin === 'child_chose_option'
+            ? 'derived_from_child'
+            : 'undecided',
       cadence: cadenceSource,
       // 孩子講過方法時，單次份量是從他的話推出來的，不是 AI 想的。
       sessionSize:
@@ -888,12 +1023,19 @@ export function composeChildGoalPlan(args: {
     currentFocus: understanding.currentFocus,
     nextAction: understanding.nextAction,
     reviewPoint,
-    // 「他從選項裡挑的」只有在那個選項真的回到 childApproach 時才成立。
-    // 沒有的話降級，不照抄 —— 照抄會在資料裡留下一個沒發生過的選擇。
+    // 「他從選項裡挑的」不是模型說了算，是對話紀錄裡有沒有那一則
+    // choice_selection。兩個方向都由程式決定：
+    //
+    //   真的挑過 → 一定是 child_chose_option（模型忘了標也一樣）。
+    //              §12：孩子挑過之後不可以再被標回 AI 自己的建議。
+    //   沒挑過   → 不准是 child_chose_option（模型亂標也一樣）。
+    //              照抄會在資料裡留下一個沒發生過的選擇。
     planningContribution:
-      understanding.planningContribution === 'child_chose_option' && childApproach === null
-        ? 'filled_missing_details'
-        : understanding.planningContribution,
+      chosen.origin === 'child_chose_option'
+        ? 'child_chose_option'
+        : understanding.planningContribution === 'child_chose_option'
+          ? 'filled_missing_details'
+          : understanding.planningContribution,
     provenance,
     model,
   };
@@ -944,8 +1086,9 @@ export function composeChildGoalPlanningResponse(args: {
     reason: 'INVALID_AI_OUTPUT',
   };
 
-  const childHasApproach =
-    typeof input.childApproach === 'string' && input.childApproach.trim().length > 0;
+  // 挑過選項也算「他已經決定怎麼做」—— 只看第一頁的話，孩子挑完之後
+  // 下一輪還會再收到一組選項，等於他剛剛那一下沒有算數。
+  const childHasApproach = effectiveChildApproach(input).text !== null;
 
   if (understanding.status === 'needs_clarification') {
     if (informationIsSufficient(input)) return invalid;

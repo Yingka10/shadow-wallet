@@ -20,12 +20,15 @@ const INPUT: ChildGoalPlanningInput = {
   cadence: null,
   preferredTime: null,
   planningSupportPreference: null,
+  responses: [],
 };
 
 const BASE_PROVENANCE = {
   childOriginalGoal: '我想練直笛',
   childStatedApproach: null as string | null,
+  childChosenOption: null as { id: string; text: string } | null,
   fields: {
+    approach: 'undecided',
     cadence: 'ai_suggested',
     sessionSize: 'ai_suggested',
     preferredTime: 'undecided',
@@ -299,6 +302,7 @@ describe('孩子講過的東西', () => {
     planningContribution: 'organized_child_plan',
     provenance: provenance(
       {
+        approach: 'child_stated',
         cadence: 'child_stated',
         sessionSize: 'derived_from_child',
         nextAction: 'child_stated',

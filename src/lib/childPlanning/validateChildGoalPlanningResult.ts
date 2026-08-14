@@ -37,6 +37,7 @@ import {
   CHILD_PLAN_FIELD_SOURCES,
   CHILD_PLAN_GOAL_CONTROL_TYPES,
   CHILD_PLAN_PROGRESSION_KINDS,
+  effectiveChildApproach,
   isChildOwned,
   type ChildGoalPlan,
   type ChildGoalPlanControl,
@@ -193,6 +194,7 @@ function validFieldSource(value: unknown): ChildPlanFieldSource | null {
 }
 
 const PROVENANCE_KEYS = [
+  'approach',
   'cadence',
   'sessionSize',
   'preferredTime',
@@ -216,6 +218,18 @@ function validProvenance(value: unknown): ChildPlanProvenance | null {
     if (childStatedApproach === null) return null;
   }
 
+  // 孩子挑走的選項。null 合法（他沒挑過）；有值就必須是完整的一組，
+  // 只有 id 或只有文字都不行 —— 半組資料會讓「他挑了什麼」變成猜的。
+  const rawChosen = value.childChosenOption;
+  let childChosenOption: ChildPlanProvenance['childChosenOption'] = null;
+  if (rawChosen !== null && rawChosen !== undefined) {
+    if (!isRecord(rawChosen)) return null;
+    const id = nonEmptyString(rawChosen.id, L.maxOptionIdLength);
+    const text = nonEmptyString(rawChosen.text, L.maxOptionLength);
+    if (id === null || text === null) return null;
+    childChosenOption = { id, text };
+  }
+
   const fields = {} as ChildPlanProvenance['fields'];
   for (const key of PROVENANCE_KEYS) {
     const source = validFieldSource(value.fields[key]);
@@ -223,7 +237,7 @@ function validProvenance(value: unknown): ChildPlanProvenance | null {
     fields[key] = source;
   }
 
-  return { childOriginalGoal, childStatedApproach, fields };
+  return { childOriginalGoal, childStatedApproach, childChosenOption, fields };
 }
 
 function validPhases(value: unknown): ChildPlanPhase[] | null {
@@ -587,18 +601,53 @@ function checkAgainstChildInput(
     rejections.add('CHILD_INPUT_OVERWRITTEN');
   }
 
-  const inputApproach =
-    input.childApproach === null || input.childApproach.trim().length === 0
-      ? null
-      : input.childApproach.trim();
-  if (provenance.childStatedApproach !== inputApproach) {
+  // 孩子目前的方法：第一頁打的字，或對話裡他挑／打的最後一個。
+  const chosen = effectiveChildApproach(input);
+  const inputApproach = chosen.text;
+
+  // 他自己打的字必須逐字保留；他沒打過就必須是 null ——
+  // 把 AI 選項的文字寫進這一欄，等於在資料裡宣稱那句話是孩子講的。
+  const typedApproach = chosen.origin === 'child_typed' ? chosen.text : null;
+  if (provenance.childStatedApproach !== typedApproach) {
     rejections.add('CHILD_INPUT_OVERWRITTEN');
   }
 
-  // 「孩子挑了一個選項」的前提，是那個選項真的從 childApproach 回來了。
-  // 反過來不成立 —— 孩子自己講的方法也會在 childApproach，那是
-  // organized_child_plan，不是他從我們給的選項裡挑的。
-  if (plan.planningContribution === 'child_chose_option' && inputApproach === null) {
+  // 他挑走的選項，逐字 ＋ id 都要對得上。
+  if (chosen.origin === 'child_chose_option') {
+    if (
+      provenance.childChosenOption === null
+      || provenance.childChosenOption.id !== chosen.optionId
+      || provenance.childChosenOption.text !== chosen.text
+    ) {
+      rejections.add('CHILD_INPUT_OVERWRITTEN');
+    }
+  } else if (provenance.childChosenOption !== null) {
+    // 沒挑過卻記了一個選擇 —— 那是一個沒有發生過的決定。
+    rejections.add('CHILD_INPUT_OVERWRITTEN');
+  }
+
+  // 方法的來源由**對話紀錄**決定，不由模型自陳。
+  //
+  //   他自己打的     → child_stated
+  //   他挑了選項     → derived_from_child（AI 的文字 ＋ 他的決定）
+  //   還沒決定       → undecided
+  //
+  // 這一條同時是 §12 那句「不能重新標回 ai_suggested」的執法點：
+  // approach 這個欄位在任何情況下都不允許是 ai_suggested。
+  const expectedApproachSource =
+    chosen.origin === 'child_typed'
+      ? 'child_stated'
+      : chosen.origin === 'child_chose_option'
+        ? 'derived_from_child'
+        : 'undecided';
+  if (provenance.fields.approach !== expectedApproachSource) {
+    rejections.add('CHILD_INPUT_OVERWRITTEN');
+  }
+
+  // 「孩子挑了一個選項」與對話紀錄必須完全一致，兩個方向都要成立：
+  // 沒挑過卻標了，是憑空多出一個決定；挑過卻沒標，是把他的決定抹掉。
+  const contributionSaysChose = plan.planningContribution === 'child_chose_option';
+  if (contributionSaysChose !== (chosen.origin === 'child_chose_option')) {
     rejections.add('CHILD_INPUT_OVERWRITTEN');
   }
 
@@ -763,6 +812,18 @@ function validateClarification(
   const rejections = new Rejections();
   checkConversationText([text], knownGoal, input, rejections);
 
+  // 同一種問題不准問第二次。
+  //
+  // 這是多輪對話才會出現的失敗，也是孩子最快放棄的一種：他已經回答過
+  // 「你最想在哪件事變厲害？」，下一輪又被問一次同樣的事，那等於在說
+  // 他剛剛打的字沒有人在讀。歷史就在 responses 裡，這一條驗得出來。
+  const answeredKinds = (Array.isArray(input.responses) ? input.responses : [])
+    .filter((response) => response.type === 'clarification_answer')
+    .map((response) => (response as { questionKind: ChildPlanClarificationKind }).questionKind);
+  if (answeredKinds.includes(kind as ChildPlanClarificationKind)) {
+    rejections.add('UNNECESSARY_CLARIFICATION');
+  }
+
   if (rejections.any) {
     return childGoalPlanningUnavailable('INVALID_AI_OUTPUT', rejections.list);
   }
@@ -809,7 +870,9 @@ function validateChoice(
   );
 
   // 孩子已經有方法了還在給他選項 —— 那就是把他的方法換掉的前一步。
-  if (input.childApproach !== null && input.childApproach.trim().length > 0) {
+  // 「已經有方法」包含他上一輪剛挑走的那個選項：再給一次選項，
+  // 孩子看到的是自己剛剛那一下完全沒有算數。
+  if (effectiveChildApproach(input).text !== null) {
     rejections.add('CHILD_INPUT_OVERWRITTEN');
   }
 

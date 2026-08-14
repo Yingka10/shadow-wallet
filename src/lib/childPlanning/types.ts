@@ -40,6 +40,18 @@ export const CHILD_GOAL_PLANNING_SCHEMA_VERSION = 1;
 /** ai-proxy 的 request type。改版會是另一個字串，這裡是唯一寫出它的地方。 */
 export const CHILD_GOAL_PLANNING_REQUEST_TYPE = 'childGoalPlanning';
 
+/**
+ * 一場 planning session 最多打幾次模型（P1-A2 §6）。
+ *
+ * GrowBook 不是 chatbot interview。三輪之後還是問不出來，正確的作法是
+ * 把主導權交回孩子（「我自己寫怎麼開始」）或直接送給爸媽，
+ * 而不是繼續問第四題 —— 那對孩子是盤問，對我們是成本，對 Demo 是卡關。
+ *
+ * ⚠️ 這是 **session 規則**，不是 input 的形狀規則，所以執法點在
+ *    childPlanningSession，不在 validator。
+ */
+export const CHILD_GOAL_PLANNING_MAX_ROUNDS = 3;
+
 export type ChildPlanAgeGroup = '2-4' | '4-6' | '6-9' | '9-12';
 
 // ---------------------------------------------------------------------------
@@ -72,6 +84,62 @@ export type ChildPlanningSupportPreference =
   /** 先告訴我第一步就好。 */
   | 'first_step_only';
 
+/**
+ * 孩子在對話中回過的一句話（P1-A2）。
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * 這個型別存在的唯一理由是：**孩子的回答需要一個自己的位置。**
+ *
+ * P1-A1 的 input 只有 goal / motivation / approach / cadence 四個內容欄位，
+ * 於是多輪對話的答案無處可放。當時能想到的作法是把答案寫回既有欄位 ——
+ * 而那正是這份契約整包在防的事：
+ *
+ *   AI 問「你最想在哪件事變厲害？」孩子答「我想把英文口說變好」，
+ *   如果那句話被寫進 childOriginalGoal，孩子的原話就被 AI 的提問改掉了。
+ *   半年後沒有任何地方看得出來他本來說的是「我想變厲害」。
+ *
+ * 所以答案一律 append 進 responses，四個內容欄位一個字都不動。
+ * 「原話不可覆寫」因此是**結構性**的，不是靠呼叫端自律。
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+export type ChildPlanningResponse =
+  /**
+   * 孩子回答了一題 clarification。
+   *
+   * question 逐字留著（不是只留 kind）：同一個 kind 在不同輪問法會不一樣，
+   * 只留 kind 的話，事後讀這段對話會看到一個沒有問題的答案。
+   */
+  | {
+      type: 'clarification_answer';
+      questionKind: ChildPlanClarificationKind;
+      question: string;
+      answer: string;
+    }
+  /**
+   * 孩子從 needs_choice 的選項裡挑了一個。
+   *
+   * ⚠️ **文字是 AI 寫的，決定是孩子做的。** 這兩件事必須分開記錄 ——
+   *    下一輪把它重新標成 ai_suggested，等於把孩子的決定抹掉。
+   */
+  | {
+      type: 'choice_selection';
+      optionId: string;
+      optionText: string;
+    }
+  /**
+   * 孩子說「我自己想」並自己輸入。
+   *
+   * 與 choice_selection 分開是因為證據強度不同：這是孩子的原話，
+   * 那是孩子挑的 AI 文字。合成一個 type 就分不出來了。
+   */
+  | { type: 'custom_choice'; answer: string };
+
+export const CHILD_PLANNING_RESPONSE_TYPES: readonly ChildPlanningResponse['type'][] = [
+  'clarification_answer',
+  'choice_selection',
+  'custom_choice',
+] as const;
+
 export type ChildGoalPlanningInput = {
   schemaVersion: typeof CHILD_GOAL_PLANNING_SCHEMA_VERSION;
   ageGroup: ChildPlanAgeGroup;
@@ -79,22 +147,73 @@ export type ChildGoalPlanningInput = {
   childOriginalGoal: string;
   childOriginalMotivation: string | null;
   /**
-   * 孩子自己已經想到的做法（原話）。
+   * 孩子在**第一頁**就自己講出來的做法（原話）。
    *
    * 「我想每天放學投 20 球」屬於這裡，不屬於 childOriginalGoal。
    * 「老師叫我先練右手旋律，再練左手」也屬於這裡 —— 孩子已經有老師、
    * 教材或課程時，那套方法就是這裡的內容。
    *
-   * 有值時 AI 只能整理它，不能換成另一套 —— 這條由
-   * validateChildGoalPlanningResult 強制，不是由 prompt 拜託。
-   *
-   * needs_choice 之後孩子挑的那個選項，下一輪也從這裡帶回來。
+   * ⚠️ **對話中的回答不寫進這裡**，一律進 responses。這一欄只回答
+   *    「孩子一開始自己說了什麼」，混進後面幾輪的答案就答不出來了。
+   *    真正拿去規劃的「目前有效方法」由 effectiveChildApproach 推導。
    */
   childApproach: string | null;
   cadence: ChildPlanCadence | null;
   preferredTime: string | null;
   planningSupportPreference: ChildPlanningSupportPreference | null;
+  /**
+   * 這場對話到目前為止孩子回過的話，依時間排序。
+   *
+   * 第一輪是空陣列。**只 append，不改寫既有元素** —— 改寫等於竄改孩子說過的話。
+   */
+  responses: ChildPlanningResponse[];
 };
+
+/**
+ * 目前真正有效的「孩子的方法」。
+ *
+ * 規則只有一條：**時間上最後一次孩子自己決定的那個**。
+ * childApproach 來自第一頁，所以任何 responses 裡的選擇都比它晚。
+ *
+ * 兩端各有一份實作（App 與 Function），由 parity 測試釘住 ——
+ * 這是一個五行的結構規則，不是關鍵字清單，不會默默分岔。
+ */
+export function effectiveChildApproach(input: ChildGoalPlanningInput): ChildPlanApproachOrigin {
+  // responses 缺席時當成第一輪。validator 會拿 input 來比對模型的回應，
+  // 而它**永遠不可以因為輸入的形狀而丟例外** —— 那會讓一個本來只是
+  // 「這一輪沒有計畫」的情況變成整個畫面炸掉。
+  const responses = Array.isArray(input.responses) ? input.responses : [];
+  for (let i = responses.length - 1; i >= 0; i -= 1) {
+    const response = responses[i];
+    if (response.type === 'custom_choice') {
+      return { text: response.answer, origin: 'child_typed' };
+    }
+    if (response.type === 'choice_selection') {
+      return {
+        text: response.optionText,
+        origin: 'child_chose_option',
+        optionId: response.optionId,
+      };
+    }
+  }
+  const typed = input.childApproach;
+  if (typeof typed === 'string' && typed.trim().length > 0) {
+    return { text: typed.trim(), origin: 'child_typed' };
+  }
+  return { text: null, origin: 'none' };
+}
+
+/**
+ * 方法是怎麼來的。
+ *
+ * `child_typed`        孩子自己打的字（第一頁或「我自己想」）
+ * `child_chose_option` 孩子從 AI 選項裡挑的 —— 文字是 AI 的，決定是他的
+ * `none`               他還沒決定
+ */
+export type ChildPlanApproachOrigin =
+  | { text: string; origin: 'child_typed' }
+  | { text: string; origin: 'child_chose_option'; optionId: string }
+  | { text: null; origin: 'none' };
 
 // ---------------------------------------------------------------------------
 // 兩個正交維度
@@ -255,9 +374,31 @@ export function isChildOwned(source: ChildPlanFieldSource): boolean {
 export type ChildPlanProvenance = {
   /** 孩子的原話，逐字。由組裝端從 input 複製，模型碰不到。 */
   childOriginalGoal: string;
-  /** 孩子自己講的方法，逐字。null = 他沒講。同樣由組裝端複製。 */
+  /**
+   * 孩子**自己打的字**寫的方法，逐字。null = 他沒有自己打過。
+   *
+   * ⚠️ 孩子挑的 AI 選項**不算**這一欄。挑選項是他的決定，但那些字不是他寫的，
+   *    寫進來就等於在資料裡說「這句話是孩子講的」。它在 childChosenOption。
+   */
   childStatedApproach: string | null;
+  /**
+   * 孩子從 needs_choice 挑走的那個選項，逐字 ＋ 它的 id。
+   *
+   * 存在的理由是 P1-A1.5 驗過的那條線：選項的文字是 AI 寫的，
+   * **決定是孩子做的**。只留一邊都會失真 —— 只記文字看不出他選過，
+   * 只記「他選了」則看不出他選的是什麼。
+   */
+  childChosenOption: { id: string; text: string } | null;
   fields: {
+    /**
+     * 目前這套方法是誰決定的。
+     *
+     * 永遠不會是 `ai_suggested`：孩子挑走的選項是 `derived_from_child`
+     * （AI 的文字 ＋ 孩子的決定），他自己打的是 `child_stated`，
+     * 還沒決定是 `undecided`。模型自己選一套方法這件事不存在 ——
+     * 它只能給選項。
+     */
+    approach: ChildPlanFieldSource;
     cadence: ChildPlanFieldSource;
     sessionSize: ChildPlanFieldSource;
     preferredTime: ChildPlanFieldSource;
@@ -527,6 +668,17 @@ export const CHILD_GOAL_PLANNING_LIMITS = {
   maxPhaseIdLength: 24,
   maxDoneWhenLength: 40,
   maxOptionLength: 40,
+  maxOptionIdLength: 24,
+  /** 孩子回答 clarification 的字數上限。比 goal 短：那是一題的答案，不是一篇。 */
+  maxAnswerLength: 120,
+  /**
+   * responses 的長度上限。
+   *
+   * 這**不是**輪數限制（那是 CHILD_GOAL_PLANNING_MAX_ROUNDS，住在 session
+   * 那一層）。這一個純粹是形狀防線：一個壞掉的呼叫端不該有辦法把
+   * 一整串歷史塞進 prompt。
+   */
+  maxResponses: 8,
   maxUnitLength: 8,
   maxModelLength: 80,
   minPhases: 2,

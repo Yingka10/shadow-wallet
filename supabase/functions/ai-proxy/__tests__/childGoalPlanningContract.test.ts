@@ -43,6 +43,7 @@ function input(overrides: Partial<ChildGoalPlanningInput> = {}): ChildGoalPlanni
     cadence: null,
     preferredTime: null,
     planningSupportPreference: null,
+    responses: [],
     ...overrides,
   };
 }
@@ -655,25 +656,86 @@ describe('Case 11｜目標清楚、還沒決定怎麼做', () => {
   });
 
   it('孩子挑了之後，下一輪的計畫記成 child_chose_option', () => {
+    // P1-A2：挑走的選項進 responses，**不**寫回 childApproach。
+    // 寫回去的話，一句 AI 寫的話會在資料裡變成孩子講的話。
     const chosen = input({
       childOriginalGoal: '我想兩週讀完這本書，但不知道怎麼安排',
-      childApproach: '每天睡前讀 15 分鐘',
       cadence: { mode: 'weekly_frequency', weeklyFrequency: 7 },
       preferredTime: '睡前',
+      responses: [
+        { type: 'choice_selection', optionId: 'option-1', optionText: '每天睡前讀 15 分鐘' },
+      ],
     });
 
     const { result: after } = roundTrip(chosen, {
       ...CASE_1_MODEL,
       desiredOutcome: '兩週讀完這本書',
-      planningContribution: 'child_chose_option',
+      // 模型這一輪忘了標也沒關係 —— 挑沒挑過由對話紀錄決定。
+      planningContribution: 'organized_child_plan',
       nextAction: { text: '今晚睡前先讀 15 分鐘', source: 'child_stated' },
     });
 
     expect(after.status).toBe('ready');
     if (after.status !== 'ready') return;
     expect(after.plan.planningContribution).toBe('child_chose_option');
-    // 選項的文字是 AI 寫的，但決定是孩子做的 —— 兩件事都留在資料裡。
-    expect(after.plan.provenance.childStatedApproach).toBe('每天睡前讀 15 分鐘');
+    // 選項的文字是 AI 寫的，決定是孩子做的 —— 兩件事分開留在資料裡。
+    expect(after.plan.provenance.childStatedApproach).toBeNull();
+    expect(after.plan.provenance.childChosenOption).toEqual({
+      id: 'option-1',
+      text: '每天睡前讀 15 分鐘',
+    });
+    // 而且它是 child-owned，不是 AI 自己挑的。
+    expect(after.plan.provenance.fields.approach).toBe('derived_from_child');
+  });
+
+  it('孩子說「我自己想」並自己輸入 → 是他的原話，不是選項', () => {
+    const own = input({
+      childOriginalGoal: '我想兩週讀完這本書，但不知道怎麼安排',
+      cadence: { mode: 'weekly_frequency', weeklyFrequency: 7 },
+      preferredTime: '睡前',
+      responses: [{ type: 'custom_choice', answer: '我想每天早上起床先讀一章' }],
+    });
+
+    const { result: after } = roundTrip(own, {
+      ...CASE_1_MODEL,
+      desiredOutcome: '兩週讀完這本書',
+      nextAction: { text: '明天早上起床先讀一章', source: 'child_stated' },
+    });
+
+    expect(after.status).toBe('ready');
+    if (after.status !== 'ready') return;
+    // 他自己打的字 → child_stated，而且沒有任何「他挑了選項」的紀錄。
+    expect(after.plan.provenance.childStatedApproach).toBe('我想每天早上起床先讀一章');
+    expect(after.plan.provenance.childChosenOption).toBeNull();
+    expect(after.plan.provenance.fields.approach).toBe('child_stated');
+    expect(after.plan.planningContribution).not.toBe('child_chose_option');
+  });
+
+  it('孩子的原話不會被對話中的回答蓋掉', () => {
+    const answered = input({
+      childOriginalGoal: '我想變厲害',
+      cadence: { mode: 'weekly_frequency', weeklyFrequency: 3 },
+      responses: [
+        {
+          type: 'clarification_answer',
+          questionKind: 'goal_focus',
+          question: '你最想在哪一件事情上變厲害？',
+          answer: '我想把英文口說變好',
+        },
+        { type: 'custom_choice', answer: '每天跟媽媽練五句英文' },
+      ],
+    });
+
+    const { result: after } = roundTrip(answered, {
+      ...CASE_1_MODEL,
+      desiredOutcome: '英文口說變好',
+      nextAction: { text: '今天先跟媽媽練五句', source: 'child_stated' },
+    });
+
+    expect(after.status).toBe('ready');
+    if (after.status !== 'ready') return;
+    // 他最早說的那句話一個字都沒有變 —— 這是整份契約最不能弄丟的東西。
+    expect(after.plan.provenance.childOriginalGoal).toBe('我想變厲害');
   });
 
   it('沒有人挑過選項卻自稱 child_chose_option → 降級，不照抄', () => {

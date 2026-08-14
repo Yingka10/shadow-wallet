@@ -23,6 +23,7 @@ import {
   CHILD_GOAL_PLANNING_REQUEST_TYPE,
   CHILD_GOAL_PLANNING_SCHEMA_VERSION,
   CHILD_PLANNING_CONTRIBUTIONS,
+  CHILD_PLANNING_RESPONSE_TYPES,
   CHILD_PLAN_CLARIFICATION_KINDS,
   CHILD_PLAN_FIELD_SOURCES,
   CHILD_PLAN_GOAL_CONTROL_TYPES,
@@ -73,6 +74,7 @@ const INPUT: ChildGoalPlanningInput = {
   cadence: null,
   preferredTime: null,
   planningSupportPreference: null,
+  responses: [],
 };
 
 describe('request type 兩邊一致', () => {
@@ -141,6 +143,51 @@ describe('兩個維度是正交的，沒有被合回同一個 enum', () => {
     // external_outcome 一定要附可控行動；三種 progression 都可以搭配它。
     expect(LOGIC).toContain('controllableActions');
     expect(LOGIC).toContain("goalControlType === 'external_outcome'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1-A2：多輪對話
+// ---------------------------------------------------------------------------
+
+describe('多輪對話的形狀兩邊一致', () => {
+  it('三種回應兩邊都認得', () => {
+    for (const type of CHILD_PLANNING_RESPONSE_TYPES) {
+      expect({ type, inFunction: LOGIC.includes(`'${type}'`) })
+        .toEqual({ type, inFunction: true });
+    }
+  });
+
+  it('「目前有效的方法」兩邊是同一支規則，不是各判各的', () => {
+    // 這一支決定「孩子到底決定了沒有」，而它同時被
+    // informationIsSufficient（要不要再問）與 compose（provenance 怎麼標）用。
+    // 兩邊分岔的話，Function 會覺得他還沒決定、App 會覺得他決定了。
+    expect(LOGIC).toContain('export function effectiveChildApproach');
+    expect(codeOnly(readApp('types.ts'))).toContain('export function effectiveChildApproach');
+    for (const source of [codeOnly(LOGIC), codeOnly(readApp('types.ts'))]) {
+      expect(source).toContain("origin: 'child_chose_option'");
+      expect(source).toContain("origin: 'child_typed'");
+    }
+  });
+
+  it('挑走的選項與孩子自己打的字，兩邊都分開存', () => {
+    for (const source of [LOGIC, readApp('types.ts')]) {
+      expect(source).toContain('childChosenOption');
+      expect(source).toContain('childStatedApproach');
+    }
+  });
+
+  it('對話裡的答案沒有任何一條路徑寫得回孩子的原話', () => {
+    // 這是整個 P1-A2 契約最不能破的一條。同一行裡同時出現「原話」與
+    // 「答案／選項」就是可疑 —— 合法的程式碼沒有理由那樣寫。
+    const suspicious = /childOriginal(Goal|Motivation)[^\n]*\b(answer|optionText|response)\b/;
+    for (const source of [
+      codeOnly(LOGIC),
+      codeOnly(readApp('buildChildGoalPlanningInput.ts')),
+      codeOnly(readApp('types.ts')),
+    ]) {
+      expect(source).not.toMatch(suspicious);
+    }
   });
 });
 

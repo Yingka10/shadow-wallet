@@ -19,9 +19,11 @@
 import {
   CHILD_GOAL_PLANNING_LIMITS,
   CHILD_GOAL_PLANNING_SCHEMA_VERSION,
+  CHILD_PLAN_CLARIFICATION_KINDS,
   type ChildGoalPlanningInput,
   type ChildPlanAgeGroup,
   type ChildPlanCadence,
+  type ChildPlanningResponse,
   type ChildPlanningSupportPreference,
 } from './types';
 
@@ -39,11 +41,13 @@ export type ChildGoalPlanningRequest = {
   ageGroup: string;
   childOriginalGoal: string;
   childOriginalMotivation?: string | null;
-  /** 孩子自己已經想到的做法。**不要把它塞進 goal**。 */
+  /** 孩子在第一頁自己想到的做法。**不要把它塞進 goal**，也不要塞對話中的答案。 */
   childApproach?: string | null;
   cadence?: ChildPlanCadence | null;
   preferredTime?: string | null;
   planningSupportPreference?: string | null;
+  /** 這場對話到目前為止孩子回過的話。第一輪不給或給空陣列。 */
+  responses?: readonly ChildPlanningResponse[] | null;
 };
 
 function trimmedOrNull(value: string | null | undefined, max: number): string | null {
@@ -93,6 +97,67 @@ function normalizeCadence(cadence: ChildPlanCadence | null | undefined): ChildPl
 }
 
 /**
+ * 對話紀錄的正規化。
+ *
+ * ⚠️ 壞掉的元素**不是丟掉，是整份失敗**（回 undefined）。
+ *
+ * 其他欄位形狀不對時當成「孩子沒選」是對的 —— 那代表資訊缺一塊。
+ * 但這裡缺的那一塊是**孩子已經回答過的話**：默默丟掉一則答案，模型會
+ * 拿到一份看起來完整、實際上少一句的對話，然後很合理地把同一題再問一次。
+ * 孩子會覺得自己剛剛講的話沒有人在聽。
+ *
+ * 這些元素是我們自己的畫面組出來的，壞掉代表是程式錯誤 ——
+ * 那一輪不該花錢打模型。
+ */
+function normalizeResponses(
+  responses: readonly ChildPlanningResponse[] | null | undefined,
+): ChildPlanningResponse[] | undefined {
+  if (responses === null || responses === undefined) return [];
+  if (!Array.isArray(responses)) return undefined;
+  if (responses.length > CHILD_GOAL_PLANNING_LIMITS.maxResponses) return undefined;
+
+  const L = CHILD_GOAL_PLANNING_LIMITS;
+  const normalized: ChildPlanningResponse[] = [];
+
+  for (const response of responses) {
+    if (response === null || typeof response !== 'object') return undefined;
+
+    if (response.type === 'clarification_answer') {
+      const question = trimmedOrNull(response.question, L.maxQuestionLength);
+      const answer = trimmedOrNull(response.answer, L.maxAnswerLength);
+      if (question === null || answer === null) return undefined;
+      if (!CHILD_PLAN_CLARIFICATION_KINDS.includes(response.questionKind)) return undefined;
+      normalized.push({
+        type: 'clarification_answer',
+        questionKind: response.questionKind,
+        question,
+        answer,
+      });
+      continue;
+    }
+
+    if (response.type === 'choice_selection') {
+      const optionId = trimmedOrNull(response.optionId, L.maxOptionIdLength);
+      const optionText = trimmedOrNull(response.optionText, L.maxOptionLength);
+      if (optionId === null || optionText === null) return undefined;
+      normalized.push({ type: 'choice_selection', optionId, optionText });
+      continue;
+    }
+
+    if (response.type === 'custom_choice') {
+      const answer = trimmedOrNull(response.answer, L.maxAnswerLength);
+      if (answer === null) return undefined;
+      normalized.push({ type: 'custom_choice', answer });
+      continue;
+    }
+
+    return undefined;
+  }
+
+  return normalized;
+}
+
+/**
  * 組出 input，或 null（= 這一輪根本不該呼叫模型）。
  *
  * 沒有目標或沒有年齡段就是 null：那一輪一定產不出可用的計畫，
@@ -114,6 +179,9 @@ export function buildChildGoalPlanningInput(
       ? (request.planningSupportPreference as ChildPlanningSupportPreference)
       : null;
 
+  const responses = normalizeResponses(request.responses);
+  if (responses === undefined) return null;
+
   return {
     schemaVersion: CHILD_GOAL_PLANNING_SCHEMA_VERSION,
     ageGroup: request.ageGroup as ChildPlanAgeGroup,
@@ -132,5 +200,6 @@ export function buildChildGoalPlanningInput(
       CHILD_GOAL_PLANNING_LIMITS.maxPreferredTimeLength,
     ),
     planningSupportPreference: support,
+    responses,
   };
 }

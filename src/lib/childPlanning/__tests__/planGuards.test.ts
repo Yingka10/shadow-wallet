@@ -27,6 +27,7 @@ function input(overrides: Partial<ChildGoalPlanningInput> = {}): ChildGoalPlanni
     cadence: null,
     preferredTime: null,
     planningSupportPreference: null,
+    responses: [],
     ...overrides,
   };
 }

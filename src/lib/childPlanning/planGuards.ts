@@ -21,6 +21,7 @@
 import { validateNextStep } from '../childProposal/planDraft/canonicalPlanFields';
 import {
   EVIDENCE_PRIORITY,
+  effectiveChildApproach,
   type ChildGoalPlanningInput,
   type ChildPlanFieldSource,
 } from './types';
@@ -160,6 +161,19 @@ export function childVocabulary(input: ChildGoalPlanningInput): ChildVocabulary 
     input.childOriginalGoal,
     input.childApproach ?? '',
     input.childOriginalMotivation ?? '',
+    // 對話裡孩子打的字也是他的話。少了這一段，孩子在 clarification 回答
+    // 「我想更有自信地上台」之後，下一輪整份計畫會因為「更有自信」被退掉 ——
+    // 他做的唯一一件事就是照著問題回答。
+    //
+    // ⚠️ choice_selection 刻意**不算**：那些字是 AI 寫的。孩子挑了一個
+    //    寫著「最有效」的選項，不代表模型從此可以自稱權威。
+    ...(Array.isArray(input.responses) ? input.responses : []).map((response) =>
+      response.type === 'clarification_answer'
+        ? response.answer
+        : response.type === 'custom_choice'
+          ? response.answer
+          : '',
+    ),
   ].join('\n');
 
   return {
@@ -228,8 +242,9 @@ export type InformationSufficiency = 'sufficient' | 'insufficient';
  */
 export function informationSufficiency(input: ChildGoalPlanningInput): InformationSufficiency {
   const hasCadence = input.cadence !== null;
-  const hasApproach =
-    typeof input.childApproach === 'string' && input.childApproach.trim().length > 0;
+  // 孩子挑過選項或自己輸入過，都算他已經講了要做什麼 —— 否則挑完之後
+  // 下一輪會被判成資訊不足，模型就可以合法地把同一件事再問一次。
+  const hasApproach = effectiveChildApproach(input).text !== null;
   return hasCadence && hasApproach ? 'sufficient' : 'insufficient';
 }
 
