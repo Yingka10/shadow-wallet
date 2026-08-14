@@ -199,6 +199,33 @@ describe('7. 寫入只走 RPC，讀取只限家庭', () => {
     expect(CODE).not.toMatch(/FOR (INSERT|UPDATE|DELETE|ALL)\s+TO/);
   });
 
+  it('table 權限與 child_proposals 一致：收回預設授權，只留 SELECT', () => {
+    // 2026-08-14 staging acceptance 抓到的：建表時沒有收回 Supabase 對
+    // public schema 的預設授權，於是 anon / authenticated 對這張表還有
+    // INSERT / UPDATE / DELETE 的 table-level 權限。
+    //
+    // RLS 擋得住（沒有寫入 policy），所以不是現成的漏洞 —— 但同家族其他
+    // 五張表都有明確 REVOKE，差別在縱深：留著預設授權的話，只要之後有人
+    // 加一條寬鬆的寫入 policy，權限那一層已經是開的了。
+    // 只看會被執行的 SQL —— 註解裡解釋「其他表都有 REVOKE ALL」正是我們要的
+    // 說明，把它一起掃進去只會逼下一個人刪掉那段話。
+    const grants = readFileSync(
+      join(MIGRATIONS, '20260824000000_child_goal_planning_sessions_grants.sql'),
+      'utf8',
+    )
+      .replace(/\r\n/g, '\n')
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('--'))
+      .join('\n');
+
+    expect(grants).toContain(
+      'REVOKE ALL ON child_goal_planning_sessions FROM PUBLIC, anon, authenticated;',
+    );
+    expect(grants).toContain('GRANT SELECT ON child_goal_planning_sessions TO authenticated;');
+    // 寫入一律走 RPC —— 這裡不該出現任何寫入授權。
+    expect(grants).not.toMatch(/GRANT[^;]*\b(INSERT|UPDATE|DELETE|ALL)\b[^;]*child_goal_planning_sessions/);
+  });
+
   it('三支 RPC 都收回 anon 的執行權', () => {
     for (const name of [
       'start_child_goal_planning_session_v1',
