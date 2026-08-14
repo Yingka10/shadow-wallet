@@ -191,15 +191,20 @@ describe('P0-8M · 孩子回顧 → 送出換時段', () => {
     expect(screen.getByText('已送給爸媽，等一起確認。')).toBeTruthy();
   });
 
-  it('送出中不能再按 —— 按鈕進 busy 狀態', () => {
+  it('送出中保留忙碌的送出按鈕且不再送出', () => {
     const onSubmit = jest.fn(async () => true);
     renderReview({
       sharedPlanTimeAdjustment: makeSharedPlan({ submitting: true, onSubmit }),
     });
 
     chooseAfterDinnerAndTime();
-    expect(screen.queryByRole('button', { name: '下週先試晚餐後' })).toBeNull();
-    fireEvent.press(screen.getByRole('button', { name: '保留回顧草稿' }));
+    const cta = screen.getByRole('button', { name: '下週先試晚餐後' });
+    expect(cta.props.accessibilityState).toEqual(
+      expect.objectContaining({ busy: true, disabled: true }),
+    );
+    expect(screen.getByText('正在送給爸媽，請稍等。')).toBeTruthy();
+
+    fireEvent.press(cta);
     expect(onSubmit).not.toHaveBeenCalled();
   });
 

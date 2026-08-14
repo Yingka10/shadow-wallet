@@ -444,6 +444,13 @@ describe('LongTermGoalDetailSheets', () => {
     expect(JSON.stringify(rendered.toJSON())).not.toMatch(READING_ONLY_COPY);
   });
 
+  it('uses time-specific adjustment wording only when capability is available', () => {
+    renderSheet('adjustment');
+
+    expect(screen.getByRole('button', { name: '想換一個時段' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '想調整進行時間' })).toBeNull();
+  });
+
   it('keeps challenge records generic and hides reading time corrections', () => {
     const onCorrectTimeWindow = jest.fn(async () => undefined);
     const rendered = renderSheet('record', {

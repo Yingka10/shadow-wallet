@@ -120,7 +120,11 @@ function getReviewPrompt(kind: PresentationKind): string {
 
 function getAdjustmentOptions(
   kind: PresentationKind,
+  supportsPreferredTimeWindow: boolean,
 ): Array<{ value: AdjustmentDraft; label: string }> {
+  const timeLabel = supportsPreferredTimeWindow
+    ? '想換一個時段'
+    : '想調整進行時間';
   const contentLabel =
     kind === 'skill'
       ? '想調整練習內容'
@@ -131,7 +135,7 @@ function getAdjustmentOptions(
           : '想調整進行內容';
 
   return [
-    { value: 'time', label: '想調整進行時間' },
+    { value: 'time', label: timeLabel },
     { value: 'frequency', label: '想調整每週安排' },
     { value: 'method', label: '想換一種進行方式' },
     { value: 'content', label: contentLabel },
@@ -322,7 +326,7 @@ function PrimaryButton({
     <TouchableOpacity
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ disabled, busy: loading }}
+      accessibilityState={{ disabled: disabled || loading, busy: loading }}
       disabled={disabled || loading}
       onPress={onPress}
       activeOpacity={0.78}
@@ -602,32 +606,31 @@ function ReviewSheet({
   const showNextStep = supportsPreferredTimeWindow && draft.preferredWindow !== null;
 
   /*
-    什麼情況才真的送出去 —— 五個條件全部成立才行：
+    什麼情況才真的送出去 —— 六個條件全部成立才行：
 
       1. 這是共同計畫（sharedPlan 有值）
-      2. 這是閱讀計畫
+      2. 畫面有時段能力
       3. 孩子選的下一步是「調整時間」
       4. 選到的是可送出的時段值
       5. 那個時段和目前談定的不一樣
+      6. 沒有等待確認或送出中的請求
 
     少一個就退回原本的 local draft 行為。特別是 (1)：一般家長建立的長期任務
     也有「調整時間」這個選項，但它沒有提案，不該進協商 RPC。
   */
   const chosenWindow = submittableWindow(draft.preferredWindow);
   const wantsTimeChange = supportsPreferredTimeWindow && draft.nextStep === 'time';
-  const canSend = Boolean(sharedPlan)
+  const canOfferTimeChange = Boolean(sharedPlan)
     && supportsPreferredTimeWindow
     && wantsTimeChange
     && chosenWindow !== null
     && !sharedPlan!.pending
-    && !sharedPlan!.submitting
     && sharedPlan!.currentPreferredTime !== chosenWindow;
+  const canSend = canOfferTimeChange && !sharedPlan!.submitting;
+  const showSubmittingTimeChange = canOfferTimeChange && sharedPlan!.submitting;
 
   // 送出失敗時**不**動 draft —— 孩子剛做完回顧，清掉等於要他從頭再選一次。
-  const handleSend = () => {
-    if (!canSend || !chosenWindow) return;
-    void sharedPlan!.onSubmit(chosenWindow);
-  };
+  const handleSend = () => { void sharedPlan?.onSubmit(chosenWindow!); };
 
   if (supportsPreferredTimeWindow && sharedPlan?.submitted) {
     return (
@@ -721,9 +724,11 @@ function ReviewSheet({
       ) : (
         <View style={styles.localNotice}>
           <Text style={styles.localNoticeText}>
-            {canSend
-              ? '送出之後爸媽會看到，一起確認後計畫才會更新。'
-              : '這份回答目前只保留在這個畫面，尚未送出給家長。'}
+            {showSubmittingTimeChange
+              ? '正在送給爸媽，請稍等。'
+              : canSend
+                ? '送出之後爸媽會看到，一起確認後計畫才會更新。'
+                : '這份回答目前只保留在這個畫面，尚未送出給家長。'}
           </Text>
         </View>
       )}
@@ -750,7 +755,7 @@ function ReviewSheet({
       </TouchableOpacity>
       <Text style={styles.preservedCopy}>這週已完成的紀錄都會保留。</Text>
 
-      {canSend ? (
+      {canSend || showSubmittingTimeChange ? (
         <PrimaryButton
           label={`下週先試${chosenLabel}`}
           loading={sharedPlan?.submitting}
@@ -774,7 +779,10 @@ function AdjustmentSheet({
   onSelect: (draft: AdjustmentDraft) => void;
   onSave: () => void;
 }) {
-  const options = getAdjustmentOptions(presentation.goalKind);
+  const options = getAdjustmentOptions(
+    presentation.goalKind,
+    presentation.supportsPreferredTimeWindow,
+  );
 
   return (
     <View>
