@@ -143,7 +143,7 @@ function normalizeGoalStartIso(
  * task 已經有的值。task 上其他的 preferred_time enum（上學前、放學後…）
  * 刻意**不**接受：閱讀 UI 只認得這兩個時段，硬塞進來只會顯示錯的字。
  */
-function readingWindowFromTask(
+function preferredTimeWindowFromTask(
   preferredTime: string | null | undefined,
 ): PreferredTimeWindow | null {
   return preferredTime === 'after_dinner' || preferredTime === 'before_bed'
@@ -158,7 +158,7 @@ function resolvePreferredWindow(
 ): PreferredTimeWindow | null {
   return todayCompletion?.planned_time_window
     ?? goal.preferred_time_window
-    ?? readingWindowFromTask(task.preferred_time)
+    ?? preferredTimeWindowFromTask(task.preferred_time)
     ?? null;
 }
 
@@ -372,10 +372,12 @@ export default function LongTermDetailScreen() {
   const presentation = useMemo(() => {
     if (!goal || !task) return null;
     return {
-      ...buildGoalPresentation(task, goal, completions),
+      ...buildGoalPresentation(task, goal, completions, undefined, {
+        sharedPlanSupportsPreferredTimeWindow: sharedPlan !== null,
+      }),
       preferredTimeWindow: selectedTimeWindow,
     };
-  }, [completions, goal, selectedTimeWindow, task]);
+  }, [completions, goal, selectedTimeWindow, sharedPlan, task]);
 
   const todayCompletion = useMemo(
     () => completions.find((completion) =>
@@ -456,7 +458,7 @@ export default function LongTermDetailScreen() {
         } catch (contextError) {
           if (!isCurrentGeneration()) return false;
           Alert.alert(
-            '閱讀時段尚未記下',
+            '完成時段尚未記下',
             contextError instanceof Error ? contextError.message : '可以稍後再試。',
           );
         }
@@ -548,7 +550,7 @@ export default function LongTermDetailScreen() {
   const sharedPlanTimeAdjustment = useMemo(() => {
     if (!sharedPlan) return undefined;
     return {
-      currentPreferredTime: readingWindowFromTask(sharedPreferredTime),
+      currentPreferredTime: preferredTimeWindowFromTask(sharedPreferredTime),
       pending: hasOpenRequest,
       submitting: submittingTimeAdjustment,
       error: timeAdjustmentError,

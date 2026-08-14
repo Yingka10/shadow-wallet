@@ -120,6 +120,8 @@ function taskRow() {
     recurrence_days: null,
     schedule_mode: 'weekly_frequency',
     weekly_frequency: 3,
+    progress_model: 'weekly_rhythm',
+    next_step: '今天先讀 15 分鐘',
     start_date: '2026-08-07',
     due_date: '2026-08-20',
     preferred_time: scenario.taskPreferredTime,
@@ -229,7 +231,7 @@ function expectWeekProgressUnchanged() {
 
 async function renderScreen() {
   const view = render(<LongTermDetailScreen />);
-  await waitFor(() => expect(screen.queryByTestId('goal-today')).not.toBeNull());
+  await waitFor(() => expect(screen.queryByTestId('goal-today-section')).not.toBeNull());
   return view;
 }
 
@@ -264,6 +266,18 @@ describe('P0-8M · 孩子端長期詳情', () => {
 
     expect(screen.getByText(/尚未選擇時段/)).toBeTruthy();
     expect(screen.queryByText(/放學後/)).toBeNull();
+  });
+
+  it('uses the observed shared-plan context to expose the structured time controls', async () => {
+    scenario.goalPreferredWindow = null;
+    scenario.taskPreferredTime = null;
+    await renderScreen();
+
+    await waitFor(() => expect(
+      screen.queryByLabelText('選擇今天的預計時段'),
+    ).not.toBeNull());
+    expect(screen.getByText('今天先讀 15 分鐘')).toBeTruthy();
+    expect(screen.getByText(/尚未選擇時段/)).toBeTruthy();
   });
 
   it('before：本週 2／3，時段是睡前', async () => {
