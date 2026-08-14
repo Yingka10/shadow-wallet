@@ -237,7 +237,7 @@ describe('P0-8M · 孩子回顧 → 送出換時段', () => {
     expect(screen.getByRole('button', { name: '下週先試晚餐後' })).toBeTruthy();
   });
 
-  it('非閱讀計畫不會出現時段題，也就送不出換時段請求', () => {
+  it('沒有時段能力的計畫，即使有共同計畫也不出現時段題，送不出換時段請求', () => {
     renderReview({
       presentation: makePresentation({
         goalKind: 'skill',

@@ -43,8 +43,12 @@ export type AdjustmentDraft =
 /**
  * 共同計畫的換時段通道（P0-8M）。
  *
- * 只有在畫面確定「這是一份進行中的共同閱讀計畫」時才會傳進來。傳 undefined
- * 代表沒有這條通道 —— 一般家長建立的長期任務走的就是這條，回顧仍然只留草稿。
+ * 只有在畫面確定「這是一份進行中的共同計畫」時才會傳進來，和任務叫什麼名字
+ * 無關。傳 undefined 代表沒有這條通道 —— 一般家長建立的長期任務走的就是這條，
+ * 回顧仍然只留草稿。
+ *
+ * 這個 prop 才是能不能送出協商 RPC 的界線。presentation 上的
+ * `supportsPreferredTimeWindow` 只決定要不要顯示窄時段 UI，看得到不等於送得出去。
  */
 export type SharedPlanTimeAdjustment = {
   /** 目前雙方談定的時段。用來判斷孩子選的是不是真的不一樣。 */

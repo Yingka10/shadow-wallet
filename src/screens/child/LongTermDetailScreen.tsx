@@ -126,11 +126,11 @@ function normalizeGoalStartIso(
 }
 
 /**
- * 閱讀畫面要顯示的時段，決策順序：
+ * 長期詳情要顯示的時段，決策順序：
  *
  *   1. 今天那筆完成紀錄實際填的 planned_time_window（發生過的事最權威）
- *   2. long_term_goals.preferred_time_window（閱讀畫面的 runtime mirror）
- *   3. tasks.preferred_time —— 只在它剛好是閱讀畫面認得的兩個值時
+ *   2. long_term_goals.preferred_time_window（詳情畫面的 runtime mirror）
+ *   3. tasks.preferred_time —— 只在它剛好是這個畫面認得的兩個值時
  *   4. null
  *
  * 第 3 步是 P0-8M 的窄相容修補。共同約定的權威一直是 Plan Version，
@@ -141,7 +141,8 @@ function normalizeGoalStartIso(
  *
  * 這不是新增第三個真相來源 —— 只是在既有 mirror 還沒補齊時，讀 canonical
  * task 已經有的值。task 上其他的 preferred_time enum（上學前、放學後…）
- * 刻意**不**接受：閱讀 UI 只認得這兩個時段，硬塞進來只會顯示錯的字。
+ * 刻意**不**接受：窄時段 UI 只認得 after_dinner／before_bed 這兩個值，硬塞
+ * 進來只會顯示錯的字。helper 改成中性命名並不放寬這個範圍。
  */
 function preferredTimeWindowFromTask(
   preferredTime: string | null | undefined,
