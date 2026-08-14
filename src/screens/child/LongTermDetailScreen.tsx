@@ -458,7 +458,7 @@ export default function LongTermDetailScreen() {
         } catch (contextError) {
           if (!isCurrentGeneration()) return false;
           Alert.alert(
-            '完成時段尚未記下',
+            '這次的時段尚未記下',
             contextError instanceof Error ? contextError.message : '可以稍後再試。',
           );
         }

@@ -665,7 +665,7 @@ describe('LongTermDetailScreen', () => {
 
     expect(await screen.findByText('今天已完成 15 分鐘')).toBeTruthy();
     await waitFor(() => {
-      expect(Alert.alert).toHaveBeenCalledWith('完成時段尚未記下', 'network');
+      expect(Alert.alert).toHaveBeenCalledWith('這次的時段尚未記下', 'network');
     });
     expect(screen.queryByText('晚餐後記錄')).toBeNull();
 
