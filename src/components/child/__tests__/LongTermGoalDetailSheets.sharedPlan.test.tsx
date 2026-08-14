@@ -22,7 +22,8 @@ function makePresentation(
     weekCompleted: 2,
     weekTarget: 3,
     totalWeeks: 2,
-    goalKind: 'reading_habit',
+    goalKind: 'habit',
+    progression: null,
     planState: 'active',
     categoryLabel: '學習與技能',
     overallLabel: '2 / 6 次',
@@ -33,7 +34,7 @@ function makePresentation(
     todayAction: '自己選一本喜歡的書，閱讀 15 分鐘',
     preferredTimeWindow: 'before_bed',
     canCompleteToday: true,
-    isReadingPlan: true,
+    supportsPreferredTimeWindow: true,
     weekDays: [],
     weekSummary: '這週已閱讀 2 次。',
     nextReward: { threshold: 3, coin: 10 },
@@ -45,7 +46,6 @@ function makePresentation(
     finalRewardText: '兩週後一起回顧。',
     reviewTitle: '週末一起回顧',
     reviewPrompt: '這週哪個時間最適合閱讀？',
-    sectionOrder: ['hero', 'today', 'week', 'rewards', 'review'],
     ...overrides,
   };
 }
@@ -198,10 +198,8 @@ describe('P0-8M · 孩子回顧 → 送出換時段', () => {
     });
 
     chooseAfterDinnerAndTime();
-    const cta = screen.getByRole('button', { name: '下週先試晚餐後' });
-    expect(cta.props.accessibilityState.busy).toBe(true);
-
-    fireEvent.press(cta);
+    expect(screen.queryByRole('button', { name: '下週先試晚餐後' })).toBeNull();
+    fireEvent.press(screen.getByRole('button', { name: '保留回顧草稿' }));
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
@@ -236,7 +234,10 @@ describe('P0-8M · 孩子回顧 → 送出換時段', () => {
 
   it('非閱讀計畫不會出現時段題，也就送不出換時段請求', () => {
     renderReview({
-      presentation: makePresentation({ goalKind: 'skill', isReadingPlan: false }),
+      presentation: makePresentation({
+        goalKind: 'skill',
+        supportsPreferredTimeWindow: false,
+      }),
       sharedPlanTimeAdjustment: makeSharedPlan(),
     });
 

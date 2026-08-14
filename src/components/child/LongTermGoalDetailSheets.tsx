@@ -109,22 +109,9 @@ const GENERAL_REVIEW_NEXT_OPTIONS: Array<{
   { value: 'method', label: '調整進行方式' },
 ];
 
-const READING_ADJUSTMENT_OPTIONS: Array<{
-  value: AdjustmentDraft;
-  label: string;
-}> = [
-  { value: 'time', label: '想換一個閱讀時段' },
-  { value: 'frequency', label: '想調整每週次數' },
-  { value: 'method', label: '想換一種進行方式' },
-  { value: 'content', label: '想調整閱讀內容' },
-  { value: 'pause', label: '想先暫停一下' },
-  { value: 'discuss', label: '想和家人討論' },
-];
-
 type PresentationKind = GoalPresentation['goalKind'];
 
 function getReviewPrompt(kind: PresentationKind): string {
-  if (kind === 'reading_habit') return '這週最喜歡哪一本書或哪一段？';
   if (kind === 'skill') return '這週哪一段練習最有感？';
   if (kind === 'family') return '這週哪一次一起做最有感？';
   if (kind === 'challenge') return '這週哪一步最有感？';
@@ -134,8 +121,6 @@ function getReviewPrompt(kind: PresentationKind): string {
 function getAdjustmentOptions(
   kind: PresentationKind,
 ): Array<{ value: AdjustmentDraft; label: string }> {
-  if (kind === 'reading_habit') return READING_ADJUSTMENT_OPTIONS;
-
   const contentLabel =
     kind === 'skill'
       ? '想調整練習內容'
@@ -496,7 +481,7 @@ function RecordSheet({
     }
   };
   const loading = correctingTimeWindow || localLoading;
-  const isReadingPlan = presentation.goalKind === 'reading_habit';
+  const supportsPreferredTimeWindow = presentation.supportsPreferredTimeWindow;
 
   return (
     <View>
@@ -512,7 +497,7 @@ function RecordSheet({
         <DetailRow
           label="完成時段"
           value={
-            isReadingPlan
+            supportsPreferredTimeWindow
               ? lastConfirmedWindow
                 ? TIME_WINDOW_LABELS[lastConfirmedWindow]
                 : '尚未記錄時段'
@@ -521,7 +506,7 @@ function RecordSheet({
         />
       </View>
 
-      {isReadingPlan ? (
+      {supportsPreferredTimeWindow ? (
         <>
           <Text style={styles.questionLabel}>需要更正時段嗎？</Text>
           <View style={styles.optionGrid}>
@@ -608,13 +593,13 @@ function ReviewSheet({
   onDismiss: () => void;
 }) {
   const kind = presentation.goalKind;
-  const isReadingPlan = kind === 'reading_habit';
+  const supportsPreferredTimeWindow = presentation.supportsPreferredTimeWindow;
   const chosenLabel = draft.preferredWindow === 'after_dinner'
     ? '晚餐後'
     : draft.preferredWindow === 'before_bed'
       ? '睡前'
       : null;
-  const showNextStep = draft.preferredWindow !== null;
+  const showNextStep = supportsPreferredTimeWindow && draft.preferredWindow !== null;
 
   /*
     什麼情況才真的送出去 —— 五個條件全部成立才行：
@@ -629,17 +614,22 @@ function ReviewSheet({
     也有「調整時間」這個選項，但它沒有提案，不該進協商 RPC。
   */
   const chosenWindow = submittableWindow(draft.preferredWindow);
-  const wantsTimeChange = isReadingPlan && draft.nextStep === 'time';
+  const wantsTimeChange = supportsPreferredTimeWindow && draft.nextStep === 'time';
   const canSend = Boolean(sharedPlan)
+    && supportsPreferredTimeWindow
     && wantsTimeChange
     && chosenWindow !== null
     && !sharedPlan!.pending
+    && !sharedPlan!.submitting
     && sharedPlan!.currentPreferredTime !== chosenWindow;
 
   // 送出失敗時**不**動 draft —— 孩子剛做完回顧，清掉等於要他從頭再選一次。
-  const handleSend = () => { void sharedPlan?.onSubmit(chosenWindow!); };
+  const handleSend = () => {
+    if (!canSend || !chosenWindow) return;
+    void sharedPlan!.onSubmit(chosenWindow);
+  };
 
-  if (sharedPlan?.submitted) {
+  if (supportsPreferredTimeWindow && sharedPlan?.submitted) {
     return (
       <View>
         <Text style={styles.sheetIntro}>{SUBMITTED_COPY}</Text>
@@ -651,10 +641,10 @@ function ReviewSheet({
 
   return (
     <View>
-      {isReadingPlan ? (
+      {supportsPreferredTimeWindow ? (
         <>
           <Text style={styles.reviewLead}>
-            這週已經讀了 {presentation.weekCompleted} 次，一起看看什麼安排最順。
+            這週完成了 {presentation.weekCompleted} 次，一起看看什麼安排最順。
           </Text>
           <Text style={styles.questionLabel}>哪個時間比較適合？</Text>
           <View style={styles.largeChoiceGrid}>
@@ -724,7 +714,7 @@ function ReviewSheet({
         </>
       )}
 
-      {sharedPlan?.pending ? (
+      {supportsPreferredTimeWindow && sharedPlan?.pending ? (
         <View style={styles.localNotice}>
           <Text style={styles.localNoticeText}>{PENDING_COPY}</Text>
         </View>
@@ -738,7 +728,7 @@ function ReviewSheet({
         </View>
       )}
 
-      {sharedPlan?.error ? (
+      {supportsPreferredTimeWindow && sharedPlan?.error ? (
         <Text
           accessibilityRole="alert"
           accessibilityLiveRegion="polite"

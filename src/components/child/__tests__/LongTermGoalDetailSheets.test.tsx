@@ -27,7 +27,8 @@ function makePresentation(
     weekCompleted: 1,
     weekTarget: 5,
     totalWeeks: 4,
-    goalKind: 'reading_habit',
+    goalKind: 'habit',
+    progression: null,
     planState: 'active',
     categoryLabel: '學習與技能',
     overallLabel: '1 / 20 次',
@@ -38,7 +39,7 @@ function makePresentation(
     todayAction: '自己選一本喜歡的書，閱讀 15 分鐘',
     preferredTimeWindow: 'after_dinner',
     canCompleteToday: true,
-    isReadingPlan: true,
+    supportsPreferredTimeWindow: true,
     weekDays: [],
     weekSummary: '這週已閱讀 1 次。',
     nextReward: { threshold: 5, coin: 10 },
@@ -50,7 +51,6 @@ function makePresentation(
     finalRewardText: '四週後一起回顧。',
     reviewTitle: '週末一起回顧',
     reviewPrompt: '這週哪個時間最適合閱讀？',
-    sectionOrder: ['hero', 'today', 'week', 'rewards', 'review'],
     ...overrides,
   };
 }
@@ -94,13 +94,18 @@ const READING_ONLY_COPY =
   /閱讀時間|最喜歡哪一本書|閱讀時段|閱讀內容|晚餐後還是睡前比較適合/;
 
 describe('LongTermGoalDetailSheets', () => {
-  it('asks the reading time first and reveals the next step after a choice', () => {
+  it('uses capability for the narrow time flow and reveals the next step after a choice', () => {
     renderSheet('review', {
-      presentation: makePresentation({ weekCompleted: 2, weekTarget: 3 }),
+      presentation: makePresentation({
+        goalKind: 'skill',
+        todayAction: '練習吉他 15 分鐘',
+        weekCompleted: 2,
+        weekTarget: 3,
+      }),
     });
 
     expect(
-      screen.getByText('這週已經讀了 2 次，一起看看什麼安排最順。'),
+      screen.getByText('這週完成了 2 次，一起看看什麼安排最順。'),
     ).toBeTruthy();
     expect(screen.getByText('哪個時間比較適合？')).toBeTruthy();
     expect(screen.queryByText('下週想怎麼試？')).toBeNull();
@@ -192,7 +197,7 @@ describe('LongTermGoalDetailSheets', () => {
       screen.getByText('這個選擇目前只保留在這個畫面，尚未送出給家長或套用到計畫。'),
     ).toBeTruthy();
 
-    fireEvent.press(screen.getByRole('button', { name: '想調整每週次數' }));
+    fireEvent.press(screen.getByRole('button', { name: '想調整每週安排' }));
     fireEvent.press(screen.getByRole('button', { name: '保留調整草稿' }));
 
     expect(onSaveAdjustmentDraft).toHaveBeenCalledWith('frequency');
@@ -223,7 +228,7 @@ describe('LongTermGoalDetailSheets', () => {
         .accessibilityState,
     ).toEqual(expect.objectContaining({ selected: false }));
 
-    fireEvent.press(screen.getByRole('button', { name: '想調整每週次數' }));
+    fireEvent.press(screen.getByRole('button', { name: '想調整每週安排' }));
     rerender(
       <LongTermGoalDetailSheets
         {...props}
@@ -240,7 +245,7 @@ describe('LongTermGoalDetailSheets', () => {
     );
 
     expect(
-      screen.getByRole('button', { name: '想調整每週次數' }).props
+      screen.getByRole('button', { name: '想調整每週安排' }).props
         .accessibilityState,
     ).toEqual(expect.objectContaining({ selected: false }));
     expect(
@@ -395,7 +400,7 @@ describe('LongTermGoalDetailSheets', () => {
     const onSaveReviewDraft = jest.fn();
     const rendered = renderSheet('review', {
       presentation: makePresentation({
-        isReadingPlan: false,
+        supportsPreferredTimeWindow: false,
         goalKind: 'skill',
         categoryLabel: '可調整的顯示文案',
       }),
@@ -427,7 +432,7 @@ describe('LongTermGoalDetailSheets', () => {
   it('uses family adjustment copy without reading-only wording', () => {
     const rendered = renderSheet('adjustment', {
       presentation: makePresentation({
-        isReadingPlan: false,
+        supportsPreferredTimeWindow: false,
         goalKind: 'family',
         categoryLabel: '可調整的顯示文案',
       }),
@@ -443,7 +448,7 @@ describe('LongTermGoalDetailSheets', () => {
     const onCorrectTimeWindow = jest.fn(async () => undefined);
     const rendered = renderSheet('record', {
       presentation: makePresentation({
-        isReadingPlan: false,
+        supportsPreferredTimeWindow: false,
         goalKind: 'challenge',
         categoryLabel: '可調整的顯示文案',
       }),
@@ -462,7 +467,7 @@ describe('LongTermGoalDetailSheets', () => {
   it('uses challenge review and adjustment wording', () => {
     const review = renderSheet('review', {
       presentation: makePresentation({
-        isReadingPlan: false,
+        supportsPreferredTimeWindow: false,
         goalKind: 'challenge',
         categoryLabel: '可調整的顯示文案',
       }),
@@ -476,7 +481,7 @@ describe('LongTermGoalDetailSheets', () => {
         {...review.props}
         activeSheet="adjustment"
         presentation={makePresentation({
-          isReadingPlan: false,
+          supportsPreferredTimeWindow: false,
           goalKind: 'challenge',
           categoryLabel: '可調整的顯示文案',
         })}
@@ -502,16 +507,19 @@ describe('LongTermGoalDetailSheets', () => {
     expect(screen.getByText('2026-07-28 至 2026-08-24（共 4 週）')).toBeTruthy();
   });
 
-  it('uses the general fallback for a non-reading habit', () => {
+  it('uses the neutral flow for weekly rhythm without time capability', () => {
     const review = renderSheet('review', {
       presentation: makePresentation({
         goalKind: 'habit',
-        isReadingPlan: false,
+        progression: 'weekly_rhythm',
+        supportsPreferredTimeWindow: false,
         categoryLabel: '學習與技能',
       }),
     });
 
     expect(screen.getByText('這週哪一段最有感？')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '晚餐後' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '睡前' })).toBeNull();
     expect(JSON.stringify(review.toJSON())).not.toMatch(READING_ONLY_COPY);
 
     review.rerender(
@@ -520,7 +528,8 @@ describe('LongTermGoalDetailSheets', () => {
         activeSheet="adjustment"
         presentation={makePresentation({
           goalKind: 'habit',
-          isReadingPlan: false,
+          progression: 'weekly_rhythm',
+          supportsPreferredTimeWindow: false,
           categoryLabel: '學習與技能',
         })}
       />,
