@@ -458,6 +458,104 @@ describe('LongTermGoalDetailView', () => {
       階段、要家長確認的。差別只在最後那一層是 CTA 還是一句說明——**不是**
       一個有 CTA、一個有一顆長得像 CTA 的灰方塊。
     */
+    /*
+      排版可以把 presentation 產生的固定句型拆成「前導語 + 主要內容」，
+      好讓縮小看的時候先讀到「雙手合奏」而不是整句。
+
+      拆的是**顯示**，不是資料：todayAction 的值與 precedence 沒動，讀屏聽到的
+      仍然是完整原句。
+    */
+    it('splits the fixed stage prefix for display and keeps the action intact', () => {
+      renderView(makePresentation({
+        progression: 'staged_skill',
+        planState: 'active',
+        canCompleteToday: false,
+        todayAction: '這一階段先練習：雙手合奏',
+      }));
+
+      const today = within(screen.getByTestId('goal-today'));
+      expect(today.getByText('這一階段先練習')).toBeTruthy();
+      expect(today.getByText('雙手合奏')).toBeTruthy();
+      expect(today.queryByText('這一階段先練習：雙手合奏')).toBeNull();
+      // 讀屏仍然聽到完整原句。
+      expect(screen.getByLabelText('這一階段先練習：雙手合奏')).toBeTruthy();
+    });
+
+    it.each([
+      ['今天先讀 15 分鐘'],
+      ['自己選一本喜歡的書，閱讀 15 分鐘'],
+      // 有冒號但前綴不在既有 presentation 句型裡：整句照登，不亂拆。
+      ['先準備練習材料：鉛筆和譜'],
+    ])('shows %s as one whole title when no known prefix matches', (todayAction) => {
+      renderView(makePresentation({ todayAction }));
+
+      const today = within(screen.getByTestId('goal-today'));
+      expect(today.getByText(todayAction)).toBeTruthy();
+    });
+
+    /*
+      這條是 tripwire：拆句用的前綴是抄 presentation 的固定句型。哪天那邊改了
+      措辭，這裡會紅，而不是默默退回顯示整句。
+    */
+    it('keeps the display split in step with the real staged-skill action', () => {
+      const presentation = buildGoalPresentation(
+        makeTask({ name: '學鋼琴', long_term_type: 'skill', recurrence_days: null }),
+        makeGoal({
+          goal_type: 'skill',
+          active_days: null,
+          checkpoint_rewards: null,
+          current_level: 2,
+          level_count: 4,
+          level_definitions: [
+            { name: '基礎指法' },
+            { name: '簡單曲目' },
+            { name: '雙手合奏' },
+            { name: '完整演奏' },
+          ],
+        }),
+        [],
+        dayjs('2026-07-30T12:00:00+08:00'),
+      );
+
+      renderView(presentation);
+
+      const today = within(screen.getByTestId('goal-today'));
+      expect(today.getByText('這一階段先練習')).toBeTruthy();
+      expect(today.getByText('雙手合奏')).toBeTruthy();
+      expect(screen.getByLabelText(presentation.todayAction)).toBeTruthy();
+    });
+
+    it('makes the step title dominate its lead-in', () => {
+      renderView(makePresentation({
+        progression: 'staged_skill',
+        planState: 'active',
+        canCompleteToday: false,
+        todayAction: '這一階段先練習：雙手合奏',
+      }));
+
+      const titleSize = StyleSheet.flatten(
+        screen.getByText('雙手合奏').props.style,
+      ).fontSize;
+      const leadSize = StyleSheet.flatten(
+        screen.getByText('這一階段先練習').props.style,
+      ).fontSize;
+
+      // 縮小看的時候要先讀到主要內容，不是先讀到前導語。
+      expect(titleSize).toBeGreaterThan(leadSize * 1.6);
+    });
+
+    it('gives the current step a visual anchor with real weight', () => {
+      renderView();
+
+      const anchor = screen.getByTestId('today-step-anchor', HIDDEN);
+      const anchorStyle = StyleSheet.flatten(anchor.props.style);
+      // 32px 的小圓看起來就是 list icon；這一格要撐得起構圖。
+      expect(anchorStyle.width).toBeGreaterThanOrEqual(56);
+      expect(anchorStyle.width).toBeLessThanOrEqual(72);
+      // 它只負責構圖，不表達任何 domain 資料。
+      expect(anchor.props.accessibilityElementsHidden).toBe(true);
+    });
+
     it('gives a parent-confirmed stage a full composition without a fake CTA', () => {
       renderView(makePresentation({
         progression: 'staged_skill',
@@ -469,8 +567,8 @@ describe('LongTermGoalDetailView', () => {
       }));
 
       const today = within(screen.getByTestId('goal-today'));
-      // 主要文案照樣是全卡最強的一句
-      expect(today.getByText('這一階段先練習：雙手合奏')).toBeTruthy();
+      // 主要文案照樣是全卡最強的一句（顯示上拆成前導語 + 主標）
+      expect(today.getByText('雙手合奏')).toBeTruthy();
       // 微文案換成階段版本，構圖仍然完整
       expect(screen.getByText('現在先走這一步')).toBeTruthy();
       expect(screen.queryByText('今天只走這一步')).toBeNull();

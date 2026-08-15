@@ -583,6 +583,80 @@ function TodayCardWash({ gradientId }: { gradientId: string }) {
   );
 }
 
+/*
+  排版用的拆句。
+
+  `todayAction` 的值和 precedence 完全沒動（next_step → completion_description
+  → progression action → task.name）。這裡只是為了讓「雙手合奏」四個字能當標題，
+  把 presentation **自己產出的固定句型**拆成前導語 + 主要內容。
+
+  兩條安全線：
+    1. 只認下面這張白名單裡的前綴，其他一律整句當標題——那正是拆之前的行為，
+       退化是安全的。作者自己寫的 next_step / completion_description 永遠不拆。
+    2. 讀屏聽到的仍然是完整原句（見 stepCopy 的 accessibilityLabel）。
+
+  白名單抄自 longTermGoalPresentation 的 progressionAction。那邊改了措辭，
+  這邊的 tripwire 測試會紅。
+*/
+const TODAY_ACTION_LEADS = ['這一階段先練習'] as const;
+
+function splitTodayAction(todayAction: string): {
+  lead: string | null;
+  title: string;
+} {
+  for (const lead of TODAY_ACTION_LEADS) {
+    const prefix = `${lead}：`;
+    if (todayAction.startsWith(prefix)) {
+      const title = todayAction.slice(prefix.length).trim();
+      if (title) return { lead, title };
+    }
+  }
+
+  return { lead: null, title: todayAction };
+}
+
+/**
+ * 這一步的視覺錨點。
+ *
+ * 一個 64px 的柔和葉形色塊，讓 Today 有構圖可言——32px 的小圓看起來就只是
+ * list icon，撐不起一張卡。它**不表達任何 domain 資料**：不看 task.name、
+ * 不挑插圖，每一種長期任務都是同一個錨點。
+ */
+function CurrentStepAnchor() {
+  return (
+    <View
+      testID="today-step-anchor"
+      style={styles.stepAnchor}
+      pointerEvents="none"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      <Svg width={64} height={64} viewBox="0 0 64 64" accessibilityElementsHidden>
+        {/* 不是正圓——有機一點才不像系統圖示的底 */}
+        <Path
+          d="M32 2c13 0 22 5 27 14 5 9 5 22 0 32-5 10-15 14-28 14C18 62 8 56 4 46 0 36 1 22 7 13 13 4 19 2 32 2Z"
+          fill={Colors.leaf50}
+        />
+        <Path
+          d="M32 47V29"
+          stroke={Colors.leaf600}
+          strokeWidth={2.6}
+          strokeLinecap="round"
+          fill="none"
+        />
+        <Path
+          d="M32 35c-10 0-16-5-16-14 10 0 16 5 16 14Z"
+          fill={Colors.leaf400}
+        />
+        <Path
+          d="M32 31c0-9 6-14 16-14 0 9-6 14-16 14Z"
+          fill={Colors.leaf300}
+        />
+      </Svg>
+    </View>
+  );
+}
+
 /**
  * 之後放 mascot 的位置。
  *
@@ -740,6 +814,8 @@ function TodayStepCard({
     ? '這一階段完成後，再和家人一起確認'
     : presentation.todayStatusText
       ?? '今天先照自己的節奏前進，需要時再和家人一起確認。';
+  const { lead: actionLead, title: actionTitle } =
+    splitTodayAction(presentation.todayAction);
 
   return (
     <View>
@@ -751,98 +827,96 @@ function TodayStepCard({
       <View testID="goal-today" style={[styles.card, styles.todayCard]}>
         <TodayCardWash gradientId={washId} />
         {/*
-          一個 step surface，一欄內容。左邊的圓是視覺錨點，右邊由上到下是
-          主要文案 → 次要 meta → 說明 affordance，全部縮在同一欄裡對齊。
-          之前那種「主文案一列、說明自成一列、說明展開又是一張卡」的排法，
-          是把一件事切成三個框，讀起來就變成表單。
+          構圖由上往下：錨點 → 這一步是什麼 → 次要 meta → 說明。
+
+          錨點自己佔一行、靠左，右邊那片留白就是不對稱的呼吸空間（也是之後
+          mascot 的位置）。主要內容因此拿得到整張卡的寬度，縮小看的時候第一
+          個讀到的是它，而不是一列一列的設定資訊。
         */}
-        <View style={styles.actionHead}>
-          <View style={styles.actionIcon}>
-            <DetailIcon
-              name="sprout"
-              color={Colors.leaf700}
-            />
-          </View>
-          <View style={styles.actionCopy}>
-            <Text style={styles.actionTitle}>{presentation.todayAction}</Text>
+        <CurrentStepAnchor />
 
-            {/*
-              時段是次要資訊，縮在主要文案下面同一欄，不跟它並排搶視線。
-              行為、文案、a11y label 一個字都沒動。
-            */}
-            {showTimeControls ? (
-              <View style={styles.scheduleRow}>
-                <View style={styles.scheduleLabel}>
-                  <DetailIcon name="clock" size={15} color={Colors.fgMuted} />
-                  <Text style={styles.scheduleText}>
-                    今天預計：
-                    {presentation.preferredTimeWindow
-                      ? formatTimeWindow(presentation.preferredTimeWindow)
-                      : '尚未選擇時段'}
-                  </Text>
-                </View>
-                {!completed && presentation.canCompleteToday ? (
-                  <TouchableOpacity
-                    style={styles.inlineAction}
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                      presentation.preferredTimeWindow
-                        ? '調整今天的預計時段'
-                        : '選擇今天的預計時段'
-                    }
-                    onPress={() => setShowTimeOptions((visible) => !visible)}
-                    activeOpacity={0.72}
-                  >
-                    <Text style={styles.inlineActionText}>
-                      {presentation.preferredTimeWindow ? '調整時段' : '選擇時段'}
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            ) : null}
-
-            {/*
-              說明的開關：一句可以點的話，不是一整列 settings row。
-              原本「ⓘ 標籤 ……………… ⌄」把標籤釘在左、箭頭推到最右，那個
-              左右撐開的排版本身就是 iOS 設定列的長相。現在文字和箭頭黏在
-              一起，靠左，寬度只有一句話那麼寬。
-              a11y label 維持不變（展開／收合小步驟說明）。
-            */}
-            <TouchableOpacity
-              style={styles.explanationToggle}
-              accessibilityRole="button"
-              accessibilityLabel={explanationLabel}
-              accessibilityState={{ expanded: showExplanation }}
-              onPress={() => setShowExplanation((visible) => !visible)}
-              activeOpacity={0.72}
-              hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
-            >
-              <Text style={styles.explanationLabel}>看看這一步怎麼算完成</Text>
-              <View
-                style={[
-                  styles.explanationChevron,
-                  showExplanation && styles.explanationChevronExpanded,
-                ]}
-              >
-                <DetailIcon name="chevron" size={15} color={Colors.leaf700} />
-              </View>
-            </TouchableOpacity>
-
-            {/*
-              展開的內容直接接在下面，靠一條細線和縮排分層，不再是插進來的
-              另一張米色卡。
-            */}
-            {showExplanation ? (
-              <View testID="today-explanation" style={styles.explanationBody}>
-                <Text style={styles.explanationText}>{presentation.focusText}</Text>
-                <Text style={styles.explanationHint}>
-                  先完成今天最小的一步，覺得不合適時再和家人一起調整。
-                </Text>
-              </View>
-            ) : null}
-          </View>
-          <MascotSlot />
+        <View
+          style={styles.stepCopy}
+          accessible
+          accessibilityLabel={presentation.todayAction}
+        >
+          {actionLead ? (
+            <Text style={styles.actionLead}>{actionLead}</Text>
+          ) : null}
+          <Text style={styles.actionTitle}>{actionTitle}</Text>
         </View>
+
+        {/*
+          時段是次要資訊，跟在主要文案後面自成一列。
+          行為、文案、a11y label 一個字都沒動。
+        */}
+        {showTimeControls ? (
+          <View style={styles.scheduleRow}>
+            <View style={styles.scheduleLabel}>
+              <DetailIcon name="clock" size={15} color={Colors.fgMuted} />
+              <Text style={styles.scheduleText}>
+                今天預計：
+                {presentation.preferredTimeWindow
+                  ? formatTimeWindow(presentation.preferredTimeWindow)
+                  : '尚未選擇時段'}
+              </Text>
+            </View>
+            {!completed && presentation.canCompleteToday ? (
+              <TouchableOpacity
+                style={styles.inlineAction}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  presentation.preferredTimeWindow
+                    ? '調整今天的預計時段'
+                    : '選擇今天的預計時段'
+                }
+                onPress={() => setShowTimeOptions((visible) => !visible)}
+                activeOpacity={0.72}
+              >
+                <Text style={styles.inlineActionText}>
+                  {presentation.preferredTimeWindow ? '調整時段' : '選擇時段'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
+
+        {/*
+          說明的開關：一句可以點的話，不是一整列 settings row。寬度只有一句話
+          那麼寬（alignSelf flex-start），文字和箭頭黏在一起。
+          a11y label 維持不變（展開／收合小步驟說明）。
+        */}
+        <TouchableOpacity
+          style={styles.explanationToggle}
+          accessibilityRole="button"
+          accessibilityLabel={explanationLabel}
+          accessibilityState={{ expanded: showExplanation }}
+          onPress={() => setShowExplanation((visible) => !visible)}
+          activeOpacity={0.72}
+          hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+        >
+          <Text style={styles.explanationLabel}>看看這一步怎麼算完成</Text>
+          <View
+            style={[
+              styles.explanationChevron,
+              showExplanation && styles.explanationChevronExpanded,
+            ]}
+          >
+            <DetailIcon name="chevron" size={15} color={Colors.leaf700} />
+          </View>
+        </TouchableOpacity>
+
+        {/*
+          展開的內容直接接在下面，靠一條細線和縮排分層，不是插進來的另一張卡。
+        */}
+        {showExplanation ? (
+          <View testID="today-explanation" style={styles.explanationBody}>
+            <Text style={styles.explanationText}>{presentation.focusText}</Text>
+            <Text style={styles.explanationHint}>
+              先完成今天最小的一步，覺得不合適時再和家人一起調整。
+            </Text>
+          </View>
+        ) : null}
 
         {showTimeControls && showTimeOptions && !completed ? (
           <View testID="time-options" style={styles.timeOptions}>
@@ -926,6 +1000,7 @@ function TodayStepCard({
             {completionError}
           </Text>
         ) : null}
+        <MascotSlot />
       </View>
     </View>
   );
@@ -1556,34 +1631,35 @@ const styles = StyleSheet.create({
     elevation: 2,
     overflow: 'hidden',
   },
-  actionHead: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
+  /** 錨點自己佔一行、靠左；右邊那片留白是刻意的呼吸空間。 */
+  stepAnchor: {
+    width: 64,
+    height: 64,
   },
-  /** 左邊的視覺錨點。跟標題頂端對齊，不是垂直置中——內容長高時它不會亂跑。 */
-  actionIcon: {
-    width: 46,
-    height: 46,
-    marginTop: 2,
-    borderRadius: 23,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.leaf50,
+  stepCopy: {
+    marginTop: 14,
   },
-  actionCopy: {
-    flex: 1,
-    minWidth: 0,
+  /** 前導語：把「這一階段先練習」讓出主角位置，只留一行輕輕的引言。 */
+  actionLead: {
+    color: Colors.fgMuted,
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '700',
   },
+  /*
+    主標題拿整張卡的寬度。縮小看的時候要先讀到這一行——它比前導語大一倍以上，
+    有測試守住這個比例。
+  */
   actionTitle: {
+    marginTop: 2,
     color: Colors.fgPrimary,
-    fontSize: 22,
-    lineHeight: 31,
+    fontSize: 26,
+    lineHeight: 36,
     fontWeight: '900',
-    letterSpacing: -0.2,
+    letterSpacing: -0.4,
   },
   scheduleRow: {
-    marginTop: 6,
+    marginTop: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1636,10 +1712,10 @@ const styles = StyleSheet.create({
   */
   mascotSlot: {
     position: 'absolute',
-    right: 0,
-    bottom: 0,
-    width: 56,
-    height: 56,
+    right: 14,
+    top: 12,
+    width: 64,
+    height: 64,
   },
   explanationLabel: {
     color: Colors.leaf700,
