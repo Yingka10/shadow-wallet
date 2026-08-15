@@ -47,7 +47,7 @@ import type { RootStackParamList } from '../../../App';
 import { useTodayTasks, type TodayTask } from '../../hooks/useTodayTasks';
 import { useWallet } from '../../hooks/useWallet';
 import { useChildProposalReview } from '../../hooks/useChildProposalReview';
-import { isChildPlanningReview } from '../../lib/childPlanning/childReview';
+import { isChildPlanningReviewCard } from '../../lib/childPlanning/childReview';
 import { ChildSharedTermsReviewCard } from '../../components/child/ChildSharedTermsReviewCard';
 import BottomNav from '../../components/BottomNav';
 import GrassGroundScene from '../../components/child/GrassGroundScene';
@@ -682,10 +682,12 @@ export default function HomeScreen() {
             P1 與 legacy 是兩張卡片，不是一張帶旗標的。
             P1 那張要說「你的做法沒有被改掉」，而那句話對 P0 的家長
             調整版不成立（那條路徑本來就可以改完成標準）。
-            路由只看 authorship 與 lineage。
+            路由只看 authorship 與 lineage —— **不看它此刻能不能按**。
+            一份現在按不了的 P1 草案還是 P1 的；拿「能不能按」當路由條件，
+            它會掉進 legacy 那張卡片，而那條路的終點是一個永遠失敗的按鈕。
           */}
           {proposalReviews[0] && (
-            isChildPlanningReview(proposalReviews[0]) ? (
+            isChildPlanningReviewCard(proposalReviews[0]) ? (
               <ChildSharedTermsReviewCard
                 review={proposalReviews[0]}
                 saving={actingProposalId === proposalReviews[0].proposal.id}

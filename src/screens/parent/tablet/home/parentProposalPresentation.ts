@@ -4,7 +4,10 @@ import {
   isChildPlanDirectConfirmable,
   resolveConfirmRoute,
 } from '../../../../lib/childPlanning/parentAgreement';
-import { childPlanningNegotiability } from '../../../../lib/childPlanning/sharedTerms';
+import {
+  childPlanningNegotiability,
+  isParentSharedTermDraft,
+} from '../../../../lib/childPlanning/sharedTerms';
 import { formatPreferredTime } from '../../../../lib/childProposal/materialDiff';
 import { childPlanCardSummary, sharedDecisionLabels } from './childPlanSummary';
 import type { ChildPlanCardSummary } from './childPlanSummary';
@@ -37,6 +40,14 @@ export type ParentProposalViewModel = {
     | 'child_plan'
     /** P1：孩子的安排成立，但還有家庭共同條件要一起決定（A4B）。 */
     | 'child_plan_needs_terms'
+    /**
+     * P1-A4B2：孩子看過共同條件，說這些可以，但還有事沒說定。
+     *
+     * ⚠️ 與 child_revisit 是**兩件事**。他沒有要求改任何東西 ——
+     *    把兩者顯示成同一句「孩子想再一起聊聊」，等於在他說「好」
+     *    之後回報成「他有意見」。
+     */
+    | 'child_agreed_pending_terms'
     | 'unready';
   id: string;
   title: string;
@@ -79,6 +90,18 @@ export type ParentProposalViewModel = {
    *    只是那條路徑的終點是 needs_child_review，不是 active。
    */
   canProposeTerms: boolean;
+  /** 那顆按鈕上的字。孩子已經答應過的時候要說「補上」，不是「再提一次」。 */
+  proposeTermsLabel: string;
+  /**
+   * 這張卡片可以走 P0 的「調整一下」嗎（P1-FINAL）。
+   *
+   * ⚠️ 不等於「是不是 child_revisit」。協商到第二輪時 current 是家長自己的
+   *    共同條件草案，它也是 authored_by='parent' —— 而 P0 那一支會照 source
+   *    重建一版，**不帶** requires_parent_decision 與 policy evidence，
+   *    還能改到孩子自己寫的完成標準。按下去的結果是那份協商再也走不到
+   *    active，孩子只會看到一顆永遠失敗的按鈕。
+   */
+  canRevise: boolean;
   /** 系統還沒整理完，這件事不該丟給家長（purpose_category / duration_type）。 */
   enrichmentRequiredCopy: string | null;
 };
@@ -121,11 +144,14 @@ export function presentParentProposal(
   const canConfirm = isChildPlan ? childPlanReady : isDirectConfirmablePlan(card);
 
   const isParentReview = plan?.authored_by === 'parent' && plan.requires_child_review === true;
+  // 孩子上一輪說的是「可以，但還有事沒說定」還是「我想再調整」——
+  // 兩者都會把提案送回 proposed 而且留在同一版上，光看版本分不出來。
+  const agreedPendingMore = card.latestChildAction === 'accepted_shared_terms_pending_more';
   const state: ParentProposalViewModel['state'] =
     proposal.status === 'needs_child_review' && isParentReview
       ? 'waiting_child'
       : proposal.status === 'proposed' && isParentReview
-        ? 'child_revisit'
+        ? (agreedPendingMore ? 'child_agreed_pending_terms' : 'child_revisit')
         : isChildPlan
           ? (childPlanReady ? 'child_plan' : 'child_plan_needs_terms')
           : canConfirm
@@ -135,28 +161,39 @@ export function presentParentProposal(
     ? '等孩子看看'
     : state === 'child_revisit'
       ? '孩子想再一起聊聊'
-      : state === 'child_plan'
-        ? '孩子已經想好怎麼做'
-        : state === 'child_plan_needs_terms'
-          ? '還有安排要一起補充'
-          : plan ? 'GrowBook 已經整理好' : '等你們一起看看';
+      : state === 'child_agreed_pending_terms'
+        ? '孩子說這些可以'
+        : state === 'child_plan'
+          ? '孩子已經想好怎麼做'
+          : state === 'child_plan_needs_terms'
+            ? '還有安排要一起補充'
+            : plan ? 'GrowBook 已經整理好' : '等你們一起看看';
   const waitingMessage = state === 'waiting_child'
     ? '等孩子看看新的安排是不是也想試試看'
     : state === 'child_revisit'
       ? '孩子想再一起聊聊'
-      : state === 'child_plan'
-        ? null
-        : state === 'child_plan_needs_terms'
-          // 不說「還不能確認」—— 孩子把「怎麼做到」想得很清楚，
-          // 缺的是家庭共同條件，而那本來就不該由他一個人決定。
-          ? '孩子的想法已經很完整，還有幾件要一起說定'
-          : canConfirm ? null : 'GrowBook 還在整理，目前先看看孩子的原始想法';
+      : state === 'child_agreed_pending_terms'
+        // 他已經答應了。這句話要讓家長知道「球在我這裡」，
+        // 而且知道**還差什麼** —— 不然他會以為自己已經做完了。
+        ? '他說這些安排可以，還有幾件說定之後就會開始'
+        : state === 'child_plan'
+          ? null
+          : state === 'child_plan_needs_terms'
+            // 不說「還不能確認」—— 孩子把「怎麼做到」想得很清楚，
+            // 缺的是家庭共同條件，而那本來就不該由他一個人決定。
+            ? '孩子的想法已經很完整，還有幾件要一起說定'
+            : canConfirm ? null : 'GrowBook 還在整理，目前先看看孩子的原始想法';
   return {
     state,
     childPlan: isChildPlan ? childPlanCardSummary(plan) : null,
     sharedDecisions: sharedDecisionLabels(pending),
     confirmLabel: isChildPlan ? '確認這份約定' : '確認這個計畫',
     canProposeTerms: negotiability.ok,
+    proposeTermsLabel: state === 'child_agreed_pending_terms'
+      ? '把還沒說定的補上'
+      : canConfirm ? '想提出不同的安排' : '一起補幾個安排',
+    canRevise: (state === 'fresh_ai' || state === 'child_revisit')
+      && !isParentSharedTermDraft(plan),
     // 「還需要整理」不是家長的待辦，所以講成 GrowBook 自己的事 ——
     // 寫成待辦的話，家長會一直找那個他其實按不到的按鈕。
     enrichmentRequiredCopy: !negotiability.ok && negotiability.block === 'enrichment_required'

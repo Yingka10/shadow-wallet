@@ -99,7 +99,16 @@ export function childPlanningReviewability(
   return { ok: true, activates: pending.length === 0, pending };
 }
 
-/** 給 UI 用的布林。細節要分辨時用 childPlanningReviewability。 */
-export function isChildPlanningReview(review: ChildProposalReviewData): boolean {
-  return childPlanningReviewability(review).ok;
+/**
+ * 這張卡片**屬於**哪一條線（P1-FINAL）。
+ *
+ * ⚠️ 路由專用，而且**只看 authorship 與 lineage** —— 刻意不問它現在能不能
+ *    回覆。一份 P1 的草案就算此刻不能按（例如系統還沒整理完），它仍然是
+ *    P1 的：拿「能不能按」當路由條件的話，它會掉進 legacy 那張卡片，
+ *    再送進 legacy accept，而那一支的 reward 錨點是 ai_suggested_coin_amount。
+ *
+ *    能不能回覆是 childPlanningReviewability 的事，由 P1 那張卡片自己說。
+ */
+export function isChildPlanningReviewCard(review: ChildProposalReviewData): boolean {
+  return isChildPlanningReviewVersion(review.currentPlanVersion, review.sourcePlanVersion);
 }

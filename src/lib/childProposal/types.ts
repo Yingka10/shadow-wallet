@@ -469,6 +469,13 @@ export type ChildProposalStatusEvent = {
   actor_user_id: string | null;
   plan_version_id: string | null;
   reason: string | null;
+  /**
+   * 機器可讀的動作語意（A4B2 起）。legacy 轉換一律是 null。
+   *
+   * ⚠️ 與 reason 分開：那一欄是孩子講的人話，會有錯字、會空白，
+   *    拿它當狀態判斷等於用自由文字當 machine state。
+   */
+  action: ChildProposalChildAction | null;
   snapshot: unknown | null;
   created_at: string;
 };
@@ -559,10 +566,23 @@ export type CreateAdjustmentRequestResult =
   | CreateAdjustmentRequestSuccess
   | ChildProposalFailure;
 
+/**
+ * 孩子在共同條件那一輪做了什麼（child_proposal_status_events.action）。
+ *
+ * ⚠️ 兩者都會把提案送回 proposed、都留在同一個版本上 —— **光看版本資料
+ *    分不出來**，這也正是那一欄存在的原因（A4B2 §9）。分不出來的話，
+ *    家長會在孩子說「可以」之後讀到「他想再聊聊」。
+ */
+export type ChildProposalChildAction =
+  | 'accepted_shared_terms_pending_more'
+  | 'requested_shared_term_changes';
+
 /** 家長首頁的一張卡：Proposal 原話加上 exact current Plan Version。 */
 export type ParentProposalCardData = {
   proposal: ChildProposal;
   currentPlanVersion: ChildProposalPlanVersion | null;
+  /** 這一版上孩子最後一次的回覆。沒有就是 null。 */
+  latestChildAction?: ChildProposalChildAction | null;
 };
 
 /** 孩子 review reader 的完整 lineage；source 由 DB 欄位讀取，不由 UI 猜。 */

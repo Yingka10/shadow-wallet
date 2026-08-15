@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SupabaseChildProposalService } from '../lib/childProposal/childProposalService';
 import type { ChildProposalReviewData } from '../lib/childProposal/types';
-import { isChildPlanningReview } from '../lib/childPlanning/childReview';
+import { isChildPlanningReviewCard } from '../lib/childPlanning/childReview';
 
 export type ChildProposalReviewReader = Pick<
   SupabaseChildProposalService,
@@ -71,7 +71,7 @@ export function useChildProposalReview(
     }
     // P1 與 legacy 是兩條線。路由只看 authorship 與 lineage —— 內容看起來
     // 像什麼都不能決定走哪一支。
-    const planningRoute = isChildPlanningReview(review)
+    const planningRoute = isChildPlanningReviewCard(review)
       && typeof reader.acceptChildPlanningTerms === 'function';
     setActingProposalId(review.proposal.id);
     try {
@@ -110,7 +110,7 @@ export function useChildProposalReview(
     const generation = ++actionGeneration.current;
     setActionError(null);
     setSuccessMessage(null);
-    const planningRoute = isChildPlanningReview(review)
+    const planningRoute = isChildPlanningReviewCard(review)
       && typeof reader.requestChildPlanningTermChanges === 'function';
     setActingProposalId(review.proposal.id);
     try {

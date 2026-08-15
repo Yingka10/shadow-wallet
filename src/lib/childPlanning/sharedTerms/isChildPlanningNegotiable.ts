@@ -76,6 +76,26 @@ export function isChildPlanningNegotiableVersion(
     && typeof plan.adopted_from_plan_version_id === 'string';
 }
 
+/**
+ * 這一版是不是**家長提出的共同條件草案**（P1-A4B1 的產物）。
+ *
+ * ⚠️ 存在的理由是要把它跟 P0 的家長調整版分開，而那兩者長得很像：
+ *    都是 authored_by='parent'、都 requires_child_review、都帶 adopted_from。
+ *    唯一穩定的差別是 **parent_confirmed_at** —— A4B1 一律留 NULL（§13：
+ *    這一步沒有任何東西被確認），P0 的調整版則一定填了。
+ *
+ *    分不出來的代價很具體：P0 的「再調整一下」會把 requires_parent_decision
+ *    與 policy evidence 一起丟掉，還能改到孩子自己寫的完成標準 ——
+ *    那份協商從此走不到 active，孩子只會看到一顆永遠失敗的按鈕。
+ */
+export function isParentSharedTermDraft(plan: ChildProposalPlanVersion | null): boolean {
+  return plan !== null
+    && plan.authored_by === 'parent'
+    && plan.requires_child_review === true
+    && typeof plan.adopted_from_plan_version_id === 'string'
+    && plan.parent_confirmed_at === null;
+}
+
 export function childPlanningNegotiability(
   card: ParentProposalCardData,
 ): ChildPlanningNegotiability {

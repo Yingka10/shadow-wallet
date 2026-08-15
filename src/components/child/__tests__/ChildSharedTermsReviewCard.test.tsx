@@ -171,3 +171,32 @@ describe('我想再調整', () => {
     }
   });
 });
+
+// ── P1-FINAL ────────────────────────────────────────────────────────────────
+//
+// 路由只看 lineage，所以「現在按不了的 P1 草案」會走到這張卡片而不是
+// legacy 那張。按不了的時候要說清楚是誰的事 —— 系統還沒整理完的時候
+// 叫他「重新看看就好」，他按幾次都一樣，然後會以為是自己弄壞的。
+
+describe('現在還不能回覆的時候', () => {
+  it('系統還沒整理完 —— 講成 GrowBook 自己的事，而且不提任務分類', () => {
+    const { getByText, queryByTestId, queryByText } = renderCard(
+      review({ requires_parent_decision: ['purpose_category'] }),
+    );
+    expect(getByText('這份安排 GrowBook 還在整理')).toBeTruthy();
+    expect(getByText('整理好之後會再拿給你看，先不用你決定。')).toBeTruthy();
+    // 不可以翻成「任務分類還沒選」—— 那等於請孩子當分類器。
+    expect(queryByText(/分類/)).toBeNull();
+    // 也不可以還留著那顆會失敗的「可以」。
+    expect(queryByTestId('child-accept-shared-terms')).toBeNull();
+  });
+
+  it('已經開始的計畫不會再問一次要不要開始', () => {
+    const data = review();
+    // 任務已經建起來、狀態還沒追上的那一瞬間（成立與列表刷新之間）。
+    data.proposal = proposal({ task_id: 'task-1' });
+    const { getByText, queryByTestId } = renderCard(data);
+    expect(getByText('這個計畫已經開始了')).toBeTruthy();
+    expect(queryByTestId('child-accept-shared-terms')).toBeNull();
+  });
+});

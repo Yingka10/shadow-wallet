@@ -41,6 +41,7 @@ import type {
   AcceptChildProposalResult,
   ChildProposalFailure,
   ChildProposal,
+  ChildProposalChildAction,
   ChildProposalConfirmedReward,
   ChildProposalFailureCode,
   ChildProposalStatus,
@@ -252,6 +253,12 @@ function isFailure(value: unknown): value is ChildProposalFailure {
  * 少一個鍵就會變成畫面上的 undefined。而且 coin_eligible 一定要有金額 ——
  * DB 有 CHECK 擋，但回傳值經過 PostgREST，這裡再確認一次不算多餘。
  */
+/** 只收 A4B2 那兩個值。舊的轉換沒有 action，legacy 事件也一律是 null。 */
+function isChildAction(value: unknown): value is ChildProposalChildAction {
+  return value === 'accepted_shared_terms_pending_more'
+    || value === 'requested_shared_term_changes';
+}
+
 function isConfirmedReward(value: unknown): value is ChildProposalConfirmedReward {
   if (typeof value !== 'object' || value === null) return false;
   const r = value as Record<string, unknown>;
@@ -324,16 +331,56 @@ export class SupabaseChildProposalService {
     if (versionError) throw new Error(versionError.message || '讀取 GrowBook 計畫失敗');
 
     const byId = new Map((versions ?? []).map(version => [version.id, version]));
+
+    // 孩子在這一版上最後做的事。**這一段拿不到就整張卡片不顯示是錯的** ——
+    // 它只是一句話的差別（「他說可以了」vs「他想再聊聊」），讀不到就當沒有，
+    // 不要讓一個附註把家長的主流程擋掉。
+    const actionByVersion = await this.latestChildActions(currentIds);
+
     return proposals.map(proposal => {
       const version = proposal.current_plan_version_id
         ? byId.get(proposal.current_plan_version_id) ?? null
         : null;
+      // Exact id plus proposal ownership: a mismatched row is not a usable plan.
+      const currentPlanVersion = version?.proposal_id === proposal.id ? version : null;
       return {
         proposal,
-        // Exact id plus proposal ownership: a mismatched row is not a usable plan.
-        currentPlanVersion: version?.proposal_id === proposal.id ? version : null,
+        currentPlanVersion,
+        latestChildAction: currentPlanVersion
+          ? actionByVersion.get(currentPlanVersion.id) ?? null
+          : null,
       };
     });
+  }
+
+  /**
+   * 每一版上孩子最後一次的回覆語意。
+   *
+   * ⚠️ 以 plan_version_id 為鍵，不是 proposal_id：協商到第二輪時，
+   *    第一輪的「我想再調整」還躺在同一個提案下面，用提案當鍵會把它
+   *    貼到新的一版上。
+   */
+  private async latestChildActions(
+    planVersionIds: readonly string[],
+  ): Promise<Map<string, ChildProposalChildAction>> {
+    const found = new Map<string, ChildProposalChildAction>();
+    if (planVersionIds.length === 0) return found;
+
+    const { data, error } = await supabase
+      .from('child_proposal_status_events')
+      .select('plan_version_id, action, created_at')
+      .in('plan_version_id', [...planVersionIds])
+      .not('action', 'is', null)
+      .order('created_at', { ascending: false });
+    if (error) return found;
+
+    for (const row of data ?? []) {
+      const versionId = row.plan_version_id;
+      const action = row.action;
+      if (typeof versionId !== 'string' || !isChildAction(action)) continue;
+      if (!found.has(versionId)) found.set(versionId, action);
+    }
+    return found;
   }
 
   /**

@@ -23,6 +23,7 @@ export {
   familyNegotiableTerms,
   isChildPlanningNegotiable,
   isChildPlanningNegotiableVersion,
+  isParentSharedTermDraft,
   systemUnresolvedTerms,
 } from './isChildPlanningNegotiable';
 export type { FamilyNegotiableTerm } from './isChildPlanningNegotiable';

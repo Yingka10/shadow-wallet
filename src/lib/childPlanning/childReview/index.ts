@@ -18,7 +18,7 @@ export {
   childPendingLabels,
   childPlanningReviewability,
   hasSystemUnresolved,
-  isChildPlanningReview,
+  isChildPlanningReviewCard,
   isChildPlanningReviewVersion,
 } from './isChildPlanningReview';
 

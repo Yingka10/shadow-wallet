@@ -26,6 +26,7 @@ import {
   freshRewardEvaluation,
   hasMaterialChange,
   isChildPlanningNegotiable,
+  isParentSharedTermDraft,
   projectSharedTerms,
   sharedTermChanges,
   systemUnresolvedTerms,
@@ -171,6 +172,34 @@ describe('2. 誰可以走這條路徑', () => {
   it('已經有任務的提案不走這一步', () => {
     const active = card({}, { task_id: 'task-1', status: 'active' });
     expect(childPlanningNegotiability(active).ok).toBe(false);
+  });
+
+  // ── P1-FINAL ──────────────────────────────────────────────────────────
+  //
+  // 家長的共同條件草案與 P0 的家長調整版長得幾乎一樣：都是
+  // authored_by='parent'、都 requires_child_review、都帶 adopted_from。
+  // 唯一穩定的差別是 parent_confirmed_at —— 這一步沒有任何東西被確認。
+  //
+  // 分不出來的話，P0 的「再調整一下」會把未決條件與 policy evidence
+  // 一起丟掉，還能改到孩子自己寫的完成標準。
+
+  it('家長的共同條件草案認得出來', () => {
+    expect(isParentSharedTermDraft(version({
+      authored_by: 'parent', adopted_from_plan_version_id: 'version-child',
+      requires_child_review: true, parent_confirmed_at: null,
+    }))).toBe(true);
+  });
+
+  it('P0 的家長調整版不是共同條件草案', () => {
+    expect(isParentSharedTermDraft(version({
+      authored_by: 'parent', adopted_from_plan_version_id: 'version-ai',
+      requires_child_review: true, parent_confirmed_at: '2026-08-14T01:00:00Z',
+    }))).toBe(false);
+  });
+
+  it('孩子自己那一版也不是 —— 它不是任何人的草案', () => {
+    expect(isParentSharedTermDraft(version())).toBe(false);
+    expect(isParentSharedTermDraft(null)).toBe(false);
   });
 });
 

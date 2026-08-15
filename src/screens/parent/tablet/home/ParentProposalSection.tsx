@@ -252,7 +252,7 @@ export function ParentProposalSection({
                           ? styles.secondaryButtonText
                           : styles.confirmButtonText}
                       >
-                        {card.canConfirm ? '想提出不同的安排' : '一起補幾個安排'}
+                        {card.proposeTermsLabel}
                       </Text>
                     </TouchableOpacity>
                   )}
@@ -262,11 +262,14 @@ export function ParentProposalSection({
                     </Text>
                   )}
                   {/*
-                    調整只給 legacy 那兩個狀態。P1 不走這一支 ——
-                    改 cadence / duration / next step 是共同條件協商，
-                    在這裡直接讓家長改，等於孩子沒答應過就成立了。
+                    調整只給 legacy。P1 不走這一支 —— 改 cadence / duration /
+                    next step 是共同條件協商，在這裡直接讓家長改，等於孩子
+                    沒答應過就成立了。
+
+                    ⚠️ 條件是 canRevise，不是 state。協商到第二輪時 state 也是
+                       child_revisit，但那一版是家長自己的共同條件草案。
                   */}
-                  {(card.state === 'fresh_ai' || card.state === 'child_revisit') && onRevise && (
+                  {card.canRevise && onRevise && (
                     <TouchableOpacity style={styles.secondaryButton} onPress={() => setEditCard(source)} activeOpacity={0.8}>
                       <Text style={styles.secondaryButtonText}>{card.state === 'child_revisit' ? '再調整一下' : '調整一下'}</Text>
                     </TouchableOpacity>

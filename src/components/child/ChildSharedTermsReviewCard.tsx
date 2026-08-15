@@ -25,6 +25,17 @@ import {
 } from '../../lib/childPlanning/childReview';
 import { sharedTermVersionChanges } from '../../lib/childPlanning/sharedTerms';
 import type { ChildProposalReviewData } from '../../lib/childProposal/types';
+import type { ChildPlanningReviewBlock } from '../../lib/childPlanning/childReview';
+
+const BLOCKED_COPY: Record<ChildPlanningReviewBlock, { title: string; hint: string | null }> = {
+  system_enrichment_required: {
+    title: '這份安排 GrowBook 還在整理',
+    hint: '整理好之後會再拿給你看，先不用你決定。',
+  },
+  already_has_task: { title: '這個計畫已經開始了', hint: '到今天的任務裡找找看。' },
+  not_in_review: { title: '安排剛剛更新了，重新看看就好', hint: null },
+  not_child_planning_review: { title: '安排剛剛更新了，重新看看就好', hint: null },
+};
 
 type Props = {
   review: ChildProposalReviewData;
@@ -49,10 +60,21 @@ export function ChildSharedTermsReviewCard({
   );
 
   if (!reviewability.ok) {
+    // 這張卡片仍然是 P1 的（路由只看 lineage），只是此刻不能回覆。
+    //
+    // ⚠️ 系統還沒整理完的時候**不要說「重新看看」就好** —— 他按幾次都
+    //    一樣，然後會以為是自己弄壞的。那不是他的待辦，講成 GrowBook
+    //    自己的事。也不可以翻成「任務分類還沒選」（A4B2 §23）。
+    const blocked = BLOCKED_COPY[reviewability.block];
     return (
       <View style={styles.card} testID="child-shared-terms-card">
-        <Text style={styles.title}>安排剛剛更新了，重新看看就好</Text>
-        <TouchableOpacity style={styles.secondary} onPress={onRetry}>
+        <Text style={styles.title}>{blocked.title}</Text>
+        {blocked.hint && <Text style={styles.subtitle}>{blocked.hint}</Text>}
+        <TouchableOpacity
+          testID="child-shared-terms-blocked-retry"
+          style={styles.secondary}
+          onPress={onRetry}
+        >
           <Text style={styles.secondaryText}>重新看看</Text>
         </TouchableOpacity>
       </View>

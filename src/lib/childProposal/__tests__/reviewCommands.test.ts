@@ -85,6 +85,39 @@ describe('review command builders', () => {
       .toMatchObject({ ok: false, code: 'PLAN_NOT_CONFIRMABLE' });
   });
 
+  // ── P1-FINAL ────────────────────────────────────────────────────────────
+  //
+  // 協商第二輪的 current 是家長自己的共同條件草案 —— 它也是
+  // authored_by='parent'、也 requires_child_review，上面那幾關都擋不住。
+  // 走過去的話：未決條件被清空、policy evidence 掉了、孩子自己寫的完成
+  // 標準被改掉，而那份協商從此走不到 active。
+
+  it('家長的共同條件草案不走 P0 的 material edit', () => {
+    const draft = {
+      ...parentPlan,
+      // A4B1 一律不寫 parent_confirmed_at —— 那一步沒有任何東西被確認。
+      parent_confirmed_at: null,
+      source_planning_session_id: null,
+      requires_parent_decision: ['reward'],
+    } as ChildProposalPlanVersion;
+
+    expect(buildRevisionCommand({
+      proposal: { ...proposal, current_plan_version_id: draft.id },
+      currentPlanVersion: draft,
+    }, edits)).toMatchObject({
+      ok: false,
+      code: 'POLICY_REJECTED',
+      reason: 'CHILD_PLAN_FIELD_NOT_EDITABLE',
+    });
+  });
+
+  it('P0 的家長調整版仍然可以再調整 —— 那條路一個字都沒變', () => {
+    expect(buildRevisionCommand({
+      proposal: { ...proposal, current_plan_version_id: parentPlan.id },
+      currentPlanVersion: parentPlan,
+    }, edits)).toMatchObject({ ok: true });
+  });
+
   it('accept 使用 current parent plan 產生 fresh canonical reward decision', () => {
     const review: ChildProposalReviewData = {
       proposal: { ...proposal, status: 'needs_child_review' },

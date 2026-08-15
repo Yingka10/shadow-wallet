@@ -21,7 +21,7 @@ import {
   buildChildRequestChangesCommand,
   childPendingLabels,
   childPlanningReviewability,
-  isChildPlanningReview,
+  isChildPlanningReviewCard,
 } from '../childReview';
 import { sharedTermVersionChanges } from '../sharedTerms';
 
@@ -130,7 +130,7 @@ function review(
 
 describe('1. 誰的畫面', () => {
   it('P1 的家長草案走這條線', () => {
-    expect(isChildPlanningReview(review())).toBe(true);
+    expect(isChildPlanningReviewCard(review())).toBe(true);
   });
 
   it('P0 的家長調整版不走 —— 那條路徑的家長本來就能改完成標準', () => {
@@ -151,12 +151,33 @@ describe('1. 誰的畫面', () => {
       adopted_from_plan_version_id: 'version-child',
       source_planning_session_id: null, child_confirmed_plan: null,
     }, { current_plan_version_id: 'version-parent-3' });
-    expect(isChildPlanningReview(second)).toBe(true);
+    expect(isChildPlanningReviewCard(second)).toBe(true);
   });
 
   it('已經有任務就不是在等孩子看', () => {
     const active = review({}, {}, { task_id: 'task-1', status: 'active' });
     expect(childPlanningReviewability(active).ok).toBe(false);
+  });
+
+  // ── P1-FINAL ────────────────────────────────────────────────────────────
+  //
+  // 路由與「能不能按」是兩件事。一份此刻按不了的 P1 草案仍然是 P1 的 ——
+  // 用「能不能按」當路由條件的話，它會掉進 legacy 那張卡片，再送進
+  // legacy accept，而那一支的 reward 錨點是 ai_suggested_coin_amount。
+
+  it('系統還沒整理完的 P1 草案，仍然屬於 P1 這條線', () => {
+    const blocked = review({ requires_parent_decision: ['purpose_category'] });
+    const reviewability = childPlanningReviewability(blocked);
+
+    expect(reviewability.ok === false && reviewability.block)
+      .toBe('system_enrichment_required');
+    // 按不了，但它不是 legacy 的。
+    expect(isChildPlanningReviewCard(blocked)).toBe(true);
+  });
+
+  it('已經成立的 P1 提案也不會掉回 legacy 卡片', () => {
+    const active = review({}, {}, { task_id: 'task-1', status: 'active' });
+    expect(isChildPlanningReviewCard(active)).toBe(true);
   });
 });
 
