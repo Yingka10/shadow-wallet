@@ -245,10 +245,10 @@ function GrowSprite({ size = 56 }: { size?: number }) {
 
 /** 路徑上三段折線的端點，marker 依 fraction 在其間線性內插。 */
 const HERO_WAYPOINTS: { x: number; y: number }[] = [
-  { x: 26, y: 118 },
-  { x: 150, y: 92 },
-  { x: 246, y: 68 },
-  { x: 322, y: 52 },
+  { x: 26, y: 166 },
+  { x: 150, y: 130 },
+  { x: 246, y: 96 },
+  { x: 322, y: 73 },
 ];
 
 function heroMarkerPosition(fraction: number): { x: number; y: number } {
@@ -281,27 +281,29 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
     >
       <Svg
         style={StyleSheet.absoluteFill}
-        viewBox="0 0 380 156"
+        viewBox="0 0 380 220"
         preserveAspectRatio="none"
         accessibilityElementsHidden
       >
-        <Path d="M0 0H380V156H0z" fill={Colors.grass.nightHillBackBottom} />
+        {/*
+          底色是深綠，不是夜空的藍灰 —— 之前用 nightHillBackBottom（帶藍霧的
+          遠山色）當滿版底色，短版面裡遠山佔比又最大，整張 Hero 看起來偏藍灰、
+          不夠綠。這裡改用兩段深綠垂直過渡，讓「綠底」在任何高度下都成立。
+        */}
+        <Path d="M0 0H380V220H0z" fill={Colors.grass.nightHillMidBottom} />
+        <Path d="M0 0H380V96H0z" fill={Colors.grass.nightHillFrontBottom} opacity={0.55} />
         <Path
-          d="M0 98c80-28 145-20 210 5 70 27 121 10 170-13v66H0V98Z"
-          fill={Colors.grass.nightHillMidBottom}
-        />
-        <Path
-          d="M0 125c81-22 151-10 219 12 68 22 117 5 161-12v31H0v-31Z"
+          d="M0 138c80-30 145-22 210 6 70 29 121 11 170-14v90H0V138Z"
           fill={Colors.grass.nightHillFrontBottom}
         />
-        <Circle cx={34} cy={29} r={15} fill={Colors.gold100} opacity={0.2} />
+        <Circle cx={40} cy={38} r={19} fill={Colors.gold100} opacity={0.2} />
         <Path
-          d="M39 16c-8 4-11 12-8 20 3 8 11 12 19 9-6-2-10-8-10-14 0-6 3-11 8-14-3-2-6-2-9-1Z"
+          d="M47 20c-10 5-14 15-10 25 4 10 14 15 24 11-8-2-13-10-13-17 0-8 4-14 10-18-4-2-7-2-11-1Z"
           fill={Colors.gold300}
         />
-        <Circle cx={115} cy={21} r={1.7} fill={Colors.gold300} />
-        <Circle cx={158} cy={38} r={1.4} fill={Colors.gold300} />
-        <Circle cx={337} cy={23} r={1.8} fill={Colors.gold300} />
+        <Circle cx={130} cy={28} r={1.9} fill={Colors.gold300} />
+        <Circle cx={178} cy={50} r={1.6} fill={Colors.gold300} />
+        <Circle cx={352} cy={30} r={2} fill={Colors.gold300} />
 
         {/*
           這段路的小徑——只是「我正在這段旅程裡」的意象，不是可數的進度條。
@@ -336,6 +338,7 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
 
       <View style={styles.heroCopy}>
         <View style={styles.categoryBadge}>
+          <DetailIcon name="sprout" size={13} color={Colors.gold100} />
           <Text style={styles.categoryText} numberOfLines={1}>
             {presentation.categoryLabel}
           </Text>
@@ -622,9 +625,13 @@ function RhythmLeafRow({ done, target }: { done: number; target: number }) {
     <View style={styles.leafRow} accessibilityElementsHidden>
       {nodes.map((filled, index) => (
         <React.Fragment key={index}>
-          {index > 0 ? <View style={styles.leafConnector} /> : null}
+          {index > 0 ? (
+            <View
+              style={[styles.leafConnector, nodes[index - 1] && filled && styles.leafConnectorFilled]}
+            />
+          ) : null}
           <View style={[styles.leafNode, filled && styles.leafNodeFilled]}>
-            {filled ? <DetailIcon name="sprout" size={13} color={Colors.bgSurface} /> : null}
+            {filled ? <DetailIcon name="sprout" size={15} color={Colors.bgSurface} /> : null}
           </View>
         </React.Fragment>
       ))}
@@ -793,10 +800,12 @@ function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
       <SectionHeading icon="milestone" title="這段路上的下一站" />
       <View testID="goal-next-stop" style={[styles.card, styles.nextStopCard]}>
         <View style={styles.nextStopIcon}>
-          <DetailIcon name="milestone" color={Colors.leaf700} />
+          <DetailIcon name="milestone" color={Colors.bgSurface} />
         </View>
         <View style={styles.nextStopCopy}>
-          <Text style={styles.nextStopCaption}>接下來的一站</Text>
+          <View style={styles.nextStopCaptionPill}>
+            <Text style={styles.nextStopCaption}>接下來的一站</Text>
+          </View>
           <Text style={styles.nextStopTitle}>{next.title}</Text>
           <Text style={styles.nextStopNote}>到這裡時，可以再一起看看。</Text>
         </View>
@@ -842,8 +851,14 @@ function TogetherReviewCard({
       </View>
       <View style={styles.reviewCopy}>
         <Text style={styles.reviewPrompt}>{presentation.reviewPrompt}</Text>
-        <Text style={styles.reviewAction}>{onOpenReview ? '一起看看 →' : '週末可以和家人一起聊聊'}</Text>
       </View>
+      {onOpenReview ? (
+        <View style={styles.reviewActionPill}>
+          <Text style={styles.reviewAction}>一起看看 →</Text>
+        </View>
+      ) : (
+        <Text style={styles.reviewActionPlain}>週末可以和家人一起聊聊</Text>
+      )}
     </>
   );
 
@@ -1004,36 +1019,39 @@ const styles = StyleSheet.create({
 
   // Hero
   hero: {
-    minHeight: 156,
-    borderRadius: 8,
+    minHeight: 214,
+    borderRadius: 22,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: Colors.grass.nightHillBackTop,
+    borderColor: Colors.grass.nightHillFrontTop,
   },
   treehouse: {
     position: 'absolute',
-    right: -8,
-    bottom: -10,
-    width: 116,
-    height: 116,
+    right: -14,
+    bottom: -14,
+    width: 168,
+    height: 168,
   },
   heroCopy: {
-    minHeight: 154,
-    paddingTop: 14,
-    paddingRight: 108,
-    paddingBottom: 12,
-    paddingLeft: 14,
+    minHeight: 212,
+    paddingTop: 18,
+    paddingRight: 130,
+    paddingBottom: 16,
+    paddingLeft: 18,
   },
   categoryBadge: {
     alignSelf: 'flex-start',
-    minHeight: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    minHeight: 24,
     maxWidth: '100%',
-    borderRadius: 7,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: Colors.grass.nightHillBackTop,
     backgroundColor: Colors.grass.nightHillMidTop,
     justifyContent: 'center',
-    paddingHorizontal: 7,
+    paddingHorizontal: 9,
   },
   categoryText: {
     color: Colors.gold100,
@@ -1042,21 +1060,21 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   heroPosition: {
-    marginTop: 8,
+    marginTop: 12,
     color: Colors.bgSurface,
-    fontSize: 22,
-    lineHeight: 27,
+    fontSize: 26,
+    lineHeight: 32,
     fontWeight: '900',
   },
   heroNote: {
-    marginTop: 4,
+    marginTop: 5,
     color: Colors.cream100,
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '700',
   },
   heroTotal: {
-    marginTop: 4,
+    marginTop: 5,
     color: Colors.gold100,
     fontSize: 12,
     lineHeight: 16,
@@ -1091,15 +1109,15 @@ const styles = StyleSheet.create({
   },
 
   card: {
-    padding: 14,
-    borderRadius: 8,
+    padding: 16,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: Colors.borderSoft,
     backgroundColor: Colors.bgSurface,
     shadowColor: Colors.shadowWarm,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.04,
-    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
     elevation: 1,
   },
 
@@ -1107,17 +1125,17 @@ const styles = StyleSheet.create({
   todayAnatomy: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 10,
+    gap: 12,
   },
   actionIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: Colors.leaf100,
-    backgroundColor: Colors.leaf50,
+    borderColor: Colors.leaf200,
+    backgroundColor: Colors.leaf100,
   },
   actionCopy: { flex: 1, minWidth: 0 },
   mascotSlot: {
@@ -1172,7 +1190,7 @@ const styles = StyleSheet.create({
   timeOption: {
     flex: 1,
     minHeight: 44,
-    borderRadius: 8,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: Colors.borderMedium,
     backgroundColor: Colors.cream50,
@@ -1190,14 +1208,19 @@ const styles = StyleSheet.create({
   },
   timeOptionTextSelected: { color: Colors.leaf700 },
   completeButton: {
-    minHeight: 48,
-    marginTop: 10,
-    borderRadius: 8,
+    minHeight: 50,
+    marginTop: 12,
+    borderRadius: 25,
     backgroundColor: Colors.accent,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 7,
+    shadowColor: Colors.shadowLeaf,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 2,
   },
   buttonBusy: { opacity: 0.65 },
   completeButtonText: {
@@ -1215,7 +1238,7 @@ const styles = StyleSheet.create({
   },
   completedState: {
     marginTop: 10,
-    borderRadius: 8,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: Colors.leaf100,
     backgroundColor: Colors.leaf50,
@@ -1268,7 +1291,7 @@ const styles = StyleSheet.create({
   restNote: {
     minHeight: 44,
     marginTop: 10,
-    borderRadius: 8,
+    borderRadius: 16,
     backgroundColor: Colors.cream50,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1302,14 +1325,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   leafConnector: {
-    width: 18,
-    height: 2,
+    width: 22,
+    height: 3,
+    borderRadius: 1.5,
     backgroundColor: Colors.leaf200,
   },
+  leafConnectorFilled: {
+    backgroundColor: Colors.leaf500,
+  },
   leafNode: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     borderWidth: 1.5,
     borderColor: Colors.leaf200,
     backgroundColor: Colors.bgSurface,
@@ -1321,9 +1348,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.leaf600,
   },
   stageNode: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     borderWidth: 1.5,
     borderColor: Colors.ink100,
     backgroundColor: Colors.bgSurface,
@@ -1402,16 +1429,23 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   nextStopIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: Colors.leaf50,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: Colors.leaf500,
     alignItems: 'center',
     justifyContent: 'center',
   },
   nextStopCopy: { flex: 1, minWidth: 0 },
+  nextStopCaptionPill: {
+    alignSelf: 'flex-start',
+    borderRadius: 9,
+    backgroundColor: Colors.fruit100,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
   nextStopCaption: {
-    color: Colors.gold700,
+    color: Colors.fruit700,
     fontSize: 11,
     fontWeight: '900',
   },
@@ -1467,10 +1501,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.cream50,
   },
   reviewIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: Colors.leaf50,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: Colors.leaf100,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1481,12 +1515,26 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     fontWeight: '700',
   },
+  reviewActionPill: {
+    minHeight: 34,
+    borderRadius: 17,
+    backgroundColor: Colors.leaf100,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   reviewAction: {
-    marginTop: 4,
     color: Colors.leaf700,
     fontSize: 12,
     lineHeight: 16,
     fontWeight: '900',
+  },
+  reviewActionPlain: {
+    maxWidth: 96,
+    color: Colors.fgMuted,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '700',
   },
   pendingNoticeText: {
     marginTop: 8,
@@ -1537,7 +1585,7 @@ const styles = StyleSheet.create({
   },
   detailsRow: {
     minHeight: 60,
-    borderRadius: 8,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: Colors.hairline,
     backgroundColor: Colors.bgSurface,
@@ -1550,7 +1598,7 @@ const styles = StyleSheet.create({
   detailsIcon: {
     width: 38,
     height: 38,
-    borderRadius: 8,
+    borderRadius: 19,
     backgroundColor: Colors.cream100,
     alignItems: 'center',
     justifyContent: 'center',
