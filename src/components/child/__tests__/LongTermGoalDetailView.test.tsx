@@ -395,6 +395,78 @@ describe('LongTermGoalDetailView', () => {
     expect(markerX()).toBe(onTheWay);
   });
 
+  /*
+    Today 是「旅途中今天要走的一步」，不是待辦清單的一列。這一組守的是那個差別
+    在畫面上還在：主要文案原封不動來自 presentation、旁邊那句補充只在真的有一步
+    可走時才說、而且整張卡不會混進獎勵／連續天數那種語彙。
+  */
+  describe('today step card', () => {
+    it('shows the structured action verbatim and adds no coaching copy of its own', () => {
+      renderView(makePresentation({
+        todayAction: '雙手合奏',
+        canCompleteToday: true,
+      }));
+
+      const today = within(screen.getByTestId('goal-today'));
+      expect(today.getByText('雙手合奏')).toBeTruthy();
+      // 視覺變好看不能偷渡成 AI coaching：沒有資料的建議一個字都不能生。
+      expect(today.queryByText(/慢慢|不用一次|試著|建議/)).toBeNull();
+    });
+
+    it('adds the one-step microcopy only when there is a step to take today', () => {
+      renderView(makePresentation({ canCompleteToday: true }));
+      expect(screen.getByText('今天只走這一步')).toBeTruthy();
+
+      renderView(makePresentation({ canCompleteToday: false }));
+      expect(screen.queryByText('今天只走這一步')).toBeNull();
+    });
+
+    it('drops the one-step microcopy once today is already recorded', () => {
+      renderView(
+        makePresentation({ canCompleteToday: true }),
+        { isCompletedToday: true },
+      );
+
+      expect(screen.queryByText('今天只走這一步')).toBeNull();
+    });
+
+    it('keeps the mascot slot decorative and out of the accessibility tree', () => {
+      renderView();
+
+      // 對讀屏隱藏——它是氣氛，不是資訊。
+      expect(screen.queryByTestId('today-mascot-slot')).toBeNull();
+      const slot = screen.getByTestId('today-mascot-slot', HIDDEN);
+      expect(slot.props.importantForAccessibility).toBe('no-hide-descendants');
+      // 絕對定位：沒有 mascot 時版面照樣成立，也不從 todayAction 身上拿寬度。
+      const slotStyle = StyleSheet.flatten(slot.props.style);
+      expect(slotStyle.position).toBe('absolute');
+      expect(slotStyle.width).toBeGreaterThanOrEqual(48);
+      expect(slotStyle.width).toBeLessThanOrEqual(72);
+    });
+
+    it('keeps reward and streak vocabulary out of the card', () => {
+      renderView(makePresentation({ canCompleteToday: true }));
+
+      const today = within(screen.getByTestId('goal-today'));
+      for (const word of ['成長幣', '獎勵', '連續', '天數', '打卡', '領取', '過關']) {
+        expect(today.queryByText(new RegExp(word))).toBeNull();
+      }
+    });
+
+    it('keeps the recorded state calm instead of celebratory', () => {
+      renderView(makePresentation(), {
+        isCompletedToday: true,
+        onOpenRecord: jest.fn(),
+      });
+
+      const today = within(screen.getByTestId('goal-today'));
+      expect(today.getByText('今天已完成 15 分鐘')).toBeTruthy();
+      expect(today.getByText('查看紀錄')).toBeTruthy();
+      expect(today.getByText('需要更正')).toBeTruthy();
+      expect(today.queryByText(/恭喜|太棒|完成挑戰|獎盃|連續/)).toBeNull();
+    });
+  });
+
   it('uses product icons instead of emoji for formal section headings', () => {
     renderView();
 

@@ -645,9 +645,17 @@ export default function LongTermDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  /*
+    頁底從 bgCanvas(#FFF8EE) 換成 cream100(#FFF2DF)。
+
+    bgCanvas 幾乎是白的，森林綠 Hero 壓在上面會因為同時對比顯得又冷又硬，
+    而且 Today 的白卡跟頁底幾乎分不開。cream100 是同一族色階裡深一階的暖紙色
+    （WishScreen / ChildProposalScreen / ProfileScreen 都在用的既有 token），
+    往下托得住 Hero，往上又讓白卡浮得出來。沒有新增任何 hex。
+  */
   safe: {
     flex: 1,
-    backgroundColor: Colors.bgCanvas,
+    backgroundColor: Colors.cream100,
   },
   header: {
     minHeight: 76,
@@ -656,7 +664,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: Colors.bgCanvas,
+    backgroundColor: Colors.cream100,
   },
   backButton: {
     width: 44,

@@ -238,14 +238,22 @@ function DetailIcon({
 function SectionHeading({
   icon,
   title,
+  hint,
 }: {
   icon: IconName;
   title: string;
+  /** 標題旁那一句很輕的補充。只有 Today 用得上，其他 section 不傳。 */
+  hint?: string | null;
 }) {
   return (
     <View style={styles.sectionHeading}>
       <DetailIcon name={icon} size={20} color={Colors.leaf700} />
       <Text style={styles.sectionHeadingText}>{title}</Text>
+      {hint ? (
+        <Text style={styles.sectionHeadingHint} numberOfLines={1}>
+          {hint}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -550,6 +558,69 @@ type TodayStepCardProps = Pick<
   | 'onOpenRecord'
 >;
 
+/**
+ * 卡面：頂端一層很淡的葉綠暈。
+ *
+ * Today 不該長得跟其他 section 一樣是白色 dashboard card——但也不該變成插畫。
+ * 一層 wash 就夠把它從「另一張卡」推成「旅途中的這一站」。
+ */
+function TodayCardWash({ gradientId }: { gradientId: string }) {
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      <Svg width="100%" height="100%" accessibilityElementsHidden>
+        <Defs>
+          <LinearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <Stop offset={0} stopColor={Colors.leaf50} stopOpacity={0.95} />
+            <Stop offset={0.6} stopColor={Colors.leaf50} stopOpacity={0} />
+          </LinearGradient>
+        </Defs>
+        <Rect x="0" y="0" width="100%" height="100%" fill={`url(#${gradientId})`} />
+      </Svg>
+    </View>
+  );
+}
+
+/**
+ * 之後放 mascot 的位置。
+ *
+ * 現在放一株很淡的嫩芽當佔位。三條規則寫在版面裡而不是註解裡：
+ *   - 絕對定位 → 沒有 mascot 時版面照樣成立，也永遠不會吃掉 todayAction 的寬度
+ *   - pointerEvents none → 蓋在說明列上也不會攔到點擊
+ *   - 對讀屏隱藏 → 它不是資訊，只是氣氛
+ */
+function MascotSlot() {
+  return (
+    <View
+      testID="today-mascot-slot"
+      style={styles.mascotSlot}
+      pointerEvents="none"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      <Svg width={56} height={56} viewBox="0 0 56 56" accessibilityElementsHidden>
+        <Path
+          d="M28 46V26"
+          stroke={Colors.leaf300}
+          strokeWidth={2.4}
+          strokeLinecap="round"
+          fill="none"
+          opacity={0.42}
+        />
+        <Path
+          d="M28 32c-9 0-14-5-14-13 9 0 14 5 14 13Z"
+          fill={Colors.leaf200}
+          opacity={0.5}
+        />
+        <Path
+          d="M28 28c0-8 5-13 14-13 0 8-5 13-14 13Z"
+          fill={Colors.leaf100}
+          opacity={0.75}
+        />
+      </Svg>
+    </View>
+  );
+}
+
 function CompletedTodayState({
   presentation,
   completion,
@@ -563,11 +634,15 @@ function CompletedTodayState({
   const completedLabel = minutes ? `今天已完成 ${minutes} 分鐘` : '今天已完成';
   const openRecord = () => onOpenRecord?.(completion?.id);
 
+  /*
+    「今天這一步已經被記下來了」，不是「恭喜過關」。所以勾勾從實心綠圓章
+    改成淡底細框、勾用葉綠而不是白色——是一則紀錄，不是一枚獎章。
+  */
   return (
     <View style={styles.completedState}>
       <View style={styles.completedTitleRow}>
         <View style={styles.completedCheck}>
-          <DetailIcon name="check" size={18} color={Colors.bgSurface} />
+          <DetailIcon name="check" size={17} color={Colors.leaf700} />
         </View>
         <View style={styles.completedCopy}>
           <Text style={styles.completedTitle}>{completedLabel}</Text>
@@ -612,6 +687,7 @@ function TodayStepCard({
   onSelectTimeWindow,
   onOpenRecord,
 }: TodayStepCardProps) {
+  const washId = useId();
   const [showTimeOptions, setShowTimeOptions] = useState(false);
   const [showExplanation, setShowExplanation] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -649,11 +725,23 @@ function TodayStepCard({
   const explanationLabel = showExplanation
     ? '收合小步驟說明'
     : '展開小步驟說明';
+  /*
+    「今天只走這一步」只有在今天真的有一步可走時才說得通。計畫暫停、已完成、
+    或這一步要家長確認（技能階段）時，標題本身就不是「今天的小步驟」，補這句
+    只會變成不知道在講誰的口號。
+  */
+  const stepHint =
+    presentation.canCompleteToday && !completed ? '今天只走這一步' : null;
 
   return (
     <View>
-      <SectionHeading icon="sprout" title={presentation.todayTitle} />
+      <SectionHeading
+        icon="sprout"
+        title={presentation.todayTitle}
+        hint={stepHint}
+      />
       <View testID="goal-today" style={[styles.card, styles.todayCard]}>
+        <TodayCardWash gradientId={washId} />
         <View style={styles.actionHead}>
           <View style={styles.actionIcon}>
             <DetailIcon
@@ -663,60 +751,68 @@ function TodayStepCard({
           </View>
           <View style={styles.actionCopy}>
             <Text style={styles.actionTitle}>{presentation.todayAction}</Text>
-            {showTimeControls ? (
-              <View style={styles.scheduleRow}>
-                <View style={styles.scheduleLabel}>
-                  <DetailIcon name="clock" size={16} color={Colors.fgMuted} />
-                  <Text style={styles.scheduleText}>
-                    今天預計：
-                    {presentation.preferredTimeWindow
-                      ? formatTimeWindow(presentation.preferredTimeWindow)
-                      : '尚未選擇時段'}
-                  </Text>
-                </View>
-                {!completed && presentation.canCompleteToday ? (
-                  <TouchableOpacity
-                    style={styles.inlineAction}
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                      presentation.preferredTimeWindow
-                        ? '調整今天的預計時段'
-                        : '選擇今天的預計時段'
-                    }
-                    onPress={() => setShowTimeOptions((visible) => !visible)}
-                    activeOpacity={0.72}
-                  >
-                    <Text style={styles.inlineActionText}>
-                      {presentation.preferredTimeWindow ? '調整時段' : '選擇時段'}
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            ) : null}
           </View>
         </View>
 
-        <TouchableOpacity
-          style={styles.explanationToggle}
-          accessibilityRole="button"
-          accessibilityLabel={explanationLabel}
-          accessibilityState={{ expanded: showExplanation }}
-          onPress={() => setShowExplanation((visible) => !visible)}
-          activeOpacity={0.72}
-        >
-          <View style={styles.explanationToggleText}>
-            <DetailIcon name="info" size={17} color={Colors.fgMuted} />
-            <Text style={styles.explanationLabel}>小步驟說明</Text>
+        {/*
+          時段是次要資訊，所以搬到主要文案**下面**自成一列，而不是擠在
+          todayAction 旁邊跟它搶視線。行為、文案、a11y label 一個字都沒動。
+        */}
+        {showTimeControls ? (
+          <View style={styles.scheduleRow}>
+            <View style={styles.scheduleLabel}>
+              <DetailIcon name="clock" size={15} color={Colors.fgMuted} />
+              <Text style={styles.scheduleText}>
+                今天預計：
+                {presentation.preferredTimeWindow
+                  ? formatTimeWindow(presentation.preferredTimeWindow)
+                  : '尚未選擇時段'}
+              </Text>
+            </View>
+            {!completed && presentation.canCompleteToday ? (
+              <TouchableOpacity
+                style={styles.inlineAction}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  presentation.preferredTimeWindow
+                    ? '調整今天的預計時段'
+                    : '選擇今天的預計時段'
+                }
+                onPress={() => setShowTimeOptions((visible) => !visible)}
+                activeOpacity={0.72}
+              >
+                <Text style={styles.inlineActionText}>
+                  {presentation.preferredTimeWindow ? '調整時段' : '選擇時段'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
-          <View
-            style={[
-              styles.explanationChevron,
-              showExplanation && styles.explanationChevronExpanded,
-            ]}
+        ) : null}
+
+        <View style={styles.explanationRow}>
+          <TouchableOpacity
+            style={styles.explanationToggle}
+            accessibilityRole="button"
+            accessibilityLabel={explanationLabel}
+            accessibilityState={{ expanded: showExplanation }}
+            onPress={() => setShowExplanation((visible) => !visible)}
+            activeOpacity={0.72}
           >
-            <DetailIcon name="chevron" size={18} color={Colors.fgMuted} />
-          </View>
-        </TouchableOpacity>
+            <View style={styles.explanationToggleText}>
+              <DetailIcon name="info" size={16} color={Colors.fgMuted} />
+              <Text style={styles.explanationLabel}>小步驟說明</Text>
+            </View>
+            <View
+              style={[
+                styles.explanationChevron,
+                showExplanation && styles.explanationChevronExpanded,
+              ]}
+            >
+              <DetailIcon name="chevron" size={17} color={Colors.fgMuted} />
+            </View>
+          </TouchableOpacity>
+          <MascotSlot />
+        </View>
 
         {showExplanation ? (
           <View style={styles.explanationBody}>
@@ -784,12 +880,13 @@ function TodayStepCard({
                 color={Colors.bgSurface}
               />
             ) : (
-              <>
-                <DetailIcon name="check" size={19} color={Colors.bgSurface} />
-                <Text style={styles.completeButtonText}>
-                  記下今天的完成
-                </Text>
-              </>
+              /*
+                刻意不放勾勾。打勾是「把待辦劃掉」的手勢，這裡要的是「把今天
+                做的事寫下來」。留文字一句就好。
+              */
+              <Text style={styles.completeButtonText}>
+                記下今天的完成
+              </Text>
             )}
           </TouchableOpacity>
         ) : (
@@ -1393,11 +1490,19 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   sectionHeadingText: {
-    flex: 1,
+    flexShrink: 1,
     color: Colors.fgPrimary,
     fontSize: 18,
     lineHeight: 24,
     fontWeight: '900',
+  },
+  sectionHeadingHint: {
+    flex: 1,
+    minWidth: 0,
+    color: Colors.fgMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
   },
   card: {
     padding: 14,
@@ -1411,27 +1516,34 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 1,
   },
+  /*
+    Today 是整頁的功能焦點，但情緒不該是「待辦卡」。所以：圓角比一般卡大得多、
+    邊框比一般卡更輕（2px 葉綠 → 1px），留白加大，卡面頂端一層淡葉綠 wash。
+  */
   todayCard: {
-    padding: 16,
-    borderWidth: 2,
+    padding: 18,
+    paddingBottom: 16,
+    borderRadius: 18,
+    borderWidth: 1,
     borderColor: Colors.leaf100,
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.07,
     elevation: 2,
+    overflow: 'hidden',
   },
   actionHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
   },
   actionIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: Colors.leaf100,
-    backgroundColor: Colors.leaf50,
+    borderWidth: 1.5,
+    borderColor: Colors.leaf200,
+    backgroundColor: Colors.bgSurface,
   },
   actionCopy: {
     flex: 1,
@@ -1440,11 +1552,12 @@ const styles = StyleSheet.create({
   actionTitle: {
     color: Colors.fgPrimary,
     fontSize: 22,
-    lineHeight: 30,
+    lineHeight: 31,
     fontWeight: '900',
+    letterSpacing: -0.2,
   },
   scheduleRow: {
-    marginTop: 4,
+    marginTop: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1476,14 +1589,34 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '900',
   },
+  /** 說明列的定位容器；mascot slot 靠它決定右下角在哪。 */
+  explanationRow: {
+    position: 'relative',
+    marginTop: 10,
+  },
+  /*
+    拿掉上方那條分隔線。「一條線 + 標籤 + chevron」正是設定頁的長相，
+    是這張卡最像工具的一處；改用留白分段就夠了。
+  */
   explanationToggle: {
     minHeight: 44,
-    marginTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: Colors.hairline,
+    paddingRight: 62,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  /*
+    Mascot 之後放這裡。絕對定位：沒有 mascot 時版面照樣成立，有了也不會
+    從 todayAction 身上拿走任何寬度。
+  */
+  mascotSlot: {
+    position: 'absolute',
+    right: -4,
+    bottom: -10,
+    width: 56,
+    height: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   explanationToggleText: {
     flexDirection: 'row',
@@ -1501,11 +1634,14 @@ const styles = StyleSheet.create({
   explanationChevronExpanded: {
     transform: [{ rotate: '-90deg' }],
   },
+  /** 展開後是一小塊柔和的說明區，不是設定頁被拉開的一格。 */
   explanationBody: {
-    borderTopWidth: 1,
-    borderTopColor: Colors.hairline,
-    paddingTop: 9,
-    paddingBottom: 3,
+    marginTop: 2,
+    borderRadius: 12,
+    backgroundColor: Colors.cream50,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 11,
   },
   explanationText: {
     color: Colors.fgSecondary,
@@ -1520,14 +1656,14 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   timeOptions: {
-    marginTop: 8,
+    marginTop: 10,
     flexDirection: 'row',
     gap: 8,
   },
   timeOption: {
     flex: 1,
     minHeight: 44,
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: Colors.borderMedium,
     backgroundColor: Colors.cream50,
@@ -1546,10 +1682,14 @@ const styles = StyleSheet.create({
   timeOptionTextSelected: {
     color: Colors.leaf700,
   },
+  /*
+    CTA 維持葉綠（Colors.accent），不用金色——金色會把「留下紀錄」讀成
+    「按下去領獎勵」。圓角跟著卡片放軟，高度不動（可點擊尺寸不縮）。
+  */
   completeButton: {
     minHeight: 56,
-    marginTop: 10,
-    borderRadius: 8,
+    marginTop: 14,
+    borderRadius: 14,
     backgroundColor: Colors.accent,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1558,12 +1698,13 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   buttonBusy: {
-    opacity: 0.65,
+    opacity: 0.6,
   },
   completeButtonText: {
     color: Colors.bgSurface,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '900',
+    letterSpacing: 0.3,
   },
   completionError: {
     marginTop: 7,
@@ -1574,19 +1715,19 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   completedState: {
-    marginTop: 10,
-    borderRadius: 8,
+    marginTop: 14,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: Colors.leaf100,
     backgroundColor: Colors.leaf50,
-    paddingHorizontal: 11,
-    paddingTop: 10,
+    paddingHorizontal: 12,
+    paddingTop: 11,
     paddingBottom: 7,
   },
   completedTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
+    gap: 10,
   },
   completedCheck: {
     width: 30,
@@ -1594,7 +1735,9 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.success,
+    borderWidth: 1.5,
+    borderColor: Colors.leaf200,
+    backgroundColor: Colors.bgSurface,
   },
   completedCopy: {
     flex: 1,
@@ -1634,8 +1777,8 @@ const styles = StyleSheet.create({
   },
   restNote: {
     minHeight: 44,
-    marginTop: 10,
-    borderRadius: 8,
+    marginTop: 14,
+    borderRadius: 14,
     backgroundColor: Colors.cream50,
     alignItems: 'center',
     justifyContent: 'center',
