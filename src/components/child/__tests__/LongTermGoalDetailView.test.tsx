@@ -453,6 +453,70 @@ describe('LongTermGoalDetailView', () => {
       }
     });
 
+    /*
+      Today 有兩種樣貌，共用同一套版面：孩子今天可以自己記錄的，和正在這個
+      階段、要家長確認的。差別只在最後那一層是 CTA 還是一句說明——**不是**
+      一個有 CTA、一個有一顆長得像 CTA 的灰方塊。
+    */
+    it('gives a parent-confirmed stage a full composition without a fake CTA', () => {
+      renderView(makePresentation({
+        progression: 'staged_skill',
+        planState: 'active',
+        canCompleteToday: false,
+        todayTitle: '目前階段',
+        todayAction: '這一階段先練習：雙手合奏',
+        todayStatusText: '這個階段由家長確認完成',
+      }));
+
+      const today = within(screen.getByTestId('goal-today'));
+      // 主要文案照樣是全卡最強的一句
+      expect(today.getByText('這一階段先練習：雙手合奏')).toBeTruthy();
+      // 微文案換成階段版本，構圖仍然完整
+      expect(screen.getByText('現在先走這一步')).toBeTruthy();
+      expect(screen.queryByText('今天只走這一步')).toBeNull();
+      // 一句柔和說明，不是假 CTA
+      expect(today.getByText('這一階段完成後，再和家人一起確認')).toBeTruthy();
+      expect(screen.queryByLabelText('記下今天的完成')).toBeNull();
+      expect(screen.queryByText('記下今天的完成')).toBeNull();
+    });
+
+    it('keeps every other plan state on its own status copy', () => {
+      renderView(makePresentation({
+        progression: 'weekly_rhythm',
+        planState: 'paused',
+        canCompleteToday: false,
+        todayStatusText: '這個計畫暫停中',
+      }));
+
+      const today = within(screen.getByTestId('goal-today'));
+      expect(today.getByText('這個計畫暫停中')).toBeTruthy();
+      // 階段版文案只屬於 staged_skill，不能外溢到暫停／未開始／休息日。
+      expect(screen.queryByText('這一階段完成後，再和家人一起確認')).toBeNull();
+      expect(screen.queryByText('現在先走這一步')).toBeNull();
+    });
+
+    it('opens the explanation inline instead of as another card', () => {
+      renderView();
+
+      const toggle = screen.getByLabelText('展開小步驟說明');
+      // 一句可以點的話，寬度只有一句話那麼寬——不是撐滿一整列的 settings row。
+      expect(StyleSheet.flatten(toggle.props.style).alignSelf).toBe('flex-start');
+      expect(screen.getByText('看看這一步怎麼算完成')).toBeTruthy();
+
+      fireEvent.press(toggle);
+      expect(screen.getByText(/先完成今天最小的一步/)).toBeTruthy();
+      // 展開的內容靠細線縮排分層，不再是插進卡裡的另一張米色卡。
+      const bodyStyle = StyleSheet.flatten(
+        screen.getByTestId('today-explanation').props.style,
+      );
+      expect(bodyStyle.backgroundColor).toBeUndefined();
+      expect(bodyStyle.borderLeftWidth).toBeGreaterThan(0);
+
+      fireEvent.press(screen.getByLabelText('收合小步驟說明'));
+      expect(screen.queryByText(/先完成今天最小的一步/)).toBeNull();
+      expect(screen.queryByTestId('today-explanation')).toBeNull();
+    });
+
     it('keeps the recorded state calm instead of celebratory', () => {
       renderView(makePresentation(), {
         isCompletedToday: true,

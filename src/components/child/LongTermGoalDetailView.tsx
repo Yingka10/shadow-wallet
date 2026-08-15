@@ -563,6 +563,9 @@ type TodayStepCardProps = Pick<
  *
  * Today 不該長得跟其他 section 一樣是白色 dashboard card——但也不該變成插畫。
  * 一層 wash 就夠把它從「另一張卡」推成「旅途中的這一站」。
+ *
+ * 這是整張卡**唯一**的色塊。邊框改成中性色、說明區改成細線縮排、狀態說明
+ * 拿掉底色之後，綠色只剩這一層，不會再和頁底吵架。
  */
 function TodayCardWash({ gradientId }: { gradientId: string }) {
   return (
@@ -583,10 +586,12 @@ function TodayCardWash({ gradientId }: { gradientId: string }) {
 /**
  * 之後放 mascot 的位置。
  *
- * 現在放一株很淡的嫩芽當佔位。三條規則寫在版面裡而不是註解裡：
+ * **現在什麼都不畫。** 上一版放了一株淡嫩芽當佔位，真機上它只是浮在說明列
+ * 旁邊的一片孤立裝飾，反而讓構圖更碎。位置保留、規則保留，畫面留白：
+ *
  *   - 絕對定位 → 沒有 mascot 時版面照樣成立，也永遠不會吃掉 todayAction 的寬度
- *   - pointerEvents none → 蓋在說明列上也不會攔到點擊
- *   - 對讀屏隱藏 → 它不是資訊，只是氣氛
+ *   - pointerEvents none → 蓋在內容上也不會攔到點擊
+ *   - 對讀屏隱藏 → 它不是資訊
  */
 function MascotSlot() {
   return (
@@ -596,28 +601,7 @@ function MascotSlot() {
       pointerEvents="none"
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-    >
-      <Svg width={56} height={56} viewBox="0 0 56 56" accessibilityElementsHidden>
-        <Path
-          d="M28 46V26"
-          stroke={Colors.leaf300}
-          strokeWidth={2.4}
-          strokeLinecap="round"
-          fill="none"
-          opacity={0.42}
-        />
-        <Path
-          d="M28 32c-9 0-14-5-14-13 9 0 14 5 14 13Z"
-          fill={Colors.leaf200}
-          opacity={0.5}
-        />
-        <Path
-          d="M28 28c0-8 5-13 14-13 0 8-5 13-14 13Z"
-          fill={Colors.leaf100}
-          opacity={0.75}
-        />
-      </Svg>
-    </View>
+    />
   );
 }
 
@@ -726,12 +710,36 @@ function TodayStepCard({
     ? '收合小步驟說明'
     : '展開小步驟說明';
   /*
-    「今天只走這一步」只有在今天真的有一步可走時才說得通。計畫暫停、已完成、
-    或這一步要家長確認（技能階段）時，標題本身就不是「今天的小步驟」，補這句
-    只會變成不知道在講誰的口號。
+    Today 有兩種樣貌，共用同一套版面：
+
+      A｜孩子今天可以自己記錄  → 微文案「今天只走這一步」＋葉綠 CTA
+      B｜正在這個階段、完成由家長確認（staged_skill）
+                              → 微文案「現在先走這一步」＋一句柔和說明，沒有 CTA
+
+    B 是**讀**既有的 progression / planState / canCompleteToday 推出來的，
+    沒有新增任何 domain state，也沒有改變誰有權完成。
   */
-  const stepHint =
-    presentation.canCompleteToday && !completed ? '今天只走這一步' : null;
+  const isParentConfirmedStage =
+    presentation.progression === 'staged_skill'
+    && presentation.planState === 'active'
+    && !presentation.canCompleteToday;
+  const stepHint = completed
+    ? null
+    : presentation.canCompleteToday
+      ? '今天只走這一步'
+      : isParentConfirmedStage
+        ? '現在先走這一步'
+        : null;
+  /*
+    「這個階段由家長確認完成」講的是權限，孩子聽起來像規則。同一件事換成
+    孩子的話：這一階段完成後，再和家人一起確認。**誰有權完成沒有變**，
+    canCompleteToday 仍然是 false，這裡只是把它說得像句話。
+    其他狀態（暫停／未開始／已結束／休息日）一律照 presentation 原文。
+  */
+  const statusNote = isParentConfirmedStage
+    ? '這一階段完成後，再和家人一起確認'
+    : presentation.todayStatusText
+      ?? '今天先照自己的節奏前進，需要時再和家人一起確認。';
 
   return (
     <View>
@@ -742,6 +750,12 @@ function TodayStepCard({
       />
       <View testID="goal-today" style={[styles.card, styles.todayCard]}>
         <TodayCardWash gradientId={washId} />
+        {/*
+          一個 step surface，一欄內容。左邊的圓是視覺錨點，右邊由上到下是
+          主要文案 → 次要 meta → 說明 affordance，全部縮在同一欄裡對齊。
+          之前那種「主文案一列、說明自成一列、說明展開又是一張卡」的排法，
+          是把一件事切成三個框，讀起來就變成表單。
+        */}
         <View style={styles.actionHead}>
           <View style={styles.actionIcon}>
             <DetailIcon
@@ -751,77 +765,84 @@ function TodayStepCard({
           </View>
           <View style={styles.actionCopy}>
             <Text style={styles.actionTitle}>{presentation.todayAction}</Text>
-          </View>
-        </View>
 
-        {/*
-          時段是次要資訊，所以搬到主要文案**下面**自成一列，而不是擠在
-          todayAction 旁邊跟它搶視線。行為、文案、a11y label 一個字都沒動。
-        */}
-        {showTimeControls ? (
-          <View style={styles.scheduleRow}>
-            <View style={styles.scheduleLabel}>
-              <DetailIcon name="clock" size={15} color={Colors.fgMuted} />
-              <Text style={styles.scheduleText}>
-                今天預計：
-                {presentation.preferredTimeWindow
-                  ? formatTimeWindow(presentation.preferredTimeWindow)
-                  : '尚未選擇時段'}
-              </Text>
-            </View>
-            {!completed && presentation.canCompleteToday ? (
-              <TouchableOpacity
-                style={styles.inlineAction}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  presentation.preferredTimeWindow
-                    ? '調整今天的預計時段'
-                    : '選擇今天的預計時段'
-                }
-                onPress={() => setShowTimeOptions((visible) => !visible)}
-                activeOpacity={0.72}
+            {/*
+              時段是次要資訊，縮在主要文案下面同一欄，不跟它並排搶視線。
+              行為、文案、a11y label 一個字都沒動。
+            */}
+            {showTimeControls ? (
+              <View style={styles.scheduleRow}>
+                <View style={styles.scheduleLabel}>
+                  <DetailIcon name="clock" size={15} color={Colors.fgMuted} />
+                  <Text style={styles.scheduleText}>
+                    今天預計：
+                    {presentation.preferredTimeWindow
+                      ? formatTimeWindow(presentation.preferredTimeWindow)
+                      : '尚未選擇時段'}
+                  </Text>
+                </View>
+                {!completed && presentation.canCompleteToday ? (
+                  <TouchableOpacity
+                    style={styles.inlineAction}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      presentation.preferredTimeWindow
+                        ? '調整今天的預計時段'
+                        : '選擇今天的預計時段'
+                    }
+                    onPress={() => setShowTimeOptions((visible) => !visible)}
+                    activeOpacity={0.72}
+                  >
+                    <Text style={styles.inlineActionText}>
+                      {presentation.preferredTimeWindow ? '調整時段' : '選擇時段'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : null}
+
+            {/*
+              說明的開關：一句可以點的話，不是一整列 settings row。
+              原本「ⓘ 標籤 ……………… ⌄」把標籤釘在左、箭頭推到最右，那個
+              左右撐開的排版本身就是 iOS 設定列的長相。現在文字和箭頭黏在
+              一起，靠左，寬度只有一句話那麼寬。
+              a11y label 維持不變（展開／收合小步驟說明）。
+            */}
+            <TouchableOpacity
+              style={styles.explanationToggle}
+              accessibilityRole="button"
+              accessibilityLabel={explanationLabel}
+              accessibilityState={{ expanded: showExplanation }}
+              onPress={() => setShowExplanation((visible) => !visible)}
+              activeOpacity={0.72}
+              hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+            >
+              <Text style={styles.explanationLabel}>看看這一步怎麼算完成</Text>
+              <View
+                style={[
+                  styles.explanationChevron,
+                  showExplanation && styles.explanationChevronExpanded,
+                ]}
               >
-                <Text style={styles.inlineActionText}>
-                  {presentation.preferredTimeWindow ? '調整時段' : '選擇時段'}
+                <DetailIcon name="chevron" size={15} color={Colors.leaf700} />
+              </View>
+            </TouchableOpacity>
+
+            {/*
+              展開的內容直接接在下面，靠一條細線和縮排分層，不再是插進來的
+              另一張米色卡。
+            */}
+            {showExplanation ? (
+              <View testID="today-explanation" style={styles.explanationBody}>
+                <Text style={styles.explanationText}>{presentation.focusText}</Text>
+                <Text style={styles.explanationHint}>
+                  先完成今天最小的一步，覺得不合適時再和家人一起調整。
                 </Text>
-              </TouchableOpacity>
+              </View>
             ) : null}
           </View>
-        ) : null}
-
-        <View style={styles.explanationRow}>
-          <TouchableOpacity
-            style={styles.explanationToggle}
-            accessibilityRole="button"
-            accessibilityLabel={explanationLabel}
-            accessibilityState={{ expanded: showExplanation }}
-            onPress={() => setShowExplanation((visible) => !visible)}
-            activeOpacity={0.72}
-          >
-            <View style={styles.explanationToggleText}>
-              <DetailIcon name="info" size={16} color={Colors.fgMuted} />
-              <Text style={styles.explanationLabel}>小步驟說明</Text>
-            </View>
-            <View
-              style={[
-                styles.explanationChevron,
-                showExplanation && styles.explanationChevronExpanded,
-              ]}
-            >
-              <DetailIcon name="chevron" size={17} color={Colors.fgMuted} />
-            </View>
-          </TouchableOpacity>
           <MascotSlot />
         </View>
-
-        {showExplanation ? (
-          <View style={styles.explanationBody}>
-            <Text style={styles.explanationText}>{presentation.focusText}</Text>
-            <Text style={styles.explanationHint}>
-              先完成今天最小的一步，覺得不合適時再和家人一起調整。
-            </Text>
-          </View>
-        ) : null}
 
         {showTimeControls && showTimeOptions && !completed ? (
           <View testID="time-options" style={styles.timeOptions}>
@@ -890,13 +911,14 @@ function TodayStepCard({
             )}
           </TouchableOpacity>
         ) : (
-          <View style={styles.restNote}>
-            <Text style={styles.restNoteText}>
-              {presentation.todayStatusText
-                ?? (presentation.todayTitle === '今天是休息日'
-                  ? '今天沒有安排，照自己的節奏休息就好。'
-                  : '今天先照自己的節奏前進，需要時再和家人一起確認。')}
-            </Text>
+          /*
+            沒有 CTA 的時候就不要畫一個長得像 CTA 的東西。原本這裡是一塊
+            滿版米色圓角方塊，在真機上讀起來就是一顆 disabled 按鈕——孩子會
+            一直想按它。改成一句靠左的柔和說明，前面一片小葉子。
+          */
+          <View style={styles.statusNote}>
+            <DetailIcon name="sprout" size={16} color={Colors.leaf700} />
+            <Text style={styles.statusNoteText}>{statusNote}</Text>
           </View>
         )}
         {completionError ? (
@@ -1520,30 +1542,34 @@ const styles = StyleSheet.create({
     Today 是整頁的功能焦點，但情緒不該是「待辦卡」。所以：圓角比一般卡大得多、
     邊框比一般卡更輕（2px 葉綠 → 1px），留白加大，卡面頂端一層淡葉綠 wash。
   */
+  /*
+    一個 surface，就一個。邊框改回中性的 borderSoft——葉綠邊框加上葉綠 wash
+    會讓整張卡讀成「一張綠卡」，配上偏黃的頁底就是撞色。綠留給 wash 一層就好。
+  */
   todayCard: {
     padding: 18,
     paddingBottom: 16,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: Colors.leaf100,
+    borderColor: Colors.borderSoft,
     shadowOpacity: 0.07,
     elevation: 2,
     overflow: 'hidden',
   },
   actionHead: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 12,
   },
+  /** 左邊的視覺錨點。跟標題頂端對齊，不是垂直置中——內容長高時它不會亂跑。 */
   actionIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 46,
+    height: 46,
+    marginTop: 2,
+    borderRadius: 23,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: Colors.leaf200,
-    backgroundColor: Colors.bgSurface,
+    backgroundColor: Colors.leaf50,
   },
   actionCopy: {
     flex: 1,
@@ -1557,7 +1583,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   scheduleRow: {
-    marginTop: 12,
+    marginTop: 6,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1589,43 +1615,36 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '900',
   },
-  /** 說明列的定位容器；mascot slot 靠它決定右下角在哪。 */
-  explanationRow: {
-    position: 'relative',
-    marginTop: 10,
-  },
   /*
-    拿掉上方那條分隔線。「一條線 + 標籤 + chevron」正是設定頁的長相，
-    是這張卡最像工具的一處；改用留白分段就夠了。
+    一句可以點的話，不是一整列 settings row。
+
+    關鍵是 alignSelf: 'flex-start'——寬度只有一句話那麼寬。原本 justifyContent
+    space-between + 滿版寬度把標籤釘在左、箭頭推到最右，那個左右撐開的排版
+    本身就是 iOS 設定列的長相，換什麼字都救不回來。
   */
   explanationToggle: {
-    minHeight: 44,
-    paddingRight: 62,
+    alignSelf: 'flex-start',
+    minHeight: 36,
+    marginTop: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 3,
   },
   /*
     Mascot 之後放這裡。絕對定位：沒有 mascot 時版面照樣成立，有了也不會
-    從 todayAction 身上拿走任何寬度。
+    從 todayAction 身上拿走任何寬度。現在裡面是空的。
   */
   mascotSlot: {
     position: 'absolute',
-    right: -4,
-    bottom: -10,
+    right: 0,
+    bottom: 0,
     width: 56,
     height: 56,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  explanationToggleText: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
   },
   explanationLabel: {
-    color: Colors.fgSecondary,
-    fontSize: 12,
+    color: Colors.leaf700,
+    fontSize: 12.5,
+    lineHeight: 18,
     fontWeight: '800',
   },
   explanationChevron: {
@@ -1634,14 +1653,15 @@ const styles = StyleSheet.create({
   explanationChevronExpanded: {
     transform: [{ rotate: '-90deg' }],
   },
-  /** 展開後是一小塊柔和的說明區，不是設定頁被拉開的一格。 */
+  /*
+    展開的說明用一條細線 + 縮排分層，**不再是另一張米色卡**。卡裡再開一張卡
+    就是把畫面切碎的元兇。
+  */
   explanationBody: {
-    marginTop: 2,
-    borderRadius: 12,
-    backgroundColor: Colors.cream50,
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 11,
+    marginTop: 6,
+    paddingLeft: 11,
+    borderLeftWidth: 2,
+    borderLeftColor: Colors.leaf100,
   },
   explanationText: {
     color: Colors.fgSecondary,
@@ -1775,21 +1795,24 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '900',
   },
-  restNote: {
-    minHeight: 44,
-    marginTop: 14,
-    borderRadius: 14,
-    backgroundColor: Colors.cream50,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 10,
+  /*
+    沒有 CTA 的變體。滿版米色圓角方塊在真機上就是一顆 disabled 按鈕，孩子會
+    一直想按；改成靠左的一句話，沒有底、沒有框。
+  */
+  statusNote: {
+    marginTop: 16,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingRight: 8,
   },
-  restNoteText: {
-    color: Colors.fgMuted,
-    fontSize: 12,
-    lineHeight: 18,
+  statusNoteText: {
+    flex: 1,
+    minWidth: 0,
+    color: Colors.fgSecondary,
+    fontSize: 13,
+    lineHeight: 20,
     fontWeight: '700',
-    textAlign: 'center',
   },
   weekRow: {
     flexDirection: 'row',

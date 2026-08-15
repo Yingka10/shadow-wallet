@@ -646,16 +646,18 @@ export default function LongTermDetailScreen() {
 
 const styles = StyleSheet.create({
   /*
-    頁底從 bgCanvas(#FFF8EE) 換成 cream100(#FFF2DF)。
+    頁底 = bgCanvas (#FFF8EE)。
 
-    bgCanvas 幾乎是白的，森林綠 Hero 壓在上面會因為同時對比顯得又冷又硬，
-    而且 Today 的白卡跟頁底幾乎分不開。cream100 是同一族色階裡深一階的暖紙色
-    （WishScreen / ChildProposalScreen / ProfileScreen 都在用的既有 token），
-    往下托得住 Hero，往上又讓白卡浮得出來。沒有新增任何 hex。
+    上一版試過 cream100 (#FFF2DF)，真機驗收判定過黃：大面積鋪開之後它是奶油
+    黃，和 Hero 的森林綠變成撞色，整頁讀起來是「黃底 + 綠卡」。North Star 的
+    canvas 不是奶油黃，是幾乎白、只帶一點暖度的紙色——那就是 bgCanvas。
+
+    Today 和頁底的層次改用卡片自己的辦法解（白卡 + 陰影 + 圓角），不靠把整頁
+    調深。頁底不需要負責這件事。
   */
   safe: {
     flex: 1,
-    backgroundColor: Colors.cream100,
+    backgroundColor: Colors.bgCanvas,
   },
   header: {
     minHeight: 76,
@@ -664,7 +666,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: Colors.cream100,
+    backgroundColor: Colors.bgCanvas,
   },
   backButton: {
     width: 44,
