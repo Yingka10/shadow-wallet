@@ -11,9 +11,11 @@ import {
 import Svg, {
   Circle,
   Defs,
+  Ellipse,
   Line,
   LinearGradient,
   Path,
+  RadialGradient,
   Rect,
   Stop,
 } from 'react-native-svg';
@@ -260,29 +262,61 @@ function SectionHeading({
   「一週三次」沒有「走完幾成」這回事，那個百分比只是「這段期間排得下幾次」。
   小徑取代它——小徑講位置，不講完成度。
 */
-const HERO_FOREST = {
-  skyTop: '#28492F',
-  skyBottom: '#1A3322',
-  hillFar: '#2E5637',
-  hillNear: '#1D3B25',
-  pathGlow: 'rgba(154, 208, 102, 0.22)',
-  path: '#6E9B5C',
+/*
+  場景色階（warm forest evening）。
+
+  一條規則貫穿整組：**天空最亮，愈靠近觀者的地面愈暗。** 之前的版本反過來，
+  遠坡比天空亮，於是那層坡讀起來不是山，是一條淺綠色的裝飾波浪。剪影對著有光
+  的天空，才會被看成「傍晚的森林」而不是「圖案」。
+*/
+const HERO_SCENE = {
+  skyTop: '#254632',
+  skyMid: '#2C5439',
+  skyHorizon: '#3A6A48',
+  ridgeFar: '#33603F',
+  hillMid: '#2A5138',
+  ground: '#1F3E2A',
+  groundShade: '#15291B',
+  trail: '#A7BF87',
+  trailEdge: '#D2E2B4',
+  grassFar: '#39684A',
+  grassNear: '#4C8055',
 } as const;
 
+/*
+  地形線：遠脊 → 中坡 → 前景地面，一層比一層暗、一層比一層低。
+
+  三條稜線的位置是算過的，不是隨手畫的：中坡與地面的稜線在左半邊都壓在
+  「共 N 週」那一行**以下**至少 7px，字才不會被一條線橫穿。遠脊會經過
+  focusText 後面，所以它的對比壓到最低（opacity 0.4、顏色貼近天空）——
+  那一層只負責空氣感，不負責輪廓。
+*/
+const RIDGE_FAR_D = 'M0 104C70 92 138 95 206 102 268 108 326 98 380 86V164H0V104Z';
+const HILL_MID_D = 'M0 138C78 130 146 131 214 134 276 137 330 129 380 118V164H0V138Z';
+const GROUND_D = 'M0 148C88 141 154 142 222 145 284 141 334 138 380 130V164H0V148Z';
+
 /**
- * 小徑：起點 →（目前位置）→ 樹屋。座標在 380 × 56 的路徑帶裡。
+ * 小徑：起點 →（目前位置）→ 樹屋。座標在 380 × 64 的前景帶裡。
  *
- * 這是一條**連續**的曲線，中途一顆圓點都沒有。North Star 示意圖上那些圓點只是
- * 在表達 journey mood；照著放會變成畫面自己發明的「四個階段」。
+ * 兩件事讓它讀起來是「地上的路」而不是「浮在空中的線」：
+ *
+ *   1. 整條曲線都壓在前景地面的稜線**以下**，不再往天空翹上去。
+ *   2. 它是一塊**近寬遠窄**的填色帶，不是等寬描邊。透視收窄本身就在說
+ *      「這是躺在地上的東西」；等寬的發光描邊只會說「這是一條線」。
+ *
+ * 中途一顆圓點都沒有。North Star 示意圖上那些圓點只是在表達 journey mood；
+ * 照著放會變成畫面自己發明的「四個階段」。
  */
-const JOURNEY_START = { x: 20, y: 44 };
-const JOURNEY_C1 = { x: 120, y: 54 };
-const JOURNEY_C2 = { x: 212, y: 10 };
-const JOURNEY_END = { x: 330, y: 20 };
-const JOURNEY_PATH_D =
-  `M${JOURNEY_START.x} ${JOURNEY_START.y}`
-  + `C${JOURNEY_C1.x} ${JOURNEY_C1.y} ${JOURNEY_C2.x} ${JOURNEY_C2.y}`
-  + ` ${JOURNEY_END.x} ${JOURNEY_END.y}`;
+const JOURNEY_START = { x: 12, y: 56 };
+const JOURNEY_C1 = { x: 100, y: 60 };
+const JOURNEY_C2 = { x: 200, y: 50 };
+const JOURNEY_END = { x: 302, y: 48 };
+
+/** 小徑的半寬：近端 5.5 → 遠端 1.6。上下兩條邊就是這個寬度的外擴。 */
+const TRAIL_D =
+  'M12 61.5C100 64.8 200 52.4 302 49.6'
+  + 'L302 46.4C200 47.6 100 55.2 12 50.5Z';
+const TRAIL_EDGE_D = 'M12 50.5C100 55.2 200 47.6 302 46.4';
 
 function pointOnJourneyPath(t: number): { x: number; y: number } {
   const u = 1 - t;
@@ -320,6 +354,46 @@ function planTotalLabel(planWeekLabel: string): string | null {
   return planWeekLabel.match(/共\s*\d+\s*\S+/)?.[0] ?? null;
 }
 
+/** 三片草葉。散在地面上讓前景長出東西來，不是可數的節點。 */
+function GrassTuft({
+  x,
+  y,
+  size = 1,
+  color,
+  opacity = 1,
+}: {
+  x: number;
+  y: number;
+  size?: number;
+  color: string;
+  opacity?: number;
+}) {
+  const blade = (tipX: number, tipY: number, bendX: number, bendY: number) =>
+    `M${x} ${y}Q${x + bendX * size} ${y - bendY * size} `
+    + `${x + tipX * size} ${y - tipY * size}`;
+
+  return (
+    <Path
+      d={[
+        blade(-3.6, 5.8, -0.6, 3.4),
+        blade(0.5, 7.2, 0.2, 3.9),
+        blade(3.4, 5.4, 0.9, 3.2),
+      ].join(' ')}
+      stroke={color}
+      strokeWidth={1.25 * size}
+      strokeLinecap="round"
+      fill="none"
+      opacity={opacity}
+    />
+  );
+}
+
+/**
+ * 前景帶：地上的小徑、草叢、目前位置。
+ *
+ * 這一層畫在樹屋圖片**之後**——草葉壓過樹屋底緣，樹才會是長在地上的，而不是
+ * 貼在右下角的貼圖。
+ */
 function JourneyPath({ position }: { position: number }) {
   const marker = pointOnJourneyPath(position);
 
@@ -327,56 +401,66 @@ function JourneyPath({ position }: { position: number }) {
     <Svg
       testID="goal-journey-path"
       style={styles.journeyPath}
-      viewBox="0 0 380 56"
+      viewBox="0 0 380 64"
       preserveAspectRatio="none"
       accessibilityElementsHidden
       pointerEvents="none"
     >
-      {/* 小徑本身：一條柔光襯底 + 一條細線。前後不分色——分了就是進度條。 */}
+      {/* 小徑：一塊近寬遠窄的地面。整條同色——分前後段就是進度條。 */}
+      <Path d={TRAIL_D} fill={HERO_SCENE.trail} opacity={0.3} />
       <Path
-        d={JOURNEY_PATH_D}
-        stroke={HERO_FOREST.pathGlow}
-        strokeWidth={8}
+        d={TRAIL_EDGE_D}
+        stroke={HERO_SCENE.trailEdge}
+        strokeWidth={0.9}
         strokeLinecap="round"
         fill="none"
-      />
-      <Path
-        d={JOURNEY_PATH_D}
-        stroke={HERO_FOREST.path}
-        strokeWidth={2.2}
-        strokeLinecap="round"
-        fill="none"
+        opacity={0.2}
       />
 
-      {/* 起點的嫩芽 */}
+      {/* 路邊的草：長在小徑上緣那道窄窄的地面上 */}
+      <GrassTuft x={58} y={50} size={1} color={HERO_SCENE.grassNear} opacity={0.75} />
+      <GrassTuft x={152} y={48} size={0.8} color={HERO_SCENE.grassFar} opacity={0.6} />
+      {/* 這一叢刻意壓在樹屋底緣上——有東西擋住底邊，樹才不像貼上去的 */}
+      <GrassTuft x={292} y={56} size={0.95} color={HERO_SCENE.grassNear} opacity={0.7} />
+
+      {/* 起點的嫩芽，站在小徑起點的旁邊 */}
       <Path
-        d={`M${JOURNEY_START.x} ${JOURNEY_START.y}v-9`}
+        d="M26 50v-8"
         stroke={Colors.leaf300}
-        strokeWidth={1.6}
+        strokeWidth={1.5}
         strokeLinecap="round"
         fill="none"
-      />
-      <Path
-        d={`M${JOURNEY_START.x} ${JOURNEY_START.y - 6}c-4.4 0-7-2.4-7-6.4 4.4 0 7 2.4 7 6.4Z`}
-        fill={Colors.leaf300}
         opacity={0.9}
       />
       <Path
-        d={`M${JOURNEY_START.x} ${JOURNEY_START.y - 8}c0-4 2.6-6.4 7-6.4 0 4-2.6 6.4-7 6.4Z`}
+        d="M26 45c-4.2 0-6.6-2.2-6.6-6 4.2 0 6.6 2.2 6.6 6Z"
+        fill={Colors.leaf300}
+        opacity={0.85}
+      />
+      <Path
+        d="M26 43c0-3.8 2.4-6 6.6-6 0 3.8-2.4 6-6.6 6Z"
         fill={Colors.leaf200}
-        opacity={0.75}
+        opacity={0.7}
       />
 
-      {/* 目前位置：一顆，只有一顆 */}
-      <Circle cx={marker.x} cy={marker.y} r={9.5} fill={Colors.gold300} opacity={0.16} />
+      {/* 目前位置：一顆，只有一顆。腳下有影子，才像停在路上而不是浮著。 */}
+      <Ellipse
+        cx={marker.x}
+        cy={marker.y + 3.6}
+        rx={6.5}
+        ry={2.2}
+        fill={HERO_SCENE.groundShade}
+        opacity={0.38}
+      />
+      <Circle cx={marker.x} cy={marker.y} r={8.5} fill={Colors.gold300} opacity={0.15} />
       <Circle
         testID="goal-journey-marker"
         cx={marker.x}
         cy={marker.y}
-        r={4.8}
+        r={4.6}
         fill={Colors.gold300}
       />
-      <Circle cx={marker.x} cy={marker.y} r={1.9} fill={HERO_FOREST.skyBottom} />
+      <Circle cx={marker.x} cy={marker.y} r={1.8} fill={HERO_SCENE.ground} />
     </Svg>
   );
 }
@@ -397,21 +481,33 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
         accessibilityElementsHidden
       >
         <Defs>
-          <LinearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <Stop offset={0} stopColor={HERO_FOREST.skyTop} />
-            <Stop offset={1} stopColor={HERO_FOREST.skyBottom} />
+          <LinearGradient id={`${gradientId}-sky`} x1="0" y1="0" x2="0" y2="1">
+            <Stop offset={0} stopColor={HERO_SCENE.skyTop} />
+            <Stop offset={0.52} stopColor={HERO_SCENE.skyMid} />
+            <Stop offset={1} stopColor={HERO_SCENE.skyHorizon} />
           </LinearGradient>
+          {/* 樹屋那一側的傍晚餘光。0.16 是「有點暖」，再高就變成發光特效了。 */}
+          <RadialGradient id={`${gradientId}-dusk`} cx="84%" cy="64%" r="46%">
+            <Stop offset={0} stopColor={Colors.gold300} stopOpacity={0.16} />
+            <Stop offset={1} stopColor={Colors.gold300} stopOpacity={0} />
+          </RadialGradient>
         </Defs>
-        <Rect x={0} y={0} width={380} height={164} fill={`url(#${gradientId})`} />
-        {/* 兩層坡就夠——多一層就開始像可數的地形 */}
-        <Path
-          d="M0 104c78-24 148-16 214 7 68 24 118 8 166-12v65H0v-60Z"
-          fill={HERO_FOREST.hillFar}
-          opacity={0.85}
-        />
-        <Path
-          d="M0 133c84-20 154-8 222 13 66 20 112 3 158-13v31H0v-31Z"
-          fill={HERO_FOREST.hillNear}
+        <Rect x={0} y={0} width={380} height={164} fill={`url(#${gradientId}-sky)`} />
+        <Rect x={0} y={0} width={380} height={164} fill={`url(#${gradientId}-dusk)`} />
+
+        {/* 遠脊 → 中坡 → 前景地面。三層就夠，而且愈近愈暗。 */}
+        <Path d={RIDGE_FAR_D} fill={HERO_SCENE.ridgeFar} opacity={0.4} />
+        <Path d={HILL_MID_D} fill={HERO_SCENE.hillMid} opacity={0.88} />
+        <Path d={GROUND_D} fill={HERO_SCENE.ground} />
+
+        {/* 樹屋腳下的影子。少了它，樹就是浮在地面上的一張圖。 */}
+        <Ellipse
+          cx={326}
+          cy={155}
+          rx={38}
+          ry={7}
+          fill={HERO_SCENE.groundShade}
+          opacity={0.34}
         />
       </Svg>
 
@@ -1222,13 +1318,13 @@ const styles = StyleSheet.create({
     width: 112,
     height: 112,
   },
-  /** 小徑帶固定 56 高，貼著底邊；Hero 長高時它不跟著拉長，marker 才不會被壓扁。 */
+  /** 前景帶固定 64 高，貼著底邊；Hero 長高時它不跟著拉長，marker 才不會被壓扁。 */
   journeyPath: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    height: 56,
+    height: 64,
   },
   heroCopy: {
     paddingTop: 16,
@@ -1266,7 +1362,8 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     lineHeight: 16,
     fontWeight: '700',
-    opacity: 0.62,
+    // 天空提亮之後 0.62 掉到 4.2:1，讀不太動；0.72 回到 5.2:1。
+    opacity: 0.72,
   },
   planNotice: {
     minHeight: 44,
