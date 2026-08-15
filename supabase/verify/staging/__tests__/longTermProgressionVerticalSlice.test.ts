@@ -106,14 +106,24 @@ suite('LT-FINAL-1R · staging vertical slice', () => {
     });
 
     expect(view.weekTarget).toBe(3);
-    expect(view.weekCompletedActual).toBe(
-      completions.filter((completion) => {
-        const at = dayjs(completion.completed_at).tz(TZ);
-        const monday = dayjs().tz(TZ).startOf('day')
-          .subtract((dayjs().tz(TZ).day() + 6) % 7, 'day');
-        return !at.isBefore(monday, 'day') && at.isBefore(monday.add(7, 'day'), 'day');
-      }).length,
-    );
+    // 這一週、而且**在計畫開始之後**的完成才算進進度 ——
+    // 計畫開始前的紀錄不是這份計畫的一部分。
+    const planStart = dayjs(goal.started_at).tz(TZ).startOf('day');
+    const monday = dayjs().tz(TZ).startOf('day')
+      .subtract((dayjs().tz(TZ).day() + 6) % 7, 'day');
+    const expected = completions.filter((completion) => {
+      const at = dayjs(completion.completed_at).tz(TZ);
+      return !at.isBefore(monday, 'day')
+        && at.isBefore(monday.add(7, 'day'), 'day')
+        && !at.isBefore(planStart, 'day');
+    }).length;
+    expect(view.weekCompletedActual).toBe(expected);
+    // 今天真的記過一次，所以它一定 >= 1。
+    expect(view.weekCompletedActual).toBeGreaterThanOrEqual(1);
+    expect(view.weekProgressLabel).toBe(`本週 ${expected} / 3`);
+    // ⚠️ current_day 確實會被 complete_task 遞增（habit 類），但它數的是
+    //    「累計完成」，不是「這一週做了幾次」—— 兩者不一樣，畫面讀的是後者。
+    expect(view.weekCompletedActual).not.toBe(goal.current_day);
     // 做超過約定次數不會被寫成 4 / 3，也不會讓計畫結束。
     expect(JSON.stringify(view)).not.toContain(`${view.weekTarget + 1} / ${view.weekTarget}`);
     expect(view.planState).toBe('active');
