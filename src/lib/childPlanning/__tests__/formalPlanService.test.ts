@@ -20,7 +20,10 @@ const ENRICHMENT: ChildPlanEnrichment = {
   estimatedMinutes: 15,
   durationType: 'long_term',
   durationDays: 14,
-  reward: { policy: 'coin_eligible', eligibility: 'allowed', policyVersion: 'v1' },
+  reward: {
+    policy: 'coin_eligible', eligibility: 'allowed', policyVersion: 'v1',
+    sessionCoinReference: 10, payoutType: 'per_completion',
+  },
   taskPolicyVersion: 't1',
   aiSnapshot: { snapshotVersion: 1 },
   aiModel: 'test-model',

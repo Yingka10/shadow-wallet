@@ -80,9 +80,14 @@ function version(overrides: Partial<ChildProposalPlanVersion> = {}): ChildPropos
   return {
     ...rawVersion(),
     reward_policy_version: POLICY_VERSION,
+    // 錨點是正式欄位，不是 snapshot（P1-A4A.1）。snapshot 這裡刻意
+    // 留一份**數字不一樣**的 policy 區塊：如果哪天有人把讀取路徑改回
+    // 去讀它，整組測試會立刻紅。
+    policy_session_coin_reference: SESSION_COINS,
+    policy_payout_type: 'per_completion',
     ai_snapshot: {
       snapshotVersion: 1,
-      policy: { payoutType: 'per_completion', sessionCoinReference: SESSION_COINS },
+      policy: { payoutType: 'per_milestone', sessionCoinReference: 999 },
     },
     ...overrides,
   };
@@ -107,6 +112,7 @@ function rawVersion(): ChildProposalPlanVersion {
     source_planning_session_id: 'session-1', planning_schema_version: 1,
     child_confirmed_plan: CHILD_CONFIRMED_PLAN,
     requires_parent_decision: [], enrichment_status: 'enriched',
+    policy_session_coin_reference: null, policy_payout_type: null,
     confirmed_reward_policy: null, confirmed_coin_amount: null, confirmed_payout_basis: null,
     confirmed_claim_period: null, confirmed_max_claims_per_period: null,
     confirmed_reward_policy_version: null, confirmed_task_policy_version: null,
@@ -315,31 +321,21 @@ describe('5. Reward freshness（沿用既有 evaluator，不是第二套）', ()
     expect(built.ok && built.command.rewardDecision).toEqual(freshDecision());
   });
 
-  it('幣值錨在 A3 enrichment 記下來的 session 價', () => {
+  it('幣值錨在正式的 policy evidence 欄位', () => {
     const decision = freshDecision();
     expect(decision.rewardPolicy).toBe('coin_eligible');
     if (decision.rewardPolicy !== 'coin_eligible' || decision.coin === null) return;
 
     // 錨點對得上 → 過；對不上 → POLICY_CHANGED。
     const aligned = card({
-      ai_snapshot: {
-        snapshotVersion: 1,
-        policy: {
-          payoutType: 'per_completion',
-          sessionCoinReference: decision.coin.suggestedAmount,
-        },
-      },
+      policy_session_coin_reference: decision.coin.suggestedAmount,
+      policy_payout_type: 'per_completion',
     });
     expect(buildChildPlanConfirmCommand(aligned, AGE_GROUP).ok).toBe(true);
 
     const drifted = card({
-      ai_snapshot: {
-        snapshotVersion: 1,
-        policy: {
-          payoutType: 'per_completion',
-          sessionCoinReference: decision.coin.suggestedAmount + 1,
-        },
-      },
+      policy_session_coin_reference: decision.coin.suggestedAmount + 1,
+      policy_payout_type: 'per_completion',
     });
     const result = buildChildPlanConfirmCommand(drifted, AGE_GROUP);
     expect(result.ok === false && result.reason).toBe('POLICY_CHANGED');
@@ -347,7 +343,7 @@ describe('5. Reward freshness（沿用既有 evaluator，不是第二套）', ()
 
   it('沒有錨點就不成立 —— 否則送什麼金額都沒有東西可比', () => {
     const result = buildChildPlanConfirmCommand(
-      card({ ai_snapshot: { snapshotVersion: 1, policy: {} } }),
+      card({ policy_session_coin_reference: null, policy_payout_type: null }),
       AGE_GROUP,
     );
     expect(result.ok === false && result.reason).toBe('POLICY_CHANGED');
@@ -356,16 +352,45 @@ describe('5. Reward freshness（沿用既有 evaluator，不是第二套）', ()
   it('payoutType 不是 per_completion 就不建成幣任務', () => {
     // staged 不是 per_milestone、accumulation 不是 final_completion。
     // 那兩種目前沒有結算路徑，session 價根本不等於會發的金額。
+    //
+    // DB 的 CHECK 只允許 per_completion，所以這一列在真的資料庫裡建不出來 ——
+    // 這條測的是「就算它出現了，App 端也不會放行」。
     const result = buildChildPlanConfirmCommand(
       card({
-        ai_snapshot: {
-          snapshotVersion: 1,
-          policy: { payoutType: 'per_milestone', sessionCoinReference: 8 },
-        },
+        policy_session_coin_reference: 8,
+        policy_payout_type: 'per_milestone' as unknown as 'per_completion',
       }),
       AGE_GROUP,
     );
     expect(result.ok === false && result.reason).toBe('POLICY_CHANGED');
+  });
+
+  it('ai_snapshot = null 也能確認 —— 稽核證據不是決策條件', () => {
+    // 這一條是 P1-A4A.1 的重點。snapshot 的形狀由「某一次 enrichment 回了
+    // 什麼」決定；一個家庭能不能開始執行他們的約定，不可以取決於那坨 JSON
+    // 裡剛好有沒有某個鍵。
+    const built = buildChildPlanConfirmCommand(
+      card({ ai_snapshot: null, ai_model: null }), AGE_GROUP);
+    expect(built.ok).toBe(true);
+    expect(built.ok && built.command.rewardDecision).toEqual(freshDecision());
+  });
+
+  it('snapshot 裡放一個不一樣的幣值，結果完全不變', () => {
+    // fixture 的 snapshot 本來就寫著 per_milestone / 999（見 version()）。
+    // 讀取路徑要是哪天被改回去讀它，這裡與上面那條會同時紅。
+    const built = buildChildPlanConfirmCommand(card(), AGE_GROUP);
+    expect(built.ok).toBe(true);
+
+    const noisy = buildChildPlanConfirmCommand(
+      card({
+        ai_snapshot: {
+          snapshotVersion: 1,
+          policy: { payoutType: 'final_completion', sessionCoinReference: 1 },
+        },
+      }),
+      AGE_GROUP,
+    );
+    expect(noisy.ok && noisy.command).toEqual(built.ok && built.command);
   });
 
   it('任務政策版本過期 → POLICY_CHANGED', () => {

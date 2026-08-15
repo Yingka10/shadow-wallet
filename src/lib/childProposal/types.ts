@@ -362,6 +362,22 @@ export type ChildProposalPlanVersion = {
   requires_parent_decision: ChildPlanSharedDecision[];
   /** enriched = 政策欄位算完了；unavailable = 當時 policy helper 不可用。 */
   enrichment_status: 'enriched' | 'unavailable' | null;
+
+  // ── P1-A4A.1 Deterministic policy evidence ─────────────────────────────
+  //
+  // 既有規則鏈（rewardEligibility → coinPolicy）在建版當時算出來的證據。
+  // **不是孩子決定的、不是模型寫的、也不是最終會發的金額。**
+  //
+  // 之所以是正式欄位而不是留在 ai_snapshot 裡：家長同意那一步要拿它跟
+  // 現在重算的結果對帳，而稽核快照的形狀由「某一次 enrichment 回了什麼」
+  // 決定 —— 正式任務建不建得起來，不可以取決於一坨 JSON 裡剛好有沒有
+  // 某個鍵。與 legacy 的 ai_suggested_coin_amount 是不同的兩欄，因為
+  // 這個數字不是 AI 算的。
+
+  /** 規則引擎算出的一次投入參考價。最終金額在 confirmed_coin_amount。 */
+  policy_session_coin_reference: number | null;
+  /** 當時政策支援的結算語意。目前只可能是 per_completion。 */
+  policy_payout_type: 'per_completion' | null;
   /**
    * AI 建議的幣值。**永遠不是最終值。**
    *

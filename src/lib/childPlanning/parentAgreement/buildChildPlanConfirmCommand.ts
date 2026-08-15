@@ -9,14 +9,15 @@
 //    與 P0 Direct Confirm 完全同一條計算鏈。差別只有一個：
 //
 //      P0  拿 plan.ai_suggested_coin_amount 當比對錨點
-//      P1  拿 A3 enrichment 當時記在 ai_snapshot.policy 裡的
-//          sessionCoinReference 當錨點
+//      P1  拿正式欄位 policy_session_coin_reference 當錨點
 //
-//    理由是 A3 刻意不在 child formal plan 上存幣值（那一步不發幣、
-//    也不替家長先決定金額）。但 A3 的 enrichment 走的就是既有的
-//    rewardEligibility → coinPolicy 規則鏈，它算出來的 session 價
-//    有被記進 snapshot —— 那是一個**伺服器端存著的、規則引擎產生的**
-//    數字，正好可以當錨點。沒有它的話，家長端送什麼幣值都沒有東西可比。
+//    兩欄分開是因為 P1 那個數字**不是 AI 算的**：它是既有的
+//    rewardEligibility → coinPolicy 規則鏈在 A3 建版當時的判定。
+//
+// ⚠️ 錨點不讀 ai_snapshot（P1-A4A.1 改掉的就是這件事）。
+//    稽核快照的形狀由「某一次 enrichment 回了什麼」決定，沒有 CHECK
+//    保護，也沒有承諾哪個鍵一定在 —— 正式任務與 confirmed reward
+//    建不建得起來，不可以取決於一坨稽核 JSON 裡剛好有沒有某個鍵。
 // ─────────────────────────────────────────────────────────────────────────
 
 import { evaluateTaskReward } from '../../../screens/parent/tablet/taskDrawer/taskReward';
@@ -47,24 +48,22 @@ const BLOCK_MESSAGE: Record<ChildPlanConfirmBlock, string> = {
 };
 
 /**
- * A3 enrichment 當時算出來的 session 價與結算方式。
+ * 這份正式計畫上的 deterministic policy evidence。
  *
- * 讀的是 snapshot 裡的 policy 區塊 —— 那一段是 deterministic 規則引擎的
- * 輸出，不是模型的自由文字。讀不到就當作「沒有可比對的錨點」。
+ * A3 建版時由既有規則鏈算出並寫進正式欄位，之後 append-only guard
+ * 擋住原地修改 —— 「拿現在的規則再算一次跟當時的證據對帳」這件事，
+ * 正是因為那兩欄不能被改才有意義。
+ *
+ * 缺任一欄就當作「沒有可比對的錨點」。**不退回去讀 ai_snapshot** ——
+ * 那會讓剛拿掉的相依從後門走回來。
  */
-function enrichmentCoinAnchor(
+function policyEvidenceAnchor(
   plan: ChildProposalPlanVersion,
 ): { coins: number | null; payoutType: string | null } {
-  const snapshot = plan.ai_snapshot;
-  if (snapshot === null || typeof snapshot !== 'object') return { coins: null, payoutType: null };
-  const policy = (snapshot as { policy?: unknown }).policy;
-  if (policy === null || typeof policy !== 'object') return { coins: null, payoutType: null };
-
-  const reference = (policy as { sessionCoinReference?: unknown }).sessionCoinReference;
-  const payoutType = (policy as { payoutType?: unknown }).payoutType;
+  const reference = plan.policy_session_coin_reference;
   return {
     coins: typeof reference === 'number' && Number.isInteger(reference) ? reference : null,
-    payoutType: typeof payoutType === 'string' ? payoutType : null,
+    payoutType: plan.policy_payout_type ?? null,
   };
 }
 
@@ -105,7 +104,7 @@ export function buildChildPlanRewardDecision(
     return policyChanged('回饋政策已更新，請重新整理後再確認。');
   }
 
-  const anchor = enrichmentCoinAnchor(plan);
+  const anchor = policyEvidenceAnchor(plan);
 
   if (decision.rewardPolicy === 'coin_eligible') {
     // staged / accumulation 不代表 milestone / final-completion 發放。

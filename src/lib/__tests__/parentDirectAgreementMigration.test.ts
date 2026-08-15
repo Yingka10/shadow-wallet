@@ -183,6 +183,12 @@ describe('4. 共同版本逐欄從孩子那一版複製', () => {
 
 describe('5. Reward', () => {
   it('幣值錨在 A3 記下來的 session 價，不是呼叫端說了算', () => {
+    // ⚠️ 這一版讀的是 ai_snapshot，而那正是 P1-A4A.1 修掉的事：
+    //    稽核快照不能當 canonical policy authority。
+    //
+    //    這條測試留著讀「當時這支寫了什麼」—— 這個檔案已經套過 staging，
+    //    改它會讓 migration history 分岔。**現行行為看 20260827**，
+    //    在 childPlanPolicyEvidenceMigration.test.ts 釘住。
     expect(AGREEMENT).toContain("v_plan.ai_snapshot -> 'policy' ->> 'sessionCoinReference'");
     expect(AGREEMENT).toContain("v_plan.ai_snapshot -> 'policy' ->> 'payoutType'");
     expect(AGREEMENT).toContain('IS DISTINCT FROM v_coin_ref');

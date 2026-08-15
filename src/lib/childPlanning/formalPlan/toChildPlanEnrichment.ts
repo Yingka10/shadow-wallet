@@ -69,8 +69,17 @@ export function toChildPlanEnrichment(args: {
       policy: draft.rewardPolicy,
       eligibility: draft.rewardEligibility,
       policyVersion: draft.rewardPolicyVersion,
-      // 幣值一個都不帶。P1-A3 不發幣，也不替家長先決定金額 ——
-      // sessionCoinReference 與 pricing 留在 snapshot 裡當稽核證據。
+      // 決定好的幣值一個都不帶：P1-A3 不發幣，也不替家長先決定金額。
+      //
+      // 但參考價與結算語意要帶（P1-A4A.1）。它們是既有規則鏈
+      // （rewardEligibility → coinPolicy）的判定，會寫進正式欄位當
+      // deterministic policy evidence —— 家長同意那一步拿現在重算的
+      // 結果跟它對帳，才知道政策有沒有在這段期間變過。
+      //
+      // 以前這兩個值只留在 ai_snapshot 裡。稽核快照的形狀由「某一次
+      // enrichment 回了什麼」決定，正式任務建不建得起來不可以取決於它。
+      sessionCoinReference: draft.sessionCoinReference,
+      payoutType: draft.payoutType,
     },
     taskPolicyVersion: TASK_POLICY_VERSION,
     aiSnapshot: buildPlanDraftSnapshot({

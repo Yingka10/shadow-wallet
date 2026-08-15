@@ -103,20 +103,23 @@ describe('不可以使用的欄位，一個都沒有進來', () => {
     expect(serialized).not.toContain(DRAFT.nextStepSuggestion as string);
   });
 
-  it('幣值一個都不帶', () => {
+  it('決定好的幣值一個都不帶', () => {
+    // ⚠️ sessionCoinReference / payoutType **不在**這張清單裡（P1-A4A.1）。
+    //    它們是規則引擎的判定，會寫進正式的 policy evidence 欄位；
+    //    這張清單擋的是「已經決定要發多少」那一類欄位。
+    //    兩者的差別見下面那一組。
     const { aiSnapshot: _snapshot, ...rest } = enrich();
     const serialized = JSON.stringify(rest);
     for (const forbidden of [
       'coinAmount',
       'finalRewardCoins',
-      'sessionCoinReference',
       'aiSuggestedCoinAmount',
-      'payoutType',
+      'confirmedCoinAmount',
+      'finalAmount',
     ]) {
       expect({ forbidden, present: serialized.includes(forbidden) })
         .toEqual({ forbidden, present: false });
     }
-    expect(serialized).not.toContain('"8"');
   });
 });
 
@@ -143,7 +146,26 @@ describe('可以使用的欄位，來源是既有的正式邏輯', () => {
       policy: 'coin_eligible',
       eligibility: 'allowed',
       policyVersion: 'coin-policy@2026-07',
+      // policy evidence（P1-A4A.1）：既有規則鏈算出的一次投入參考價與
+      // 結算語意，照抄不加工。它們會成為正式欄位，家長同意那一步拿
+      // 現在重算的結果跟它們對帳 —— 這一層動一個數字，那個對帳就失真。
+      sessionCoinReference: 8,
+      payoutType: 'per_completion',
     });
+    expect(result.reward.sessionCoinReference).toBe(DRAFT.sessionCoinReference);
+    expect(result.reward.payoutType).toBe(DRAFT.payoutType);
+  });
+
+  it('不能發幣的計畫，參考價照樣照抄 null —— 不補一個數字', () => {
+    const result = enrich({
+      category: 'B',
+      rewardPolicy: 'family_contribution',
+      rewardEligibility: 'blocked',
+      pricingStatus: 'unpriced',
+      sessionCoinReference: null,
+      aiSuggestedCoinAmount: null,
+    });
+    expect(result.reward.sessionCoinReference).toBeNull();
   });
 
   it('B 類家庭參與不會因為孩子想要幣就變成可發幣', () => {

@@ -55,6 +55,7 @@ function version(overrides: Partial<ChildProposalPlanVersion> = {}): ChildPropos
       progressionKind: 'rhythm',
     },
     requires_parent_decision: [], enrichment_status: 'enriched',
+    policy_session_coin_reference: 10, policy_payout_type: 'per_completion',
     confirmed_reward_policy: null, confirmed_coin_amount: null, confirmed_payout_basis: null,
     confirmed_claim_period: null, confirmed_max_claims_per_period: null,
     confirmed_reward_policy_version: null, confirmed_task_policy_version: null,

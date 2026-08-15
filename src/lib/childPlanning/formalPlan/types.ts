@@ -25,6 +25,7 @@ import type {
   ChildProposalRewardEligibility,
   ChildProposalRewardPolicy,
 } from '../../childProposal/types';
+import type { PayoutType } from '../../childProposal/planDraft/types';
 
 /** 命令版本。與 planning session 的三支 RPC 同一數列。 */
 export const PUBLISH_CHILD_CONFIRMED_PLAN_SCHEMA_VERSION = 1;
@@ -70,7 +71,9 @@ export const REQUIRES_PARENT_DECISION_VALUES: readonly RequiresParentDecision[] 
  *
  * ⚠️ 沒有 cadence。孩子的節奏優先，孩子沒決定就是沒決定 ——
  *    AI 不可以偷偷補一個「一週三次」。
- * ⚠️ 沒有任何幣值。這一步不發幣，也不替家長先決定金額。
+ * ⚠️ 沒有任何**決定好的**幣值。這一步不發幣，也不替家長先決定金額。
+ *    reward 裡的兩個 policy evidence 欄位是規則引擎的判定，不是承諾 ——
+ *    見下方說明。
  */
 export type ChildPlanEnrichment = {
   purposeCategory: 'A' | 'B' | 'C' | 'D';
@@ -82,6 +85,25 @@ export type ChildPlanEnrichment = {
     policy: ChildProposalRewardPolicy;
     eligibility: ChildProposalRewardEligibility;
     policyVersion: string;
+    /**
+     * 規則引擎算出的一次投入參考價（P1-A4A.1）。
+     *
+     * **不是最終金額**，也不是「AI 建議的幣值」—— 它是既有的
+     * rewardEligibility → coinPolicy 那條鏈對「這樣一次投入值多少」的
+     * 判定，會被寫進正式欄位 policy_session_coin_reference，
+     * 之後家長同意那一步拿現在重算的結果跟它對帳。
+     *
+     * 算不出來就是 null。RPC 會把 reward 列進 requires_parent_decision，
+     * 不會挑一個數字補上。
+     */
+    sessionCoinReference: number | null;
+    /**
+     * 這份計畫的結算語意。目前唯一有實作結算路徑的是 per_completion；
+     * 其他值一律不寫進正式欄位（RPC 端擋，DB CHECK 再擋一次）。
+     *
+     * ⚠️ 不由 progressionKind 推導：staged 不是 per_milestone。
+     */
+    payoutType: PayoutType;
   };
   taskPolicyVersion: string;
   /** 這一次 enrichment 的稽核證據。**不是** canonical 計畫資料。 */

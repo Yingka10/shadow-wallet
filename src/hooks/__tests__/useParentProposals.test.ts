@@ -49,6 +49,8 @@ function aiPlan(proposalId: string): ChildProposalPlanVersion {
     adopted_from_plan_version_id: null, ai_suggested_coin_amount: 10,
     source_planning_session_id: null, planning_schema_version: null,
     child_confirmed_plan: null, requires_parent_decision: [], enrichment_status: null,
+    // legacy AI 版本沒有 P1 policy evidence，錨點仍是 ai_suggested_coin_amount。
+    policy_session_coin_reference: null, policy_payout_type: null,
     confirmed_reward_policy: null, confirmed_coin_amount: null, confirmed_payout_basis: null,
     confirmed_claim_period: null, confirmed_max_claims_per_period: null,
     confirmed_reward_policy_version: null, confirmed_task_policy_version: null,

@@ -19,6 +19,7 @@ function plan(overrides: Partial<ChildProposalPlanVersion> = {}): ChildProposalP
     // 所以四欄都是空的（DB CHECK 也只允許 authored_by='child' 的列帶 lineage）。
     source_planning_session_id: null, planning_schema_version: null,
     child_confirmed_plan: null, requires_parent_decision: [], enrichment_status: null,
+    policy_session_coin_reference: null, policy_payout_type: null,
     confirmed_reward_policy: null, confirmed_coin_amount: null,
     confirmed_payout_basis: null, confirmed_claim_period: null,
     confirmed_max_claims_per_period: null, confirmed_reward_policy_version: null,

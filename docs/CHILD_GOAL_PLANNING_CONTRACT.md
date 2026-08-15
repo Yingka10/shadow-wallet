@@ -749,9 +749,11 @@ trim / rewrite / default / AI regenerate 一律不允許。
 （`evaluateTaskReward`，與 P0 完全同一條計算鏈，**沒有第二套 evaluator**），
 RPC 再驗那份判定與計畫上的證據一致。
 
-幣值的錨點是 A3 enrichment 記在 `ai_snapshot.policy.sessionCoinReference` 的
-session 價 —— 那是伺服器端存著、規則引擎產生的數字。A3 刻意不在 child formal
-plan 上存幣值，所以沒有這個錨點的話，呼叫端送什麼金額都沒有東西可以比對。
+幣值的錨點是正式欄位 `policy_session_coin_reference`（見 §13）。
+沒有錨點的話，呼叫端送什麼金額都沒有東西可以比對。
+
+> A4A 出貨時這個錨點讀的是 `ai_snapshot.policy.sessionCoinReference`。
+> **P1-A4A.1 改掉了**：稽核快照不是 canonical policy authority。
 
 - 政策／版本對不上 → `POLICY_CHANGED`，**不靜靜改掉計畫上的證據**
 - `finalAmount ≠ suggestedAmount` → 拒絕（家長不自由輸入金額）
@@ -776,3 +778,72 @@ current version 換掉了也回 `STALE_PLAN_VERSION`。
 家長新增／修改 cadence、duration、next step；孩子二次 review；
 A4B 共同條件協商；LongTermDetail redesign；WP2 merge；Dynamic Replan；
 付費 provider cutover。
+
+---
+
+## 13. Deterministic Policy Evidence（P1-A4A.1）
+
+### 13.1 為什麼要有這一節
+
+A4A 出貨時，家長同意那一步的幣值錨點讀的是：
+
+```
+ai_snapshot -> 'policy' ->> 'sessionCoinReference'
+ai_snapshot -> 'policy' ->> 'payoutType'
+```
+
+這違反一條既有的界線：**`ai_snapshot` 是稽核證據，不是 canonical policy
+authority。** 快照的形狀由「某一次 enrichment 回了什麼」決定，沒有 CHECK、
+沒有承諾哪個鍵一定在。正式任務與 confirmed reward 建不建得起來，不可以
+取決於一坨稽核 JSON 裡剛好有沒有某個鍵 —— 那條相依一旦成立，snapshot 就
+再也不能改形狀，而它本來就是會隨模型與版本演化的那一欄。
+
+### 13.2 兩個正式欄位
+
+| 欄位 | 語意 |
+|---|---|
+| `policy_session_coin_reference` | 既有規則鏈（`rewardEligibility → coinPolicy`）在建版當時算出的一次投入參考價 |
+| `policy_payout_type` | 當時政策**支援**的結算語意。CHECK 只允許 `per_completion` |
+
+它們**不是**孩子決定的、**不是**模型生成的、**不是**最終確認的幣值
+（那一個在 `confirmed_coin_amount`）。
+
+不塞進 legacy 的 `ai_suggested_coin_amount`：那個名字說這是 AI 算的，
+而這個數字不是。P0 legacy 該欄的語意與行為完全不變。
+
+### 13.3 A3 寫入規則
+
+值來自 enrichment 的 `reward.sessionCoinReference` / `reward.payoutType`，
+也就是既有 Plan Draft 那條鏈的輸出。寫入條件：
+
+- `reward_policy = coin_eligible` 且 `eligibility = allowed`
+- 且 `payoutType = per_completion`
+
+任一條不成立 → **兩欄都留 NULL**，而且 `reward` 進 `requires_parent_decision`。
+
+**不猜。** 不因 `progressionKind = staged` 寫 `per_milestone`，
+不因 `accumulation` 寫 `final_completion`。那兩種結算方式現在沒有實作，
+猜一個寫進去只會讓一份沒有結算路徑的計畫看起來完全正常 —— 直到孩子
+完成第一個里程碑、而沒有人發幣。
+
+enrichment 不可用時同樣兩欄 NULL，計畫照樣成立（`enrichment_status`
+與 `requires_parent_decision` 會說明缺什麼）。
+
+### 13.4 append-only
+
+兩欄都在 `child_proposal_plan_version_guard()` 的內容清單裡。
+「拿現在的規則再算一次、跟建版當時的證據對帳」這件事，正是因為證據
+不能被原地改才有意義。政策後來變了走 `POLICY_CHANGED`，不是回頭修那一列。
+
+### 13.5 A4A 讀取規則
+
+`confirm_child_planning_proposal_v1` 的**決策路徑一個條件都不讀
+`ai_snapshot`**。錨點就是這兩欄；共同約定版本逐欄複製它們；事後驗證
+兩個方向都比對（孩子那一版沒被改、共同版本等於孩子那一版）。
+
+`ai_snapshot` 仍然跟著複製到共同版本 —— 它是證據，之後要回答
+「當時的政策判定憑什麼」時要找得到。但**它只是證據**。
+
+> **canonical regression**：`ai_snapshot = NULL` 而 policy evidence 完整時，
+> A4A 必須仍然可以確認。稽核證據存不存在，不該決定一個家庭能不能
+> 開始執行他們的約定。
