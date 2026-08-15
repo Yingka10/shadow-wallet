@@ -23,6 +23,12 @@ import {
   type ProposeChildPlanningTermsResult,
 } from '../childPlanning/sharedTerms';
 import {
+  buildChildAcceptCommand,
+  buildChildRequestChangesCommand,
+  type AcceptChildPlanningTermsResult,
+  type RequestChildPlanningTermChangesResult,
+} from '../childPlanning/childReview';
+import {
   buildAcceptReviewCommand,
   buildCloseUnsuitableCommand,
   buildRequestChangesCommand,
@@ -96,6 +102,17 @@ export const CONFIRM_CHILD_PLANNING_PROPOSAL_RPC = 'confirm_child_planning_propo
 export const PROPOSE_CHILD_PLANNING_TERMS_RPC = 'propose_child_planning_terms_v1';
 
 /**
+ * P1-A4B2：孩子對家長提出的共同條件的兩個回覆。
+ *
+ * ⚠️ 是 ACCEPT_CHILD_PROPOSAL_PLAN_RPC / REQUEST_CHILD_PROPOSAL_CHANGES_RPC
+ *    的 **sibling**。那兩支用 P0 的 reward 錨點與 P0 的調整版形狀，
+ *    一個字都沒改。
+ */
+export const ACCEPT_CHILD_PLANNING_TERMS_RPC = 'accept_child_planning_terms_v1';
+export const REQUEST_CHILD_PLANNING_TERM_CHANGES_RPC =
+  'request_child_planning_term_changes_v1';
+
+/**
  * 只有這六支。型別上就不接受任意字串 —— 打錯名字要在編譯期就被抓到，
  * 不是等到 PostgREST 回 PGRST202 才發現 migration「沒套用」。
  */
@@ -109,6 +126,8 @@ type ChildProposalRpcName =
   | typeof CONFIRM_CHILD_PLANNING_PROPOSAL_RPC
   | typeof REVISE_CHILD_PROPOSAL_PLAN_RPC
   | typeof PROPOSE_CHILD_PLANNING_TERMS_RPC
+  | typeof ACCEPT_CHILD_PLANNING_TERMS_RPC
+  | typeof REQUEST_CHILD_PLANNING_TERM_CHANGES_RPC
   | typeof ACCEPT_CHILD_PROPOSAL_PLAN_RPC
   | typeof REQUEST_CHILD_PROPOSAL_CHANGES_RPC
   | typeof CLOSE_CHILD_PROPOSAL_UNSUITABLE_RPC
@@ -539,6 +558,105 @@ export class SupabaseChildProposalService {
       proposalId,
       planVersionId,
       status: 'needs_child_review',
+      idempotentReplay: result.payload.idempotentReplay === true,
+    };
+  }
+
+  /**
+   * P1-A4B2：孩子接受家長提出的共同條件。
+   *
+   * ⚠️ 回傳的 `activated` 才是「這件事開始了沒有」。條件還沒說完的那一輪
+   *    也是 ok:true —— 那代表「他同意這一輪」，不是「任務開始了」。
+   *    把 ok 當成開始，畫面就會對孩子說謊。
+   */
+  async acceptChildPlanningTerms(
+    review: ChildProposalReviewData,
+    childAgeGroup: string,
+  ): Promise<AcceptChildPlanningTermsResult> {
+    const built = buildChildAcceptCommand(review, childAgeGroup);
+    if (built.ok !== true) return built;
+
+    const fallback = '送出你的回覆失敗';
+    const result = await callProposalRpc(
+      ACCEPT_CHILD_PLANNING_TERMS_RPC, built.command, fallback,
+    );
+    if (result.ok !== true) return result;
+
+    const proposalId = requireId(result.payload, 'proposalId', fallback);
+    if (isFailure(proposalId)) return proposalId;
+    const planVersionId = requireId(result.payload, 'planVersionId', fallback);
+    if (isFailure(planVersionId)) return planVersionId;
+
+    const activated = result.payload.activated === true;
+    const status = result.payload.status;
+    if (status !== 'active' && status !== 'proposed') {
+      return { ok: false, code: 'UNKNOWN', message: `${fallback}：回應狀態無法辨識` };
+    }
+    if (activated !== (status === 'active')) {
+      return { ok: false, code: 'UNKNOWN', message: `${fallback}：回應狀態前後不一致` };
+    }
+
+    let taskId: string | null = null;
+    let confirmedReward: ChildProposalConfirmedReward | null = null;
+    if (activated) {
+      const id = requireId(result.payload, 'taskId', fallback);
+      if (isFailure(id)) return id;
+      taskId = id;
+      if (!isConfirmedReward(result.payload.confirmedReward)) {
+        return {
+          ok: false, code: 'UNKNOWN', reason: 'CONFIRMED_REWARD_MISSING',
+          message: `${fallback}：共同版本缺少確認的回饋紀錄`,
+        };
+      }
+      confirmedReward = result.payload.confirmedReward;
+    }
+
+    return {
+      ok: true,
+      proposalId,
+      planVersionId,
+      status,
+      activated,
+      taskId,
+      childPlanVersionId: typeof result.payload.childPlanVersionId === 'string'
+        ? result.payload.childPlanVersionId
+        : null,
+      requiresParentDecision: Array.isArray(result.payload.requiresParentDecision)
+        ? result.payload.requiresParentDecision.filter(
+          (term): term is string => typeof term === 'string')
+        : [],
+      confirmedReward,
+      idempotentReplay: result.payload.idempotentReplay === true,
+    };
+  }
+
+  /** P1-A4B2：孩子想再和家長談。不建任務、不改任何版本內容。 */
+  async requestChildPlanningTermChanges(
+    review: ChildProposalReviewData,
+    reason?: string,
+  ): Promise<RequestChildPlanningTermChangesResult> {
+    const built = buildChildRequestChangesCommand(review, reason);
+    if (built.ok !== true) return built;
+
+    const fallback = '送出你的想法失敗';
+    const result = await callProposalRpc(
+      REQUEST_CHILD_PLANNING_TERM_CHANGES_RPC, built.command, fallback,
+    );
+    if (result.ok !== true) return result;
+
+    const proposalId = requireId(result.payload, 'proposalId', fallback);
+    if (isFailure(proposalId)) return proposalId;
+    const planVersionId = requireId(result.payload, 'planVersionId', fallback);
+    if (isFailure(planVersionId)) return planVersionId;
+    if (result.payload.status !== 'proposed') {
+      return { ok: false, code: 'UNKNOWN', message: `${fallback}：回應狀態無法辨識` };
+    }
+
+    return {
+      ok: true,
+      proposalId,
+      planVersionId,
+      status: 'proposed',
       idempotentReplay: result.payload.idempotentReplay === true,
     };
   }

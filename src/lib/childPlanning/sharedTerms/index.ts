@@ -35,5 +35,9 @@ export {
 export type { BuildChildPlanningTermsResult } from './buildChildPlanningTermsCommand';
 
 export { projectCard, projectSharedTerms, pricingRelevantChange } from './projectSharedTerms';
-export { overriddenChildChoices, sharedTermChanges } from './sharedTermDiff';
+export {
+  overriddenChildChoices,
+  sharedTermChanges,
+  sharedTermVersionChanges,
+} from './sharedTermDiff';
 export type { SharedTermChange } from './sharedTermDiff';

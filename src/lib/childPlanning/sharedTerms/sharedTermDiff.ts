@@ -77,7 +77,34 @@ export function sharedTermChanges(
   source: ChildProposalPlanVersion,
   terms: ChildPlanningSharedTerms,
 ): SharedTermChange[] {
-  const next = projectSharedTerms(source, terms);
+  const changes = sharedTermVersionChanges(source, projectSharedTerms(source, terms));
+  if (terms.rewardChoice === 'no_coin' && source.reward_policy === 'coin_eligible'
+    && !changes.some((change) => change.label === '怎麼給回饋')) {
+    changes.push({
+      label: '怎麼給回饋',
+      before: rewardText(source),
+      after: '看得到進度，不給成長幣',
+    });
+  }
+  return changes;
+}
+
+/**
+ * 兩個版本之間的共同條件差異。
+ *
+ * ⚠️ **白名單**：只比對節奏、時段、每次多久、先試多久、回饋方式。
+ *    孩子擁有的欄位（標題、做法、下一步、progression 結構）不在這裡 ——
+ *    它們本來就不該有差異，真的有差異是資料錯了，不是一次合法的協商，
+ *    那要在 RPC 層擋下來（CHILD_PLAN_INTEGRITY_VIOLATION），
+ *    不是排成一行讓孩子挑「要不要接受」。
+ *
+ * P1-A4B2 的孩子端直接用這一支：來源是家長草案的 adopted_from。
+ * **不另存一份 narrative** —— 第二份 truth 遲早會和資料說不一樣的話。
+ */
+export function sharedTermVersionChanges(
+  source: ChildProposalPlanVersion,
+  next: ChildProposalPlanVersion,
+): SharedTermChange[] {
   const changes: SharedTermChange[] = [];
 
   const beforeCadence = cadenceText(source);
@@ -104,12 +131,10 @@ export function sharedTermChanges(
     changes.push({ label: '這次先試多久', before: beforeDuration, after: afterDuration });
   }
 
-  if (terms.rewardChoice === 'no_coin' && source.reward_policy === 'coin_eligible') {
-    changes.push({
-      label: '怎麼給回饋',
-      before: rewardText(source),
-      after: '看得到進度，不給成長幣',
-    });
+  const beforeReward = rewardText(source);
+  const afterReward = rewardText(next);
+  if (afterReward !== null && afterReward !== beforeReward) {
+    changes.push({ label: '怎麼給回饋', before: beforeReward, after: afterReward });
   }
 
   return changes;

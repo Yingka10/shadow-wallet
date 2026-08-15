@@ -1340,6 +1340,14 @@ export interface Database {
         Args: { p_command: object };
         Returns: unknown;
       };
+      accept_child_planning_terms_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      request_child_planning_term_changes_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
       mark_task_atomic: {
         Args: {
           p_task_id: string;

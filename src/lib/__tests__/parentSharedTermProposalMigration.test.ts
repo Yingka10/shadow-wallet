@@ -195,6 +195,23 @@ describe('5. 未決集合', () => {
     expect(CODE).toContain("p_duration_type = 'long_term'");
   });
 
+  it('沒選回饋方式時 reward 不會從未決集合裡消失', () => {
+    // 三值邏輯：v_choice 是 NULL 時 `NULL = 'no_coin'` 的結果是 NULL 不是
+    // false，整個 IF 條件就變成 NULL，那一段直接不執行 —— 一個真的還沒
+    // 說定的 reward 就這樣不見了。staging acceptance 抓到的（A4B2 主線）。
+    //
+    // **現行行為看 20260830**；20260828 是有問題的那一版，留著不動。
+    const fixed = body(
+      read('20260830000000_shared_term_pending_reward_fix.sql'),
+      'propose_child_planning_terms_v1');
+    expect(fixed.replace(/\s+/g, ' ')).toContain(
+      "IF NOT (COALESCE(v_choice, '') = 'no_coin'"
+      + " OR (v_policy = 'coin_eligible' AND v_coin_ref IS NOT NULL)) THEN");
+    expect(fixed).toContain("IF COALESCE(v_choice, '') = 'no_coin' THEN");
+    // 裸比較一個都不能留。
+    expect(fixed).not.toMatch(/[^(]v_choice = 'no_coin'/);
+  });
+
   it('草案可以帶著未決集合（scope CHECK 放寬到有 adoption lineage）', () => {
     expect(CODE).toContain('OR adopted_from_plan_version_id IS NOT NULL');
     expect(CODE).toContain('cardinality(requires_parent_decision) = 0');

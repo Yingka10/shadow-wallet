@@ -972,3 +972,99 @@ freshness → canonical Task → confirmedReward → active；或孩子想再改
 > `refresh_child_plan_enrichment_v1` 之類的 RPC。要做一顆真的「重新整理」
 > 需要新的 orchestration（新版本？就地補欄位？誰有權觸發？），
 > 所以這一包只顯示說明文字，不放一顆按不動的按鈕。
+
+---
+
+## 15. Child Re-review & Activation（P1-A4B2）
+
+### 15.1 兩種「可以」
+
+這一節最重要的一條邊界：**孩子按下「可以」不永遠等於任務開始。**
+
+| `requires_parent_decision` | 結果 |
+|---|---|
+| `[]` | 正式成立 → `active` ＋ canonical task ＋ confirmed reward |
+| 非空 | 記下他同意這一輪 → 回 `proposed` 繼續談，**不建任務** |
+
+走哪一條由**資料**決定，不由呼叫端指定。讓 UI 挑路徑的話，隱藏一顆按鈕
+就等於繞過檢查。
+
+`accept_child_planning_terms_v1` / `request_child_planning_term_changes_v1`
+是 `accept_child_proposal_plan_v1` / `request_child_proposal_changes_v1` 的
+**sibling**（後者用 P0 的 `ai_suggested_coin_amount` 錨點與 P0 的調整版
+形狀），legacy 一個字都沒改。
+
+### 15.2 Partial accept 不碰 `child_accepted_at`
+
+那一欄在這個 repo 的既有語意是「孩子接受了即將成為共同計畫的版本」，
+而且一向與 `effective_at`、正式任務一起出現。在還不完整的草案上填它，
+之後每一個讀者都要重新理解這個欄位。
+
+所以 partial accept **只寫一筆狀態事件**，Parent Review Version 維持
+`child_accepted_at = null` / `effective_at = null` / `confirmed_* = null`，
+也不新增版本。
+
+### 15.3 動作語意：`child_proposal_status_events.action`
+
+「同意這一輪」與「想再調整」都會回 `proposed`，兩者必須分得開：
+
+| action | 意思 |
+|---|---|
+| `accepted_shared_terms_pending_more` | 他看過、同意這一輪，但還沒談完 |
+| `requested_shared_term_changes` | 他想再調整 |
+
+封閉列舉，NULL = 沒有標注的一般轉換（所有 legacy 轉換）。
+**`reason` 留給人話**（孩子寫「我還是想睡前」）—— 拿人話當狀態機的
+判斷依據，第一個把句子改順一點的人就會把流程弄壞。
+
+`transition_child_proposal_v1` 因此多收一個 optional `action` 直通。
+舊呼叫端不帶它，寫進去是 NULL，legacy 行為不變。
+
+### 15.4 孩子擁有的欄位：對不上就是資料錯
+
+家長那一輪只該碰共同條件。`plan_title` / `plan_summary` / `next_step` /
+`completion_description` / `purpose_category` / `duration_type` 與**直接來源**
+和**鏈頭的孩子版本**都必須一致，否則 `CHILD_PLAN_INTEGRITY_VIOLATION`。
+
+這不是一次合法的協商 —— 畫面上那句「你的做法沒有被改掉」會是假的，
+所以不可以排成一行讓孩子挑要不要接受。
+
+Diff 白名單同樣只有五項（cadence / preferred_time / session size /
+trial window / reward），由 `sharedTermVersionChanges()` 從**資料**算出來，
+**不另存一份 narrative**。
+
+### 15.5 Policy freshness
+
+即使 A4B1 幾天前才算過，孩子接受前一定用既有 `evaluateTaskReward`
+再算一次，與這一版的 `policy_session_coin_reference` / `policy_payout_type`
+比對。**不讀 `ai_snapshot`**。
+
+對不上 → `POLICY_CHANGED`，**不 UPDATE 那一版的證據**：孩子按下「可以」
+的那一刻偷偷換一個金額，是這條路徑上最不該發生的事。
+（自動 refresh version 是另一包的事。）
+
+### 15.6 成立時
+
+任務只由 `create_parent_task_v1` 建立（`creationSource='child_proposal'`）；
+`child_accepted_at` / `effective_at` / confirmed reward 全部委派既有的
+`transition_child_proposal_v1`，**不手組第二套 confirmedReward**。
+
+**不新增「孩子接受版」**：接受是 lifecycle，不是內容修訂 —— 同一份內容
+因為按了一顆「可以」多出一版一模一樣的計畫，之後沒有人分得出它們的差別。
+事後驗證會擋（`version_no` 不得多出新的一版）。
+
+### 15.7 兩輪協商的 lineage
+
+```
+Task → Proposal → current Parent Agreement v3
+                  → adopted_from v2（Parent Review）
+                  → adopted_from v1（Child Formal Plan）
+                  → child_confirmed_plan
+```
+
+兩輪、三輪都成立；recursive walk 深度上限 20。
+
+### 15.8 這一包不做
+
+孩子重新寫 Goal Plan、Dynamic Next Step、AI replan、enrichment retry、
+LongTermDetail redesign、WP2 merge、付費 provider cutover。

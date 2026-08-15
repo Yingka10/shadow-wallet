@@ -47,6 +47,8 @@ import type { RootStackParamList } from '../../../App';
 import { useTodayTasks, type TodayTask } from '../../hooks/useTodayTasks';
 import { useWallet } from '../../hooks/useWallet';
 import { useChildProposalReview } from '../../hooks/useChildProposalReview';
+import { isChildPlanningReview } from '../../lib/childPlanning/childReview';
+import { ChildSharedTermsReviewCard } from '../../components/child/ChildSharedTermsReviewCard';
 import BottomNav from '../../components/BottomNav';
 import GrassGroundScene from '../../components/child/GrassGroundScene';
 import { ChildPlanReviewCard } from '../../components/child/ChildPlanReviewCard';
@@ -676,19 +678,42 @@ export default function HomeScreen() {
             舊的直接建立任務入口見 LEGACY_CHILD_TASK_ENTRY_ENABLED。
           */}
           {proposalReviewSuccess && <Text style={styles.reviewSuccess}>{proposalReviewSuccess}</Text>}
+          {/*
+            P1 與 legacy 是兩張卡片，不是一張帶旗標的。
+            P1 那張要說「你的做法沒有被改掉」，而那句話對 P0 的家長
+            調整版不成立（那條路徑本來就可以改完成標準）。
+            路由只看 authorship 與 lineage。
+          */}
           {proposalReviews[0] && (
-            <ChildPlanReviewCard
-              review={proposalReviews[0]}
-              saving={actingProposalId === proposalReviews[0].proposal.id}
-              error={proposalReviewActionError}
-              onAccept={() => {
-                void acceptProposalReview(proposalReviews[0]).then(completed => {
-                  if (completed) refresh();
-                });
-              }}
-              onRequestChanges={() => { void requestProposalChanges(proposalReviews[0]); }}
-              onRetry={() => { void refreshProposalReviews(); }}
-            />
+            isChildPlanningReview(proposalReviews[0]) ? (
+              <ChildSharedTermsReviewCard
+                review={proposalReviews[0]}
+                saving={actingProposalId === proposalReviews[0].proposal.id}
+                error={proposalReviewActionError}
+                onAccept={() => {
+                  void acceptProposalReview(proposalReviews[0]).then(completed => {
+                    if (completed) refresh();
+                  });
+                }}
+                onRequestChanges={reason => {
+                  void requestProposalChanges(proposalReviews[0], reason);
+                }}
+                onRetry={() => { void refreshProposalReviews(); }}
+              />
+            ) : (
+              <ChildPlanReviewCard
+                review={proposalReviews[0]}
+                saving={actingProposalId === proposalReviews[0].proposal.id}
+                error={proposalReviewActionError}
+                onAccept={() => {
+                  void acceptProposalReview(proposalReviews[0]).then(completed => {
+                    if (completed) refresh();
+                  });
+                }}
+                onRequestChanges={() => { void requestProposalChanges(proposalReviews[0]); }}
+                onRetry={() => { void refreshProposalReviews(); }}
+              />
+            )
           )}
           {proposalReviewError && proposalReviews.length === 0 && (
             <View style={styles.reviewError}>
