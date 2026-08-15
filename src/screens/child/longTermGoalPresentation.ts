@@ -59,11 +59,62 @@ export type GoalDayStatus = {
   state: GoalDayState;
 };
 
-export type GoalMilestone = {
+// ── Journey Hero｜我現在走到哪裡（§4）──────────────────────────────────
+export type GoalJourneyHero = {
+  categoryLabel: string;
+  /** 第 1 週 / 第 3 階段。 */
+  positionLabel: string;
+  /**
+   * 這段路現在的樣子。**只來自談定過的資料**（孩子寫下的期望、目前階段名）。
+   * 沒有就是 null —— Hero 少一行，不要生一句話。
+   */
+  positionNote: string | null;
+  /** 共 2 週 / 共 4 階段。還沒安排週期就是 null。 */
+  totalLabel: string | null;
+};
+
+// ── Progress｜我現在怎麼往前（§12、§13）────────────────────────────────
+/** 這週節奏上的一格。數量＝約定次數，是真資料不是裝飾。 */
+export type GoalRhythmNode = {
   id: string;
+  done: boolean;
+};
+
+export type GoalStage = {
+  id: string;
+  name: string;
+  status: 'completed' | 'current' | 'next' | 'upcoming';
+  /** 說好的回饋。secondary，永遠不是這一段的主角（§15）。 */
+  coin: number | null;
+};
+
+type GoalProgressBase = {
   title: string;
-  detail: string | null;
-  status: 'completed' | 'next' | 'upcoming' | 'planned';
+  /** 主要數字前的小字：本週 / 已完成 / 目前。 */
+  lead: string | null;
+  /** 主要數字：2 / 3、2 / 4 階段、8 / 20 頁。 */
+  value: string;
+  note: string | null;
+};
+
+/**
+ * progression 改的是這一段的**內部呈現**，不是整頁重新換版（§2）。
+ */
+export type GoalProgressView =
+  | (GoalProgressBase & { kind: 'rhythm'; nodes: GoalRhythmNode[] })
+  | (GoalProgressBase & { kind: 'fixed_days'; days: GoalDayStatus[] })
+  | (GoalProgressBase & { kind: 'staged'; stages: GoalStage[] })
+  | (GoalProgressBase & { kind: 'accumulation'; ratio: number })
+  | (GoalProgressBase & { kind: 'plain' });
+
+// ── Next Stop｜接下來的一站（§14）──────────────────────────────────────
+export type GoalNextStop = {
+  /** 完成第 5 次 / 累積 50 頁。 */
+  title: string;
+  caption: string;
+  note: string | null;
+  /** 有就顯示，但只能是 secondary information（§15）。 */
+  coin: number | null;
 };
 
 export type GoalRecentRecord = {

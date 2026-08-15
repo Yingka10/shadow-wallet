@@ -23,6 +23,13 @@ function text(value: unknown): string | null {
 export function resolveTodayAction(
   task: Pick<Task, 'next_step' | 'completion_description' | 'name'>,
   childPlan: ChildConfirmedPlanView | null,
+  /**
+   * 這個 progression 自己的正式說法（階段式計畫的當前階段名）。
+   *
+   * 它一樣是家庭談定的欄位，只是比較泛 —— 所以排在孩子／家長真的寫下的
+   * 那一句之後，但比 task.name 具體。沒有就是 null，不會憑空生成。
+   */
+  progressionStep: string | null = null,
 ): string {
   return text(task.next_step)
     // 孩子自己寫的第一步。task.next_step 通常就是從這裡來的，
@@ -30,6 +37,7 @@ export function resolveTodayAction(
     ?? text(childPlan?.nextAction)
     // deterministic fallback：怎樣算完成一次，是正式欄位不是建議。
     ?? text(task.completion_description)
+    ?? text(progressionStep)
     ?? task.name;
 }
 
