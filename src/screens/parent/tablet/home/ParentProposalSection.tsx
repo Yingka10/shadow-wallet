@@ -20,6 +20,8 @@ import {
 import { presentParentProposal } from './parentProposalPresentation';
 import { ParentProposalEditSheet } from './ParentProposalEditSheet';
 import { ParentProposalUnsuitableSheet } from './ParentProposalUnsuitableSheet';
+import { ParentSharedTermsSheet } from './ParentSharedTermsSheet';
+import type { ChildPlanningSharedTerms } from '../../../../lib/childPlanning/sharedTerms';
 
 type Props = {
   childName: string;
@@ -32,6 +34,14 @@ type Props = {
   confirmError: string | null;
   successMessage: string | null;
   onRevise?: (card: ParentProposalCardData, edits: ParentProposalMaterialEdits) => Promise<boolean> | boolean | void;
+  /**
+   * P1-A4B1：家長提出家庭共同條件。**不是** onRevise 的別名 ——
+   * 那一支是 P0 的 material edit，這一支的終點是 needs_child_review。
+   */
+  onProposeTerms?: (
+    card: ParentProposalCardData,
+    terms: ChildPlanningSharedTerms,
+  ) => Promise<boolean> | boolean | void;
   onCloseProposal?: (card: ParentProposalCardData, reason: string) => Promise<boolean> | boolean | void;
   actingProposalId?: string | null;
   actionError?: string | null;
@@ -48,12 +58,14 @@ export function ParentProposalSection({
   confirmError,
   successMessage,
   onRevise,
+  onProposeTerms,
   onCloseProposal,
   actingProposalId = null,
   actionError = null,
 }: Props) {
   const [editCard, setEditCard] = useState<ParentProposalCardData | null>(null);
   const [closeCard, setCloseCard] = useState<ParentProposalCardData | null>(null);
+  const [termsCard, setTermsCard] = useState<ParentProposalCardData | null>(null);
   const cards = useMemo(
     () => proposals.slice(0, 3).map(item => ({
       source: item,
@@ -223,8 +235,35 @@ export function ParentProposalSection({
                     </TouchableOpacity>
                   )}
                   {/*
-                    調整只給 legacy 那兩個狀態。P1-A4A 不開家長編輯 ——
-                    改 cadence / duration / next step 都是 A4B 的協商流程，
+                    P1-A4B1：提出家庭共同條件。與「確認」是兩條路徑 ——
+                    這一顆的終點是 needs_child_review，孩子看過並同意
+                    之後才會開始。所以字是「一起補幾個安排」／
+                    「想提出不同的安排」，不是「調整一下」。
+                  */}
+                  {card.canProposeTerms && onProposeTerms && (
+                    <TouchableOpacity
+                      testID={`propose-terms-${card.id}`}
+                      style={card.canConfirm ? styles.secondaryButton : styles.confirmButton}
+                      onPress={() => setTermsCard(source)}
+                      activeOpacity={0.8}
+                    >
+                      <Text
+                        style={card.canConfirm
+                          ? styles.secondaryButtonText
+                          : styles.confirmButtonText}
+                      >
+                        {card.canConfirm ? '想提出不同的安排' : '一起補幾個安排'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                  {card.enrichmentRequiredCopy && (
+                    <Text style={styles.waitingText} testID={`enrichment-required-${card.id}`}>
+                      {card.enrichmentRequiredCopy}
+                    </Text>
+                  )}
+                  {/*
+                    調整只給 legacy 那兩個狀態。P1 不走這一支 ——
+                    改 cadence / duration / next step 是共同條件協商，
                     在這裡直接讓家長改，等於孩子沒答應過就成立了。
                   */}
                   {(card.state === 'fresh_ai' || card.state === 'child_revisit') && onRevise && (
@@ -254,6 +293,19 @@ export function ParentProposalSection({
           onSave={async edits => {
             const completed = await onRevise?.(editCard, edits);
             if (completed === true) setEditCard(null);
+          }}
+        />
+      )}
+      {termsCard && (
+        <ParentSharedTermsSheet
+          visible
+          card={termsCard}
+          saving={actingProposalId === termsCard.proposal.id}
+          error={actionError}
+          onClose={() => setTermsCard(null)}
+          onSubmit={async terms => {
+            const completed = await onProposeTerms?.(termsCard, terms);
+            if (completed === true) setTermsCard(null);
           }}
         />
       )}

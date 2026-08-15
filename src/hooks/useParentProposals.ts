@@ -5,11 +5,13 @@ import {
   type ParentProposalMaterialEdits,
 } from '../lib/childProposal';
 import { resolveConfirmRoute } from '../lib/childPlanning/parentAgreement';
+import type { ChildPlanningSharedTerms } from '../lib/childPlanning/sharedTerms';
 
 export type ParentProposalReader = Pick<SupabaseChildProposalService, 'listProposedForParent'>
   & Partial<Pick<
     SupabaseChildProposalService,
-    'confirmDirect' | 'confirmChildPlanAgreement' | 'revisePlan' | 'closeUnsuitable'
+    'confirmDirect' | 'confirmChildPlanAgreement' | 'revisePlan'
+    | 'proposeChildPlanningTerms' | 'closeUnsuitable'
   >>;
 
 const defaultReader = new SupabaseChildProposalService();
@@ -141,6 +143,49 @@ export function useParentProposals(
     }
   }, [reader, refresh]);
 
+  /**
+   * P1-A4B1：家長提出家庭共同條件。
+   *
+   * ⚠️ 與 reviseProposal 是**兩支**。成功訊息也不一樣：這一步沒有
+   *    「存下來」，只有「送出去等他看」—— 講成儲存會讓家長以為定了。
+   */
+  const proposeSharedTerms = useCallback(async (
+    card: ParentProposalCardData,
+    terms: ChildPlanningSharedTerms,
+  ): Promise<boolean> => {
+    const currentAction = ++actionRequestId.current;
+    setActionError(null);
+    setSuccessMessage(null);
+    if (!reader.proposeChildPlanningTerms) {
+      setActionError('目前還不能送出共同條件，請重新整理後再試。');
+      return false;
+    }
+    if (!childAgeGroup) {
+      setActionError('還沒讀到孩子的年齡段，請重新整理後再試。');
+      return false;
+    }
+    setActingProposalId(card.proposal.id);
+    try {
+      const result = await reader.proposeChildPlanningTerms(card, terms, childAgeGroup);
+      if (actionRequestId.current !== currentAction) return false;
+      if (result.ok !== true) {
+        setActionError(result.message);
+        return false;
+      }
+      await refresh();
+      if (actionRequestId.current !== currentAction) return false;
+      setSuccessMessage('已經送給孩子看看了');
+      return true;
+    } catch (caught) {
+      if (actionRequestId.current === currentAction) {
+        setActionError(caught instanceof Error ? caught.message : '送出共同條件失敗');
+      }
+      return false;
+    } finally {
+      if (actionRequestId.current === currentAction) setActingProposalId(null);
+    }
+  }, [childAgeGroup, reader, refresh]);
+
   const closeProposal = useCallback(async (
     card: ParentProposalCardData,
     reason: string,
@@ -183,6 +228,7 @@ export function useParentProposals(
     confirmingProposalId,
     confirmError,
     reviseProposal,
+    proposeSharedTerms,
     closeProposal,
     actingProposalId,
     actionError,

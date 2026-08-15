@@ -220,3 +220,41 @@ describe('§20 legacy AI 提案一個行為都沒變', () => {
     expect(presentParentProposal(parentReview, '承恩').state).toBe('waiting_child');
   });
 });
+
+describe('§17 / §18 家長提出共同條件', () => {
+  it('還有共同條件沒說定 → 可以提出，而且沒有假的「確認」', () => {
+    const view = presentParentProposal(card({ requires_parent_decision: ['cadence'] }), '承恩');
+    expect(view.canConfirm).toBe(false);
+    expect(view.canProposeTerms).toBe(true);
+    expect(view.enrichmentRequiredCopy).toBeNull();
+  });
+
+  it('已經完整的計畫也可以提出不同的安排（§8）', () => {
+    // 孩子已經講過睡前 15 分鐘，家長仍然可以說「睡前太晚了」——
+    // 只是那條路徑的終點是 needs_child_review，不是 active。
+    const view = presentParentProposal(card(), '承恩');
+    expect(view.canConfirm).toBe(true);
+    expect(view.canProposeTerms).toBe(true);
+  });
+
+  it('系統還沒整理完 → 不開協商，而且講成 GrowBook 自己的事', () => {
+    const view = presentParentProposal(
+      card({ requires_parent_decision: ['purpose_category'] }), '承恩');
+    expect(view.canProposeTerms).toBe(false);
+    expect(view.enrichmentRequiredCopy).toBe('GrowBook 還需要先整理這件事的回饋規則');
+    // 不是「還不能確認」，也沒有任何 A/B/C/D。
+    expect(view.enrichmentRequiredCopy).not.toContain('分類');
+    expect(view.sharedDecisions).toEqual(['GrowBook 還在整理這件事的類型']);
+  });
+
+  it('legacy AI 提案不走協商路徑', () => {
+    const legacy = card({
+      authored_by: 'ai', source_planning_session_id: null, planning_schema_version: null,
+      child_confirmed_plan: null, enrichment_status: null, ai_suggested_coin_amount: 10,
+    });
+    const view = presentParentProposal(legacy, '承恩');
+    expect(view.canProposeTerms).toBe(false);
+    expect(view.state).toBe('fresh_ai');
+    expect(view.canConfirm).toBe(true);
+  });
+});

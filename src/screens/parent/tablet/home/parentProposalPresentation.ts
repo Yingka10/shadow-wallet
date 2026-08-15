@@ -4,6 +4,7 @@ import {
   isChildPlanDirectConfirmable,
   resolveConfirmRoute,
 } from '../../../../lib/childPlanning/parentAgreement';
+import { childPlanningNegotiability } from '../../../../lib/childPlanning/sharedTerms';
 import { formatPreferredTime } from '../../../../lib/childProposal/materialDiff';
 import { childPlanCardSummary, sharedDecisionLabels } from './childPlanSummary';
 import type { ChildPlanCardSummary } from './childPlanSummary';
@@ -70,6 +71,16 @@ export type ParentProposalViewModel = {
   sharedDecisions: string[];
   /** 主要按鈕的字。P1 是「確認這份約定」，不是「採用 AI 建議」。 */
   confirmLabel: string;
+  /**
+   * 家長現在可以提出家庭共同條件嗎（P1-A4B1）。
+   *
+   * ⚠️ 與 canConfirm 是**兩件事**。可以確認的計畫也可以提出不同的安排
+   *    （孩子已經講過睡前 15 分鐘，家長仍然可以說「睡前太晚了」）——
+   *    只是那條路徑的終點是 needs_child_review，不是 active。
+   */
+  canProposeTerms: boolean;
+  /** 系統還沒整理完，這件事不該丟給家長（purpose_category / duration_type）。 */
+  enrichmentRequiredCopy: string | null;
 };
 
 export function formatProposalCadence(proposal: ChildProposal): string {
@@ -105,6 +116,7 @@ export function presentParentProposal(
   // 用一個布林同時代表兩種確認，之後每個讀它的人都要再問一次「哪一種」。
   const isChildPlan = route === 'child_planning_plan';
   const pending = childPlanSharedDecisions(plan);
+  const negotiability = childPlanningNegotiability(card);
   const childPlanReady = isChildPlan && isChildPlanDirectConfirmable(card);
   const canConfirm = isChildPlan ? childPlanReady : isDirectConfirmablePlan(card);
 
@@ -144,6 +156,12 @@ export function presentParentProposal(
     childPlan: isChildPlan ? childPlanCardSummary(plan) : null,
     sharedDecisions: sharedDecisionLabels(pending),
     confirmLabel: isChildPlan ? '確認這份約定' : '確認這個計畫',
+    canProposeTerms: negotiability.ok,
+    // 「還需要整理」不是家長的待辦，所以講成 GrowBook 自己的事 ——
+    // 寫成待辦的話，家長會一直找那個他其實按不到的按鈕。
+    enrichmentRequiredCopy: !negotiability.ok && negotiability.block === 'enrichment_required'
+      ? 'GrowBook 還需要先整理這件事的回饋規則'
+      : null,
     id: proposal.id,
     title: `${childName}有一個新的挑戰想法`,
     statusLabel,

@@ -18,6 +18,11 @@ import {
   type ConfirmChildPlanningProposalResult,
 } from '../childPlanning/parentAgreement';
 import {
+  buildChildPlanningTermsCommand,
+  type ChildPlanningSharedTerms,
+  type ProposeChildPlanningTermsResult,
+} from '../childPlanning/sharedTerms';
+import {
   buildAcceptReviewCommand,
   buildCloseUnsuitableCommand,
   buildRequestChangesCommand,
@@ -82,6 +87,15 @@ export const DECLINE_CHILD_PROPOSAL_ADJUSTMENT_RPC = 'decline_child_proposal_adj
 export const CONFIRM_CHILD_PLANNING_PROPOSAL_RPC = 'confirm_child_planning_proposal_v1';
 
 /**
+ * P1-A4B1：家長對孩子已規劃的計畫提出家庭共同條件。
+ *
+ * ⚠️ 是 REVISE_CHILD_PROPOSAL_PLAN_RPC 的 **sibling**。那一支服務 P0
+ *    （來源是 ai / parent 版本，可改的欄位、reward 語意都不一樣），
+ *    一個字都沒改。
+ */
+export const PROPOSE_CHILD_PLANNING_TERMS_RPC = 'propose_child_planning_terms_v1';
+
+/**
  * 只有這六支。型別上就不接受任意字串 —— 打錯名字要在編譯期就被抓到，
  * 不是等到 PostgREST 回 PGRST202 才發現 migration「沒套用」。
  */
@@ -94,6 +108,7 @@ type ChildProposalRpcName =
   | typeof CONFIRM_CHILD_PROPOSAL_RPC
   | typeof CONFIRM_CHILD_PLANNING_PROPOSAL_RPC
   | typeof REVISE_CHILD_PROPOSAL_PLAN_RPC
+  | typeof PROPOSE_CHILD_PLANNING_TERMS_RPC
   | typeof ACCEPT_CHILD_PROPOSAL_PLAN_RPC
   | typeof REQUEST_CHILD_PROPOSAL_CHANGES_RPC
   | typeof CLOSE_CHILD_PROPOSAL_UNSUITABLE_RPC
@@ -449,6 +464,56 @@ export class SupabaseChildProposalService {
         ? result.payload.relatedIds.filter((id): id is string => typeof id === 'string')
         : [],
       confirmedReward: result.payload.confirmedReward,
+      idempotentReplay: result.payload.idempotentReplay === true,
+    };
+  }
+
+  /**
+   * P1-A4B1：家長提出家庭共同條件 → 家長草案 ＋ needs_child_review。
+   *
+   * ⚠️ 與 revisePlan 是**兩支**。那一支是 P0 的 material edit；這一支
+   *    的來源必須沿 adopted_from 走得回一份孩子自己規劃的計畫，而且
+   *    只碰共同條件。合成一支的話，每加一個欄位都要先問「這是哪一條的」。
+   *
+   * 終點是 needs_child_review，不是 active：不建任務、不發幣。
+   */
+  async proposeChildPlanningTerms(
+    card: ParentProposalCardData,
+    terms: ChildPlanningSharedTerms,
+    childAgeGroup: string,
+  ): Promise<ProposeChildPlanningTermsResult> {
+    const built = buildChildPlanningTermsCommand(card, terms, childAgeGroup);
+    if (built.ok !== true) return built;
+
+    const fallback = '送出共同條件失敗';
+    const result = await callProposalRpc(
+      PROPOSE_CHILD_PLANNING_TERMS_RPC, built.command, fallback,
+    );
+    if (result.ok !== true) return result;
+
+    const proposalId = requireId(result.payload, 'proposalId', fallback);
+    if (isFailure(proposalId)) return proposalId;
+    const planVersionId = requireId(result.payload, 'planVersionId', fallback);
+    if (isFailure(planVersionId)) return planVersionId;
+    const sourcePlanVersionId = requireId(result.payload, 'sourcePlanVersionId', fallback);
+    if (isFailure(sourcePlanVersionId)) return sourcePlanVersionId;
+    const childPlanVersionId = requireId(result.payload, 'childPlanVersionId', fallback);
+    if (isFailure(childPlanVersionId)) return childPlanVersionId;
+    if (result.payload.status !== 'needs_child_review') {
+      return { ok: false, code: 'UNKNOWN', message: `${fallback}：回應狀態無法辨識` };
+    }
+
+    return {
+      ok: true,
+      proposalId,
+      planVersionId,
+      sourcePlanVersionId,
+      childPlanVersionId,
+      status: 'needs_child_review',
+      requiresParentDecision: Array.isArray(result.payload.requiresParentDecision)
+        ? result.payload.requiresParentDecision.filter(
+          (term): term is string => typeof term === 'string')
+        : [],
       idempotentReplay: result.payload.idempotentReplay === true,
     };
   }

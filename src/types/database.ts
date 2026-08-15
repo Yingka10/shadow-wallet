@@ -1336,6 +1336,10 @@ export interface Database {
         Args: { p_command: object };
         Returns: unknown;
       };
+      propose_child_planning_terms_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
       mark_task_atomic: {
         Args: {
           p_task_id: string;

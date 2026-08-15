@@ -847,3 +847,128 @@ enrichment 不可用時同樣兩欄 NULL，計畫照樣成立（`enrichment_stat
 > **canonical regression**：`ai_snapshot = NULL` 而 policy evidence 完整時，
 > A4A 必須仍然可以確認。稽核證據存不存在，不該決定一個家庭能不能
 > 開始執行他們的約定。
+
+---
+
+## 14. Parent Shared-Term Proposal（P1-A4B1）
+
+### 14.1 語意
+
+家長不是在「修改孩子的計畫」，而是在說：
+
+> 你想怎麼做到的那一段我保留；這幾個需要家庭一起配合的條件，
+> 我想這樣安排，你再看看可不可以。
+
+所以這條路徑的終點是 `needs_child_review`，**不是** `active`：
+不建任務、不發幣、不寫任何 `confirmed_*`。
+
+`propose_child_planning_terms_v1` 是 `revise_child_proposal_plan_v1` 的
+**sibling**。後者服務 P0（來源 `authored_by ∈ (ai, parent)`，可改
+`completion_description`，reward 語意不同），一個字都沒改。
+
+### 14.2 可協商 vs 系統還沒整理完
+
+| 類別 | 欄位 | 誰決定 |
+|---|---|---|
+| Family-negotiable | `cadence` / `session_size` / `duration` / `reward` | 家庭一起 |
+| System-unresolved | `purpose_category` / `duration_type` | GrowBook |
+
+未決集合包含 `purpose_category`，或 `duration_type` 是 NULL →
+`ENRICHMENT_REQUIRED`。**不讓家長選 A/B/C/D**：那個選擇直接決定孩子
+拿不拿得到幣，家長不是分類器。
+
+> **§3 audit — `duration_type` 能不能 deterministic 得出？**
+> **不能。** 它在 P0 Plan Draft 裡是模型輸出後通過 enum 驗證的欄位，
+> 而孩子確認過的計畫（`progressionKind` / `cadence` / `trialPeriod`）
+> 都不足以推出 `one_time` / `recurring` / `long_term`：一個 rhythm 計畫
+> 可能是 recurring 也可能是 long_term。所以它是 system-unresolved，
+> 不在 UI 上猜。
+>
+> 家長能提出的 `duration` 是**先試多久**這個 trial window
+> （`duration_days`），而且只有長期計畫才有意義。
+
+因此 A3 的 `duration` 未決判斷也改了：長期計畫沒有天數一樣算沒說定
+（`child_planning_pending_duration`）。原本那種計畫在 A4A 會被擋下，
+卻因為未決集合是空的，家長端連要補什麼都看不到。
+
+### 14.3 孩子擁有的欄位
+
+命令型別上沒有 `desiredOutcome` / `actionPlanSummary` / `nextAction` /
+`childConfirmedPlan` / `planTitle` / `planSummary` / `nextStep` /
+`progressionKind` / `phases` / `targetValue` / `targetUnit` /
+`goalControlType`。RPC 收到任何一個 → `CHILD_PLAN_FIELD_NOT_EDITABLE`，
+**拒絕，不是忽略**：忽略的話家長端顯示「已送出」，而他以為改掉的那句話
+其實沒有變。
+
+`sharedTerms` 是白名單，不是黑名單。
+
+### 14.4 草案版本的形狀
+
+```
+authored_by            = 'parent'
+requires_child_review  = true
+parent_confirmed_at    != null      ← 家長確實做了決定
+child_accepted_at      = null
+effective_at           = null       ← 但還沒生效
+child_confirmed_plan   = null       ← canonical child plan 只有一份
+adopted_from_plan_version_id = 來源版本
+requires_parent_decision     = **重算**後仍未說定的項目
+```
+
+proposal → `needs_child_review`，`task_id` 仍是 null。
+
+### 14.5 Lineage
+
+只重用 `adopted_from_plan_version_id`，**不新增 `root_child_plan_id`**：
+
+```
+Parent Review v3 → v2 → Child Formal v1（authored_by=child，有 planning lineage）
+```
+
+RPC 用 recursive CTE（深度上限 20）沿著 chain 走，找不到那份孩子的計畫 →
+`NOT_CHILD_PLANNING_LINEAGE`。這是這條路徑與 P0 parent revision 的分界。
+
+### 14.6 未決集合重算
+
+家長這一輪處理了 cadence 與 duration，reward 仍然沒說定 → 新版本只留
+`['reward']`。**不照抄、也不清空** —— 一按送出就全部清空，等於宣稱一件
+從來沒有人決定的事已經決定了。
+
+`reward` 說定的兩種方式：家長明確選了不給幣，或現在真的算得出合法的幣值依據。
+
+（`requires_parent_decision` 的 scope CHECK 因此放寬到「有 planning
+lineage，或有 adoption lineage」。P0 legacy 從不寫這一欄，行為不變。）
+
+### 14.7 Reward
+
+家長能提出的只有 `growbook_default` 或 `no_coin`，**只准往下**：
+資格閘門說不能發幣的計畫，勾一個選項不會讓它變成可以發幣。
+B 類 ＋ `coin_eligible` 仍然拒絕。家長送不進任何金額。
+
+政策證據沿用 A4A.1 的 `policy_session_coin_reference` /
+`policy_payout_type`，決策路徑**不讀 `ai_snapshot`**。
+
+- 每次多久改了 → 必須帶新的判定（既有 `evaluateTaskReward`，輸入是套用
+  新條件後的計畫投影）。沒帶 → `REWARD_REEVALUATION_REQUIRED`
+- 定價相關條件沒變、卻報一個不同的參考價 → `POLICY_EVIDENCE_MISMATCH`
+- 來源不是 `coin_eligible` 卻帶 coin 判定 → `REWARD_UPGRADE_NOT_ALLOWED`
+
+### 14.8 冪等、stale、無實質改變
+
+同一來源 ＋ 同一組正規化條件重送 → 同一個 `planVersionId`、
+`idempotentReplay: true`。內容不同卻想覆蓋第一份草案 →
+`STALE_PLAN_VERSION`（孩子可能已經在看那一份了）。
+`one_adoption_per_source` 撞到 → `REVISION_ALREADY_EXISTS`。
+所有條件都與現在一樣 → `NO_MATERIAL_CHANGE`，不產生新版本。
+
+### 14.9 這一包不做
+
+孩子端的 re-review 與啟用（A4B2）：孩子看到差異 → 接受 → policy
+freshness → canonical Task → confirmedReward → active；或孩子想再改 →
+回 `proposed` 再協商。
+
+> **§18 待決設計 — enrichment retry。** 目前**沒有**重跑 enrichment 的
+> 路徑：A3 的正式版本 per-session unique 且 append-only，沒有
+> `refresh_child_plan_enrichment_v1` 之類的 RPC。要做一顆真的「重新整理」
+> 需要新的 orchestration（新版本？就地補欄位？誰有權觸發？），
+> 所以這一包只顯示說明文字，不放一顆按不動的按鈕。
