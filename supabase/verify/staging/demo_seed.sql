@@ -356,6 +356,62 @@ BEGIN
 END
 $tasks$;
 
+-- ── 第七筆：技能學習類（staged progression）─────────────────────────────────
+--
+-- create_parent_task_v1 的 plan_mode CHECK 只允許 growth_plan / short_support /
+-- family_role（見 20260728000000_task_drawer_persistence_v1.sql），不支援
+-- skill —— 這是全產品共通的洞，不是這支腳本特有的，所以這一筆沒有 RPC 可走。
+--
+-- 欄位形狀對齊 createSkillGoal()（src/lib/taskActions.ts）：tasks
+-- （is_long_term/long_term_type='skill'）+ long_term_goals（里程碑存於
+-- level_definitions）+ child_tasks。少了 child_tasks，孩子端連「記下今天的
+-- 完成」都按不下去（complete_task 會回 task_not_assigned）—— LT-FINAL-1.1
+-- 之前 createSkillGoal 故意不建這張，是這包順便修掉的產品層級的洞。
+--
+-- reward_policy 刻意留 NULL，跟 createSkillGoal() 現況一致：技能類的幣值
+-- 由 level_definitions 各階段管理，透過里程碑確認發放（P5b，尚未實作）；
+-- 每次 session check-in 本身不發幣，不是漏了設定。
+DO $skill$
+DECLARE
+  d demo_input%ROWTYPE;
+  v_task_id uuid;
+BEGIN
+  SELECT * INTO d FROM demo_input;
+
+  INSERT INTO tasks (
+    family_id, name, category, day_type, is_long_term, long_term_type,
+    base_time_min, difficulty, coin_override, time_saving_min,
+    is_system_default, allow_repeat, min_age, max_age, is_active,
+    recurrence_days
+  ) VALUES (
+    d.family_id, '學會騎腳踏車', 'D', 'both', true, 'skill',
+    0, 1, NULL, 0,
+    false, false, 0, 99, true,
+    ARRAY[1, 3, 5]
+  ) RETURNING id INTO v_task_id;
+
+  INSERT INTO long_term_goals (
+    child_id, task_id, goal_type, status, current_day, total_days,
+    checkpoint_rewards, level_definitions, current_level, level_count,
+    started_at, interrupt_count
+  ) VALUES (
+    d.child_id, v_task_id, 'skill', 'active', 0, 90,
+    NULL,
+    jsonb_build_array(
+      jsonb_build_object('id', 'lv-1', 'name', '認識腳踏車與安全裝備', 'coin', 10),
+      jsonb_build_object('id', 'lv-2', 'name', '扶著慢慢滑行、抓平衡', 'coin', 23),
+      jsonb_build_object('id', 'lv-3', 'name', '能自己踩踏板前進',     'coin', 37),
+      jsonb_build_object('id', 'lv-4', 'name', '能自己上下車、轉彎',   'coin', 50)
+    ),
+    0, 4,
+    pg_temp.demo_this_monday() - 7, 0
+  );
+
+  INSERT INTO child_tasks (child_id, task_id, is_active)
+    VALUES (d.child_id, v_task_id, true);
+END
+$skill$;
+
 -- ── State A：背景生活紀錄 ───────────────────────────────────────────────────
 --
 -- 這一段讓 Demo 家庭看起來「已經運作了一陣子」，週報有得比、AI 顧問答得出
@@ -373,8 +429,9 @@ $tasks$;
 -- 「完成學校作業」刻意不完成 —— 它是 day_type='once'，完成後 child_tasks
 -- 會被停用，孩子端今天就少一件事可做。留著它當「今天還沒做的那一件」。
 --
--- 類別覆蓋：A（整理書包）、B（餐後整理、餐桌小幫手）、D（運動練習、閱讀計畫）。
--- **C（自主挑戰）本來就沒有**，六筆背景任務裡沒有 C —— 而這是對的：
+-- 類別覆蓋：A（整理書包）、B（餐後整理、餐桌小幫手）、D（運動練習、閱讀計畫、
+-- 學會騎腳踏車）。
+-- **C（自主挑戰）本來就沒有**，背景任務裡沒有 C —— 而這是對的：
 -- C 依定義來自孩子自己提出，那正是 Demo 要現場 live 跑的那條故事線。
 -- State A 的 C 是空的，代表「孩子還沒提出想法」，不是資料缺漏。
 
@@ -391,6 +448,7 @@ DECLARE
   v_reading  uuid;
   v_bag      uuid;
   v_helper   uuid;
+  v_bike     uuid;
   v_n        int;
 BEGIN
   SELECT * INTO d FROM demo_input;
@@ -406,9 +464,10 @@ BEGIN
   SELECT id INTO v_reading  FROM tasks WHERE family_id = d.family_id AND name = '四週閱讀計畫';
   SELECT id INTO v_bag      FROM tasks WHERE family_id = d.family_id AND name = '整理書包 14 天';
   SELECT id INTO v_helper   FROM tasks WHERE family_id = d.family_id AND name = '四週餐桌小幫手';
+  SELECT id INTO v_bike     FROM tasks WHERE family_id = d.family_id AND name = '學會騎腳踏車';
 
   IF v_exercise IS NULL OR v_dinner IS NULL OR v_reading IS NULL
-     OR v_bag IS NULL OR v_helper IS NULL THEN
+     OR v_bag IS NULL OR v_helper IS NULL OR v_bike IS NULL THEN
     RAISE EXCEPTION '背景紀錄找不到對應任務，seed 的任務名稱可能被改過了';
   END IF;
 
@@ -418,6 +477,15 @@ BEGIN
   PERFORM pg_temp.demo_complete(v_dinner,   d.child_id, v_last_monday + 2, 19, 'after_dinner', 'self_started');
   PERFORM pg_temp.demo_complete(v_reading,  d.child_id, v_last_monday + 2, 21, 'before_bed',   'reminded');
   PERFORM pg_temp.demo_complete(v_exercise, d.child_id, v_last_monday + 4, 19, 'after_dinner', 'self_started');
+
+  -- 技能類：兩次練習紀錄，只是「今天有練」的 session check-in，不會推進
+  -- current_level（LT-FINAL-1.1 §D：session check-in ≠ progress advancement，
+  -- 階段前進要靠家長之後確認，不是自動累加）。
+  --
+  -- planned_time_window 是既有的窄欄位（20260727000000），CHECK 只允許
+  -- after_dinner / before_bed 兩種值 —— 不是這一筆才有的限制。
+  PERFORM pg_temp.demo_complete(v_bike, d.child_id, v_last_monday,     19, 'after_dinner', 'self_started');
+  PERFORM pg_temp.demo_complete(v_bike, d.child_id, v_last_monday + 2, 19, 'after_dinner', 'reminded');
 
   -- ── 本週：已經過去的週一/三/五，四筆 ─────────────────────────────────────
   FOREACH v_day IN ARRAY ARRAY[v_this_monday, v_this_monday + 2, v_this_monday + 4] LOOP
@@ -474,8 +542,8 @@ BEGIN
   END IF;
 
   SELECT count(*) INTO v_count FROM task_completions WHERE child_id = v_child;
-  IF v_count <> 9 THEN
-    RAISE EXCEPTION '背景完成紀錄應該是 9 筆（上週 5 + 本週 4），實際 %', v_count;
+  IF v_count <> 11 THEN
+    RAISE EXCEPTION '背景完成紀錄應該是 11 筆（上週 5 + 本週 4 + 技能練習 2），實際 %', v_count;
   END IF;
 END
 $wallet_check$;

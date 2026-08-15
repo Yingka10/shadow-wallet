@@ -351,8 +351,8 @@ describe('P0-10A. State A 的背景紀錄', () => {
     expect(body).toMatch(/RAISE EXCEPTION[^;]*追不回任何一次完成/);
   });
 
-  it('背景完成筆數是固定的（上週 5 + 本週 4）', () => {
-    expect(body).toMatch(/v_count <> 9/);
+  it('背景完成筆數是固定的（上週 5 + 本週 4 + 技能練習 2）', () => {
+    expect(body).toMatch(/v_count <> 11/);
   });
 });
 
@@ -572,8 +572,8 @@ describe('P0-10B. runner 的 state 切換', () => {
   });
 
   it('兩個 state 的預期產出寫在同一處，dry-run 與文件不會各說各話', () => {
-    expect(RUNNER).toMatch(/a\)\s*B_TASKS=6;.*B_PROPOSALS=0/s);
-    expect(RUNNER).toMatch(/b\)\s*B_TASKS=7;.*B_PROPOSALS=1/s);
+    expect(RUNNER).toMatch(/a\)\s*B_TASKS=7;.*B_PROPOSALS=0/s);
+    expect(RUNNER).toMatch(/b\)\s*B_TASKS=8;.*B_PROPOSALS=1/s);
   });
 
   it('State A 仍然是零提案 —— B 的提案不能滲進 A', () => {

@@ -49,8 +49,8 @@ done
 # 每個 state 的預期產出。dry-run 印這組數字，demoData.test.ts 也釘住它，
 # 所以「文件說會建幾筆」與「腳本真的建幾筆」不會各說各話。
 case "$STATE" in
-  a) B_TASKS=6; B_GOALS=3; B_DONE=9;  B_TX=3; B_PROPOSALS=0; B_VERSIONS=0 ;;
-  b) B_TASKS=7; B_GOALS=4; B_DONE=11; B_TX=5; B_PROPOSALS=1; B_VERSIONS=2 ;;
+  a) B_TASKS=7; B_GOALS=4; B_DONE=11; B_TX=3; B_PROPOSALS=0; B_VERSIONS=0 ;;
+  b) B_TASKS=8; B_GOALS=5; B_DONE=13; B_TX=5; B_PROPOSALS=1; B_VERSIONS=2 ;;
   *) echo "!! 不認得的 state：$STATE（只有 a 與 b）" >&2; exit 1 ;;
 esac
 
