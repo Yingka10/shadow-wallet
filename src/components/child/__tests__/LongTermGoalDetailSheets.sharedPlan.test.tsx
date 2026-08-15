@@ -16,13 +16,15 @@ function makePresentation(
 ): GoalPresentation {
   return {
     headerTitle: '自主閱讀計畫',
-    weekLabel: '第 2 週',
     planWeekLabel: '第 2 週／共 2 週',
     weekProgressLabel: '本週完成 2／3 次',
-    weekCompleted: 2,
+    weekCompletedActual: 2,
     weekTarget: 3,
-    totalWeeks: 2,
-    goalKind: 'reading_habit',
+    weekTargetReached: false,
+    weekExtra: 0,
+    weekProgressNote: '還差 1 次到這週約定的節奏',
+    progression: 'rhythm',
+    targetReached: false,
     planState: 'active',
     categoryLabel: '學習與技能',
     overallLabel: '2 / 6 次',
@@ -33,7 +35,13 @@ function makePresentation(
     todayAction: '自己選一本喜歡的書，閱讀 15 分鐘',
     preferredTimeWindow: 'before_bed',
     canCompleteToday: true,
-    isReadingPlan: true,
+    completionReason: 'available',
+    sessionMinutes: 15,
+    agreedTime: { value: 'after_dinner', label: '晚餐後' },
+    supportsTimeWindow: true,
+    childPlan: null,
+    agreedReward: null,
+    legacyReward: false,
     weekDays: [],
     weekSummary: '這週已閱讀 2 次。',
     nextReward: { threshold: 3, coin: 10 },
@@ -45,7 +53,6 @@ function makePresentation(
     finalRewardText: '兩週後一起回顧。',
     reviewTitle: '週末一起回顧',
     reviewPrompt: '這週哪個時間最適合閱讀？',
-    sectionOrder: ['hero', 'today', 'week', 'rewards', 'review'],
     ...overrides,
   };
 }
@@ -211,7 +218,7 @@ describe('P0-8M · 孩子回顧 → 送出換時段', () => {
 
   it('非閱讀計畫不會出現時段題，也就送不出換時段請求', () => {
     renderReview({
-      presentation: makePresentation({ goalKind: 'skill', isReadingPlan: false }),
+      presentation: makePresentation({ progression: 'staged', supportsTimeWindow: false }),
       sharedPlanTimeAdjustment: makeSharedPlan(),
     });
 

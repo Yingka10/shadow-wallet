@@ -13,6 +13,16 @@ dayjs.extend(timezone);
 export type TodayTask = Task & {
   isCompleted: boolean;
   goal?: LongTermGoal;
+  /**
+   * 這一週的完成紀錄（只有長期任務有）。
+   *
+   * ⚠️ 一次批次查回來，**不是**每張 GoalCard 自己查一次。首頁最多會有
+   *    六張卡，N+1 在冷啟動時看得出來。
+   *
+   * 首頁的進度以它為準 —— `long_term_goals.current_day` 建立後從來沒有
+   *    被遞增過，拿它算進度會永遠顯示 0%。
+   */
+  weekCompletions?: { completed_at: string }[];
 };
 
 export type UseTodayTasksResult = {
@@ -105,9 +115,37 @@ export function useTodayTasks(childId: string): UseTodayTasksResult {
       setIsPrerequisiteMet(prereqMet);
 
       // 6. Split into three buckets
+      const longTermIds = tasks.filter(t => t.is_long_term).map(t => t.id);
+
+      // 這一週的長期完成紀錄，一次查完。
+      const weekStart = dayjs().tz('Asia/Taipei').startOf('day');
+      const mondayStart = weekStart.subtract((weekStart.day() + 6) % 7, 'day');
+      const weekCompletionsByTask = new Map<string, { completed_at: string }[]>();
+      if (longTermIds.length > 0) {
+        const { data: weekRows, error: weekErr } = await supabase
+          .from('task_completions')
+          .select('task_id, completed_at')
+          .eq('child_id', childId)
+          .eq('status', 'completed')
+          .in('task_id', longTermIds)
+          .gte('completed_at', mondayStart.toISOString())
+          .lt('completed_at', mondayStart.add(7, 'day').toISOString());
+        if (weekErr) throw weekErr;
+        for (const row of weekRows ?? []) {
+          const list = weekCompletionsByTask.get(row.task_id) ?? [];
+          list.push({ completed_at: row.completed_at });
+          weekCompletionsByTask.set(row.task_id, list);
+        }
+      }
+
       const longTerm = tasks
         .filter(t => t.is_long_term)
-        .map(t => ({ ...t, isCompleted: completedIds.has(t.id), goal: goalsByTaskId.get(t.id) }));
+        .map(t => ({
+          ...t,
+          isCompleted: completedIds.has(t.id),
+          goal: goalsByTaskId.get(t.id),
+          weekCompletions: weekCompletionsByTask.get(t.id) ?? [],
+        }));
 
       // 今天該顯示的短期任務。判斷邏輯抽到 isTaskDueToday，與家長端今日總覽
       // (useParentDashboard) 共用同一事實來源，避免兩邊清單再次漂移。

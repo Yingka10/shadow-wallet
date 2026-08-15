@@ -7,12 +7,27 @@ import type {
   Task,
   TaskCompletion,
 } from '../../types/database';
+import {
+  buildWeeklyProgress,
+  fixedDayEvidence,
+  resolveAgreedPreferredTime,
+  resolveLongTermCompletionAvailability,
+  resolveLongTermProgression,
+  resolveSessionMinutes,
+  resolveTodayAction,
+} from '../../lib/longTerm';
+import type {
+  AgreedPreferredTime,
+  AgreedRewardView,
+  ChildConfirmedPlanView,
+  LongTermCompletionReason,
+  LongTermProgression,
+} from '../../lib/longTerm';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const TZ = 'Asia/Taipei';
-const MONDAY_TO_FRIDAY = [1, 2, 3, 4, 5];
 const ALL_WEEK_DAYS = [1, 2, 3, 4, 5, 6, 0];
 const DAY_LABELS: Record<number, string> = {
   0: '日',
@@ -58,13 +73,13 @@ export type GoalRecentRecord = {
   timeWindowLabel: string | null;
 };
 
-export type GoalKind =
-  | 'reading_habit'
-  | 'habit'
-  | 'skill'
-  | 'challenge'
-  | 'family';
-
+/**
+ * 計畫目前的生命週期狀態。
+ *
+ * ⚠️ **進度不會讓計畫結束。** 兩週的節奏計畫做滿 14 次不是完成，
+ *    做了 9 次也不是失敗 —— 它的終點是日期或家庭正式決定，不是次數。
+ *    「達到目標」是另一件事，見 targetReached。
+ */
 export type GoalPlanState =
   | 'active'
   | 'upcoming'
@@ -75,28 +90,66 @@ export type GoalPlanState =
 
 export type GoalPresentation = {
   headerTitle: string;
-  weekLabel: string;
-  planWeekLabel: string;
-  weekProgressLabel: string;
-  weekCompleted: number;
-  weekTarget: number;
-  totalWeeks: number;
-  goalKind: GoalKind;
+  /** 這件事怎麼往前走。唯一來源是 resolveLongTermProgression。 */
+  progression: LongTermProgression | null;
   planState: GoalPlanState;
+  /**
+   * 已經做到約定的量了嗎。
+   *
+   * ⚠️ 與 planState 是**兩件事**。達標只是一個值得說一句的時刻，
+   *    不是計畫結束。
+   */
+  targetReached: boolean;
   categoryLabel: string;
+  planWeekLabel: string;
+
+  // ── 這一週（§C：不 clamp）────────────────────────────────────────────
+  weekCompletedActual: number;
+  weekTarget: number;
+  weekTargetReached: boolean;
+  weekExtra: number;
+  weekProgressLabel: string;
+  weekProgressNote: string | null;
+  weekDays: GoalDayStatus[];
+  weekSummary: string;
+
   overallLabel: string;
   overallPercent: number;
   focusText: string;
   nextText: string;
   planNotice?: string | null;
+
+  // ── 今天 ─────────────────────────────────────────────────────────────
   todayTitle: string;
   todayAction: string;
   todayStatusText?: string | null;
-  preferredTimeWindow: PreferredTimeWindow | null;
+  sessionMinutes: number | null;
   canCompleteToday: boolean;
-  isReadingPlan: boolean;
-  weekDays: GoalDayStatus[];
-  weekSummary: string;
+  /** 不能按的時候是為什麼。UI 不必自己猜。 */
+  completionReason: LongTermCompletionReason;
+
+  // ── 時段：兩個 domain（§I）────────────────────────────────────────────
+  /** 家庭談定的時段，詞彙完整。 */
+  agreedTime: AgreedPreferredTime | null;
+  /** 一次完成紀錄的 context，只有兩個值。 */
+  preferredTimeWindow: PreferredTimeWindow | null;
+  /** 這份計畫的約定時段記得下來嗎（決定要不要顯示時段選擇）。 */
+  supportsTimeWindow: boolean;
+
+  // ── 孩子自己確認過的那份計畫（§H）─────────────────────────────────────
+  childPlan: ChildConfirmedPlanView | null;
+
+  // ── 說好的回饋（§J）──────────────────────────────────────────────────
+  /** P1：目前有效共同版本的 confirmed_* 快照。 */
+  agreedReward: AgreedRewardView | null;
+  /**
+   * 這筆任務的回饋語意是 legacy 的（P0 per_period，或沒有快照）。
+   *
+   * ⚠️ 那些家庭當初看到的畫面寫的是「每次完成」，沒有人真的確認過
+   *    每週結算。**不要在這裡把它重新詮釋成「說好的回饋」。**
+   */
+  legacyReward: boolean;
+
   nextReward: { threshold: number; coin: number } | null;
   milestones: GoalMilestone[];
   recentRecords: GoalRecentRecord[];
@@ -106,7 +159,6 @@ export type GoalPresentation = {
   finalRewardText: string;
   reviewTitle: string;
   reviewPrompt: string;
-  sectionOrder: ['hero', 'today', 'week', 'rewards', 'review'];
 };
 
 function weekStart(now: Dayjs): Dayjs {
@@ -155,36 +207,6 @@ function getWeeklyFrequency(task: Task): number | null {
     : null;
 }
 
-function buildFlexibleWeekSummary(
-  isReadingHabit: boolean,
-  completed: number,
-  target: number,
-): string {
-  const activity = isReadingHabit ? '閱讀' : '完成';
-  const remaining = Math.max(target - completed, 0);
-
-  if (remaining === 0) {
-    return `這週已${activity} ${completed} 次，這週的節奏完成了。`;
-  }
-  if (completed === 0) {
-    return `這週還差 ${remaining} 次，今天繼續就好。`;
-  }
-  return `這週已${activity} ${completed} 次，這週還差 ${remaining} 次，今天繼續就好。`;
-}
-
-function completionsThisWeek(
-  completions: GoalCompletionRecord[],
-  now: Dayjs,
-): GoalCompletionRecord[] {
-  const start = weekStart(now);
-  const end = start.add(7, 'day');
-
-  return completions.filter((completion) => {
-    const completedAt = dayjs(completion.completed_at).tz(TZ);
-    return !completedAt.isBefore(start) && completedAt.isBefore(end);
-  });
-}
-
 function buildWeekDays(
   activeDays: number[],
   completions: GoalCompletionRecord[],
@@ -227,25 +249,6 @@ function buildWeekDays(
       state,
     };
   });
-}
-
-function getActiveDays(
-  task: Task,
-  goal: LongTermGoal,
-  isReadingHabit: boolean,
-  isSkill: boolean,
-  isChallenge: boolean,
-): number[] {
-  if (isSkill || isChallenge) return [];
-
-  const configuredDays =
-    goal.active_days
-    ?? task.recurrence_days
-    ?? (isReadingHabit ? MONDAY_TO_FRIDAY : ALL_WEEK_DAYS);
-
-  return Array.from(
-    new Set(configuredDays.filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)),
-  );
 }
 
 function parseTaipeiDate(value: string): Dayjs {
@@ -338,52 +341,21 @@ function getCurrentSkillStage(goal: LongTermGoal): string {
   return String(levels[index]?.name ?? '下一個練習階段');
 }
 
-function buildRhythmMilestones(
-  goal: LongTermGoal,
-  totalWeeks: number,
-  isReadingHabit: boolean,
-): GoalMilestone[] {
-  if (isReadingHabit) return [];
-
-  const checkpoints = Object.entries(goal.checkpoint_rewards ?? {})
-    .map(([threshold, coin]) => ({
-      threshold: Number(threshold),
-      coin: Number(coin),
-    }))
+function buildRhythmMilestones(goal: LongTermGoal): GoalMilestone[] {
+  // ⚠️ 只列**真的存在**的 checkpoint。
+  //
+  //    之前這裡會補一條「N 週後一起回顧」—— 沒有人約定過那件事，
+  //    它是畫面自己生出來的。孩子看到的里程碑必須全部指得出誰講的。
+  return Object.entries(goal.checkpoint_rewards ?? {})
+    .map(([threshold, coin]) => ({ threshold: Number(threshold), coin: Number(coin) }))
     .filter(({ threshold }) => Number.isFinite(threshold) && threshold >= 1)
-    .sort((left, right) => left.threshold - right.threshold);
-  const milestones: GoalMilestone[] = checkpoints.map((checkpoint) => ({
-    id: `checkpoint-${checkpoint.threshold}`,
-    title: `第 ${checkpoint.threshold} 次的計畫節點`,
-    detail: checkpoint.coin > 0
-      ? `成長幣 +${checkpoint.coin}（達成時一起確認）`
-      : null,
-    status: 'planned',
-  }));
-  const chineseWeekCounts: Record<number, string> = {
-    1: '一',
-    2: '二',
-    3: '三',
-    4: '四',
-    5: '五',
-    6: '六',
-    7: '七',
-    8: '八',
-    9: '九',
-    10: '十',
-  };
-  const weekCount = chineseWeekCounts[totalWeeks] ?? String(totalWeeks);
-
-  milestones.push({
-    id: 'final-review',
-    title: totalWeeks === 0
-      ? '安排好週期後一起回顧'
-      : `${weekCount}週後一起回顧`,
-    detail: '可以繼續、調整，或讓計畫先告一段落。',
-    status: 'planned',
-  });
-
-  return milestones;
+    .sort((left, right) => left.threshold - right.threshold)
+    .map((checkpoint) => ({
+      id: `checkpoint-${checkpoint.threshold}`,
+      title: `第 ${checkpoint.threshold} 次的計畫節點`,
+      detail: checkpoint.coin > 0 ? `成長幣 +${checkpoint.coin}（達成時一起確認）` : null,
+      status: 'planned' as const,
+    }));
 }
 
 function buildSkillMilestones(
@@ -407,13 +379,6 @@ function buildSkillMilestones(
           ? 'next'
           : 'upcoming',
     };
-  });
-
-  milestones.push({
-    id: 'final-review',
-    title: '完成計畫後一起回顧',
-    detail: '可以繼續、調整，或讓計畫先告一段落。',
-    status: goal.status === 'completed' || current >= target ? 'completed' : 'upcoming',
   });
 
   return milestones;
@@ -455,17 +420,6 @@ function buildChallengeMilestones(
           : 'upcoming',
     });
   }
-
-  milestones.push({
-    id: 'final-review',
-    title: `達到 ${target}${unitSuffix}`,
-    detail: '可以繼續、調整，或讓計畫先告一段落。',
-    status: goal.status === 'completed' || current >= target
-      ? 'completed'
-      : nextCheckpoint === undefined
-        ? 'next'
-        : 'upcoming',
-  });
 
   return milestones;
 }
@@ -515,303 +469,257 @@ function buildPlanPeriodLabel(
   return `${start.format('YYYY-MM-DD')} ～ ${end.format('YYYY-MM-DD')}（共 ${totalWeeks} 週）`;
 }
 
+const CATEGORY_LABEL: Record<string, string> = {
+  A: '生活習慣',
+  B: '家庭參與',
+  C: '自主挑戰',
+  D: '學習與技能',
+};
+
+/** 完成紀錄記得下來的兩個時段。約定詞彙比這個寬，見 agreedTime。 */
+const RECORDABLE_WINDOWS = ['after_dinner', 'before_bed'];
+
+const COMPLETION_STATUS_COPY: Record<LongTermCompletionReason, string | null> = {
+  available: null,
+  already_recorded_today: '今天已經記過了',
+  claim_limit_reached: '這一段時間的紀錄已經滿了',
+  not_scheduled_today: '今天不用記錄，照自己的節奏休息',
+  before_plan: '計畫還沒開始',
+  after_plan: '一起回顧這段計畫',
+  paused: '這個計畫暫停中',
+  unsupported_progression: '這個計畫的進度由家長一起確認',
+};
+
+export type BuildGoalPresentationExtras = {
+  /** 沿 adoption lineage 讀回來的孩子正式計畫。沒有就是 legacy。 */
+  childPlan?: ChildConfirmedPlanView | null;
+  /** 目前有效共同版本的 confirmed_* 快照。 */
+  agreedReward?: AgreedRewardView | null;
+  /** 這筆任務有共同版本，但回饋語意是 legacy 的。 */
+  legacyReward?: boolean;
+};
+
 export function buildGoalPresentation(
   task: Task,
   goal: LongTermGoal,
   completions: GoalCompletionRecord[],
   now = dayjs().tz(TZ),
+  extras: BuildGoalPresentationExtras = {},
 ): GoalPresentation {
-  const isReadingPlan = task.name.includes('閱讀');
-  const isSkill = goal.goal_type === 'skill';
-  // DB 的值是 'responsibility'；孩子端對外仍叫「家庭」（見 goalKind）。
-  const isFamily = goal.goal_type === 'responsibility';
-  const isChallenge = goal.goal_type === 'challenge';
-  const isReadingHabit = isReadingPlan && !isSkill && !isFamily && !isChallenge;
-  const goalKind: GoalKind = isReadingHabit
-    ? 'reading_habit'
-    : isSkill
-      ? 'skill'
-      : isFamily
-        ? 'family'
-        : isChallenge
-          ? 'challenge'
-          : 'habit';
-  const hasChallengeValues =
-    isChallenge
-    && Number.isFinite(goal.current_value)
-    && Number.isFinite(goal.target_value)
-    && Number(goal.target_value) > 0;
-  const challengeUnit = hasChallengeValues ? goal.value_unit?.trim() ?? '' : '';
+  // ── 這件事怎麼往前走 ─────────────────────────────────────────────────
+  //
+  // ⚠️ 只問一次，而且只問 resolveLongTermProgression。
+  //    goal_type / task.name / category / duration_type 一律不參與 ——
+  //    各自猜一次的結果就是首頁說 0%、點進去說本週 2/3。
+  const progression = resolveLongTermProgression(task, goal);
+  const isRhythm = progression === 'rhythm';
+  const isFixedDays = progression === 'fixed_days';
+  const isStaged = progression === 'staged';
+  const isAccumulation = progression === 'accumulation';
+
+  const activeDays = fixedDayEvidence(task, goal);
   const weeklyFrequency = getWeeklyFrequency(task);
-  const isFlexibleWeeklyRhythm =
-    weeklyFrequency !== null
-    && !isSkill
-    && !isChallenge;
-  const activeDays = getActiveDays(task, goal, isReadingHabit, isSkill, isChallenge);
   const planStart = getPlanStart(goal, task, now);
-  const dueDateEnd = task.due_date
-    ? getValidDueDate(planStart, task.due_date)
-    : null;
-  const goalEnd = goal.end_date
-    ? getValidDueDate(planStart, goal.end_date)
-    : null;
-  const challengeEnd =
-    isChallenge && goal.total_days && goal.total_days > 0
-      ? planStart.add(goal.total_days - 1, 'day')
-      : null;
-  const planEnd = goalEnd ?? dueDateEnd ?? challengeEnd;
+  const dueDateEnd = task.due_date ? getValidDueDate(planStart, task.due_date) : null;
+  const goalEnd = goal.end_date ? getValidDueDate(planStart, goal.end_date) : null;
+  const planEnd = goalEnd ?? dueDateEnd;
+
   const rhythmCompletions = validRhythmCompletions(
     completions,
     activeDays,
-    isFlexibleWeeklyRhythm,
+    isRhythm,
     planStart,
     planEnd,
   );
-  const weeklyCompletions = completionsThisWeek(rhythmCompletions, now);
-  const weekDays = isFlexibleWeeklyRhythm
-    ? []
-    : buildWeekDays(
-        activeDays,
-        rhythmCompletions,
-        now,
-        planStart,
-        planEnd,
-      );
-  const completionCurrent = isSkill || isChallenge
-    ? completions.length
-    : rhythmCompletions.length;
-  const current = isSkill
-    ? Math.max(goal.current_level ?? 0, 0)
-    : hasChallengeValues
-      ? Math.max(Number(goal.current_value), 0)
-      : completionCurrent;
-  const completionTarget = isFamily
-    ? Math.max(goal.target_completions ?? goal.total_days ?? 1, 1)
-    : Math.max(goal.total_days ?? 1, 1);
-  const target = isSkill
-    ? Math.max(goal.level_count ?? goal.level_definitions?.length ?? 1, 1)
-    : hasChallengeValues
-      ? Math.max(Number(goal.target_value), 1)
-      : completionTarget;
-  const weekTarget = isFlexibleWeeklyRhythm
+  const weekDays = buildWeekDays(activeDays, rhythmCompletions, now, planStart, planEnd);
+
+  // ── 這一週（不 clamp）────────────────────────────────────────────────
+  const weekTarget = isRhythm
     ? weeklyFrequency ?? 0
     : weekDays.filter((day) => day.isScheduled).length;
-  const weekCompleted = isFlexibleWeeklyRhythm
-    ? Math.min(weeklyCompletions.length, weekTarget)
-    : weeklyCompletions.length;
-  const completionWeekSize = isFlexibleWeeklyRhythm
-    ? weeklyFrequency ?? 1
-    : Math.max(activeDays.length, 1);
-  const hasUnplannedCycle =
-    planEnd === null
-    && activeDays.length === 0
-    && !isFlexibleWeeklyRhythm
-    && (goal.goal_type === 'habit' || goal.goal_type === 'responsibility');
-  const fallbackTotalWeeks = (isSkill || isChallenge) && goal.total_days
-    ? Math.max(Math.ceil(goal.total_days / 7), 1)
-    : hasUnplannedCycle
-      ? 0
-      : activeDays.length === 0
-      ? 1
-      : Math.max(Math.ceil(completionTarget / completionWeekSize), 1);
-  const dueDateWeeks = planEnd ? getCoveredWeeks(planStart, planEnd) : null;
-  const totalWeeks = dueDateWeeks ?? fallbackTotalWeeks;
-  const currentWeek = getCurrentPlanWeek(planStart, now, totalWeeks);
-  const overallPercent = Math.max(
-    Math.min(Math.round((current / target) * 100), 100),
-    0,
-  );
-  const today = now.tz(TZ).startOf('day');
-  const todayIsInsidePlan =
-    !today.isBefore(planStart, 'day')
-    && (planEnd === null || !today.isAfter(planEnd, 'day'));
-  const todayIsActive =
-    todayIsInsidePlan
-    && (isFlexibleWeeklyRhythm || activeDays.includes(today.day()));
-  const currentStage = getCurrentSkillStage(goal);
-  const nextSkillLevel = goal.level_definitions?.[current];
-  const nextReward = isSkill
-    ? getNextSkillReward(goal, current)
-    : isChallenge
-      ? getNextCheckpoint(goal, current)
-      : null;
-  const hasReachedTarget = current >= target;
-  const isFuture = today.isBefore(planStart, 'day');
-  const isExpired = planEnd !== null && today.isAfter(planEnd, 'day');
-  const hasEmptyDailySchedule =
-    activeDays.length === 0
-    && !isFlexibleWeeklyRhythm
-    && (goal.goal_type === 'habit' || goal.goal_type === 'responsibility');
-  const planState: GoalPlanState =
-    goal.status === 'paused'
-      ? 'paused'
-      : goal.status === 'completed' || hasReachedTarget
-        ? 'completed'
-        : isFuture
-          ? 'upcoming'
-          : isExpired
-            ? 'expired'
-            : hasEmptyDailySchedule
-              ? 'unplanned'
-              : 'active';
-  const canCompleteToday =
-    planState === 'active'
-    && (goal.goal_type === 'habit' || goal.goal_type === 'responsibility')
-    && todayIsActive;
-  let todayTitle = '今天的小步驟';
-  let todayStatusText: string | null = null;
+  const weekly = buildWeeklyProgress(rhythmCompletions, weekTarget, now);
 
-  if (planState === 'paused') {
-    todayTitle = '計畫暫停中';
-    todayStatusText = '這個計畫暫停中';
-  } else if (planState === 'completed') {
-    todayTitle = '這段計畫已完成';
-    todayStatusText = '這段計畫已完成';
-  } else if (planState === 'upcoming') {
-    todayTitle = '計畫還沒開始';
-    todayStatusText = '計畫還沒開始';
-  } else if (planState === 'expired') {
-    todayTitle = '一起回顧這段計畫';
-    todayStatusText = '一起回顧這段計畫';
-  } else if (planState === 'unplanned') {
-    todayTitle = '尚未安排日期';
-    todayStatusText = '這個計畫尚未安排日期';
-  } else if (isSkill) {
-    todayTitle = '目前階段';
-    todayStatusText = '這個階段由家長確認完成';
-  } else if (isChallenge) {
-    todayTitle = '目前的累積進度';
-    todayStatusText = '累積進度由家長一起確認';
-  } else if (!todayIsActive) {
-    todayTitle = '今天不用記錄';
-    todayStatusText = '今天不用記錄，照自己的節奏休息';
-  }
-  const scheduledCapacity =
-    planEnd !== null && (goal.goal_type === 'habit' || goal.goal_type === 'responsibility')
-      ? isFlexibleWeeklyRhythm
-        ? getCoveredWeeks(planStart, planEnd) * weekTarget
-        : countScheduledDates(planStart, planEnd, activeDays)
+  // ── 期間 ────────────────────────────────────────────────────────────
+  const totalWeeks = planEnd
+    ? getCoveredWeeks(planStart, planEnd)
+    : goal.total_days && goal.total_days > 0
+      ? Math.max(Math.ceil(goal.total_days / 7), 1)
+      : 0;
+  const currentWeek = getCurrentPlanWeek(planStart, now, totalWeeks);
+
+  // ── 進度數字（依 progression，各自的單位）─────────────────────────────
+  const stagedTarget = Math.max(goal.level_count ?? goal.level_definitions?.length ?? 0, 0);
+  const stagedCurrent = Math.max(goal.current_level ?? 0, 0);
+  const accTarget = Number(goal.target_value ?? 0);
+  const accCurrent = Math.max(Number(goal.current_value ?? 0), 0);
+  const accUnit = goal.value_unit?.trim() ?? '';
+
+  // ⚠️ **達標與計畫結束是兩件事**（§D）。這個布林只給畫面說一句話用，
+  //    不進 planState。
+  const targetReached = isStaged
+    ? stagedTarget > 0 && stagedCurrent >= stagedTarget
+    : isAccumulation
+      ? accTarget > 0 && accCurrent >= accTarget
+      : weekly.weekTargetReached;
+
+  const today = now.tz(TZ).startOf('day');
+  const hasSchedule = isRhythm
+    ? (weeklyFrequency ?? 0) > 0
+    : isFixedDays
+      ? activeDays.length > 0
+      : progression !== null;
+
+  // ── 生命週期（§D：不從進度推）─────────────────────────────────────────
+  const planState: GoalPlanState = goal.status === 'paused'
+    ? 'paused'
+    : goal.status === 'completed'
+      ? 'completed'
+      : today.isBefore(planStart, 'day')
+        ? 'upcoming'
+        : planEnd !== null && today.isAfter(planEnd, 'day')
+          ? 'expired'
+          : !hasSchedule
+            ? 'unplanned'
+            : 'active';
+
+  // ── 今天能不能按（§B：與 progression 分開，且不看週目標）──────────────
+  const availability = resolveLongTermCompletionAvailability({
+    task,
+    goal,
+    progression,
+    completions,
+    now,
+    planStart,
+    planEnd,
+  });
+  const canCompleteToday = planState === 'active' && availability.canComplete;
+  const completionReason = planState === 'paused'
+    ? 'paused'
+    : planState === 'upcoming'
+      ? 'before_plan'
+      : planState === 'expired'
+        ? 'after_plan'
+        : availability.reason;
+
+  // ── 今天要做什麼（§G：只來自 canonical 來源）──────────────────────────
+  const childPlan = extras.childPlan ?? null;
+  const todayAction = resolveTodayAction(task, childPlan);
+  const sessionMinutes = resolveSessionMinutes(task);
+  const agreedTime = resolveAgreedPreferredTime(task);
+  const supportsTimeWindow = agreedTime !== null
+    && RECORDABLE_WINDOWS.includes(agreedTime.value);
+
+  const todayCompletion = completions.find(
+    (completion) => dayjs(completion.completed_at).tz(TZ).isSame(today, 'day'),
+  ) ?? null;
+
+  const overallPercent = isStaged && stagedTarget > 0
+    ? Math.min(Math.round((stagedCurrent / stagedTarget) * 100), 100)
+    : isAccumulation && accTarget > 0
+      ? Math.min(Math.round((accCurrent / accTarget) * 100), 100)
+      // 節奏計畫的「整體進度」是**走到第幾週**，不是做了幾次 ——
+      // 用次數當百分比，做滿約定次數就會顯示 100%，而計畫還在跑。
+      : totalWeeks > 0
+        ? Math.min(Math.round((currentWeek / totalWeeks) * 100), 100)
+        : 0;
+
+  const milestones = isStaged
+    ? buildSkillMilestones(goal, stagedCurrent, Math.max(stagedTarget, 1))
+    : isAccumulation
+      ? buildChallengeMilestones(goal, accCurrent, Math.max(accTarget, 1), accUnit)
+      : buildRhythmMilestones(goal);
+
+  const nextReward = isStaged
+    ? getNextSkillReward(goal, stagedCurrent)
+    : isAccumulation
+      ? getNextCheckpoint(goal, accCurrent)
       : null;
-  const planNotice =
-    (planState === 'active' || planState === 'unplanned')
-    && scheduledCapacity !== null
-    && scheduledCapacity < target
-      ? `目前期間最多安排 ${scheduledCapacity} 次，和 ${target} 次目標不一致，可以和家人一起調整。`
-      : null;
-  const planWeekLabel = isSkill
-    ? `第 ${Math.min(current + 1, target)} 階段／共 ${target} 階段`
-    : hasUnplannedCycle
-      ? '尚未安排週期'
-      : `第 ${currentWeek} 週／共 ${totalWeeks} 週`;
-  const completionConditionLabel = isSkill
-    ? `完成 ${target} 個階段`
-    : hasChallengeValues
-      ? `累積 ${target}${challengeUnit ? ` ${challengeUnit}` : ''}`
-      : `完成 ${target} 次`;
-  const adjustableItemsLabel = isReadingHabit
-    ? '閱讀時段、每週次數、閱讀方式或內容'
-    : isSkill
-      ? '練習時段、每週次數、階段內容'
-      : isFamily
-        ? '參與時段、每週次數、任務內容'
-        : '執行時段、每週次數、任務內容';
-  const milestones = isSkill
-    ? buildSkillMilestones(goal, current, target)
-    : hasChallengeValues
-      ? buildChallengeMilestones(goal, current, target, challengeUnit)
-      : buildRhythmMilestones(
-          goal,
-          totalWeeks,
-          isReadingHabit,
-        );
+
+  const scheduledCapacity = planEnd !== null && (isRhythm || isFixedDays)
+    ? isRhythm
+      ? getCoveredWeeks(planStart, planEnd) * weekTarget
+      : countScheduledDates(planStart, planEnd, activeDays)
+    : null;
 
   return {
     headerTitle: task.name,
-    weekLabel: hasUnplannedCycle
-      ? '尚未安排週期'
-      : isReadingHabit
-      ? `第 ${currentWeek} 週`
-      : isSkill
-        ? `第 ${Math.min(current + 1, target)} 階段`
-        : '成長旅程',
-    planWeekLabel,
-    weekProgressLabel: isSkill
-      ? '依自己的節奏練習'
-      : isChallenge
-        ? '累積進度由家長確認'
-        : weekTarget === 0
-          ? '本週尚未安排日期'
-          : `本週完成 ${weekCompleted}／${weekTarget} 次`,
-    weekCompleted,
-    weekTarget,
-    totalWeeks,
-    goalKind,
+    progression,
     planState,
-    categoryLabel: isChallenge
-      ? '自主挑戰'
-      : isReadingPlan || isSkill
-        ? '學習與技能'
-        : isFamily
-          ? '家庭參與'
-          : '習慣養成',
-    overallLabel: isSkill
-      ? `第 ${current} / ${target} 階段`
-      : hasChallengeValues
-        ? `${current} / ${target}${challengeUnit ? ` ${challengeUnit}` : ''}`
-        : `${current} / ${target} 次`,
-    overallPercent,
-    focusText: hasUnplannedCycle
-      ? '先和家人一起安排適合的執行日期'
-      : isReadingHabit
-      ? currentWeek === 1
-        ? '第 1 週：先找到適合自己的閱讀節奏'
-        : `第 ${currentWeek} 週：繼續找到適合自己的閱讀節奏`
-      : isSkill
-        ? `目前階段：${currentStage}`
-        : hasChallengeValues
-          ? `目前已累積 ${current}${challengeUnit ? ` ${challengeUnit}` : ''}`
-          : isFamily
-            ? '每一次參與，都讓家裡的節奏更穩一點'
-            : '先找到適合自己的生活節奏',
-    nextText: isReadingHabit
-      ? todayIsActive
-        ? '今天繼續就好，已完成的閱讀都會保留'
-        : '下一次繼續就好，已完成的閱讀都會保留'
-      : isSkill && nextSkillLevel
-        ? `下一個里程碑：${String(nextSkillLevel.name ?? `第 ${current + 1} 階段`)}`
-        : nextReward
-          ? hasChallengeValues
-            ? `下一個里程碑：累積 ${nextReward.threshold}${challengeUnit ? ` ${challengeUnit}` : ''}`
-            : `下一個里程碑：完成第 ${nextReward.threshold} 次`
-          : `下一次繼續完成「${task.name}」就好`,
-    planNotice,
-    todayTitle,
-    todayAction: isReadingHabit
-      ? goal.motivation_note?.trim()
-        || (task.base_time_min > 0
-          ? `${task.name} ${task.base_time_min} 分鐘，今天繼續就好`
-          : `${task.name}，今天繼續就好`)
-      : isSkill
-        ? `這一階段先練習：${currentStage}`
-        : isChallenge
-          ? hasChallengeValues
-            ? `已累積 ${current}${challengeUnit ? ` ${challengeUnit}` : ''}，由家長確認後更新`
-            : '這項累積進度由家長確認後更新'
-          : task.name,
-    todayStatusText,
-    preferredTimeWindow: goal.preferred_time_window,
-    canCompleteToday,
-    isReadingPlan: isReadingHabit,
+    targetReached,
+    categoryLabel: CATEGORY_LABEL[String(task.category ?? '').trim()] ?? '成長計畫',
+    planWeekLabel: isStaged
+      ? `第 ${Math.min(stagedCurrent + 1, Math.max(stagedTarget, 1))} 階段／共 ${Math.max(stagedTarget, 1)} 階段`
+      : planState === 'unplanned' || totalWeeks === 0
+        ? '還沒安排週期'
+        : `第 ${currentWeek} 週／共 ${totalWeeks} 週`,
+
+    weekCompletedActual: weekly.weekCompletedActual,
+    weekTarget: weekly.weekTarget,
+    weekTargetReached: weekly.weekTargetReached,
+    weekExtra: weekly.weekExtra,
+    weekProgressLabel: weekly.label,
+    weekProgressNote: weekly.note,
     weekDays,
-    weekSummary: isFlexibleWeeklyRhythm
-      ? buildFlexibleWeekSummary(isReadingHabit, weekCompleted, weekTarget)
-      : isReadingHabit
-      ? `這週已閱讀 ${weeklyCompletions.length} 次。少一天沒有關係，找到適合自己的節奏更重要。`
-      : isSkill
-        ? '這週可以依自己的節奏，繼續目前的練習階段。'
-        : isChallenge
-          ? '累積進度會在家長確認後更新。'
-          : `這週已完成 ${weeklyCompletions.length} 次。`,
+    weekSummary: isStaged
+      ? '這週可以依自己的節奏，繼續目前的練習階段。'
+      : isAccumulation
+        ? '累積進度會在家長確認後更新。'
+        : weekly.note ?? weekly.label,
+
+    overallLabel: isStaged
+      ? `第 ${stagedCurrent} / ${Math.max(stagedTarget, 1)} 階段`
+      : isAccumulation
+        ? `${accCurrent} / ${accTarget}${accUnit ? ` ${accUnit}` : ''}`
+        : totalWeeks > 0
+          ? `第 ${currentWeek} 週 / 共 ${totalWeeks} 週`
+          : '還沒安排週期',
+    overallPercent,
+    focusText: planState === 'unplanned'
+      ? '先和家人一起安排適合的執行日期'
+      : isStaged
+        ? `目前階段：${getCurrentSkillStage(goal)}`
+        : isAccumulation
+          ? `目前已累積 ${accCurrent}${accUnit ? ` ${accUnit}` : ''}`
+          : childPlan?.desiredOutcome ?? task.name,
+    nextText: isStaged && goal.level_definitions?.[stagedCurrent]
+      ? `下一個里程碑：${String(goal.level_definitions[stagedCurrent].name ?? `第 ${stagedCurrent + 1} 階段`)}`
+      : nextReward
+        ? isAccumulation
+          ? `下一個里程碑：累積 ${nextReward.threshold}${accUnit ? ` ${accUnit}` : ''}`
+          : `下一個里程碑：完成第 ${nextReward.threshold} 次`
+        : weekly.note ?? weekly.label,
+    planNotice: planState === 'active'
+      && scheduledCapacity !== null
+      && goal.total_days !== null
+      && scheduledCapacity < (goal.total_days ?? 0)
+      ? null
+      : null,
+
+    todayTitle: planState === 'paused'
+      ? '計畫暫停中'
+      : planState === 'completed'
+        ? '這段計畫已完成'
+        : planState === 'upcoming'
+          ? '計畫還沒開始'
+          : planState === 'expired'
+            ? '一起回顧這段計畫'
+            : planState === 'unplanned'
+              ? '尚未安排日期'
+              : '今天的小步驟',
+    todayAction,
+    todayStatusText: todayCompletion ? '今天做完了' : COMPLETION_STATUS_COPY[completionReason],
+    sessionMinutes,
+    canCompleteToday,
+    completionReason,
+
+    agreedTime,
+    preferredTimeWindow: goal.preferred_time_window,
+    supportsTimeWindow,
+
+    childPlan,
+    agreedReward: extras.agreedReward ?? null,
+    legacyReward: extras.legacyReward ?? false,
+
     nextReward,
     milestones,
     recentRecords: buildRecentRecords(task, completions),
@@ -820,23 +728,30 @@ export function buildGoalPresentation(
       planStart,
       planEnd,
       totalWeeks,
-      isSkill || isChallenge,
+      isStaged || isAccumulation,
     ),
-    completionConditionLabel,
-    adjustableItemsLabel,
-    finalRewardText: hasUnplannedCycle
+    completionConditionLabel: isStaged
+      ? `完成 ${Math.max(stagedTarget, 1)} 個階段`
+      : isAccumulation
+        ? `累積 ${accTarget}${accUnit ? ` ${accUnit}` : ''}`
+        // ⚠️ 節奏計畫**沒有**「總共要做 N 次」這個終點。
+        //    寫成次數的話，做滿那個數字就會有人以為結束了。
+        : totalWeeks > 0 && weekly.weekTarget > 0
+          ? `${totalWeeks} 週計畫 · 每週 ${weekly.weekTarget} 次`
+          : '還沒安排週期',
+    adjustableItemsLabel: isStaged
+      ? '練習時段、每週次數、階段內容'
+      : '執行時段、每週次數、任務內容',
+    finalRewardText: planState === 'unplanned'
       ? '安排好週期後，再一起回顧這段計畫'
-      : isReadingHabit
-        ? `第 ${totalWeeks} 週結束後一起回顧，可以繼續、調整閱讀方式，或讓計畫先告一段落`
-        : isSkill
-          ? '完成最後階段後，一起留下這段學習成果'
+      : isStaged
+        ? '完成最後階段後，一起留下這段學習成果'
+        : totalWeeks > 0
+          ? `第 ${totalWeeks} 週結束後一起回顧，可以繼續、調整，或讓計畫先告一段落`
           : '完成旅程後，一起選一個值得記住的時刻',
-    reviewTitle: isReadingHabit ? '週末一起回顧' : '一起回顧這段成長',
-    reviewPrompt: isReadingHabit
-      ? '哪一本最喜歡？晚餐後還是睡前比較適合？'
-      : isSkill
-        ? '哪一段練習最有感？下一步想怎麼調整？'
-        : '這段時間哪裡最順？下一步想怎麼調整？',
-    sectionOrder: ['hero', 'today', 'week', 'rewards', 'review'],
+    reviewTitle: '一起回顧這段成長',
+    reviewPrompt: isStaged
+      ? '哪一段練習最有感？下一步想怎麼調整？'
+      : '這段時間哪裡最順？下一步想怎麼調整？',
   };
 }

@@ -131,29 +131,24 @@ const READING_ADJUSTMENT_OPTIONS: Array<{
   { value: 'discuss', label: '想和家人討論' },
 ];
 
-type PresentationKind = GoalPresentation['goalKind'];
+// LT-FINAL-1R：問句依 progression，不依名稱猜出來的「閱讀計畫」。
+type PresentationKind = GoalPresentation['progression'];
 
 function getReviewPrompt(kind: PresentationKind): string {
-  if (kind === 'reading_habit') return '這週最喜歡哪一本書或哪一段？';
-  if (kind === 'skill') return '這週哪一段練習最有感？';
-  if (kind === 'family') return '這週哪一次一起做最有感？';
-  if (kind === 'challenge') return '這週哪一步最有感？';
+  if (kind === 'staged') return '這週哪一段練習最有感？';
+  if (kind === 'accumulation') return '這週哪一步最有感？';
   return '這週哪一段最有感？';
 }
 
 function getAdjustmentOptions(
   kind: PresentationKind,
 ): Array<{ value: AdjustmentDraft; label: string }> {
-  if (kind === 'reading_habit') return READING_ADJUSTMENT_OPTIONS;
-
   const contentLabel =
-    kind === 'skill'
+    kind === 'staged'
       ? '想調整練習內容'
-      : kind === 'family'
-        ? '想調整參與內容'
-        : kind === 'challenge'
-          ? '想調整挑戰內容'
-          : '想調整進行內容';
+      : kind === 'accumulation'
+        ? '想調整挑戰內容'
+        : '想調整進行內容';
 
   return [
     { value: 'time', label: '想調整進行時間' },
@@ -506,7 +501,7 @@ function RecordSheet({
     }
   };
   const loading = correctingTimeWindow || localLoading;
-  const isReadingPlan = presentation.goalKind === 'reading_habit';
+  const supportsTimeWindow = presentation.supportsTimeWindow;
 
   return (
     <View>
@@ -522,7 +517,7 @@ function RecordSheet({
         <DetailRow
           label="完成時段"
           value={
-            isReadingPlan
+            supportsTimeWindow
               ? lastConfirmedWindow
                 ? TIME_WINDOW_LABELS[lastConfirmedWindow]
                 : '尚未記錄時段'
@@ -531,7 +526,7 @@ function RecordSheet({
         />
       </View>
 
-      {isReadingPlan ? (
+      {supportsTimeWindow ? (
         <>
           <Text style={styles.questionLabel}>需要更正時段嗎？</Text>
           <View style={styles.optionGrid}>
@@ -615,9 +610,10 @@ function ReviewSheet({
   sharedPlan?: SharedPlanTimeAdjustment;
   onDismiss: () => void;
 }) {
-  const kind = presentation.goalKind;
-  const isReadingPlan = kind === 'reading_habit';
-  const nextOptions = isReadingPlan
+  const kind = presentation.progression;
+  // 「想換個時段」這個選項只有在時段記得下來時才成立。
+  const supportsTimeWindow = presentation.supportsTimeWindow;
+  const nextOptions = supportsTimeWindow
     ? READING_REVIEW_NEXT_OPTIONS
     : GENERAL_REVIEW_NEXT_OPTIONS;
 
@@ -625,7 +621,7 @@ function ReviewSheet({
     什麼情況才真的送出去 —— 五個條件全部成立才行：
 
       1. 這是共同計畫（sharedPlan 有值）
-      2. 這是閱讀計畫
+      2. 這份約定的時段記得下來（completion context 只有兩個值）
       3. 孩子選的下一步是「調整時間」
       4. 選到的是可送出的時段值
       5. 那個時段和目前談定的不一樣
@@ -634,7 +630,7 @@ function ReviewSheet({
     也有「調整時間」這個選項，但它沒有提案，不該進協商 RPC。
   */
   const chosenWindow = submittableWindow(draft.preferredWindow);
-  const wantsTimeChange = isReadingPlan && draft.nextStep === 'time';
+  const wantsTimeChange = supportsTimeWindow && draft.nextStep === 'time';
   const canSend = Boolean(sharedPlan)
     && wantsTimeChange
     && chosenWindow !== null
@@ -657,12 +653,8 @@ function ReviewSheet({
     <View>
       <Text style={styles.questionLabel}>{getReviewPrompt(kind)}</Text>
       <TextInput
-        accessibilityLabel={isReadingPlan ? '最喜歡的閱讀內容' : '這週最有感的片段'}
-        placeholder={
-          isReadingPlan
-            ? '想記下哪一本書或哪一段？'
-            : '想記下這週最有感的一段嗎？'
-        }
+        accessibilityLabel="這週最有感的片段"
+        placeholder="想記下這週最有感的一段嗎？"
         placeholderTextColor={Colors.fgMuted}
         value={draft.favoriteNote}
         onChangeText={(favoriteNote) => onChange({ ...draft, favoriteNote })}
@@ -671,7 +663,7 @@ function ReviewSheet({
         style={styles.textInput}
       />
 
-      {isReadingPlan ? (
+      {supportsTimeWindow ? (
         <>
           <Text style={styles.questionLabel}>哪個時間比較適合？</Text>
           <View style={styles.optionGrid}>
@@ -749,7 +741,7 @@ function AdjustmentSheet({
   onSelect: (draft: AdjustmentDraft) => void;
   onSave: () => void;
 }) {
-  const options = getAdjustmentOptions(presentation.goalKind);
+  const options = getAdjustmentOptions(presentation.progression);
 
   return (
     <View>

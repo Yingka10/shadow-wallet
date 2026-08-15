@@ -135,6 +135,11 @@ const mockTasks = {
     due_date: null,
     created_at: '2026-07-01',
     is_active: true,
+    // LT-FINAL-1R：時段是談出來的，不是從名字猜的。
+    preferred_time: 'after_dinner',
+    estimated_minutes: 15,
+    claim_period: 'day',
+    max_claims_per_period: 1,
   },
   'task-skill': {
     id: 'task-skill',
@@ -321,15 +326,17 @@ describe('LongTermDetailScreen', () => {
     render(<LongTermDetailScreen />);
 
     expect(await screen.findByText('自主閱讀計畫')).toBeTruthy();
-    expect(screen.getAllByText('第 1 週／共 4 週').length).toBeGreaterThan(0);
-    expect(screen.getByText('本週完成 3／5 次')).toBeTruthy();
+    expect(screen.getAllByText('第 1 週／共 3 週').length).toBeGreaterThan(0);
+    expect(screen.getByText('本週 3 / 5')).toBeTruthy();
     expect(screen.getByText('今天預計：晚餐後')).toBeTruthy();
-    expect(screen.getByText(/這週已閱讀 3 次。/)).toBeTruthy();
+    expect(screen.getByText(/本週 3 \/ 5/)).toBeTruthy();
     expect(screen.queryByText(/自己開始/)).toBeNull();
     expect(screen.queryByText('3 / 20 次')).toBeNull();
     expect(screen.getByTestId('goal-hero')).toBeTruthy();
-    expect(screen.queryByTestId('goal-rewards')).toBeNull();
-    expect(screen.queryByText('成長里程碑')).toBeNull();
+    // LT-FINAL-1R：這份 fixture **真的有** checkpoint_rewards { '5': 10 }，
+    // 所以它會出現 —— 該消失的是憑空生成的那一條「N 週後一起回顧」。
+    expect(screen.getByText('第 5 次的計畫節點')).toBeTruthy();
+    expect(screen.queryByText(/週後一起回顧/)).toBeNull();
   });
 
   it('keeps existing long-term tasks readable before context columns are migrated', async () => {
@@ -348,7 +355,7 @@ describe('LongTermDetailScreen', () => {
     render(<LongTermDetailScreen />);
 
     expect(await screen.findByText('自主閱讀計畫')).toBeTruthy();
-    expect(screen.getByText('本週完成 3／5 次')).toBeTruthy();
+    expect(screen.getByText('本週 3 / 5')).toBeTruthy();
     expect(screen.queryByText('今天已完成 15 分鐘')).toBeNull();
     expect(
       mockSupabaseEqCalls.filter(({ table, column, value }) =>
@@ -478,7 +485,7 @@ describe('LongTermDetailScreen', () => {
 
     render(<LongTermDetailScreen />);
 
-    expect(await screen.findByText('本週完成 3／5 次')).toBeTruthy();
+    expect(await screen.findByText('本週 3 / 5')).toBeTruthy();
     expect(screen.queryByText('今天已完成 15 分鐘')).toBeNull();
     expect(mockSupabaseEqCalls).toContainEqual({
       table: 'task_completions',
@@ -490,7 +497,7 @@ describe('LongTermDetailScreen', () => {
   it('records the chosen schedule without asking how reading started', async () => {
     render(<LongTermDetailScreen />);
 
-    fireEvent.press(await screen.findByLabelText('記錄今天的閱讀'));
+    fireEvent.press(await screen.findByLabelText('記下今天的完成'));
 
     await waitFor(() => {
       expect(mockRecordCompletionContext).toHaveBeenCalledWith(
@@ -529,9 +536,9 @@ describe('LongTermDetailScreen', () => {
     fireEvent.press(await screen.findByLabelText('更多計畫選項'));
     fireEvent.press(screen.getByText('查看計畫詳情'));
 
-    expect(screen.getByText('2026-07-27 ～ 2026-08-23（共 4 週）')).toBeTruthy();
-    expect(screen.getByText('完成 20 次')).toBeTruthy();
-    expect(screen.getByText('閱讀時段、每週次數、閱讀方式或內容')).toBeTruthy();
+    expect(screen.getByText('2026-07-27 ～ 2026-08-16（共 3 週）')).toBeTruthy();
+    expect(screen.getByText('3 週計畫 · 每週 5 次')).toBeTruthy();
+    expect(screen.getByText('執行時段、每週次數、任務內容')).toBeTruthy();
   });
 
   it('opens pause as a local adjustment without updating Supabase', async () => {
@@ -550,11 +557,11 @@ describe('LongTermDetailScreen', () => {
     render(<LongTermDetailScreen />);
 
     fireEvent.press(await screen.findByLabelText('開始週末回顧'));
-    fireEvent.changeText(screen.getByLabelText('最喜歡的閱讀內容'), '神奇樹屋');
+    fireEvent.changeText(screen.getByLabelText('這週最有感的片段'), '神奇樹屋');
     fireEvent.press(screen.getByText('保留回顧草稿'));
     fireEvent.press(screen.getByLabelText('開始週末回顧'));
 
-    expect(screen.getByLabelText('最喜歡的閱讀內容').props.value).toBe('神奇樹屋');
+    expect(screen.getByLabelText('這週最有感的片段').props.value).toBe('神奇樹屋');
     expectNoSupabaseWrites();
   });
 
@@ -563,7 +570,7 @@ describe('LongTermDetailScreen', () => {
 
     fireEvent.press(await screen.findByLabelText('更多計畫選項'));
     fireEvent.press(screen.getByText('提出調整'));
-    fireEvent.press(screen.getByLabelText('想換一個閱讀時段'));
+    fireEvent.press(screen.getByLabelText('想調整進行時間'));
     fireEvent.press(screen.getByText('保留調整草稿'));
 
     expectNoSupabaseWrites();
@@ -572,17 +579,17 @@ describe('LongTermDetailScreen', () => {
   it('immediately controls the completed state after recording today', async () => {
     render(<LongTermDetailScreen />);
 
-    fireEvent.press(await screen.findByLabelText('記錄今天的閱讀'));
+    fireEvent.press(await screen.findByLabelText('記下今天的完成'));
 
     expect(await screen.findByText('今天已完成 15 分鐘')).toBeTruthy();
-    expect(screen.queryByLabelText('記錄今天的閱讀')).toBeNull();
+    expect(screen.queryByLabelText('記下今天的完成')).toBeNull();
   });
 
   it('keeps the completion but not an unsaved time when context recording fails', async () => {
     mockRecordCompletionContext.mockRejectedValueOnce(new Error('network'));
     render(<LongTermDetailScreen />);
 
-    fireEvent.press(await screen.findByLabelText('記錄今天的閱讀'));
+    fireEvent.press(await screen.findByLabelText('記下今天的完成'));
 
     expect(await screen.findByText('今天已完成 15 分鐘')).toBeTruthy();
     await waitFor(() => {
@@ -600,7 +607,7 @@ describe('LongTermDetailScreen', () => {
     mockRecordCompletionContext.mockReturnValueOnce(contextRequest.promise);
     render(<LongTermDetailScreen />);
 
-    fireEvent.press(await screen.findByLabelText('記錄今天的閱讀'));
+    fireEvent.press(await screen.findByLabelText('記下今天的完成'));
 
     expect(await screen.findByText('今天已完成 15 分鐘')).toBeTruthy();
     expect(screen.queryByText('晚餐後記錄')).toBeNull();
@@ -624,7 +631,7 @@ describe('LongTermDetailScreen', () => {
       .mockReturnValueOnce(correctionRequest.promise);
     render(<LongTermDetailScreen />);
 
-    fireEvent.press(await screen.findByLabelText('記錄今天的閱讀'));
+    fireEvent.press(await screen.findByLabelText('記下今天的完成'));
     expect(await screen.findByText('今天已完成 15 分鐘')).toBeTruthy();
     await waitFor(() => {
       expect(mockRecordCompletionContext).toHaveBeenCalledTimes(1);
@@ -676,7 +683,7 @@ describe('LongTermDetailScreen', () => {
       .mockReturnValueOnce(correctionRequest.promise);
     const initialRender = render(<LongTermDetailScreen />);
 
-    fireEvent.press(await screen.findByLabelText('記錄今天的閱讀'));
+    fireEvent.press(await screen.findByLabelText('記下今天的完成'));
     await waitFor(() => {
       expect(mockRecordCompletionContext).toHaveBeenCalledTimes(1);
     });
@@ -743,13 +750,17 @@ describe('LongTermDetailScreen', () => {
     });
     render(<LongTermDetailScreen />);
 
-    expect(await screen.findByText('本週完成 3／5 次')).toBeTruthy();
-    expect(screen.queryByTestId('goal-rewards')).toBeNull();
-    fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
+    expect(await screen.findByText('本週 3 / 5')).toBeTruthy();
+    // 區塊會在（fixture 有真的 checkpoint），重點是它**不會**被 RPC 回傳的
+    // milestone 改寫 —— 下面驗的是那一件事。
+    expect(screen.queryByText(/第 4 天/)).toBeNull();
+    fireEvent.press(screen.getByLabelText('記下今天的完成'));
 
     expect(await screen.findByText('今天已完成 15 分鐘')).toBeTruthy();
-    expect(screen.queryByTestId('goal-rewards')).toBeNull();
-    expect(screen.queryByText(/成長幣 \+10/)).toBeNull();
+    // RPC 回了一個 checkpoint，但畫面上的里程碑仍然只來自 goal 的資料 ——
+    // 不因為一次完成的回應就宣稱達成。
+    expect(screen.getByText('成長幣 +10（達成時一起確認）')).toBeTruthy();
+    expect(screen.queryByText(/已達成/)).toBeNull();
   });
 
   it('keeps reading progress completion-based when the RPC returns no milestone', async () => {
@@ -763,13 +774,17 @@ describe('LongTermDetailScreen', () => {
     });
     render(<LongTermDetailScreen />);
 
-    expect(await screen.findByText('本週完成 3／5 次')).toBeTruthy();
-    expect(screen.queryByTestId('goal-rewards')).toBeNull();
-    fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
+    expect(await screen.findByText('本週 3 / 5')).toBeTruthy();
+    // 區塊會在（fixture 有真的 checkpoint），重點是它**不會**被 RPC 回傳的
+    // milestone 改寫 —— 下面驗的是那一件事。
+    expect(screen.queryByText(/第 4 天/)).toBeNull();
+    fireEvent.press(screen.getByLabelText('記下今天的完成'));
 
     await screen.findByText('今天已完成 15 分鐘');
-    expect(screen.queryByTestId('goal-rewards')).toBeNull();
-    expect(screen.queryByText(/成長幣 \+10/)).toBeNull();
+    // checkpoint 是 fixture 上真的有的（{'5': 10}），所以它在。
+    // 這裡要驗的是「RPC 沒回 milestone 時，畫面不會自己宣稱達成」。
+    expect(screen.getByText('成長幣 +10（達成時一起確認）')).toBeTruthy();
+    expect(screen.queryByText(/已達成/)).toBeNull();
   });
 
   it('does not apply a returned milestone to family current_day', async () => {
@@ -787,7 +802,7 @@ describe('LongTermDetailScreen', () => {
     expect(await screen.findByText('成長幣 +10（達成時一起確認）')).toBeTruthy();
     fireEvent.press(screen.getByLabelText('記下今天的完成'));
 
-    await screen.findByText('今天已完成');
+    await screen.findByText('今天已完成 15 分鐘');
     expect(screen.getByText('成長幣 +10（達成時一起確認）')).toBeTruthy();
     expect(screen.queryByText(/已記下/)).toBeNull();
   });
@@ -833,10 +848,10 @@ describe('LongTermDetailScreen', () => {
     fireEvent.press(screen.getByText('暫停一下'));
     fireEvent.press(screen.getByText('保留調整草稿'));
     fireEvent.press(await screen.findByLabelText('開始週末回顧'));
-    fireEvent.changeText(screen.getByLabelText('最喜歡的閱讀內容'), '神奇樹屋');
+    fireEvent.changeText(screen.getByLabelText('這週最有感的片段'), '神奇樹屋');
     fireEvent.press(screen.getByText('保留回顧草稿'));
     fireEvent.press(screen.getByLabelText('開始週末回顧'));
-    expect(screen.getByLabelText('最喜歡的閱讀內容').props.value).toBe('神奇樹屋');
+    expect(screen.getByLabelText('這週最有感的片段').props.value).toBe('神奇樹屋');
 
     mockRouteParams = {
       goalId: 'goal-skill',
@@ -846,7 +861,7 @@ describe('LongTermDetailScreen', () => {
     rerender(<LongTermDetailScreen />);
 
     expect(await screen.findByText('目前階段：雙手合奏')).toBeTruthy();
-    expect(screen.queryByLabelText('最喜歡的閱讀內容')).toBeNull();
+    expect(screen.queryByLabelText('這週最有感的片段')).toBeNull();
     fireEvent.press(screen.getByLabelText('開始週末回顧'));
     expect(screen.getByText('這週哪一段練習最有感？')).toBeTruthy();
     expect(screen.getByLabelText('這週最有感的片段').props.value).toBe('');
@@ -866,7 +881,7 @@ describe('LongTermDetailScreen', () => {
     mockCompleteTask.mockReturnValueOnce(completionRequest.promise);
     const { rerender } = render(<LongTermDetailScreen />);
 
-    fireEvent.press(await screen.findByLabelText('記錄今天的閱讀'));
+    fireEvent.press(await screen.findByLabelText('記下今天的完成'));
     mockRouteParams = {
       goalId: 'goal-skill',
       taskId: 'task-skill',
@@ -881,7 +896,7 @@ describe('LongTermDetailScreen', () => {
       taskName: '自主閱讀計畫',
     };
     rerender(<LongTermDetailScreen />);
-    await screen.findByText('本週完成 3／5 次');
+    await screen.findByText('本週 3 / 5');
 
     await act(async () => {
       completionRequest.resolve({
@@ -918,7 +933,7 @@ describe('LongTermDetailScreen', () => {
       taskName: '自主閱讀計畫',
     };
     rerender(<LongTermDetailScreen />);
-    await screen.findByText('本週完成 3／5 次');
+    await screen.findByText('本週 3 / 5');
 
     await act(async () => {
       correctionRequest.resolve();
@@ -940,7 +955,7 @@ describe('LongTermDetailScreen', () => {
     mockCompleteTask.mockReturnValueOnce(completionRequest.promise);
     const { unmount } = render(<LongTermDetailScreen />);
 
-    fireEvent.press(await screen.findByLabelText('記錄今天的閱讀'));
+    fireEvent.press(await screen.findByLabelText('記下今天的完成'));
     unmount();
 
     await act(async () => {
@@ -982,7 +997,7 @@ describe('LongTermDetailScreen', () => {
     mockCompleteTask.mockReturnValueOnce(completionRequest.promise);
     const { rerender } = render(<LongTermDetailScreen />);
 
-    fireEvent.press(await screen.findByLabelText('記錄今天的閱讀'));
+    fireEvent.press(await screen.findByLabelText('記下今天的完成'));
     mockRouteParams = {
       goalId: 'goal-skill',
       taskId: 'task-skill',

@@ -210,7 +210,8 @@ describe('HomeScreen', () => {
     };
 
     render(<HomeScreen />);
-    expect(screen.getByText('第 2/4 級')).toBeTruthy();
+    // LT-FINAL-1R：階段制的判準是真的有 level，不是 goal_type。
+    expect(screen.getByText('第 2 / 4 階段')).toBeTruthy();
   });
 
   // LT-FINAL-1 §9：孩子的計畫叫什麼，是孩子決定的。

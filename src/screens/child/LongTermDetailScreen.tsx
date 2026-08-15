@@ -46,6 +46,7 @@ import {
   buildGoalPresentation,
   type GoalCompletionRecord,
 } from './longTermGoalPresentation';
+import { loadLongTermSharedPlan, type LongTermSharedPlan } from '../../lib/longTerm';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -214,6 +215,11 @@ export default function LongTermDetailScreen() {
   const [adjustmentDraft, setAdjustmentDraft] =
     useState<AdjustmentDraft | null>(null);
   const [correctingTimeWindow, setCorrectingTimeWindow] = useState(false);
+  /*
+    孩子自己確認過的那份計畫，以及目前有效共同版本的回饋快照。
+    讀不到就是 null —— legacy 任務本來就沒有，畫面少一段而不是編一段。
+  */
+  const [sharedPlanModel, setSharedPlanModel] = useState<LongTermSharedPlan | null>(null);
 
   /*
     孩子的身分來自已載入的 goal，不從 route params 猜。goal 還沒回來之前
@@ -310,6 +316,12 @@ export default function LongTermDetailScreen() {
         dayjs(completion.completed_at).tz(TZ).isSame(dayjs().tz(TZ), 'day'),
       );
 
+      const shared = await loadLongTermSharedPlan({
+        taskId, childId: loadedGoal.child_id,
+      });
+      if (!isCurrentGeneration()) return;
+      setSharedPlanModel(shared);
+
       setGoal(loadedGoal);
       setTask(loadedTask);
       setCompletions(loadedCompletions);
@@ -332,6 +344,7 @@ export default function LongTermDetailScreen() {
     setAdjustmentDraft(null);
     setGoal(null);
     setTask(null);
+    setSharedPlanModel(null);
     setCompletions([]);
     setSelectedTimeWindow(null);
     setChecking(false);
@@ -372,10 +385,14 @@ export default function LongTermDetailScreen() {
   const presentation = useMemo(() => {
     if (!goal || !task) return null;
     return {
-      ...buildGoalPresentation(task, goal, completions),
+      ...buildGoalPresentation(task, goal, completions, undefined, {
+        childPlan: sharedPlanModel?.childPlan ?? null,
+        agreedReward: sharedPlanModel?.agreedReward ?? null,
+        legacyReward: sharedPlanModel?.legacyReward ?? false,
+      }),
       preferredTimeWindow: selectedTimeWindow,
     };
-  }, [completions, goal, selectedTimeWindow, task]);
+  }, [completions, goal, selectedTimeWindow, sharedPlanModel, task]);
 
   const todayCompletion = useMemo(
     () => completions.find((completion) =>
@@ -584,7 +601,7 @@ export default function LongTermDetailScreen() {
           <View style={styles.weekPill}>
             <View style={styles.weekDot} />
             <Text style={styles.weekText} numberOfLines={1}>
-              {presentation?.weekLabel ?? '成長旅程'}
+              {presentation?.planWeekLabel ?? '成長旅程'}
             </Text>
           </View>
           <TouchableOpacity

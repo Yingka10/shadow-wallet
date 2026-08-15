@@ -48,6 +48,7 @@ import { useTodayTasks, type TodayTask } from '../../hooks/useTodayTasks';
 import { useWallet } from '../../hooks/useWallet';
 import { useChildProposalReview } from '../../hooks/useChildProposalReview';
 import { isChildPlanningReviewCard } from '../../lib/childPlanning/childReview';
+import { buildWeeklyProgress, resolveLongTermProgression } from '../../lib/longTerm';
 import { ChildSharedTermsReviewCard } from '../../components/child/ChildSharedTermsReviewCard';
 import BottomNav from '../../components/BottomNav';
 import GrassGroundScene from '../../components/child/GrassGroundScene';
@@ -198,29 +199,68 @@ function getGoalTone(task: TodayTask): { tone: GoalTone; icon: string } {
   return { tone: 'growth', icon: '🌱' };
 }
 
-function getGoalProgress(goal: TodayTask['goal']): { label: string; pct: number } {
-  if (!goal) return { label: '第 0/0 天', pct: 0 };
+/**
+ * 首頁那張卡上的進度。**與詳情頁共用同一個 progression resolver。**
+ *
+ * ⚠️ 之前這裡是 `goal_type === 'skill' ? 級 : current_day / total_days`。
+ *    兩個判準都是錯的：`goal_type` 不決定進度（它由兩條路徑寫），
+ *    而 `current_day` 建立後從來沒有被遞增過 —— 一份每天都有在做的
+ *    共同計畫，首頁永遠顯示 0%。
+ *
+ *    真實進度只有一個來源：task_completions（由 useTodayTasks 批次查回）。
+ */
+function getGoalProgress(task: TodayTask): { label: string; pct: number } {
+  const goal = task.goal;
+  if (!goal) return { label: '還沒安排週期', pct: 0 };
 
-  if (goal.goal_type === 'skill') {
-    const total = Math.max(goal.level_count ?? goal.level_definitions?.length ?? 0, 1);
+  const progression = resolveLongTermProgression(task, goal);
+
+  if (progression === 'staged') {
+    const total = Math.max(goal.level_count ?? goal.level_definitions?.length ?? 1, 1);
     const current = Math.min(goal.current_level ?? 0, total);
-    return { label: `第 ${current}/${total} 級`, pct: current / total };
+    return { label: `第 ${current} / ${total} 階段`, pct: current / total };
   }
 
-  const total = Math.max(goal.total_days ?? 30, 1);
-  const current = Math.min(goal.current_day ?? 0, total);
-  return { label: `第 ${current}/${total} 天`, pct: current / total };
+  if (progression === 'accumulation') {
+    const total = Math.max(Number(goal.target_value ?? 0), 1);
+    const current = Math.max(Number(goal.current_value ?? 0), 0);
+    const unit = goal.value_unit?.trim() ?? '';
+    return {
+      label: `${current} / ${total}${unit ? ` ${unit}` : ''}`,
+      pct: Math.min(current / total, 1),
+    };
+  }
+
+  if (progression === 'rhythm' || progression === 'fixed_days') {
+    const target = progression === 'rhythm'
+      ? Number(task.weekly_frequency ?? 0)
+      : (goal.active_days ?? task.recurrence_days ?? []).length;
+    const weekly = buildWeeklyProgress(task.weekCompletions ?? [], target);
+    return {
+      // 超過約定次數時講「本週完成 4 次 · 原本約定 3 次」，不寫 4/3。
+      label: weekly.weekExtra > 0
+        ? `${weekly.label} · 約定 ${weekly.weekTarget} 次`
+        : weekly.label,
+      pct: weekly.weekTarget > 0
+        ? Math.min(weekly.weekCompletedActual / weekly.weekTarget, 1)
+        : 0,
+    };
+  }
+
+  return { label: '還沒安排週期', pct: 0 };
 }
 
+/**
+ * 任務圖示。**只看 category，不看名稱。**
+ *
+ * ⚠️ 之前會因為名字裡有「碗」「垃圾」「鋼琴」換圖示 —— 那是內容嗅探，
+ *    而且會在孩子自己命名的計畫上猜錯。同一條規則已經在 getGoalTone
+ *    上拔過一次（P1-FINAL）。
+ */
 function taskIcon(task: TodayTask): string {
-  const name = task.name;
-  if (name.includes('碗') || name.includes('盤') || name.includes('飯')) return '🍽️';
-  if (name.includes('垃圾')) return '🗑️';
-  if (name.includes('閱讀') || name.includes('書')) return '📚';
-  if (name.includes('睡')) return '🌙';
-  if (name.includes('鋼琴')) return '🎹';
   if (task.category === 'C') return '🤝';
   if (task.category === 'A') return '☀️';
+  if (task.category === 'D') return '📚';
   return '🌿';
 }
 
@@ -1004,7 +1044,7 @@ function ProgressDots({ done, total }: { done: number; total: number }) {
 
 function GoalCard({ task, onPress }: { task: TodayTask; onPress: () => void }) {
   const info = getGoalTone(task);
-  const progress = getGoalProgress(task.goal);
+  const progress = getGoalProgress(task);
 
   return (
     <TouchableOpacity activeOpacity={0.86} style={styles.goalCard} onPress={onPress}>

@@ -223,7 +223,7 @@ afterEach(() => { jest.useRealTimers(); });
 
 /** 週進度在 hero 與週卡各出現一次，所以用 getAllByText 而不是 getByText。 */
 function expectWeekProgressUnchanged() {
-  expect(screen.getAllByText('本週完成 2／3 次').length).toBeGreaterThan(0);
+  expect(screen.getAllByText('本週 2 / 3').length).toBeGreaterThan(0);
   expect(screen.queryByText(/本週完成 3／3 次|本週完成 2／4 次/)).toBeNull();
 }
 
@@ -238,7 +238,6 @@ describe('P0-8M · 孩子端長期詳情', () => {
     await renderScreen();
 
     expect(screen.getByText(/今天預計：睡前/)).toBeTruthy();
-    expect(screen.queryByText(/尚未選擇時段/)).toBeNull();
   });
 
   it('goal mirror 有值時以 goal 為準', async () => {
@@ -254,16 +253,19 @@ describe('P0-8M · 孩子端長期詳情', () => {
     scenario.taskPreferredTime = null;
     await renderScreen();
 
-    expect(screen.getByText(/尚未選擇時段/)).toBeTruthy();
+    expect(screen.queryByText(/今天預計/)).toBeNull();
   });
 
-  it('task 上不是閱讀 UI 認得的時段時不硬塞，仍顯示尚未選擇', async () => {
+  // LT-FINAL-1R §I：談定的時段與「記得下來的時段」是兩件事。
+  // 放學後談得成、但 completion context 記不下來 —— 所以不出現時段選擇，
+  // 但也**不可以**假裝沒談過。
+  it('放學後：不顯示時段選擇，但約定本身講得出來', async () => {
     scenario.goalPreferredWindow = null;
     scenario.taskPreferredTime = 'after_school';
     await renderScreen();
 
-    expect(screen.getByText(/尚未選擇時段/)).toBeTruthy();
-    expect(screen.queryByText(/放學後/)).toBeNull();
+    expect(screen.queryByText(/今天預計/)).toBeNull();
+    expect(screen.getByText(/放學後/)).toBeTruthy();
   });
 
   it('before：本週 2／3，時段是睡前', async () => {

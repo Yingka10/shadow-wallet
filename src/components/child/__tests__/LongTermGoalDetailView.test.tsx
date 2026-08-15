@@ -47,13 +47,15 @@ function makePresentation(
 ): GoalPresentation {
   return {
     headerTitle: '自主閱讀計畫',
-    weekLabel: '第 1 週',
     planWeekLabel: '第 1 週／共 4 週',
     weekProgressLabel: '本週完成 1／5 次',
-    weekCompleted: 1,
+    weekCompletedActual: 1,
     weekTarget: 5,
-    totalWeeks: 4,
-    goalKind: 'reading_habit',
+    weekTargetReached: false,
+    weekExtra: 0,
+    weekProgressNote: '還差 4 次到這週約定的節奏',
+    progression: 'rhythm',
+    targetReached: false,
     planState: 'active',
     categoryLabel: '學習與技能',
     overallLabel: '1 / 20 次',
@@ -66,7 +68,13 @@ function makePresentation(
     todayStatusText: null,
     preferredTimeWindow: 'after_dinner',
     canCompleteToday: true,
-    isReadingPlan: true,
+    completionReason: 'available',
+    sessionMinutes: 15,
+    agreedTime: { value: 'after_dinner', label: '晚餐後' },
+    supportsTimeWindow: true,
+    childPlan: null,
+    agreedReward: null,
+    legacyReward: false,
     weekDays: [
       {
         day: 1,
@@ -141,7 +149,6 @@ function makePresentation(
     finalRewardText: '四週後一起回顧，可以繼續、調整，或讓計畫先告一段落。',
     reviewTitle: '週末一起回顧',
     reviewPrompt: '這週哪個時間最適合閱讀？',
-    sectionOrder: ['hero', 'today', 'week', 'rewards', 'review'],
     ...overrides,
   };
 }
@@ -270,10 +277,10 @@ describe('LongTermGoalDetailView', () => {
     expect(
       screen.getAllByText('第一週：先找到適合自己的閱讀節奏').length,
     ).toBeGreaterThan(1);
-    expect(screen.getByText(/不知道選哪一本/)).toBeTruthy();
+    expect(screen.getByText(/先完成今天最小的一步/)).toBeTruthy();
 
     fireEvent.press(collapseButton);
-    expect(screen.queryByText(/不知道選哪一本/)).toBeNull();
+    expect(screen.queryByText(/先完成今天最小的一步/)).toBeNull();
   });
 
   it('lets an unfinished reading plan adjust its time and record today', async () => {
@@ -291,7 +298,7 @@ describe('LongTermGoalDetailView', () => {
     expect(onSelectTimeWindow).toHaveBeenCalledWith('before_bed');
 
     await act(async () => {
-      fireEvent.press(screen.getByText('記錄今天的閱讀'));
+      fireEvent.press(screen.getByText('記下今天的完成'));
     });
     expect(onComplete).toHaveBeenCalledTimes(1);
   });
@@ -306,7 +313,7 @@ describe('LongTermGoalDetailView', () => {
 
     expect(screen.getByText('今天已完成 15 分鐘')).toBeTruthy();
     expect(screen.getByText('晚餐後記錄')).toBeTruthy();
-    expect(screen.queryByText('記錄今天的閱讀')).toBeNull();
+    expect(screen.queryByText('記下今天的完成')).toBeNull();
 
     fireEvent.press(screen.getByText('查看紀錄'));
     fireEvent.press(screen.getByText('需要更正'));
@@ -328,7 +335,7 @@ describe('LongTermGoalDetailView', () => {
     );
 
     await act(async () => {
-      fireEvent.press(screen.getByText('記錄今天的閱讀'));
+      fireEvent.press(screen.getByText('記下今天的完成'));
     });
     expect(onComplete).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('completion-loading')).toBeNull();
@@ -355,7 +362,7 @@ describe('LongTermGoalDetailView', () => {
       />,
     );
     expect(screen.queryByText('今天已完成 15 分鐘')).toBeNull();
-    expect(screen.getByText('記錄今天的閱讀')).toBeTruthy();
+    expect(screen.getByText('記下今天的完成')).toBeTruthy();
   });
 
   it('does not expose record, review, or details actions without callbacks', () => {
@@ -398,10 +405,12 @@ describe('LongTermGoalDetailView', () => {
   it('does not offer reading time choices to a completable non-reading task', () => {
     renderView(makePresentation({
       headerTitle: '鋼琴家之路',
-      goalKind: 'skill',
+      progression: 'staged',
       todayAction: '練習雙手合奏 15 分鐘',
       canCompleteToday: true,
-      isReadingPlan: true,
+      // 這份約定的時段記不下來（不是 after_dinner / before_bed），
+      // 所以不顯示時段選擇。
+      supportsTimeWindow: false,
       preferredTimeWindow: null,
       recentRecords: [],
     }));
@@ -411,11 +420,9 @@ describe('LongTermGoalDetailView', () => {
     expect(screen.queryByText('晚餐後')).toBeNull();
     expect(screen.queryByText('睡前')).toBeNull();
     expect(screen.getByText('記下今天的完成')).toBeTruthy();
-    expect(screen.queryByText('記錄今天的閱讀')).toBeNull();
 
     fireEvent.press(screen.getByLabelText('展開小步驟說明'));
     expect(screen.getByText(/先完成今天最小的一步/)).toBeTruthy();
-    expect(screen.queryByText(/不知道選哪一本/)).toBeNull();
   });
 
   it.each([
@@ -435,13 +442,14 @@ describe('LongTermGoalDetailView', () => {
       }));
 
       expect(screen.getByText(todayTitle)).toBeTruthy();
-      expect(screen.getAllByText(todayStatusText).length).toBeGreaterThanOrEqual(2);
+      expect(screen.getAllByText(todayStatusText).length).toBeGreaterThanOrEqual(1);
       expect(
         screen.queryByText('今天先照自己的節奏前進，需要時再和家人一起確認。'),
       ).toBeNull();
 
+      // LT-FINAL-1R：「本週進度」那一段講的是這週，不是今天的狀態。
       const week = within(screen.getByTestId('goal-week'));
-      expect(week.getByText(todayStatusText)).toBeTruthy();
+      expect(week.getByText('本週完成 1／5 次')).toBeTruthy();
       expect(
         week.getByText('少一天沒有關係，找到適合自己的節奏更重要。'),
       ).toBeTruthy();
@@ -488,7 +496,7 @@ describe('LongTermGoalDetailView', () => {
 
     renderView(makePresentation(), { onComplete });
 
-    const completeButton = screen.getByLabelText('記錄今天的閱讀');
+    const completeButton = screen.getByLabelText('記下今天的完成');
     fireEvent.press(completeButton);
     fireEvent.press(completeButton);
 
@@ -504,7 +512,7 @@ describe('LongTermGoalDetailView', () => {
     });
 
     await act(async () => {
-      fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
+      fireEvent.press(screen.getByLabelText('記下今天的完成'));
     });
     expect(onComplete).toHaveBeenCalledTimes(2);
     expect(screen.queryByTestId('completion-loading')).toBeNull();
@@ -519,7 +527,7 @@ describe('LongTermGoalDetailView', () => {
     renderView(makePresentation(), { onComplete });
 
     await act(async () => {
-      fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
+      fireEvent.press(screen.getByLabelText('記下今天的完成'));
     });
     expect(
       screen.getByText('剛才沒有記錄成功，請再試一次。'),
@@ -527,7 +535,7 @@ describe('LongTermGoalDetailView', () => {
     expect(screen.queryByTestId('completion-loading')).toBeNull();
 
     await act(async () => {
-      fireEvent.press(screen.getByLabelText('記錄今天的閱讀'));
+      fireEvent.press(screen.getByLabelText('記下今天的完成'));
     });
     expect(onComplete).toHaveBeenCalledTimes(2);
     expect(screen.queryByTestId('completion-loading')).toBeNull();
@@ -660,8 +668,8 @@ describe('LongTermGoalDetailView', () => {
 
   it('renders milestones as status-labelled timeline rows', () => {
     renderView(makePresentation({
-      goalKind: 'skill',
-      isReadingPlan: false,
+      progression: 'staged',
+      supportsTimeWindow: false,
       milestones: TRUSTED_MILESTONES,
     }));
     const milestones = within(screen.getByTestId('goal-rewards'));
@@ -685,8 +693,8 @@ describe('LongTermGoalDetailView', () => {
 
   it('labels habit and family checkpoint configuration as a planned node', () => {
     renderView(makePresentation({
-      goalKind: 'habit',
-      isReadingPlan: false,
+      progression: 'rhythm',
+      supportsTimeWindow: false,
       milestones: [
         {
           id: 'checkpoint-5',
@@ -751,7 +759,7 @@ describe('LongTermGoalDetailView', () => {
   it('keeps skill goals in the same skeleton with a non-reading action', () => {
     renderView(makePresentation({
       headerTitle: '鋼琴家之路',
-      goalKind: 'skill',
+      progression: 'staged',
       planWeekLabel: '第 2 階段／共 4 階段',
       weekProgressLabel: '這週練習 2 次',
       weekSummary: '這週可以依自己的節奏，繼續目前的練習階段。',
@@ -762,7 +770,7 @@ describe('LongTermGoalDetailView', () => {
       todayAction: '練習雙手合奏 15 分鐘',
       preferredTimeWindow: null,
       canCompleteToday: true,
-      isReadingPlan: false,
+      supportsTimeWindow: false,
       milestones: TRUSTED_MILESTONES,
       reviewPrompt: '這週哪一段練習最有進步？',
     }));
@@ -778,7 +786,6 @@ describe('LongTermGoalDetailView', () => {
       expect(screen.getByTestId(testID)).toBeTruthy();
     }
     expect(screen.getByText('記下今天的完成')).toBeTruthy();
-    expect(screen.queryByText('記錄今天的閱讀')).toBeNull();
 
     const week = within(screen.getByTestId('goal-week'));
     expect(week.getByText('這週練習 2 次')).toBeTruthy();
@@ -788,7 +795,7 @@ describe('LongTermGoalDetailView', () => {
 
   it('uses compact weekly progress for challenge goals without fake daily cells', () => {
     renderView(makePresentation({
-      goalKind: 'challenge',
+      progression: 'accumulation',
       weekProgressLabel: '目前累積 25／100 頁',
       weekSummary: '累積進度由家長一起確認。',
       weekTarget: 5,
@@ -826,8 +833,8 @@ describe('LongTermGoalDetailView', () => {
 
     const week = within(screen.getByTestId('goal-week'));
     expect(screen.getByText('本週進度')).toBeTruthy();
-    expect(week.getByText('本週完成 3／4 次')).toBeTruthy();
-    expect(week.getByText(/這週還差 1 次/)).toBeTruthy();
+    expect(week.getByText('本週 3 / 4')).toBeTruthy();
+    expect(week.getByText(/還差 1 次到這週約定的節奏/)).toBeTruthy();
     expect(week.queryByTestId('goal-day-caption-1')).toBeNull();
     expect(week.queryByText(/尚未記錄|未安排|漏掉/)).toBeNull();
   });
@@ -851,7 +858,7 @@ describe('LongTermGoalDetailView', () => {
         ],
       }),
       '第 2 / 4 階段',
-      '依自己的節奏練習',
+      '這週可以依自己的節奏，繼續目前的練習階段。',
     ],
     [
       'challenge',
@@ -866,7 +873,7 @@ describe('LongTermGoalDetailView', () => {
         value_unit: '頁',
       }),
       '25 / 100 頁',
-      '累積進度由家長確認',
+      '累積進度會在家長確認後更新。',
     ],
   ] as const)(
     'renders truthful %s compact progress from the presentation builder',
@@ -890,7 +897,7 @@ describe('LongTermGoalDetailView', () => {
 
   it('uses compact weekly status when a habit has no scheduled days', () => {
     renderView(makePresentation({
-      goalKind: 'habit',
+      progression: 'rhythm',
       planState: 'unplanned',
       weekProgressLabel: '本週尚未安排',
       weekSummary: '先和家人一起選出適合的日子。',

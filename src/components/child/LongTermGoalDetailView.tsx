@@ -79,10 +79,6 @@ function formatTimeWindow(window: PreferredTimeWindow): string {
   return window === 'after_dinner' ? '晚餐後' : '睡前';
 }
 
-function minutesFromAction(action: string): string | null {
-  return action.match(/(\d+)\s*分鐘/)?.[1] ?? null;
-}
-
 function DetailIcon({
   name,
   size = 22,
@@ -353,7 +349,8 @@ function CompletedTodayState({
   completion?: GoalRecentRecord;
   onOpenRecord?: Props['onOpenRecord'];
 }) {
-  const minutes = minutesFromAction(presentation.todayAction);
+  // 分鐘數讀 canonical 欄位（estimated_minutes），**不是**從那句話裡 parse 出來的。
+  const minutes = presentation.sessionMinutes;
   const completedLabel = minutes ? `今天已完成 ${minutes} 分鐘` : '今天已完成';
   const openRecord = () => onOpenRecord?.(completion?.id);
 
@@ -413,9 +410,10 @@ function TodayStepCard({
   const completionPendingRef = useRef(false);
   const completed = isCompletedToday;
   const busy = checking || completing;
-  const isReadingPlan = presentation.goalKind === 'reading_habit';
+  // LT-FINAL-1R：畫面不再問「這是不是閱讀計畫」。時段選擇要不要出現，
+  // 由**這份約定的時段記不記得下來**決定（completion context 只有兩個值）。
   const showReadingTimeControls =
-    isReadingPlan && presentation.canCompleteToday;
+    presentation.supportsTimeWindow && presentation.canCompleteToday;
   const todayCompletion = isCompletedToday
     ? presentation.recentRecords[0]
     : undefined;
@@ -452,12 +450,28 @@ function TodayStepCard({
         <View style={styles.actionHead}>
           <View style={styles.actionIcon}>
             <DetailIcon
-              name={isReadingPlan ? 'book' : 'sprout'}
+              name={presentation.categoryLabel === '學習與技能' ? 'book' : 'sprout'}
               color={Colors.leaf700}
             />
           </View>
           <View style={styles.actionCopy}>
             <Text style={styles.actionTitle}>{presentation.todayAction}</Text>
+            {/*
+              家庭談定的時段。詞彙比 completion context 寬（放學後、週末、
+              需要時…），所以就算這一次記不下來，也要講得出來 ——
+              不然一份正式談過「放學後」的計畫會顯示成從來沒談過。
+            */}
+            {!showReadingTimeControls && presentation.agreedTime ? (
+              <View style={styles.scheduleLabel}>
+                <DetailIcon name="clock" size={16} color={Colors.fgMuted} />
+                <Text style={styles.scheduleText}>
+                  說好的時段：{presentation.agreedTime.label}
+                  {presentation.sessionMinutes
+                    ? `・約 ${presentation.sessionMinutes} 分鐘`
+                    : ''}
+                </Text>
+              </View>
+            ) : null}
             {showReadingTimeControls ? (
               <View style={styles.scheduleRow}>
                 <View style={styles.scheduleLabel}>
@@ -517,9 +531,7 @@ function TodayStepCard({
           <View style={styles.explanationBody}>
             <Text style={styles.explanationText}>{presentation.focusText}</Text>
             <Text style={styles.explanationHint}>
-              {isReadingPlan
-                ? '不知道選哪一本時，可以先從最想翻開的那一本開始。'
-                : '先完成今天最小的一步，覺得不合適時再和家人一起調整。'}
+              {'先完成今天最小的一步，覺得不合適時再和家人一起調整。'}
             </Text>
           </View>
         ) : null}
@@ -570,11 +582,7 @@ function TodayStepCard({
             disabled={busy}
             onPress={() => void handleComplete()}
             accessibilityRole="button"
-            accessibilityLabel={
-              isReadingPlan
-                ? '記錄今天的閱讀'
-                : '記下今天的完成'
-            }
+            accessibilityLabel="記下今天的完成"
             accessibilityState={{ disabled: busy }}
             activeOpacity={0.78}
           >
@@ -587,11 +595,7 @@ function TodayStepCard({
             ) : (
               <>
                 <DetailIcon name="check" size={19} color={Colors.bgSurface} />
-                <Text style={styles.completeButtonText}>
-                  {isReadingPlan
-                    ? '記錄今天的閱讀'
-                    : '記下今天的完成'}
-                </Text>
+                <Text style={styles.completeButtonText}>記下今天的完成</Text>
               </>
             )}
           </TouchableOpacity>
@@ -660,20 +664,17 @@ function WeekProgressCard({
     presentation.planState === 'active'
     && presentation.weekTarget > 0
     && presentation.weekDays.some((day) => day.isScheduled)
-    && (
-      presentation.goalKind === 'reading_habit'
-      || presentation.goalKind === 'habit'
-      || presentation.goalKind === 'family'
-    );
+    && (presentation.progression === 'rhythm' || presentation.progression === 'fixed_days');
   const showsOverallProgress =
     presentation.planState === 'active'
-    && (
-      presentation.goalKind === 'skill'
-      || presentation.goalKind === 'challenge'
-    );
+    && (presentation.progression === 'staged' || presentation.progression === 'accumulation');
+  // 這一段是**本週進度**，所以主字一律是週進度。
+  //
+  // ⚠️ 之前是 `todayStatusText ?? weekProgressLabel` —— 今天已經記過的時候，
+  //    整段就只剩「今天已經記過了」，而孩子點進「本週進度」是要看這週的。
   const compactPrimaryText = showsOverallProgress
     ? presentation.overallLabel
-    : presentation.todayStatusText ?? presentation.weekProgressLabel;
+    : presentation.weekProgressLabel;
 
   return (
     <View>
