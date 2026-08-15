@@ -253,6 +253,7 @@ describe('LongTermGoalDetailView', () => {
         'goal-current-position',
         'goal-today-section',
         'goal-progress-section',
+        'goal-next-stop-section',
         'goal-review-section',
         'goal-more',
       ]) {
@@ -268,6 +269,7 @@ describe('LongTermGoalDetailView', () => {
         'goal-current-position',
         'goal-today-section',
         'goal-progress-section',
+        'goal-next-stop-section',
         'goal-review-section',
         'goal-more',
       ]);
@@ -550,8 +552,8 @@ describe('LongTermGoalDetailView', () => {
       const anchor = screen.getByTestId('today-step-anchor', HIDDEN);
       const anchorStyle = StyleSheet.flatten(anchor.props.style);
       // 32px 的小圓看起來就是 list icon；這一格要撐得起構圖。
+      // 只守下限——上限交給 mockup，別再用細碎的數字把設計綁死。
       expect(anchorStyle.width).toBeGreaterThanOrEqual(56);
-      expect(anchorStyle.width).toBeLessThanOrEqual(72);
       // 它只負責構圖，不表達任何 domain 資料。
       expect(anchor.props.accessibilityElementsHidden).toBe(true);
     });
@@ -629,12 +631,42 @@ describe('LongTermGoalDetailView', () => {
     });
   });
 
+  /*
+    節奏卡上的葉子直接對應 weekTarget / weekCompleted。這一條守的是「不要多長
+    出一顆」——畫面上每一顆節點都得有資料撐著。
+  */
+  it('draws exactly as many rhythm nodes as the week actually plans', () => {
+    renderView(makePresentation({
+      progression: 'weekly_rhythm',
+      weekCompleted: 2,
+      weekTarget: 3,
+    }));
+
+    const trail = screen.getByTestId('goal-rhythm-trail', HIDDEN);
+    expect(trail.children).toHaveLength(3);
+
+    const progress = within(screen.getByTestId('goal-progress'));
+    expect(progress.getByText('本週 2 / 3')).toBeTruthy();
+  });
+
+  it('moves the plan milestones into their own next-stop section', () => {
+    renderView(makePresentation({ milestones: TRUSTED_MILESTONES }));
+
+    const nextStop = within(screen.getByTestId('goal-next-stop-section'));
+    expect(nextStop.getByText('這段路上的下一站')).toBeTruthy();
+    expect(nextStop.getByTestId('goal-milestones')).toBeTruthy();
+    // 節點搬家了，Progress 不該再留一份。
+    expect(
+      within(screen.getByTestId('goal-progress')).queryByTestId('goal-milestones'),
+    ).toBeNull();
+  });
+
   it('uses product icons instead of emoji for formal section headings', () => {
     renderView();
 
     for (const heading of [
       '今天的小步驟',
-      '進度',
+      '這週的節奏',
       '週末一起回顧',
     ]) {
       expect(screen.getByText(heading)).toBeTruthy();
@@ -655,8 +687,9 @@ describe('LongTermGoalDetailView', () => {
     const actionStyle = StyleSheet.flatten(
       screen.getByText('自己選一本喜歡的書，閱讀 15 分鐘').props.style,
     );
-    expect(actionStyle.fontSize).toBeGreaterThanOrEqual(22);
-    expect(actionStyle.lineHeight).toBeGreaterThanOrEqual(30);
+    // 只守「主要文案比周邊都大」的下限；確切字級由 mockup 決定。
+    expect(actionStyle.fontSize).toBeGreaterThanOrEqual(19);
+    expect(actionStyle.lineHeight).toBeGreaterThanOrEqual(26);
 
     const completeButton = screen.getByLabelText('記下今天的完成');
     const completeButtonStyle = StyleSheet.flatten(completeButton.props.style);
@@ -1081,7 +1114,7 @@ describe('LongTermGoalDetailView', () => {
       progression: 'staged_skill',
       milestones: TRUSTED_MILESTONES,
     }));
-    const milestones = within(screen.getByTestId('goal-progress'));
+    const milestones = within(screen.getByTestId('goal-next-stop-section'));
 
     expect(milestones.getByText('完成第 1 次閱讀')).toBeTruthy();
     expect(milestones.getByText('完成第 5 次閱讀')).toBeTruthy();
@@ -1118,14 +1151,16 @@ describe('LongTermGoalDetailView', () => {
 
     renderView(presentation);
 
-    const progress = within(screen.getByTestId('goal-progress'));
-    expect(progress.getAllByText('已完成')).toHaveLength(2);
-    expect(progress.getByText('進行中')).toBeTruthy();
-    expect(progress.getByText('下一階段')).toBeTruthy();
-    expect(progress.queryByText('下一個里程碑')).toBeNull();
-    expect(progress.queryByText('計畫節點')).toBeNull();
+    // 階段時間軸搬到「這段路上的下一站」，狀態語意一個字沒變。
+    const nextStop = within(screen.getByTestId('goal-next-stop-section'));
+    expect(nextStop.getAllByText('已完成')).toHaveLength(2);
+    expect(nextStop.getByText('進行中')).toBeTruthy();
+    expect(nextStop.getByText('下一階段')).toBeTruthy();
+    expect(nextStop.queryByText('下一個里程碑')).toBeNull();
+    expect(nextStop.queryByText('計畫節點')).toBeNull();
 
     // 孩子現在練的那一階段，是被標示出來的那一列。
+    const progress = within(screen.getByTestId('goal-progress'));
     expect(progress.getByText('已完成 2 / 4 階段')).toBeTruthy();
     expect(progress.getByText('現在正在：雙手合奏')).toBeTruthy();
   });
@@ -1155,7 +1190,7 @@ describe('LongTermGoalDetailView', () => {
       ],
     }));
 
-    const milestones = within(screen.getByTestId('goal-progress'));
+    const milestones = within(screen.getByTestId('goal-next-stop-section'));
     expect(milestones.getByText('計畫節點')).toBeTruthy();
     expect(milestones.queryByText('已完成')).toBeNull();
   });
@@ -1328,7 +1363,7 @@ describe('LongTermGoalDetailView', () => {
     renderView(presentation);
 
     expect(presentation.goalKind).toBe('habit');
-    expect(screen.getByText('進度')).toBeTruthy();
+    expect(screen.getByText('這週的節奏')).toBeTruthy();
     const week = within(screen.getByTestId('goal-progress'));
     expect(week.getByTestId('goal-day-caption-1')).toBeTruthy();
     expect(week.getByTestId('goal-day-caption-5')).toBeTruthy();

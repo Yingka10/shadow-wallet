@@ -369,7 +369,7 @@ describe('LongTermDetailScreen', () => {
     expect(screen.getByText('共 4 週')).toBeTruthy();
     expect(screen.queryByText('第 1 週／共 4 週')).toBeNull();
     expect(screen.queryByText('本週完成 3／5 次')).toBeNull();
-    expect(screen.getByText('進度')).toBeTruthy();
+    expect(screen.getByText('這週的節奏')).toBeTruthy();
     expect(screen.getByText('今天預計：晚餐後')).toBeTruthy();
     expect(screen.getByText(/這週已完成 3 次。/)).toBeTruthy();
     expect(screen.queryByText(/自己開始/)).toBeNull();
@@ -423,7 +423,7 @@ describe('LongTermDetailScreen', () => {
 
     expect(await screen.findByText('自主閱讀計畫')).toBeTruthy();
     expect(screen.queryByText('本週完成 3／5 次')).toBeNull();
-    expect(screen.getByText('進度')).toBeTruthy();
+    expect(screen.getByText('這週的節奏')).toBeTruthy();
     expect(screen.queryByText('今天已完成 15 分鐘')).toBeNull();
     expect(
       mockSupabaseEqCalls.filter(({ table, column, value }) =>
@@ -553,7 +553,7 @@ describe('LongTermDetailScreen', () => {
 
     render(<LongTermDetailScreen />);
 
-    expect(await screen.findByText('進度')).toBeTruthy();
+    expect(await screen.findByText('這週的節奏')).toBeTruthy();
     expect(screen.queryByText('本週完成 3／5 次')).toBeNull();
     expect(screen.queryByText('今天已完成 15 分鐘')).toBeNull();
     expect(mockSupabaseEqCalls).toContainEqual({
@@ -825,7 +825,7 @@ describe('LongTermDetailScreen', () => {
     });
     render(<LongTermDetailScreen />);
 
-    expect(await screen.findByText('進度')).toBeTruthy();
+    expect(await screen.findByText('這週的節奏')).toBeTruthy();
     expect(screen.queryByText('本週完成 3／5 次')).toBeNull();
     expect(screen.getByTestId('goal-milestones')).toBeTruthy();
     fireEvent.press(screen.getByLabelText('記下今天的完成'));
@@ -846,7 +846,7 @@ describe('LongTermDetailScreen', () => {
     });
     render(<LongTermDetailScreen />);
 
-    expect(await screen.findByText('進度')).toBeTruthy();
+    expect(await screen.findByText('這週的節奏')).toBeTruthy();
     expect(screen.queryByText('本週完成 3／5 次')).toBeNull();
     expect(screen.getByTestId('goal-milestones')).toBeTruthy();
     fireEvent.press(screen.getByLabelText('記下今天的完成'));
@@ -989,7 +989,7 @@ describe('LongTermDetailScreen', () => {
       taskName: '自主閱讀計畫',
     };
     rerender(<LongTermDetailScreen />);
-    await screen.findByText('進度');
+    await screen.findByText('這週的節奏');
 
     await act(async () => {
       completionRequest.resolve({
@@ -1027,7 +1027,7 @@ describe('LongTermDetailScreen', () => {
       taskName: '自主閱讀計畫',
     };
     rerender(<LongTermDetailScreen />);
-    await screen.findByText('進度');
+    await screen.findByText('這週的節奏');
 
     await act(async () => {
       correctionRequest.resolve();

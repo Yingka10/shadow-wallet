@@ -299,9 +299,10 @@ const HERO_SCENE = {
   focusText 後面，所以它的對比壓到最低（opacity 0.4、顏色貼近天空）——
   那一層只負責空氣感，不負責輪廓。
 */
-const RIDGE_FAR_D = 'M0 104C70 92 138 95 206 102 268 108 326 98 380 86V164H0V104Z';
-const HILL_MID_D = 'M0 138C78 130 146 131 214 134 276 137 330 129 380 118V164H0V138Z';
-const GROUND_D = 'M0 148C88 141 154 142 222 145 284 141 334 138 380 130V164H0V148Z';
+const HERO_HEIGHT = 240;
+const RIDGE_FAR_D = 'M0 158C70 145 138 149 206 156 268 162 326 152 380 140V240H0V158Z';
+const HILL_MID_D = 'M0 186C78 176 146 178 214 182 276 186 330 174 380 162V240H0V186Z';
+const GROUND_D = 'M0 200C88 191 154 192 222 196 284 192 334 188 380 178V240H0V200Z';
 
 /**
  * 小徑：起點 →（目前位置）→ 樹屋。座標在 380 × 64 的前景帶裡。
@@ -484,7 +485,7 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
     >
       <Svg
         style={StyleSheet.absoluteFill}
-        viewBox="0 0 380 164"
+        viewBox={`0 0 380 ${HERO_HEIGHT}`}
         preserveAspectRatio="none"
         accessibilityElementsHidden
       >
@@ -495,13 +496,13 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
             <Stop offset={1} stopColor={HERO_SCENE.skyHorizon} />
           </LinearGradient>
           {/* 樹屋那一側的傍晚餘光。0.16 是「有點暖」，再高就變成發光特效了。 */}
-          <RadialGradient id={`${gradientId}-dusk`} cx="84%" cy="64%" r="46%">
+          <RadialGradient id={`${gradientId}-dusk`} cx="84%" cy="70%" r="46%">
             <Stop offset={0} stopColor={Colors.gold300} stopOpacity={0.16} />
             <Stop offset={1} stopColor={Colors.gold300} stopOpacity={0} />
           </RadialGradient>
         </Defs>
-        <Rect x={0} y={0} width={380} height={164} fill={`url(#${gradientId}-sky)`} />
-        <Rect x={0} y={0} width={380} height={164} fill={`url(#${gradientId}-dusk)`} />
+        <Rect x={0} y={0} width={380} height={HERO_HEIGHT} fill={`url(#${gradientId}-sky)`} />
+        <Rect x={0} y={0} width={380} height={HERO_HEIGHT} fill={`url(#${gradientId}-dusk)`} />
 
         {/* 遠脊 → 中坡 → 前景地面。三層就夠，而且愈近愈暗。 */}
         <Path d={RIDGE_FAR_D} fill={HERO_SCENE.ridgeFar} opacity={0.4} />
@@ -510,12 +511,12 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
 
         {/* 樹屋腳下的影子。少了它，樹就是浮在地面上的一張圖。 */}
         <Ellipse
-          cx={326}
-          cy={155}
-          rx={38}
-          ry={7}
+          cx={318}
+          cy={228}
+          rx={50}
+          ry={9}
           fill={HERO_SCENE.groundShade}
-          opacity={0.34}
+          opacity={0.32}
         />
       </Svg>
 
@@ -529,9 +530,12 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
       <JourneyPath position={journeyMarkerPosition(presentation.planState)} />
 
       <View style={styles.heroCopy}>
-        <Text style={styles.categoryText} numberOfLines={1}>
-          {presentation.categoryLabel}
-        </Text>
+        <View style={styles.categoryPill}>
+          <DetailIcon name="sprout" size={14} color={Colors.leaf200} />
+          <Text style={styles.categoryText} numberOfLines={1}>
+            {presentation.categoryLabel}
+          </Text>
+        </View>
         <Text style={styles.heroPosition} numberOfLines={2}>
           {presentation.weekLabel}
         </Text>
@@ -616,41 +620,102 @@ function splitTodayAction(todayAction: string): {
 }
 
 /**
- * 這一步的視覺錨點。
+ * Today 左側的場景圓。
  *
- * 一個 64px 的柔和葉形色塊，讓 Today 有構圖可言——32px 的小圓看起來就只是
- * list icon，撐不起一張卡。它**不表達任何 domain 資料**：不看 task.name、
- * 不挑插圖，每一種長期任務都是同一個錨點。
+ * 一本攤開的書＋一株盆栽，畫在暖奶油色的圓裡——這是 mockup 的閱讀版視覺。
+ * **它是固定的一張圖，不看 task.name、不依任務挑插圖**：鋼琴階段和閱讀計畫
+ * 看到的是同一個場景圓。它的工作是撐起三欄構圖，不是描述這個任務在做什麼。
  */
-function CurrentStepAnchor() {
+function StepScene() {
   return (
     <View
       testID="today-step-anchor"
-      style={styles.stepAnchor}
+      style={styles.stepScene}
       pointerEvents="none"
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
     >
-      <Svg width={64} height={64} viewBox="0 0 64 64" accessibilityElementsHidden>
-        {/* 不是正圓——有機一點才不像系統圖示的底 */}
+      <Svg width={104} height={104} viewBox="0 0 104 104" accessibilityElementsHidden>
+        <Circle cx={52} cy={52} r={52} fill={Colors.cream100} />
+        <Circle cx={52} cy={52} r={44} fill={Colors.cream50} opacity={0.7} />
+
+        {/* 盆栽 */}
         <Path
-          d="M32 2c13 0 22 5 27 14 5 9 5 22 0 32-5 10-15 14-28 14C18 62 8 56 4 46 0 36 1 22 7 13 13 4 19 2 32 2Z"
-          fill={Colors.leaf50}
+          d="M34 44V28"
+          stroke={Colors.leaf600}
+          strokeWidth={2}
+          strokeLinecap="round"
+          fill="none"
+        />
+        <Path d="M34 33c-8 0-13-4-13-11 8 0 13 4 13 11Z" fill={Colors.leaf400} />
+        <Path d="M34 30c0-7 5-11 13-11 0 7-5 11-13 11Z" fill={Colors.leaf300} />
+        <Path
+          d="M25 44h18l-2.6 13a3 3 0 0 1-3 2.5h-6.8a3 3 0 0 1-3-2.5L25 44Z"
+          fill={Colors.cream300}
+        />
+
+        {/* 馬克杯 */}
+        <Path
+          d="M58 42h18v12a9 9 0 0 1-9 9 9 9 0 0 1-9-9V42Z"
+          fill={Colors.leaf200}
         />
         <Path
-          d="M32 47V29"
-          stroke={Colors.leaf600}
-          strokeWidth={2.6}
+          d="M76 45h4a5 5 0 0 1 0 10h-4"
+          stroke={Colors.leaf300}
+          strokeWidth={2.4}
+          fill="none"
+        />
+
+        {/* 攤開的書 */}
+        <Path
+          d="M14 70c12-5 24-5 38 2 14-7 26-7 38-2l-6 16c-11-4-22-4-32 2-10-6-21-6-32-2l-6-16Z"
+          fill={Colors.bgSurface}
+        />
+        <Path
+          d="M52 72v18"
+          stroke={Colors.leaf200}
+          strokeWidth={1.6}
           strokeLinecap="round"
           fill="none"
         />
         <Path
-          d="M32 35c-10 0-16-5-16-14 10 0 16 5 16 14Z"
-          fill={Colors.leaf400}
+          d="M14 70c12-5 24-5 38 2 14-7 26-7 38-2"
+          stroke={Colors.leaf300}
+          strokeWidth={1.8}
+          strokeLinecap="round"
+          fill="none"
         />
+      </Svg>
+    </View>
+  );
+}
+
+/** Today 右側的草叢。mascot 之前先由它把右欄撐住，沒有臉、不搶戲。 */
+function StepGreenery() {
+  return (
+    <View
+      style={styles.stepGreenery}
+      pointerEvents="none"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      <Svg width={64} height={78} viewBox="0 0 64 78" accessibilityElementsHidden>
+        <Ellipse cx={32} cy={70} rx={28} ry={6} fill={Colors.leaf50} />
         <Path
-          d="M32 31c0-9 6-14 16-14 0 9-6 14-16 14Z"
-          fill={Colors.leaf300}
+          d="M30 70V44"
+          stroke={Colors.leaf400}
+          strokeWidth={2.4}
+          strokeLinecap="round"
+          fill="none"
+        />
+        <Path d="M30 52c-11 0-17-6-17-15 11 0 17 6 17 15Z" fill={Colors.leaf300} />
+        <Path d="M30 47c0-9 6-15 17-15 0 9-6 15-17 15Z" fill={Colors.leaf200} />
+        <Path
+          d="M12 70c-.5-6-2-10-5-13M52 70c.5-6 2-10 5-13"
+          stroke={Colors.leaf200}
+          strokeWidth={2}
+          strokeLinecap="round"
+          fill="none"
         />
       </Svg>
     </View>
@@ -833,23 +898,30 @@ function TodayStepCard({
           mascot 的位置）。主要內容因此拿得到整張卡的寬度，縮小看的時候第一
           個讀到的是它，而不是一列一列的設定資訊。
         */}
-        <CurrentStepAnchor />
-
-        <View
-          style={styles.stepCopy}
-          accessible
-          accessibilityLabel={presentation.todayAction}
-        >
-          {actionLead ? (
-            <Text style={styles.actionLead}>{actionLead}</Text>
-          ) : null}
-          <Text style={styles.actionTitle}>{actionTitle}</Text>
-        </View>
-
         {/*
-          時段是次要資訊，跟在主要文案後面自成一列。
-          行為、文案、a11y label 一個字都沒動。
+          三欄：左邊場景圓、中間主要內容 + CTA、右邊草叢與 mascot 的位置。
+          主要內容那一欄 flex:1，兩側固定寬——左右兩欄都只是構圖，永遠不會把
+          主文案擠成細長條。
         */}
+        <View style={styles.stepRow}>
+          <StepScene />
+
+          <View style={styles.stepMain}>
+            <View
+              style={styles.stepCopy}
+              accessible
+              accessibilityLabel={presentation.todayAction}
+            >
+              {actionLead ? (
+                <Text style={styles.actionLead}>{actionLead}</Text>
+              ) : null}
+              <Text style={styles.actionTitle}>{actionTitle}</Text>
+            </View>
+
+            {/*
+              時段是次要資訊，跟在主要文案後面。
+              行為、文案、a11y label 一個字都沒動。
+            */}
         {showTimeControls ? (
           <View style={styles.scheduleRow}>
             <View style={styles.scheduleLabel}>
@@ -995,12 +1067,18 @@ function TodayStepCard({
             <Text style={styles.statusNoteText}>{statusNote}</Text>
           </View>
         )}
-        {completionError ? (
-          <Text accessibilityRole="alert" style={styles.completionError}>
-            {completionError}
-          </Text>
-        ) : null}
-        <MascotSlot />
+            {completionError ? (
+              <Text accessibilityRole="alert" style={styles.completionError}>
+                {completionError}
+              </Text>
+            ) : null}
+          </View>
+
+          <View style={styles.stepSide}>
+            <StepGreenery />
+            <MascotSlot />
+          </View>
+        </View>
       </View>
     </View>
   );
@@ -1042,6 +1120,62 @@ function DayStatusGlyph({ state }: { state: GoalDayStatus['state'] }) {
   );
 }
 
+/**
+ * 這週節奏的小徑：一顆節點代表這週的一次。
+ *
+ * 節點數 = weekTarget，亮起來的 = weekCompleted，兩個都直接來自 presentation。
+ * 上限 7 是版面保護（一週最多七天），不是語意。
+ */
+function WeeklyRhythmTrail({
+  completed,
+  target,
+}: {
+  completed: number;
+  target: number;
+}) {
+  const nodes = Math.min(Math.max(target, 0), 7);
+  if (nodes === 0) return null;
+
+  return (
+    <View
+      testID="goal-rhythm-trail"
+      style={styles.rhythmTrail}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      {Array.from({ length: nodes }, (_, index) => {
+        const done = index < completed;
+        return (
+          <View key={index} style={styles.rhythmNodeWrap}>
+            {index > 0 ? (
+              <View
+                style={[
+                  styles.rhythmLink,
+                  done && styles.rhythmLinkDone,
+                ]}
+              />
+            ) : null}
+            <View style={[styles.rhythmNode, done && styles.rhythmNodeDone]}>
+              {done ? (
+                <Svg width={18} height={18} viewBox="0 0 24 24">
+                  <Path
+                    d="M12 20V9M12 13C8 13 5 11 5 7c4 0 7 2 7 6Z"
+                    stroke={Colors.bgSurface}
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    fill="none"
+                  />
+                </Svg>
+              ) : null}
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 function ProgressCard({
   presentation,
 }: {
@@ -1057,7 +1191,7 @@ function ProgressCard({
 
   return (
     <View>
-      <SectionHeading icon="calendar" title="進度" />
+      <SectionHeading icon="calendar" title="這週的節奏" />
       <View testID="goal-progress" style={styles.card}>
         {showsDailySchedule ? (
           <View style={styles.weekRow}>
@@ -1105,10 +1239,30 @@ function ProgressCard({
             </Text>
           </View>
         ) : showsWeeklyRhythm ? (
-          <View style={styles.compactWeekProgress}>
-            <Text style={styles.compactWeekLabel}>
-              本週 {presentation.weekCompleted} / {presentation.weekTarget}
-            </Text>
+          /*
+            mockup 的節奏卡：左邊「本週 2 / 3」，右邊一條小徑上的葉子。
+            葉子的數量就是 weekTarget、亮起來的就是 weekCompleted——兩個數字
+            都來自 presentation，沒有一顆是湊出來的。
+          */
+          <View style={styles.rhythmRow}>
+            <View style={styles.rhythmCopy}>
+              {/* 一個 Text，數字用巢狀 Text 放大——拆成三個 Text 會讓
+                  「本週 2 / 3」在讀屏和測試裡都變成三段。 */}
+              <Text style={styles.rhythmCountLabel}>
+                本週{' '}
+                <Text style={styles.rhythmCount}>
+                  {presentation.weekCompleted}
+                </Text>
+                <Text style={styles.rhythmCountTotal}>
+                  {' '}/ {presentation.weekTarget}
+                </Text>
+              </Text>
+              <Text style={styles.rhythmSummary}>{presentation.weekSummary}</Text>
+            </View>
+            <WeeklyRhythmTrail
+              completed={presentation.weekCompleted}
+              target={presentation.weekTarget}
+            />
           </View>
         ) : showsStage || showsAccumulation || showsChallenge ? (
           <View style={styles.compactWeekProgress}>
@@ -1125,13 +1279,36 @@ function ProgressCard({
             <Text style={styles.compactWeekLabel}>尚未安排</Text>
           </View>
         )}
-        <View style={styles.weekInsight}>
-          <DetailIcon name="sprout" size={16} color={Colors.leaf700} />
-          <Text style={styles.weekInsightText}>{presentation.weekSummary}</Text>
-        </View>
-        {presentation.milestones.length > 0 ? (
-          <MilestoneTimeline milestones={presentation.milestones} />
-        ) : null}
+        {showsWeeklyRhythm ? null : (
+          <View style={styles.weekInsight}>
+            <DetailIcon name="sprout" size={16} color={Colors.leaf700} />
+            <Text style={styles.weekInsightText}>{presentation.weekSummary}</Text>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+}
+
+/**
+ * 「這段路上的下一站」。
+ *
+ * mockup 把節點從 Progress 裡搬出來自成一段。內容還是同一份
+ * `presentation.milestones`——狀態、標籤、Layer 0 修好的階段語意全部沒動，
+ * 只是換了位置和標題。
+ */
+function NextStopSection({
+  milestones,
+}: {
+  milestones: GoalMilestone[];
+}) {
+  if (milestones.length === 0) return null;
+
+  return (
+    <View>
+      <SectionHeading icon="milestone" title="這段路上的下一站" />
+      <View style={styles.card}>
+        <MilestoneTimeline milestones={milestones} />
       </View>
     </View>
   );
@@ -1245,20 +1422,37 @@ function ReviewCard({
   onOpenReview?: Props['onOpenReview'];
   pendingTimeAdjustmentNotice?: string | null;
 }) {
+  /*
+    reviewPrompt 是 presentation 產生的固定句型，通常是兩個問句。mockup 把它
+    排成兩行對話泡泡，所以這裡**只為了排版**沿著全形問號斷行——句子本身一個字
+    沒改，斷不出兩句就整句一行。
+  */
+  const promptLines = presentation.reviewPrompt
+    .split('？')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => `${line}？`);
   const content = (
     <>
       <View style={styles.reviewIcon}>
-        <DetailIcon name="conversation" color={Colors.leaf700} />
+        <DetailIcon name="sprout" size={26} color={Colors.leaf600} />
       </View>
       <View style={styles.reviewCopy}>
-        <Text style={styles.reviewPrompt}>{presentation.reviewPrompt}</Text>
-        <Text style={styles.reviewAction}>
-          {onOpenReview ? '開始週末回顧' : '週末可以和家人一起聊聊'}
-        </Text>
+        {promptLines.map((line) => (
+          <View key={line} style={styles.reviewPromptRow}>
+            <DetailIcon name="conversation" size={15} color={Colors.leaf400} />
+            <Text style={styles.reviewPrompt}>{line}</Text>
+          </View>
+        ))}
       </View>
       {onOpenReview ? (
-        <DetailIcon name="chevron" size={20} color={Colors.gold700} />
-      ) : null}
+        <View style={styles.reviewPill}>
+          <Text style={styles.reviewAction}>一起看看</Text>
+          <DetailIcon name="chevron" size={15} color={Colors.leaf700} />
+        </View>
+      ) : (
+        <Text style={styles.reviewAction}>週末可以和家人一起聊聊</Text>
+      )}
     </>
   );
 
@@ -1434,6 +1628,9 @@ export default function LongTermGoalDetailView({
       <View testID="goal-progress-section">
         <ProgressCard presentation={presentation} />
       </View>
+      <View testID="goal-next-stop-section">
+        <NextStopSection milestones={presentation.milestones} />
+      </View>
       <View testID="goal-review-section">
         <ReviewCard
           presentation={presentation}
@@ -1454,7 +1651,10 @@ export default function LongTermGoalDetailView({
           onPress={() => setShowSupportingDetails((visible) => !visible)}
           activeOpacity={0.72}
         >
-          <Text style={styles.supportingDetailsLabel}>更多紀錄與計畫</Text>
+          <View style={styles.supportingDetailsHead}>
+            <DetailIcon name="document" size={19} color={Colors.fgMuted} />
+            <Text style={styles.supportingDetailsLabel}>更多紀錄與計畫</Text>
+          </View>
           <View
             style={[
               styles.supportingDetailsChevron,
@@ -1500,17 +1700,16 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   hero: {
-    // 比 North Star 示意圖再收斂一截，讓第一屏留得住「今天的小步驟」。
-    minHeight: 164,
-    borderRadius: 16,
+    minHeight: HERO_HEIGHT,
+    borderRadius: 20,
     overflow: 'hidden',
   },
   treehouse: {
     position: 'absolute',
-    right: -6,
-    bottom: -4,
-    width: 112,
-    height: 112,
+    right: -8,
+    bottom: -6,
+    width: 154,
+    height: 154,
   },
   /** 前景帶固定 64 高，貼著底邊；Hero 長高時它不跟著拉長，marker 才不會被壓扁。 */
   journeyPath: {
@@ -1521,43 +1720,53 @@ const styles = StyleSheet.create({
     height: 64,
   },
   heroCopy: {
-    paddingTop: 16,
-    paddingRight: 106,
-    paddingBottom: 40,
-    paddingLeft: 18,
+    paddingTop: 18,
+    paddingRight: 132,
+    paddingBottom: 68,
+    paddingLeft: 20,
+  },
+  categoryPill: {
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+    minHeight: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 11,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: 'rgba(226, 240, 205, 0.34)',
+    backgroundColor: 'rgba(226, 240, 205, 0.12)',
   },
   categoryText: {
-    color: Colors.gold100,
-    fontSize: 11,
-    lineHeight: 16,
+    flexShrink: 1,
+    color: Colors.leaf100,
+    fontSize: 12.5,
+    lineHeight: 18,
     fontWeight: '800',
-    letterSpacing: 1.4,
-    opacity: 0.82,
   },
   heroPosition: {
-    marginTop: 9,
+    marginTop: 14,
     color: Colors.bgSurface,
-    fontSize: 30,
-    lineHeight: 36,
+    fontSize: 40,
+    lineHeight: 50,
     fontWeight: '900',
-    letterSpacing: -0.4,
+    letterSpacing: -0.5,
   },
   focusText: {
-    marginTop: 4,
-    color: Colors.cream100,
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: '700',
-    opacity: 0.92,
+    marginTop: 2,
+    color: Colors.cream50,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '800',
   },
   heroTotalLabel: {
-    marginTop: 8,
+    marginTop: 12,
     color: Colors.cream200,
-    fontSize: 11.5,
-    lineHeight: 16,
+    fontSize: 12.5,
+    lineHeight: 18,
     fontWeight: '700',
-    // 天空提亮之後 0.62 掉到 4.2:1，讀不太動；0.72 回到 5.2:1。
-    opacity: 0.72,
+    opacity: 0.78,
   },
   planNotice: {
     minHeight: 44,
@@ -1631,19 +1840,44 @@ const styles = StyleSheet.create({
     elevation: 2,
     overflow: 'hidden',
   },
-  /** 錨點自己佔一行、靠左；右邊那片留白是刻意的呼吸空間。 */
-  stepAnchor: {
-    width: 64,
-    height: 64,
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  /*
+    三欄的寬度是從 mockup 量的：那張圖是 390pt 畫面的 2.23 倍渲染，
+    換算回來大約是「場景 88 / 主要內容 158 / 右欄 56」。左右兩欄再寬一點，
+    「今天先讀 15 分鐘」就會被擠成兩行——主角就不像主角了。
+  */
+  stepScene: {
+    width: 88,
+    height: 88,
+  },
+  /** 中欄：主要內容。唯一會伸縮的一欄。 */
+  stepMain: {
+    flex: 1,
+    minWidth: 0,
+  },
+  /** 右欄：草叢與 mascot 的位置。固定寬，永遠不從主文案身上拿寬度。 */
+  stepSide: {
+    width: 56,
+    height: 92,
+    justifyContent: 'flex-end',
+  },
+  stepGreenery: {
+    position: 'absolute',
+    right: -8,
+    bottom: -10,
   },
   stepCopy: {
-    marginTop: 14,
+    marginBottom: 2,
   },
   /** 前導語：把「這一階段先練習」讓出主角位置，只留一行輕輕的引言。 */
   actionLead: {
     color: Colors.fgMuted,
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 12,
+    lineHeight: 18,
     fontWeight: '700',
   },
   /*
@@ -1653,10 +1887,10 @@ const styles = StyleSheet.create({
   actionTitle: {
     marginTop: 2,
     color: Colors.fgPrimary,
-    fontSize: 26,
-    lineHeight: 36,
+    fontSize: 20,
+    lineHeight: 29,
     fontWeight: '900',
-    letterSpacing: -0.4,
+    letterSpacing: -0.3,
   },
   scheduleRow: {
     marginTop: 8,
@@ -1712,10 +1946,10 @@ const styles = StyleSheet.create({
   */
   mascotSlot: {
     position: 'absolute',
-    right: 14,
-    top: 12,
+    right: -6,
+    bottom: 0,
     width: 64,
-    height: 64,
+    height: 72,
   },
   explanationLabel: {
     color: Colors.leaf700,
@@ -1779,18 +2013,23 @@ const styles = StyleSheet.create({
     color: Colors.leaf700,
   },
   /*
-    CTA 維持葉綠（Colors.accent），不用金色——金色會把「留下紀錄」讀成
-    「按下去領獎勵」。圓角跟著卡片放軟，高度不動（可點擊尺寸不縮）。
+    CTA 用 mockup 的暖金（gold600）。
+
+    註記：J2 那一輪的規則是「不要用大面積金色，金色會把留下紀錄讀成領獎勵」。
+    這次的 approved mockup 上就是金色，而且 brief 明列了只有 header 比例、右上
+    狀態文字、hero 假節點不照抄——CTA 顏色不在例外裡，所以照圖。要改回葉綠
+    只是換這一行的 backgroundColor（Colors.accent）。
   */
   completeButton: {
     minHeight: 56,
-    marginTop: 14,
-    borderRadius: 14,
-    backgroundColor: Colors.accent,
+    marginTop: 12,
+    borderRadius: 28,
+    backgroundColor: Colors.gold600,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 7,
+    paddingHorizontal: 18,
     paddingVertical: 12,
   },
   buttonBusy: {
@@ -1945,6 +2184,77 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     textAlign: 'center',
   },
+  /* 這週的節奏：左邊數字、右邊小徑上的葉子。 */
+  rhythmRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  rhythmCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  rhythmCountRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+  },
+  rhythmCountLabel: {
+    color: Colors.fgPrimary,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '900',
+  },
+  rhythmCount: {
+    color: Colors.leaf600,
+    fontSize: 26,
+    lineHeight: 30,
+    fontWeight: '900',
+  },
+  rhythmCountTotal: {
+    color: Colors.fgMuted,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '800',
+  },
+  rhythmSummary: {
+    marginTop: 4,
+    color: Colors.fgMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
+  },
+  rhythmTrail: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  rhythmNodeWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  rhythmLink: {
+    width: 16,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: Colors.ink100,
+  },
+  rhythmLinkDone: {
+    backgroundColor: Colors.leaf300,
+  },
+  rhythmNode: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1.5,
+    borderColor: Colors.ink100,
+    backgroundColor: Colors.bgSurface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rhythmNodeDone: {
+    borderColor: Colors.leaf600,
+    backgroundColor: Colors.leaf600,
+  },
   compactWeekProgress: {
     gap: 3,
   },
@@ -2072,17 +2382,16 @@ const styles = StyleSheet.create({
     color: Colors.gold700,
   },
   reviewCard: {
-    minHeight: 82,
+    minHeight: 92,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    borderColor: Colors.cream300,
-    backgroundColor: Colors.cream50,
+    gap: 12,
+    borderRadius: 18,
   },
   reviewIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: Colors.leaf50,
     alignItems: 'center',
     justifyContent: 'center',
@@ -2090,18 +2399,34 @@ const styles = StyleSheet.create({
   reviewCopy: {
     flex: 1,
     minWidth: 0,
+    gap: 6,
+  },
+  reviewPromptRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 7,
   },
   reviewPrompt: {
+    flex: 1,
+    minWidth: 0,
     color: Colors.fgSecondary,
-    fontSize: 12,
-    lineHeight: 17,
+    fontSize: 12.5,
+    lineHeight: 18,
     fontWeight: '700',
   },
+  reviewPill: {
+    minHeight: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.leaf50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 13,
+  },
   reviewAction: {
-    marginTop: 4,
     color: Colors.leaf700,
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 12.5,
+    lineHeight: 18,
     fontWeight: '900',
   },
   pendingNoticeText: {
@@ -2112,15 +2437,22 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     fontWeight: '700',
   },
+  /* 更多紀錄與計畫：mockup 是一張安靜的白卡，不是上下夾線的設定列。 */
   supportingDetailsToggle: {
-    minHeight: 48,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: Colors.hairline,
+    minHeight: 60,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: Colors.borderSoft,
+    backgroundColor: Colors.bgSurface,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 4,
+    paddingHorizontal: 18,
+  },
+  supportingDetailsHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   supportingDetailsLabel: {
     color: Colors.fgSecondary,
