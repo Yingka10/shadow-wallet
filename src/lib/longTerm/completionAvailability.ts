@@ -21,7 +21,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
 import type { LongTermGoal, Task } from '../../types/database';
-import { fixedDayEvidence, progressionSupportsChildCheckIn } from './progression';
+import { fixedDayEvidence, supportsSessionCheckIn } from './progression';
 import type { LongTermProgression } from './progression';
 
 dayjs.extend(utc);
@@ -37,7 +37,13 @@ export type LongTermCompletionReason =
   | 'before_plan'
   | 'after_plan'
   | 'paused'
-  | 'unsupported_progression';
+  | 'unsupported_progression'
+  /**
+   * 階段制／累積制沒有排出「哪幾天做」——不假設每天都能做（那是憑空發明
+   * 一張行程表），也不當成 unsupported_progression（這個 progression
+   * 本身支援 session check-in，只是這個計畫沒有排程可以核對）。
+   */
+  | 'schedule_not_defined';
 
 export type LongTermCompletionAvailability = {
   canComplete: boolean;
@@ -104,15 +110,35 @@ export function resolveLongTermCompletionAvailability({
     ({ canComplete: false, reason });
 
   if (goal.status === 'paused') return deny('paused');
-  if (!progressionSupportsChildCheckIn(progression)) return deny('unsupported_progression');
+  // 這裡問的是「這個 progression 能不能留下 session record」，不是
+  // 「completion 能不能自動推進進度」——後者是 supportsAutomaticProgressAdvancement
+  // 的問題，跟今天按不按得下去無關（LT-FINAL-1.1 §3）。
+  if (!supportsSessionCheckIn(progression)) return deny('unsupported_progression');
 
   const today = now.tz(TZ).startOf('day');
   if (today.isBefore(planStart, 'day')) return deny('before_plan');
   if (planEnd !== null && today.isAfter(planEnd, 'day')) return deny('after_plan');
 
+  // ── schedule：什麼時候可以記今天有做（LT-FINAL-1.1 §4）──────────────────
+  //
+  // progression 講「怎麼衡量整體前進」，schedule 講「今天排了沒有」——
+  // 兩者不是同一件事，這裡不把它們混在一起判。
   if (progression === 'fixed_days') {
     const days = fixedDayEvidence(task, goal);
     if (!days.includes(today.day())) return deny('not_scheduled_today');
+  }
+
+  if (progression === 'staged' || progression === 'accumulation') {
+    // resolveLongTermProgression 的優先序已經保證：走到這裡代表
+    // progress_model 不是 weekly_rhythm、schedule_mode 也不是
+    // weekly_frequency（否則 progression 會先被判成 rhythm）——所以這裡
+    // 只需要檢查固定星期證據；沒有就是真的沒排程，不能假設每天都能做。
+    const days = fixedDayEvidence(task, goal);
+    if (days.length > 0) {
+      if (!days.includes(today.day())) return deny('not_scheduled_today');
+    } else {
+      return deny('schedule_not_defined');
+    }
   }
 
   const cap = Number.isInteger(task.max_claims_per_period)

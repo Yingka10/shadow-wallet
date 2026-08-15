@@ -9,6 +9,7 @@ import type {
 } from '../../types/database';
 import {
   buildWeeklyProgress,
+  completionsThisWeek,
   fixedDayEvidence,
   resolveAgreedPreferredTime,
   resolveLongTermCompletionAvailability,
@@ -135,6 +136,23 @@ export type GoalPresentation = {
   preferredTimeWindow: PreferredTimeWindow | null;
   /** 這份計畫的約定時段記得下來嗎（決定要不要顯示時段選擇）。 */
   supportsTimeWindow: boolean;
+
+  // ── Session Check-in vs Progress Advancement（LT-FINAL-1.1 §10）───────
+  //
+  // 「今天有做」跟「整體前進到哪裡」是兩組不同的資料。staged/accumulation
+  // 打卡不會動 progression position（overallLabel 用的是 goal.current_level
+  // / current_value，永遠不受這裡影響）——這裡另外算一組「這段時間真的
+  // 留了幾次紀錄」，跟 progression 完全脫鉤。
+  //
+  // ⚠️ 這只是資料語意分開，不是新的 UI。要不要顯示、顯示在哪裡，
+  //    是 LT-FINAL-2 的事。
+  sessionEvidence: {
+    /** 今天已經留過一筆 session record。 */
+    checkedInToday: boolean;
+    /** 這週（Taipei 週）的 session 次數，**不**經過 activeDays 篩選 ——
+     *  staged/accumulation 沒有排程時，這個數字仍然要說得出「做了幾次」。 */
+    weekSessionCount: number;
+  };
 
   // ── 孩子自己確認過的那份計畫（§H）─────────────────────────────────────
   childPlan: ChildConfirmedPlanView | null;
@@ -488,6 +506,7 @@ const COMPLETION_STATUS_COPY: Record<LongTermCompletionReason, string | null> = 
   after_plan: '一起回顧這段計畫',
   paused: '這個計畫暫停中',
   unsupported_progression: '這個計畫的進度由家長一起確認',
+  schedule_not_defined: '這個計畫還沒排定可以記錄的日子',
 };
 
 export type BuildGoalPresentationExtras = {
@@ -715,6 +734,11 @@ export function buildGoalPresentation(
     agreedTime,
     preferredTimeWindow: goal.preferred_time_window,
     supportsTimeWindow,
+
+    sessionEvidence: {
+      checkedInToday: todayCompletion !== null,
+      weekSessionCount: completionsThisWeek(completions, now).length,
+    },
 
     childPlan,
     agreedReward: extras.agreedReward ?? null,

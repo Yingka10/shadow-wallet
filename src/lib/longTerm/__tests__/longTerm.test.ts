@@ -105,9 +105,19 @@ describe('resolveLongTermCompletionAvailability', () => {
       .toEqual({ canComplete: false, reason: 'claim_limit_reached' });
   });
 
-  it('階段制與累積制孩子不能自己打卡', () => {
+  // LT-FINAL-1.1：staged / accumulation 現在**支援** session check-in
+  // （§2 audit 證明 complete_task 對這兩種 progression 不會產生 side
+  // effect），但沒有排程就不假設每天都能做。完整矩陣見
+  // src/lib/longTerm/__tests__/sessionCheckIn.test.ts。
+  it('階段制沒有排程時記不下來，理由是 schedule_not_defined 不是 unsupported_progression', () => {
     const staged = task({ progress_model: null, schedule_mode: null, weekly_frequency: null });
     expect(call({ task: staged, goal: goal({ level_count: 3 }) }))
+      .toEqual({ canComplete: false, reason: 'schedule_not_defined' });
+  });
+
+  it('真的沒有任何 progression 證據才是 unsupported_progression', () => {
+    const nothing = task({ progress_model: null, schedule_mode: null, weekly_frequency: null });
+    expect(call({ task: nothing, goal: goal() }))
       .toEqual({ canComplete: false, reason: 'unsupported_progression' });
   });
 

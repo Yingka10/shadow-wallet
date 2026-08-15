@@ -2,8 +2,9 @@ export {
   fixedDayEvidence,
   hasAccumulationEvidence,
   hasLevelEvidence,
-  progressionSupportsChildCheckIn,
   resolveLongTermProgression,
+  supportsAutomaticProgressAdvancement,
+  supportsSessionCheckIn,
 } from './progression';
 export type { LongTermProgression } from './progression';
 

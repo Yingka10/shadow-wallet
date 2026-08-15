@@ -85,8 +85,32 @@ export function resolveLongTermProgression(
   return null;
 }
 
-/** 這種進度模型支不支援孩子自己打卡。 */
-export function progressionSupportsChildCheckIn(
+// ── Session Check-in vs Progress Advancement（LT-FINAL-1.1）─────────────────
+//
+// 「今天有做」跟「階段/累積前進了」是兩件不同的事，四種 progression 的
+// 支援矩陣不一樣（見 §2 audit，complete_task 對 staged/accumulation 只留
+// 一筆 completion，不動 current_level / current_value）：
+//
+//                Session Check-in    Auto Progress Advancement
+//   rhythm             yes                  yes*
+//   fixed_days         yes                  yes*
+//   staged             yes                  no
+//   accumulation       yes                  no
+//   null               no                   no
+//
+//   * 這裡的 advancement 只代表「completion 是這個 progression 的進度
+//     evidence」，不代表整份計畫因此被判定 completed —— 那是 §D 的
+//     planState/targetReached，跟這裡無關。
+
+/** 這個 progression 能不能留下「今天有做」的 session record。 */
+export function supportsSessionCheckIn(
+  progression: LongTermProgression | null,
+): boolean {
+  return progression !== null;
+}
+
+/** completion 是不是這個 progression 用來衡量「整體前進」的證據。 */
+export function supportsAutomaticProgressAdvancement(
   progression: LongTermProgression | null,
 ): boolean {
   return progression === 'rhythm' || progression === 'fixed_days';

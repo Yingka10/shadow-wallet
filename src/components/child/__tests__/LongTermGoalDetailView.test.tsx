@@ -72,6 +72,7 @@ function makePresentation(
     sessionMinutes: 15,
     agreedTime: { value: 'after_dinner', label: '晚餐後' },
     supportsTimeWindow: true,
+    sessionEvidence: { checkedInToday: false, weekSessionCount: 1 },
     childPlan: null,
     agreedReward: null,
     legacyReward: false,
