@@ -58,8 +58,27 @@ function durationText(plan: ChildProposalPlanVersion): string | null {
     : null;
 }
 
+/**
+ * 回饋方式，講成家庭讀得懂而且**與錢包實際行為一致**的一句話。
+ *
+ * ⚠️ 這一行是家庭真正同意的那句話 —— 孩子按下「可以」的時候，同意的
+ *    就是它。所以它必須說得出**一次完成會發生什麼**，而不是含糊帶過。
+ *
+ *    在 P1-REWARD-FIX 之前這裡寫的是「完成一次給成長幣」，而任務實際上
+ *    是 per_period：一週做滿三次才給一次的錢。差三倍，而畫面上從來沒有
+ *    出現過「每週達標」四個字。現在 payout_basis 一律是 per_completion，
+ *    這句話才真的成立。
+ *
+ *    禁止寫成「每週達標 +N」—— 那是被推翻掉的舊語意。
+ */
 function rewardText(plan: ChildProposalPlanVersion): string | null {
-  if (plan.reward_policy === 'coin_eligible') return '完成一次給成長幣';
+  if (plan.reward_policy === 'coin_eligible') {
+    // 錨點是 A4A.1 的正式欄位，不是 ai_suggested_coin_amount（那不是算出來的）。
+    const coins = plan.policy_session_coin_reference;
+    return typeof coins === 'number' && coins > 0
+      ? `每完成一次，+${coins} 成長幣`
+      : '每完成一次就有成長幣';
+  }
   if (plan.reward_policy === 'progress_only') return '看得到進度，不給成長幣';
   if (plan.reward_policy === 'record_only') return '先把完成記錄下來';
   if (plan.reward_policy === 'family_contribution') return '記在家庭貢獻裡';

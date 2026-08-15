@@ -10,7 +10,25 @@
 
 ## 0. 先講結論：現在它是壞的，而且壞在同一個地方
 
-一份走完 A4A 或 A4B 的長期計畫，在孩子端會變成這樣：
+> **⚠️ 更正（2026-08-15，P1-REWARD-FIX 期間發現）。**
+>
+> 這一節初版說「一份走完 A4A 或 A4B 的長期計畫」會落成階段制而且沒有
+> 完成按鈕。**主線不是這樣。** `create_parent_task_v1` 在 child_proposal
+> ＋ `progress_model = 'weekly_rhythm'` 的分支會把 `long_term_type` 與
+> `long_term_goals.goal_type` 改寫成 `'habit'`（20260818…:826），staging
+> 實際資料也是 habit。所以 D 類 ＋ weekly_frequency 的主線計畫
+> `isSkill = false`、`canCompleteToday` 成立、進度走完成次數。
+>
+> 下面描述的死路仍然真實，但範圍是**其他**的長期 child proposal：
+> `progress_model` 為 null 時（例如非 D 類的長期計畫），`long_term_type`
+> 留在 `'skill'`，於是整套 skill 推導與「沒有完成按鈕」就會發生。
+>
+> §1–§6 的 mapping、hierarchy 與 precedence **不受影響** —— 它們本來就
+> 主張不要用 `goal_type` 判進度，而這次更正正好又是一個例子：
+> `goal_type` 現在同時被兩條路徑寫，語意更不可靠了。
+
+一份走完 A4A 或 A4B 的長期計畫（`progress_model` 為 null 的那一類），
+在孩子端會變成這樣：
 
 | 畫面上寫什麼 | 為什麼 |
 |---|---|
@@ -37,6 +55,10 @@ duration_type = 'long_term'
   → long_term_type = 'skill'          20260804…:859
   → goal_type = 'skill'               20260804…:952
   → isSkill = true                    longTermGoalPresentation.ts:525
+
+  ⚠️ 但 progress_model = 'weekly_rhythm' 時，20260818…:826 會把上面兩個
+     改寫成 'habit'。所以同一個欄位由兩條路徑寫，而且第二條只在
+     主線成立 —— 這正是不能拿 goal_type 判進度的理由。
 ```
 
 而 `planMode` 之所以是 `growth_plan`，是因為**另外兩個模式都不收可發幣的

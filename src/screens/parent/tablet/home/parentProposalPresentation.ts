@@ -221,17 +221,31 @@ export function presentParentProposal(
     rhythmCopy: plan?.progress_model === 'weekly_rhythm'
       ? '以每週節奏累積，不會因漏一天重新開始'
       : null,
+    // P1 的幣值錨點是正式欄位（A4A.1），不是 ai_suggested_coin_amount ——
+    // 後者在孩子自己規劃的版本上一律是 null，讀它的話家長在按下「確認這份
+    // 約定」之前看不到任何金額。
+    //
+    // 而且這句話要和錢包實際行為一致：payout_basis 是 per_completion，
+    // 所以是「每完成一次」，**不是**「每週達標」（P1-REWARD-FIX）。
     rewardSuggestion:
-      plan?.reward_policy === 'coin_eligible'
-      && plan.reward_eligibility === 'allowed'
-      && typeof plan.ai_suggested_coin_amount === 'number'
-      && plan.ai_suggested_coin_amount > 0
-        ? `建議：每次完成 ${plan.ai_suggested_coin_amount} 成長幣`
+      plan?.reward_policy === 'coin_eligible' && plan.reward_eligibility === 'allowed'
+        ? (typeof plan.policy_session_coin_reference === 'number'
+            && plan.policy_session_coin_reference > 0
+          ? `每完成一次，+${plan.policy_session_coin_reference} 成長幣`
+          : typeof plan.ai_suggested_coin_amount === 'number'
+            && plan.ai_suggested_coin_amount > 0
+            ? `建議：每次完成 ${plan.ai_suggested_coin_amount} 成長幣`
+            : null)
         : null,
-    rewardSuggestionLabel: plan?.reward_policy === 'coin_eligible'
-      && typeof plan.ai_suggested_coin_amount === 'number'
-      ? 'GrowBook 建議'
-      : null,
+    rewardSuggestionLabel: plan?.reward_policy !== 'coin_eligible'
+      ? null
+      : typeof plan.policy_session_coin_reference === 'number'
+          && plan.policy_session_coin_reference > 0
+        // 這不是建議，是這份約定的內容 —— 講成建議會讓家長以為還要再挑一次。
+        ? '說好的回饋'
+        : typeof plan.ai_suggested_coin_amount === 'number'
+          ? 'GrowBook 建議'
+          : null,
     canConfirm,
     waitingMessage,
   };

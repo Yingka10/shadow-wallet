@@ -131,8 +131,8 @@ partial accept 與 request-changes **都**把提案送回 `proposed`，而且
 
 | # | 事情 | 為什麼現在不做 |
 |---|---|---|
-| 1 | **LongTerm Detail 對共同計畫的呈現** —— 一份談定的計畫在孩子端顯示成階段制，而且**沒有完成按鈕** | 這是本包最嚴重的發現，但修法是整個 progression 判準的重寫，正是這一包被要求先產出 IA 而不要動的部分。完整分析與 final mapping 見 `LONG_TERM_DETAIL_FINAL_IA.md` |
-| 2 | 首頁 GoalCard 對共同計畫永遠顯示「第 0/1 級、0%」 | 同一個根因（`goal_type` 當進度判準），跟 ① 一起修才不會出現兩份真相 |
+| 1 | **LongTerm Detail 對共同計畫的呈現** —— `progress_model` 為 null 的長期 child proposal 會顯示成階段制，而且**沒有完成按鈕**（⚠️ 更正：D 類 ＋ weekly_frequency 的**主線**不受影響，20260818…:826 會把它改寫成 habit，按鈕一直都在） | 修法是整個 progression 判準的重寫，正是這一包被要求先產出 IA 而不要動的部分。完整分析與 final mapping 見 `LONG_TERM_DETAIL_FINAL_IA.md` |
+| 2 | 首頁 GoalCard 對共同計畫顯示「第 0/N 天、0%」（`current_day` 建立後從不遞增；`goal_type='skill'` 的那一類則是「第 0/1 級」） | 同一個根因（`goal_type` / `current_day` 當進度判準），跟 ① 一起修才不會出現兩份真相 |
 | 3 | 孩子 partial accept 之後，那件事在他的畫面上消失 | 需要一個「等家長」的新表面；而且 P0 送出提案後也一樣沒有痕跡 —— 這是既有缺口，不是 P1 帶進來的 |
 | 4 | `revise_child_proposal_plan_v1` 的 DB 層 lineage guard | 本包不得修改 P0 函式（見 §2 F2 殘留缺口） |
 | 5 | enrichment refresh 的重試路徑 | A4B1 §18 已回報：沒有現成 RPC，需要新的 orchestration |

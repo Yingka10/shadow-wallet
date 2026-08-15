@@ -29,6 +29,7 @@ import {
   isParentSharedTermDraft,
   projectSharedTerms,
   sharedTermChanges,
+  sharedTermVersionChanges,
   systemUnresolvedTerms,
 } from '../sharedTerms';
 import type { ChildPlanningSharedTerms } from '../sharedTerms';
@@ -369,6 +370,50 @@ describe('5. reward 重新評估（§21 C）', () => {
     for (const forbidden of ['coinAmount', 'finalAmount', 'confirmedCoinAmount']) {
       expect({ forbidden, present: serialized.includes(forbidden) })
         .toEqual({ forbidden, present: false });
+    }
+  });
+});
+
+// ── P1-REWARD-FIX ───────────────────────────────────────────────────────────
+//
+// 這一行是家庭真正同意的那句話。孩子按下「可以」的時候同意的就是它，
+// 所以它必須說得出**一次完成會發生什麼** —— 而且要跟錢包實際行為一致。
+//
+// 修正之前寫的是「完成一次給成長幣」，任務卻是 per_period（一週做滿三次
+// 才給一次的錢）。差三倍，而畫面上從來沒有出現過「每週達標」四個字。
+
+describe('7. 回饋方式講的是一次完成會發生什麼', () => {
+  it('可發幣的計畫寫得出金額，而且說的是「每完成一次」', () => {
+    const source = version({ reward_policy: 'progress_only', policy_session_coin_reference: null });
+    const next = version({ reward_policy: 'coin_eligible', policy_session_coin_reference: 8 });
+    const change = sharedTermVersionChanges(source, next)
+      .find((item) => item.label === '怎麼給回饋');
+
+    expect(change?.after).toBe('每完成一次，+8 成長幣');
+  });
+
+  it('沒有正式幣值錨點時不編一個數字出來', () => {
+    const source = version({ reward_policy: 'progress_only', policy_session_coin_reference: null });
+    const next = version({ reward_policy: 'coin_eligible', policy_session_coin_reference: null });
+    const change = sharedTermVersionChanges(source, next)
+      .find((item) => item.label === '怎麼給回饋');
+
+    expect(change?.after).toBe('每完成一次就有成長幣');
+  });
+
+  it('永遠不出現「每週達標」—— 那是被推翻掉的舊語意', () => {
+    const combos: ChildProposalPlanVersion[] = [
+      version({ reward_policy: 'coin_eligible', policy_session_coin_reference: 8 }),
+      version({ reward_policy: 'coin_eligible', policy_session_coin_reference: null }),
+      version({ reward_policy: 'progress_only', policy_session_coin_reference: null }),
+    ];
+    for (const next of combos) {
+      const text = JSON.stringify(sharedTermVersionChanges(version({
+        reward_policy: 'record_only', policy_session_coin_reference: null,
+      }), next));
+      for (const forbidden of ['每週達標', '達標', '每週給', '一週給']) {
+        expect(text).not.toContain(forbidden);
+      }
     }
   });
 });

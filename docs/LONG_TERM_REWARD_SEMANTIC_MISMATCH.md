@@ -1,5 +1,14 @@
 # LONG_TERM_REWARD_SEMANTIC_MISMATCH
 
+> **已解決（2026-08-15，P1-REWARD-FIX）。** 產品判定：weekly_rhythm ＋
+> coin_eligible 的 payout_basis 是 **per_completion**，「每週 N 次」是
+> progression target，不是發幣門檻。修法見
+> `supabase/migrations/20260831000000_weekly_rhythm_per_completion.sql`，
+> staging acceptance 30/30 ＋ legacy regression 5/5。
+>
+> 這份文件保留原始 audit 內容作為證據與決策紀錄。§7 的影響評估有一處
+> 事實錯誤，已在該節就地更正。
+
 > LT-FINAL-1 §5 的 completion audit 結果。**這是 STOP。**
 > 日期 2026-08-15，基準 `feat/p1-ai-goal-planning-contract` @ `1ff4a36`。
 >
@@ -169,8 +178,22 @@ A4A.1 那一欄是「家庭同意的時候，政策說這是每次完成給」�
 |---|---|
 | 已建立的 A4A / A4B 長期計畫 | 資料一致（DB 內部沒有矛盾），但**與家庭同意的文字不符** |
 | 錢包 / transactions | 沒有多付也沒有少付**相對於 DB 規則**；相對於家庭的理解是少付 |
-| 孩子目前是否已經受影響 | **否** —— 這些計畫在孩子端根本沒有完成按鈕（P1-FINAL §Deferred ①），所以還沒有人因此少拿過幣 |
+| 孩子目前是否已經受影響 | **否**，但理由與初版寫的不一樣 —— 見下 |
 | production | 零筆（P1 從未上 production） |
+
+> **⚠️ 更正（2026-08-15）。** 初版這一格寫的是「這些計畫在孩子端根本沒有
+> 完成按鈕」。**那是錯的。** `create_parent_task_v1` 在 child_proposal ＋
+> weekly_rhythm 的分支會把 `long_term_type` 與 `goal_type` 改寫成
+> `'habit'`（20260818…:826），所以主線的 P1 計畫 `goal_type` 是 habit 不是
+> skill，`canCompleteToday` 成立，**按鈕一直都在**。
+>
+> 沒有人受影響的真正理由是：`reward_settlements` 一列都沒有 ——
+> 那些計畫從來沒有真的被完成過（staging 只有 demo seed 的完成紀錄，
+> production 沒有 P1 資料）。結論不變，理由要對。
+>
+> 「沒有完成按鈕」的問題只發生在**不是 D 類 weekly_frequency** 的長期
+> child proposal（progress_model 為 null，於是 long_term_type 留在
+> 'skill'）。那一類仍然需要 LT-FINAL-1 處理。
 
 **這是目前唯一一次可以在沒有任何既有家庭受影響的情況下修正它的時機。**
 

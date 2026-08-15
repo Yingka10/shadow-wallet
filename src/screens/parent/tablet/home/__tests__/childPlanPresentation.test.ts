@@ -191,6 +191,10 @@ describe('§20 legacy AI 提案一個行為都沒變', () => {
     enrichment_status: null,
     requires_parent_decision: [],
     ai_suggested_coin_amount: 10,
+    // P0 的 AI 計畫沒有 A3 enrichment，所以沒有 policy evidence ——
+    // 幣值錨點仍然是 ai_suggested_coin_amount，文案也仍然是「GrowBook 建議」。
+    policy_session_coin_reference: null,
+    policy_payout_type: null,
   });
   const view = presentParentProposal(legacy, '承恩');
 
