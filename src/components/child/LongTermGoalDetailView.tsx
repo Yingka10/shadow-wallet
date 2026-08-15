@@ -1,4 +1,17 @@
-import React, { useMemo, useRef, useState } from 'react';
+// GrowBook Child Long-Term Detail — Final Journey Visual Shell（LT-FINAL-2）
+//
+// ─────────────────────────────────────────────────────────────────────────
+// 固定骨架（§2）：Header（screen 層）→ Hero → Today → Progress → Next Stop
+// （有真實 checkpoint 才 render）→ Together Review → More。
+//
+// 所有 progression 共用同一份骨架，只有 Progress 內部換 renderer——
+// 不再 rhythm / skill / challenge 各一套頁面。
+//
+// 這裡的每一個字都來自 GoalPresentation，這支元件不重算 progression、
+// 不從 task.name 猜圖示、不自己編一句「正在找到節奏」。
+// ─────────────────────────────────────────────────────────────────────────
+
+import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -14,7 +27,6 @@ import { webMouseDraggableScroll } from '../../constants/webStyles';
 import type { PreferredTimeWindow } from '../../types/database';
 import type {
   GoalDayStatus,
-  GoalMilestone,
   GoalPresentation,
   GoalRecentRecord,
 } from '../../screens/child/longTermGoalPresentation';
@@ -28,6 +40,8 @@ type Props = {
   onOpenRecord?: (completionId?: string) => void;
   onOpenReview?: () => void;
   onOpenDetails?: () => void;
+  /** 「更多紀錄與計畫」——開同一個選單（最近紀錄／計畫細節／可調整內容）。 */
+  onOpenMore?: () => void;
   /**
    * 已經送出、還等家長確認的時段調整（P0-8M）。
    *
@@ -98,12 +112,7 @@ function DetailIcon({
 
   if (name === 'sprout') {
     return (
-      <Svg
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        accessibilityElementsHidden
-      >
+      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
         <Path d="M12 20V9" {...common} />
         <Path d="M12 13C8 13 5 11 5 7c4 0 7 2 7 6Z" {...common} />
         <Path d="M12 10c0-4 3-6 7-6 0 4-3 6-7 6Z" {...common} />
@@ -114,12 +123,7 @@ function DetailIcon({
 
   if (name === 'book') {
     return (
-      <Svg
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        accessibilityElementsHidden
-      >
+      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
         <Path d="M4 5.5c3.5-.7 6.2.2 8 2.1v11c-1.8-1.9-4.5-2.8-8-2.1v-11Z" {...common} />
         <Path d="M20 5.5c-3.5-.7-6.2.2-8 2.1v11c1.8-1.9 4.5-2.8 8-2.1v-11Z" {...common} />
       </Svg>
@@ -128,12 +132,7 @@ function DetailIcon({
 
   if (name === 'calendar') {
     return (
-      <Svg
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        accessibilityElementsHidden
-      >
+      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
         <Rect x={4} y={5.5} width={16} height={14} rx={2} {...common} />
         <Path d="M8 3.5v4M16 3.5v4M4 10h16" {...common} />
         <Circle cx={9} cy={14} r={1} fill={color} />
@@ -144,12 +143,7 @@ function DetailIcon({
 
   if (name === 'milestone') {
     return (
-      <Svg
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        accessibilityElementsHidden
-      >
+      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
         <Path d="M12 3.5 14.5 8l5 .8-3.6 3.6.8 5-4.7-2.3-4.7 2.3.8-5-3.6-3.6 5-.8L12 3.5Z" {...common} />
       </Svg>
     );
@@ -157,12 +151,7 @@ function DetailIcon({
 
   if (name === 'conversation') {
     return (
-      <Svg
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        accessibilityElementsHidden
-      >
+      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
         <Path d="M5 5h14v10H9l-4 4V5Z" {...common} />
         <Path d="M8.5 9h7M8.5 12h4.5" {...common} />
       </Svg>
@@ -171,12 +160,7 @@ function DetailIcon({
 
   if (name === 'document') {
     return (
-      <Svg
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        accessibilityElementsHidden
-      >
+      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
         <Path d="M6 3.5h8l4 4v13H6v-17Z" {...common} />
         <Path d="M14 3.5v4h4M9 12h6M9 16h6" {...common} />
       </Svg>
@@ -185,12 +169,7 @@ function DetailIcon({
 
   if (name === 'check') {
     return (
-      <Svg
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        accessibilityElementsHidden
-      >
+      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
         <Path d="m5.5 12.5 4 4 9-9" {...common} />
       </Svg>
     );
@@ -198,12 +177,7 @@ function DetailIcon({
 
   if (name === 'chevron') {
     return (
-      <Svg
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        accessibilityElementsHidden
-      >
+      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
         <Path d="m9 5 7 7-7 7" {...common} />
       </Svg>
     );
@@ -211,12 +185,7 @@ function DetailIcon({
 
   if (name === 'clock') {
     return (
-      <Svg
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        accessibilityElementsHidden
-      >
+      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
         <Circle cx={12} cy={12} r={8.5} {...common} />
         <Path d="M12 7.5V12l3 2" {...common} />
       </Svg>
@@ -224,25 +193,14 @@ function DetailIcon({
   }
 
   return (
-    <Svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      accessibilityElementsHidden
-    >
+    <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
       <Circle cx={12} cy={12} r={9} {...common} />
       <Path d="M12 10.5v6M12 7.3v.2" {...common} />
     </Svg>
   );
 }
 
-function SectionHeading({
-  icon,
-  title,
-}: {
-  icon: IconName;
-  title: string;
-}) {
+function SectionHeading({ icon, title }: { icon: IconName; title: string }) {
   return (
     <View style={styles.sectionHeading}>
       <DetailIcon name={icon} size={20} color={Colors.leaf700} />
@@ -251,12 +209,75 @@ function SectionHeading({
   );
 }
 
+/**
+ * progression-neutral 的小夥伴 —— 不從任務名稱猜圖（§11）。純 SVG，沒有
+ * asset 時 layout 仍然成立；只負責「有人在陪我走」，不做表情/對話框。
+ */
+function GrowSprite({ size = 56 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 56 56" accessibilityElementsHidden>
+      <Circle cx={28} cy={34} r={16} fill={Colors.leaf100} />
+      <Circle cx={28} cy={34} r={16} fill="none" stroke={Colors.leaf300} strokeWidth={1.4} />
+      <Circle cx={22} cy={31} r={2.1} fill={Colors.ink700} />
+      <Circle cx={34} cy={31} r={2.1} fill={Colors.ink700} />
+      <Path
+        d="M23 38c2.2 2 7.8 2 10 0"
+        stroke={Colors.ink700}
+        strokeWidth={1.6}
+        strokeLinecap="round"
+        fill="none"
+      />
+      <Path
+        d="M28 18c-5 0-8 3-8 3s3-1 8-1 8 1 8 1-3-3-8-3Z"
+        fill={Colors.leaf500}
+      />
+      <Path
+        d="M28 19V9"
+        stroke={Colors.leaf600}
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+// ── Journey Hero（§4、§5）───────────────────────────────────────────────
+
+/** 路徑上三段折線的端點，marker 依 fraction 在其間線性內插。 */
+const HERO_WAYPOINTS: { x: number; y: number }[] = [
+  { x: 26, y: 118 },
+  { x: 150, y: 92 },
+  { x: 246, y: 68 },
+  { x: 322, y: 52 },
+];
+
+function heroMarkerPosition(fraction: number): { x: number; y: number } {
+  const clamped = Math.min(Math.max(fraction, 0), 1);
+  const segments = HERO_WAYPOINTS.length - 1;
+  const scaled = clamped * segments;
+  const index = Math.min(Math.floor(scaled), segments - 1);
+  const t = scaled - index;
+  const a = HERO_WAYPOINTS[index];
+  const b = HERO_WAYPOINTS[index + 1];
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+}
+
 function GoalHero({ presentation }: { presentation: GoalPresentation }) {
+  const marker = heroMarkerPosition(presentation.heroMarkerFraction);
+  const pathD = HERO_WAYPOINTS
+    .map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x} ${point.y}`)
+    .join(' ');
+  const accessibleSummary = [
+    presentation.heroPositionLabel,
+    presentation.heroTotalLabel,
+    presentation.heroPositionNote,
+  ].filter(Boolean).join('，');
+
   return (
     <View
       testID="goal-hero"
       style={styles.hero}
-      accessibilityLabel={`${presentation.planWeekLabel}，${presentation.weekProgressLabel}`}
+      accessibilityLabel={accessibleSummary}
     >
       <Svg
         style={StyleSheet.absoluteFill}
@@ -281,6 +302,29 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
         <Circle cx={115} cy={21} r={1.7} fill={Colors.gold300} />
         <Circle cx={158} cy={38} r={1.4} fill={Colors.gold300} />
         <Circle cx={337} cy={23} r={1.8} fill={Colors.gold300} />
+
+        {/*
+          這段路的小徑——只是「我正在這段旅程裡」的意象，不是可數的進度條。
+          唯一可數的東西是下面那顆 marker，就一顆（§4 絕對規則）。
+        */}
+        <Path
+          d={pathD}
+          stroke={Colors.grass.nightBladeTop}
+          strokeWidth={2.5}
+          strokeLinecap="round"
+          strokeDasharray="1 9"
+          fill="none"
+          opacity={0.85}
+        />
+        <Circle cx={marker.x} cy={marker.y} r={7} fill={Colors.gold300} opacity={0.35} />
+        <Circle
+          cx={marker.x}
+          cy={marker.y}
+          r={4.5}
+          fill={Colors.gold500}
+          stroke={Colors.bgSurface}
+          strokeWidth={1.6}
+        />
       </Svg>
 
       <Image
@@ -296,39 +340,25 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
             {presentation.categoryLabel}
           </Text>
         </View>
-        <Text style={styles.planWeekLabel} numberOfLines={2}>
-          {presentation.planWeekLabel}
+        <Text style={styles.heroPosition} numberOfLines={1}>
+          {presentation.heroPositionLabel}
         </Text>
-        <Text style={styles.weekProgressLabel} numberOfLines={2}>
-          {presentation.weekProgressLabel}
-        </Text>
-        <View
-          style={styles.progressTrack}
-          accessibilityRole="progressbar"
-          accessibilityValue={{
-            min: 0,
-            max: 100,
-            now: presentation.overallPercent,
-          }}
-        >
-          <View
-            testID="goal-progress-fill"
-            style={[
-              styles.progressFill,
-              { width: `${presentation.overallPercent}%` as `${number}%` },
-            ]}
-          />
-        </View>
-        <Text style={styles.focusText}>
-          {presentation.focusText}
-        </Text>
-        <Text style={styles.nextText}>
-          {presentation.nextText}
-        </Text>
+        {presentation.heroPositionNote ? (
+          <Text style={styles.heroNote} numberOfLines={2}>
+            {presentation.heroPositionNote}
+          </Text>
+        ) : null}
+        {presentation.heroTotalLabel ? (
+          <Text style={styles.heroTotal} numberOfLines={1}>
+            {presentation.heroTotalLabel}
+          </Text>
+        ) : null}
       </View>
     </View>
   );
 }
+
+// ── Today（§6-§10）────────────────────────────────────────────────────
 
 type TodayStepCardProps = Pick<
   Props,
@@ -349,7 +379,6 @@ function CompletedTodayState({
   completion?: GoalRecentRecord;
   onOpenRecord?: Props['onOpenRecord'];
 }) {
-  // 分鐘數讀 canonical 欄位（estimated_minutes），**不是**從那句話裡 parse 出來的。
   const minutes = presentation.sessionMinutes;
   const completedLabel = minutes ? `今天已完成 ${minutes} 分鐘` : '今天已完成';
   const openRecord = () => onOpenRecord?.(completion?.id);
@@ -363,9 +392,7 @@ function CompletedTodayState({
         <View style={styles.completedCopy}>
           <Text style={styles.completedTitle}>{completedLabel}</Text>
           {completion?.timeWindowLabel ? (
-            <Text style={styles.completedMeta}>
-              {completion.timeWindowLabel}記錄
-            </Text>
+            <Text style={styles.completedMeta}>{completion.timeWindowLabel}記錄</Text>
           ) : null}
         </View>
       </View>
@@ -395,6 +422,28 @@ function CompletedTodayState({
   );
 }
 
+/** availability reason → Today 卡的非操作 state 文案（§10）。 */
+function unavailableCopy(presentation: GoalPresentation): string {
+  switch (presentation.completionReason) {
+    case 'schedule_not_defined':
+      return '這份計畫還沒安排練習時間';
+    case 'not_scheduled_today':
+      return '今天沒有安排這一步';
+    case 'claim_limit_reached':
+      return '這一段時間的紀錄已經滿了';
+    case 'before_plan':
+      return '計畫還沒開始';
+    case 'after_plan':
+      return '一起回顧這段計畫';
+    case 'paused':
+      return '這個計畫暫停中';
+    case 'unsupported_progression':
+      return '這個計畫的進度由家長一起確認';
+    default:
+      return '今天先照自己的節奏前進，需要時再和家人一起確認。';
+  }
+}
+
 function TodayStepCard({
   presentation,
   isCompletedToday,
@@ -404,19 +453,14 @@ function TodayStepCard({
   onOpenRecord,
 }: TodayStepCardProps) {
   const [showTimeOptions, setShowTimeOptions] = useState(false);
-  const [showExplanation, setShowExplanation] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [completionError, setCompletionError] = useState<string | null>(null);
   const completionPendingRef = useRef(false);
   const completed = isCompletedToday;
   const busy = checking || completing;
-  // LT-FINAL-1R：畫面不再問「這是不是閱讀計畫」。時段選擇要不要出現，
-  // 由**這份約定的時段記不記得下來**決定（completion context 只有兩個值）。
   const showReadingTimeControls =
     presentation.supportsTimeWindow && presentation.canCompleteToday;
-  const todayCompletion = isCompletedToday
-    ? presentation.recentRecords[0]
-    : undefined;
+  const todayCompletion = isCompletedToday ? presentation.recentRecords[0] : undefined;
 
   const handleComplete = async () => {
     if (checking || completionPendingRef.current) return;
@@ -439,36 +483,25 @@ function TodayStepCard({
     setShowTimeOptions(false);
   };
 
-  const explanationLabel = showExplanation
-    ? '收合小步驟說明'
-    : '展開小步驟說明';
-
   return (
     <View>
-      <SectionHeading icon="sprout" title={presentation.todayTitle} />
+      <View style={styles.sectionHeadingRow}>
+        <SectionHeading icon="sprout" title={presentation.todayTitle} />
+        <Text style={styles.sectionHeadingHint}>今天只走這一步</Text>
+      </View>
       <View testID="goal-today" style={styles.card}>
-        <View style={styles.actionHead}>
+        <View style={styles.todayAnatomy}>
           <View style={styles.actionIcon}>
-            <DetailIcon
-              name={presentation.categoryLabel === '學習與技能' ? 'book' : 'sprout'}
-              color={Colors.leaf700}
-            />
+            <DetailIcon name="sprout" size={22} color={Colors.leaf700} />
           </View>
           <View style={styles.actionCopy}>
             <Text style={styles.actionTitle}>{presentation.todayAction}</Text>
-            {/*
-              家庭談定的時段。詞彙比 completion context 寬（放學後、週末、
-              需要時…），所以就算這一次記不下來，也要講得出來 ——
-              不然一份正式談過「放學後」的計畫會顯示成從來沒談過。
-            */}
             {!showReadingTimeControls && presentation.agreedTime ? (
               <View style={styles.scheduleLabel}>
                 <DetailIcon name="clock" size={16} color={Colors.fgMuted} />
                 <Text style={styles.scheduleText}>
-                  說好的時段：{presentation.agreedTime.label}
-                  {presentation.sessionMinutes
-                    ? `・約 ${presentation.sessionMinutes} 分鐘`
-                    : ''}
+                  {presentation.agreedTime.label}
+                  {presentation.sessionMinutes ? `・約 ${presentation.sessionMinutes} 分鐘` : ''}
                 </Text>
               </View>
             ) : null}
@@ -488,9 +521,7 @@ function TodayStepCard({
                     style={styles.inlineAction}
                     accessibilityRole="button"
                     accessibilityLabel={
-                      presentation.preferredTimeWindow
-                        ? '調整今天的預計時段'
-                        : '選擇今天的預計時段'
+                      presentation.preferredTimeWindow ? '調整今天的預計時段' : '選擇今天的預計時段'
                     }
                     onPress={() => setShowTimeOptions((visible) => !visible)}
                     activeOpacity={0.72}
@@ -502,118 +533,222 @@ function TodayStepCard({
                 ) : null}
               </View>
             ) : null}
+
+            {completed ? (
+              <CompletedTodayState
+                presentation={presentation}
+                completion={todayCompletion}
+                onOpenRecord={onOpenRecord}
+              />
+            ) : presentation.canCompleteToday ? (
+              <TouchableOpacity
+                style={[styles.completeButton, busy && styles.buttonBusy]}
+                disabled={busy}
+                onPress={() => void handleComplete()}
+                accessibilityRole="button"
+                accessibilityLabel="記下今天的完成"
+                accessibilityState={{ disabled: busy }}
+                activeOpacity={0.78}
+              >
+                {busy ? (
+                  <ActivityIndicator testID="completion-loading" size="small" color={Colors.bgSurface} />
+                ) : (
+                  <>
+                    <DetailIcon name="check" size={19} color={Colors.bgSurface} />
+                    <Text style={styles.completeButtonText}>記下今天的完成</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            ) : (
+              <View
+                testID="today-unavailable"
+                style={styles.restNote}
+                accessible
+                accessibilityLabel={unavailableCopy(presentation)}
+              >
+                <Text style={styles.restNoteText}>{unavailableCopy(presentation)}</Text>
+              </View>
+            )}
+
+            {showReadingTimeControls && showTimeOptions && !completed ? (
+              <View testID="time-options" style={styles.timeOptions}>
+                {([
+                  ['after_dinner', '晚餐後'],
+                  ['before_bed', '睡前'],
+                ] as const).map(([value, label]) => {
+                  const selected = presentation.preferredTimeWindow === value;
+                  return (
+                    <TouchableOpacity
+                      key={value}
+                      style={[styles.timeOption, selected && styles.timeOptionSelected]}
+                      onPress={() => handleTimeSelect(value)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`改成${label}`}
+                      accessibilityState={{ selected }}
+                      activeOpacity={0.72}
+                    >
+                      <Text style={[styles.timeOptionText, selected && styles.timeOptionTextSelected]}>
+                        {label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ) : null}
+
+            {completionError ? (
+              <Text accessibilityRole="alert" style={styles.completionError}>
+                {completionError}
+              </Text>
+            ) : null}
+          </View>
+          <View style={styles.mascotSlot} accessibilityElementsHidden>
+            <GrowSprite size={52} />
           </View>
         </View>
+      </View>
+    </View>
+  );
+}
 
-        <TouchableOpacity
-          style={styles.explanationToggle}
-          accessibilityRole="button"
-          accessibilityLabel={explanationLabel}
-          accessibilityState={{ expanded: showExplanation }}
-          onPress={() => setShowExplanation((visible) => !visible)}
-          activeOpacity={0.72}
-        >
-          <View style={styles.explanationToggleText}>
-            <DetailIcon name="info" size={17} color={Colors.fgMuted} />
-            <Text style={styles.explanationLabel}>小步驟說明</Text>
+// ── Progress（§13）────────────────────────────────────────────────────
+
+function RhythmLeafRow({ done, target }: { done: number; target: number }) {
+  if (target <= 0) return null;
+  // ⚠️ 節點數量＝約定次數，是真資料不是裝飾；多做的次數只用文字表達，
+  // 不畫第 target+1 顆葉子（§13 rhythm 超標規則）。
+  const nodes = Array.from({ length: target }, (_, index) => index < Math.min(done, target));
+  return (
+    <View style={styles.leafRow} accessibilityElementsHidden>
+      {nodes.map((filled, index) => (
+        <React.Fragment key={index}>
+          {index > 0 ? <View style={styles.leafConnector} /> : null}
+          <View style={[styles.leafNode, filled && styles.leafNodeFilled]}>
+            {filled ? <DetailIcon name="sprout" size={13} color={Colors.bgSurface} /> : null}
           </View>
+        </React.Fragment>
+      ))}
+    </View>
+  );
+}
+
+function StageNodeRow({ current, target }: { current: number; target: number }) {
+  const nodes = Array.from({ length: target }, (_, index) => {
+    if (index < current) return 'completed' as const;
+    if (index === current) return 'current' as const;
+    return 'upcoming' as const;
+  });
+  return (
+    <View style={styles.leafRow} accessibilityElementsHidden>
+      {nodes.map((state, index) => (
+        <React.Fragment key={index}>
+          {index > 0 ? <View style={styles.leafConnector} /> : null}
           <View
             style={[
-              styles.explanationChevron,
-              showExplanation && styles.explanationChevronExpanded,
+              styles.stageNode,
+              state === 'completed' && styles.stageNodeCompleted,
+              state === 'current' && styles.stageNodeCurrent,
             ]}
           >
-            <DetailIcon name="chevron" size={18} color={Colors.fgMuted} />
+            {state === 'completed' ? (
+              <DetailIcon name="check" size={13} color={Colors.bgSurface} />
+            ) : null}
           </View>
-        </TouchableOpacity>
+        </React.Fragment>
+      ))}
+    </View>
+  );
+}
 
-        {showExplanation ? (
-          <View style={styles.explanationBody}>
-            <Text style={styles.explanationText}>{presentation.focusText}</Text>
-            <Text style={styles.explanationHint}>
-              {'先完成今天最小的一步，覺得不合適時再和家人一起調整。'}
-            </Text>
-          </View>
+function ProgressCard({ presentation }: { presentation: GoalPresentation }) {
+  const { progression } = presentation;
+
+  let title: string;
+  let body: React.ReactNode;
+
+  if (progression === 'rhythm') {
+    title = '這週的節奏';
+    body = (
+      <>
+        <Text style={styles.progressPrimary}>{presentation.weekProgressLabel}</Text>
+        {presentation.weekProgressNote ? (
+          <Text style={styles.progressNote}>{presentation.weekProgressNote}</Text>
         ) : null}
-
-        {showReadingTimeControls && showTimeOptions && !completed ? (
-          <View testID="time-options" style={styles.timeOptions}>
-            {([
-              ['after_dinner', '晚餐後'],
-              ['before_bed', '睡前'],
-            ] as const).map(([value, label]) => {
-              const selected = presentation.preferredTimeWindow === value;
-              return (
-                <TouchableOpacity
-                  key={value}
-                  style={[
-                    styles.timeOption,
-                    selected && styles.timeOptionSelected,
-                  ]}
-                  onPress={() => handleTimeSelect(value)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`改成${label}`}
-                  accessibilityState={{ selected }}
-                  activeOpacity={0.72}
-                >
-                  <Text
-                    style={[
-                      styles.timeOptionText,
-                      selected && styles.timeOptionTextSelected,
-                    ]}
-                  >
-                    {label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        ) : null}
-
-        {completed ? (
-          <CompletedTodayState
-            presentation={presentation}
-            completion={todayCompletion}
-            onOpenRecord={onOpenRecord}
-          />
-        ) : presentation.canCompleteToday ? (
-          <TouchableOpacity
-            style={[styles.completeButton, busy && styles.buttonBusy]}
-            disabled={busy}
-            onPress={() => void handleComplete()}
-            accessibilityRole="button"
-            accessibilityLabel="記下今天的完成"
-            accessibilityState={{ disabled: busy }}
-            activeOpacity={0.78}
+        <RhythmLeafRow done={presentation.weekCompletedActual} target={presentation.weekTarget} />
+      </>
+    );
+  } else if (progression === 'fixed_days') {
+    title = '這週的安排';
+    body = (
+      <>
+        <Text style={styles.progressPrimary}>{presentation.weekProgressLabel}</Text>
+        <View style={[styles.weekRow, styles.weekRowSpaced]}>
+        {presentation.weekDays.map((day) => (
+          <View
+            key={day.isoDate}
+            style={styles.dayCell}
+            accessible
+            accessibilityLabel={`${WEEKDAY_NAMES[day.day]}，${DAY_STATE_LABELS[day.state]}`}
           >
-            {busy ? (
-              <ActivityIndicator
-                testID="completion-loading"
-                size="small"
-                color={Colors.bgSurface}
-              />
-            ) : (
-              <>
-                <DetailIcon name="check" size={19} color={Colors.bgSurface} />
-                <Text style={styles.completeButtonText}>記下今天的完成</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.restNote}>
-            <Text style={styles.restNoteText}>
-              {presentation.todayStatusText
-                ?? (presentation.todayTitle === '今天是休息日'
-                  ? '今天沒有安排，照自己的節奏休息就好。'
-                  : '今天先照自己的節奏前進，需要時再和家人一起確認。')}
+            <Text style={styles.dayLabel}>{day.label}</Text>
+            <View
+              style={[
+                styles.dayCircle,
+                day.state === 'completed' && styles.dayCircleCompleted,
+                day.state === 'today' && styles.dayCircleToday,
+                day.state === 'upcoming' && styles.dayCircleUpcoming,
+                day.state === 'missed' && styles.dayCircleMissed,
+                day.state === 'unscheduled' && styles.dayCircleUnscheduled,
+              ]}
+            >
+              <Svg width={24} height={24} viewBox="0 0 24 24" accessibilityElementsHidden>
+                <DayStatusGlyph state={day.state} />
+              </Svg>
+            </View>
+            <Text testID={`goal-day-caption-${day.day}`} style={styles.dayCaption} numberOfLines={2}>
+              {DAY_CAPTIONS[day.state]}
             </Text>
           </View>
-        )}
-        {completionError ? (
-          <Text accessibilityRole="alert" style={styles.completionError}>
-            {completionError}
-          </Text>
-        ) : null}
+        ))}
+        </View>
+      </>
+    );
+  } else if (progression === 'staged' && presentation.stagedProgress) {
+    const { current, target } = presentation.stagedProgress;
+    title = '成長進度';
+    body = (
+      <>
+        <Text style={styles.progressPrimary}>已完成 {current} / {target} 階段</Text>
+        <Text style={styles.progressNote}>{presentation.focusText}</Text>
+        <StageNodeRow current={current} target={target} />
+        <Text style={styles.progressNote}>{presentation.weekSummary}</Text>
+      </>
+    );
+  } else if (progression === 'accumulation' && presentation.accumulationProgress) {
+    const { current, target, unit } = presentation.accumulationProgress;
+    const ratio = target > 0 ? Math.min(current / target, 1) : 0;
+    title = '成長進度';
+    body = (
+      <>
+        <Text style={styles.progressPrimary}>
+          {current} / {target}{unit ? ` ${unit}` : ''}
+        </Text>
+        <View style={styles.ratioTrack}>
+          <View style={[styles.ratioFill, { width: `${Math.round(ratio * 100)}%` as `${number}%` }]} />
+        </View>
+        <Text style={styles.progressNote}>{presentation.weekSummary}</Text>
+      </>
+    );
+  } else {
+    title = '成長進度';
+    body = <Text style={styles.progressNote}>還沒安排這種進度</Text>;
+  }
+
+  return (
+    <View>
+      <SectionHeading icon="calendar" title={title} />
+      <View testID="goal-week" style={styles.card}>
+        {body}
       </View>
     </View>
   );
@@ -623,29 +758,17 @@ function DayStatusGlyph({ state }: { state: GoalDayStatus['state'] }) {
   if (state === 'completed') {
     return <DetailIcon name="check" size={18} color={Colors.bgSurface} />;
   }
-
   if (state === 'today') {
     return <Circle cx={12} cy={12} r={3.2} fill={Colors.leaf600} />;
   }
-
   if (state === 'missed') {
     return <Circle cx={12} cy={12} r={3} fill={Colors.fruit700} />;
   }
-
   if (state === 'unscheduled') {
     return (
-      <Line
-        x1={8}
-        y1={12}
-        x2={16}
-        y2={12}
-        stroke={Colors.ink300}
-        strokeWidth={2}
-        strokeLinecap="round"
-      />
+      <Line x1={8} y1={12} x2={16} y2={12} stroke={Colors.ink300} strokeWidth={2} strokeLinecap="round" />
     );
   }
-
   return (
     <>
       <Circle cx={9} cy={12} r={1.2} fill={Colors.ink300} />
@@ -655,189 +778,55 @@ function DayStatusGlyph({ state }: { state: GoalDayStatus['state'] }) {
   );
 }
 
-function WeekProgressCard({
-  presentation,
-}: {
-  presentation: GoalPresentation;
-}) {
-  const showsDailySchedule =
-    presentation.planState === 'active'
-    && presentation.weekTarget > 0
-    && presentation.weekDays.some((day) => day.isScheduled)
-    && (presentation.progression === 'rhythm' || presentation.progression === 'fixed_days');
-  const showsOverallProgress =
-    presentation.planState === 'active'
-    && (presentation.progression === 'staged' || presentation.progression === 'accumulation');
-  // 這一段是**本週進度**，所以主字一律是週進度。
-  //
-  // ⚠️ 之前是 `todayStatusText ?? weekProgressLabel` —— 今天已經記過的時候，
-  //    整段就只剩「今天已經記過了」，而孩子點進「本週進度」是要看這週的。
-  const compactPrimaryText = showsOverallProgress
-    ? presentation.overallLabel
-    : presentation.weekProgressLabel;
+// ── Next Stop（§14：只有真實 checkpoint 才 render）───────────────────────
+
+function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
+  // 「已累積 X」這種摘要節點不是真的 checkpoint（見 buildChallengeMilestones），
+  // 且它永遠是 completed —— 用 status !== 'completed' 天然把它濾掉，
+  // 不需要另外對 id 白名單。
+  const next = presentation.milestones.find((milestone) => milestone.status === 'next')
+    ?? presentation.milestones.find((milestone) => milestone.status === 'planned');
+  if (!next) return null;
 
   return (
     <View>
-      <SectionHeading
-        icon="calendar"
-        title={showsDailySchedule ? '本週安排' : '本週進度'}
-      />
-      <View testID="goal-week" style={styles.card}>
-        {showsDailySchedule ? (
-          <View style={styles.weekRow}>
-            {presentation.weekDays.map((day) => (
-              <View
-                key={day.isoDate}
-                style={styles.dayCell}
-                accessible
-                accessibilityLabel={`${WEEKDAY_NAMES[day.day]}，${DAY_STATE_LABELS[day.state]}`}
-              >
-                <Text style={styles.dayLabel}>{day.label}</Text>
-                <View
-                  style={[
-                    styles.dayCircle,
-                    day.state === 'completed' && styles.dayCircleCompleted,
-                    day.state === 'today' && styles.dayCircleToday,
-                    day.state === 'upcoming' && styles.dayCircleUpcoming,
-                    day.state === 'missed' && styles.dayCircleMissed,
-                    day.state === 'unscheduled' && styles.dayCircleUnscheduled,
-                  ]}
-                >
-                  <Svg
-                    width={24}
-                    height={24}
-                    viewBox="0 0 24 24"
-                    accessibilityElementsHidden
-                  >
-                    <DayStatusGlyph state={day.state} />
-                  </Svg>
-                </View>
-                <Text
-                  testID={`goal-day-caption-${day.day}`}
-                  style={styles.dayCaption}
-                  numberOfLines={2}
-                >
-                  {DAY_CAPTIONS[day.state]}
-                </Text>
-              </View>
-            ))}
-          </View>
-        ) : (
-          <View style={styles.compactWeekProgress}>
-            <Text style={styles.compactWeekLabel}>
-              {compactPrimaryText}
-            </Text>
-            {showsOverallProgress ? (
-              <Text style={styles.compactWeekMeta}>
-                {presentation.weekProgressLabel}
-              </Text>
-            ) : null}
-          </View>
-        )}
-        <View style={styles.weekInsight}>
-          <DetailIcon name="sprout" size={16} color={Colors.leaf700} />
-          <Text style={styles.weekInsightText}>{presentation.weekSummary}</Text>
+      <SectionHeading icon="milestone" title="這段路上的下一站" />
+      <View testID="goal-next-stop" style={[styles.card, styles.nextStopCard]}>
+        <View style={styles.nextStopIcon}>
+          <DetailIcon name="milestone" color={Colors.leaf700} />
         </View>
-      </View>
-    </View>
-  );
-}
-
-function milestoneStatusLabel(milestone: GoalMilestone): string {
-  if (milestone.status === 'completed') return '已完成';
-  if (milestone.status === 'next') return '下一個里程碑';
-  if (milestone.status === 'planned') return '計畫節點';
-  return '尚未到';
-}
-
-function PlanNotice({ notice }: { notice: string }) {
-  return (
-    <View
-      style={styles.planNotice}
-      accessible
-      accessibilityLabel={`計畫提醒：${notice}`}
-    >
-      <DetailIcon name="info" size={17} color={Colors.gold700} />
-      <Text style={styles.planNoticeText}>{notice}</Text>
-    </View>
-  );
-}
-
-function MilestoneTimeline({
-  milestones,
-}: {
-  milestones: GoalMilestone[];
-}) {
-  return (
-    <View>
-      <SectionHeading icon="milestone" title="成長里程碑" />
-      <View testID="goal-rewards" style={styles.timeline}>
-        {milestones.map((milestone, index) => (
-          <View key={milestone.id} style={styles.timelineRow}>
-            <View style={styles.timelineRail}>
-              <View
-                style={[
-                  styles.timelineNode,
-                  milestone.status === 'completed' && styles.timelineNodeCompleted,
-                  milestone.status === 'next' && styles.timelineNodeNext,
-                ]}
-              >
-                {milestone.status === 'completed' ? (
-                  <DetailIcon name="check" size={15} color={Colors.bgSurface} />
-                ) : (
-                  <DetailIcon
-                    name="milestone"
-                    size={14}
-                    color={
-                      milestone.status === 'next'
-                        ? Colors.gold700
-                        : Colors.ink300
-                    }
-                  />
-                )}
-              </View>
-              {index < milestones.length - 1 ? (
-                <View style={styles.timelineLine} />
-              ) : null}
-            </View>
-            <View
-              style={[
-                styles.timelineContent,
-                index < milestones.length - 1 && styles.timelineContentDivider,
-              ]}
-            >
-              <View style={styles.timelineTitleRow}>
-                <Text style={styles.timelineTitle}>{milestone.title}</Text>
-                <View
-                  style={[
-                    styles.statusBadge,
-                    milestone.status === 'completed' && styles.statusBadgeCompleted,
-                    milestone.status === 'next' && styles.statusBadgeNext,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.statusBadgeText,
-                      milestone.status === 'completed' && styles.statusBadgeTextCompleted,
-                      milestone.status === 'next' && styles.statusBadgeTextNext,
-                    ]}
-                  >
-                    {milestoneStatusLabel(milestone)}
-                  </Text>
-                </View>
-              </View>
-              {milestone.detail ? (
-                <Text style={styles.timelineDetail}>{milestone.detail}</Text>
-              ) : null}
-            </View>
+        <View style={styles.nextStopCopy}>
+          <Text style={styles.nextStopCaption}>接下來的一站</Text>
+          <Text style={styles.nextStopTitle}>{next.title}</Text>
+          <Text style={styles.nextStopNote}>到這裡時，可以再一起看看。</Text>
+        </View>
+        {next.coin !== null ? (
+          <View style={styles.rewardBadge}>
+            <Text style={styles.rewardBadgeText}>+{next.coin}</Text>
           </View>
-        ))}
+        ) : null}
       </View>
     </View>
   );
 }
 
-function ReviewCard({
+// ── 說好的回饋（§15：輕量 supporting info，不是價目表）────────────────────
+
+function AgreedRewardNote({ presentation }: { presentation: GoalPresentation }) {
+  if (presentation.legacyReward || !presentation.agreedReward) return null;
+  return (
+    <View testID="goal-agreed-reward" style={styles.rewardNote} accessible>
+      <DetailIcon name="sprout" size={15} color={Colors.leaf700} />
+      <Text style={styles.rewardNoteText}>
+        說好的回饋　{presentation.agreedReward.label}
+      </Text>
+    </View>
+  );
+}
+
+// ── Together Review（§16：接真實現有能力）─────────────────────────────────
+
+function TogetherReviewCard({
   presentation,
   onOpenReview,
   pendingTimeAdjustmentNotice,
@@ -853,13 +842,8 @@ function ReviewCard({
       </View>
       <View style={styles.reviewCopy}>
         <Text style={styles.reviewPrompt}>{presentation.reviewPrompt}</Text>
-        <Text style={styles.reviewAction}>
-          {onOpenReview ? '開始週末回顧' : '週末可以和家人一起聊聊'}
-        </Text>
+        <Text style={styles.reviewAction}>{onOpenReview ? '一起看看 →' : '週末可以和家人一起聊聊'}</Text>
       </View>
-      {onOpenReview ? (
-        <DetailIcon name="chevron" size={20} color={Colors.gold700} />
-      ) : null}
     </>
   );
 
@@ -890,6 +874,9 @@ function ReviewCard({
     </View>
   );
 }
+
+// ── 最近紀錄（§17：從 More 點進去的其中一項；緊貼在 More 之前，
+//    保留孩子更正過去某一天紀錄的能力，不是拿掉再假裝路徑還在）─────────────
 
 function RecentRecords({
   records,
@@ -937,54 +924,38 @@ function RecentRecords({
   );
 }
 
-function PlanDetailsEntry({
-  presentation,
-  onOpenDetails,
-}: {
-  presentation: GoalPresentation;
-  onOpenDetails?: Props['onOpenDetails'];
-}) {
+// ── More（§17：安靜收斂，不一進頁全部攤開）─────────────────────────────────
+
+function MoreCard({ onOpenMore }: { onOpenMore?: Props['onOpenMore'] }) {
   const content = (
     <>
       <View style={styles.detailsIcon}>
         <DetailIcon name="document" color={Colors.fgMuted} />
       </View>
-      <View style={styles.detailsCopy}>
-        <Text style={styles.detailsTitle}>
-          {onOpenDetails ? '查看計畫安排' : '計畫安排'}
-        </Text>
-        <Text style={styles.detailsMeta} numberOfLines={2}>
-          {presentation.planPeriodLabel} · {presentation.completionConditionLabel}
-        </Text>
-      </View>
-      {onOpenDetails ? (
-        <DetailIcon name="chevron" size={20} color={Colors.ink300} />
-      ) : null}
+      <Text style={styles.detailsTitle}>更多紀錄與計畫</Text>
+      {onOpenMore ? <DetailIcon name="chevron" size={20} color={Colors.ink300} /> : null}
     </>
   );
 
-  return (
-    <View>
-      <SectionHeading icon="document" title="計畫詳情" />
-      {onOpenDetails ? (
-        <TouchableOpacity
-          testID="goal-details"
-          style={styles.detailsRow}
-          onPress={onOpenDetails}
-          accessibilityRole="button"
-          accessibilityLabel="查看計畫詳情"
-          activeOpacity={0.72}
-        >
-          {content}
-        </TouchableOpacity>
-      ) : (
-        <View testID="goal-details" style={styles.detailsRow}>
-          {content}
-        </View>
-      )}
+  return onOpenMore ? (
+    <TouchableOpacity
+      testID="goal-more"
+      style={styles.detailsRow}
+      onPress={onOpenMore}
+      accessibilityRole="button"
+      accessibilityLabel="更多紀錄與計畫"
+      activeOpacity={0.72}
+    >
+      {content}
+    </TouchableOpacity>
+  ) : (
+    <View testID="goal-more" style={styles.detailsRow}>
+      {content}
     </View>
   );
 }
+
+// ── Shell ────────────────────────────────────────────────────────────
 
 export default function LongTermGoalDetailView({
   presentation,
@@ -994,19 +965,9 @@ export default function LongTermGoalDetailView({
   onSelectTimeWindow,
   onOpenRecord,
   onOpenReview,
-  onOpenDetails,
+  onOpenMore,
   pendingTimeAdjustmentNotice = null,
 }: Props) {
-  const recentRecords = useMemo(
-    () => presentation.recentRecords.slice(0, 3),
-    [presentation.recentRecords],
-  );
-  const visiblePlanNotice =
-    presentation.planState === 'active'
-    || presentation.planState === 'unplanned'
-      ? presentation.planNotice
-      : null;
-
   return (
     <ScrollView
       testID="long-term-detail-scroll"
@@ -1015,9 +976,6 @@ export default function LongTermGoalDetailView({
       showsVerticalScrollIndicator={false}
     >
       <GoalHero presentation={presentation} />
-      {visiblePlanNotice ? (
-        <PlanNotice notice={visiblePlanNotice} />
-      ) : null}
       <TodayStepCard
         presentation={presentation}
         isCompletedToday={isCompletedToday}
@@ -1026,36 +984,25 @@ export default function LongTermGoalDetailView({
         onSelectTimeWindow={onSelectTimeWindow}
         onOpenRecord={onOpenRecord}
       />
-      <WeekProgressCard presentation={presentation} />
-      {presentation.milestones.length > 0 ? (
-        <MilestoneTimeline milestones={presentation.milestones} />
-      ) : null}
-      <ReviewCard
+      <ProgressCard presentation={presentation} />
+      <AgreedRewardNote presentation={presentation} />
+      <NextStopCard presentation={presentation} />
+      <TogetherReviewCard
         presentation={presentation}
         onOpenReview={onOpenReview}
         pendingTimeAdjustmentNotice={pendingTimeAdjustmentNotice}
       />
-      <RecentRecords
-        records={recentRecords}
-        onOpenRecord={onOpenRecord}
-      />
-      <PlanDetailsEntry
-        presentation={presentation}
-        onOpenDetails={onOpenDetails}
-      />
+      <RecentRecords records={presentation.recentRecords} onOpenRecord={onOpenRecord} />
+      <MoreCard onOpenMore={onOpenMore} />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: {
-    flex: 1,
-  },
-  content: {
-    paddingHorizontal: 14,
-    paddingBottom: 44,
-    gap: 14,
-  },
+  scroll: { flex: 1 },
+  content: { paddingHorizontal: 14, paddingBottom: 44, gap: 14 },
+
+  // Hero
   hero: {
     minHeight: 156,
     borderRadius: 8,
@@ -1072,9 +1019,9 @@ const styles = StyleSheet.create({
   },
   heroCopy: {
     minHeight: 154,
-    paddingTop: 12,
+    paddingTop: 14,
     paddingRight: 108,
-    paddingBottom: 10,
+    paddingBottom: 12,
     paddingLeft: 14,
   },
   categoryBadge: {
@@ -1094,66 +1041,29 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     fontWeight: '800',
   },
-  planWeekLabel: {
-    marginTop: 5,
+  heroPosition: {
+    marginTop: 8,
     color: Colors.bgSurface,
-    fontSize: 18,
-    lineHeight: 22,
+    fontSize: 22,
+    lineHeight: 27,
     fontWeight: '900',
   },
-  weekProgressLabel: {
-    marginTop: 1,
-    color: Colors.gold100,
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '800',
-  },
-  progressTrack: {
-    width: '100%',
-    height: 6,
-    marginTop: 6,
-    borderRadius: 3,
-    overflow: 'hidden',
-    backgroundColor: Colors.grass.nightHillBackTop,
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 3,
-    backgroundColor: Colors.leaf300,
-  },
-  focusText: {
-    marginTop: 6,
+  heroNote: {
+    marginTop: 4,
     color: Colors.cream100,
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '800',
-  },
-  nextText: {
-    marginTop: 3,
-    color: Colors.cream200,
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '700',
-  },
-  planNotice: {
-    minHeight: 44,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: Colors.gold300,
-    backgroundColor: Colors.gold100,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    paddingHorizontal: 11,
-    paddingVertical: 10,
-  },
-  planNoticeText: {
-    flex: 1,
-    color: Colors.fgSecondary,
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 18,
     fontWeight: '700',
   },
+  heroTotal: {
+    marginTop: 4,
+    color: Colors.gold100,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '800',
+  },
+
+  // Section heading
   sectionHeading: {
     minHeight: 34,
     flexDirection: 'row',
@@ -1162,6 +1072,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
     marginBottom: 6,
   },
+  sectionHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sectionHeadingHint: {
+    color: Colors.fgMuted,
+    fontSize: 11,
+    fontWeight: '700',
+  },
   sectionHeadingText: {
     flex: 1,
     color: Colors.fgPrimary,
@@ -1169,6 +1089,7 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     fontWeight: '900',
   },
+
   card: {
     padding: 14,
     borderRadius: 8,
@@ -1181,9 +1102,11 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 1,
   },
-  actionHead: {
+
+  // Today
+  todayAnatomy: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 10,
   },
   actionIcon: {
@@ -1196,9 +1119,11 @@ const styles = StyleSheet.create({
     borderColor: Colors.leaf100,
     backgroundColor: Colors.leaf50,
   },
-  actionCopy: {
-    flex: 1,
-    minWidth: 0,
+  actionCopy: { flex: 1, minWidth: 0 },
+  mascotSlot: {
+    width: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   actionTitle: {
     color: Colors.fgPrimary,
@@ -1239,49 +1164,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '900',
   },
-  explanationToggle: {
-    minHeight: 44,
-    marginTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: Colors.hairline,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  explanationToggleText: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  explanationLabel: {
-    color: Colors.fgSecondary,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  explanationChevron: {
-    transform: [{ rotate: '90deg' }],
-  },
-  explanationChevronExpanded: {
-    transform: [{ rotate: '-90deg' }],
-  },
-  explanationBody: {
-    borderTopWidth: 1,
-    borderTopColor: Colors.hairline,
-    paddingTop: 9,
-    paddingBottom: 3,
-  },
-  explanationText: {
-    color: Colors.fgSecondary,
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: '700',
-  },
-  explanationHint: {
-    marginTop: 5,
-    color: Colors.fgMuted,
-    fontSize: 11,
-    lineHeight: 17,
-  },
   timeOptions: {
     marginTop: 8,
     flexDirection: 'row',
@@ -1306,9 +1188,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '900',
   },
-  timeOptionTextSelected: {
-    color: Colors.leaf700,
-  },
+  timeOptionTextSelected: { color: Colors.leaf700 },
   completeButton: {
     minHeight: 48,
     marginTop: 10,
@@ -1319,9 +1199,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 7,
   },
-  buttonBusy: {
-    opacity: 0.65,
-  },
+  buttonBusy: { opacity: 0.65 },
   completeButtonText: {
     color: Colors.bgSurface,
     fontSize: 14,
@@ -1345,11 +1223,7 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 7,
   },
-  completedTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-  },
+  completedTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   completedCheck: {
     width: 30,
     height: 30,
@@ -1358,10 +1232,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: Colors.success,
   },
-  completedCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
+  completedCopy: { flex: 1, minWidth: 0 },
   completedTitle: {
     color: Colors.leaf700,
     fontSize: 14,
@@ -1410,18 +1281,85 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
+
+  // Progress
+  progressPrimary: {
+    color: Colors.fgPrimary,
+    fontSize: 19,
+    lineHeight: 25,
+    fontWeight: '900',
+  },
+  progressNote: {
+    marginTop: 3,
+    color: Colors.fgMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
+  },
+  leafRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  leafConnector: {
+    width: 18,
+    height: 2,
+    backgroundColor: Colors.leaf200,
+  },
+  leafNode: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 1.5,
+    borderColor: Colors.leaf200,
+    backgroundColor: Colors.bgSurface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  leafNodeFilled: {
+    borderColor: Colors.leaf600,
+    backgroundColor: Colors.leaf600,
+  },
+  stageNode: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 1.5,
+    borderColor: Colors.ink100,
+    backgroundColor: Colors.bgSurface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stageNodeCompleted: {
+    borderColor: Colors.success,
+    backgroundColor: Colors.success,
+  },
+  stageNodeCurrent: {
+    borderWidth: 2.5,
+    borderColor: Colors.gold500,
+    backgroundColor: Colors.gold100,
+  },
+  ratioTrack: {
+    marginTop: 10,
+    width: '100%',
+    height: 8,
+    borderRadius: 4,
+    overflow: 'hidden',
+    backgroundColor: Colors.leaf50,
+  },
+  ratioFill: {
+    height: '100%',
+    borderRadius: 4,
+    backgroundColor: Colors.leaf500,
+  },
   weekRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 2,
   },
-  dayCell: {
-    flex: 1,
-    minWidth: 0,
-    alignItems: 'center',
-    gap: 4,
-  },
+  weekRowSpaced: { marginTop: 10 },
+  dayCell: { flex: 1, minWidth: 0, alignItems: 'center', gap: 4 },
   dayLabel: {
     color: Colors.fgSecondary,
     fontSize: 11,
@@ -1436,10 +1374,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dayCircleCompleted: {
-    borderColor: Colors.success,
-    backgroundColor: Colors.success,
-  },
+  dayCircleCompleted: { borderColor: Colors.success, backgroundColor: Colors.success },
   dayCircleToday: {
     borderWidth: 2,
     borderColor: Colors.leaf500,
@@ -1450,14 +1385,8 @@ const styles = StyleSheet.create({
     borderColor: Colors.ink300,
     backgroundColor: Colors.bgSurface,
   },
-  dayCircleMissed: {
-    borderColor: Colors.fruit300,
-    backgroundColor: Colors.fruit100,
-  },
-  dayCircleUnscheduled: {
-    borderColor: Colors.ink100,
-    backgroundColor: Colors.cream50,
-  },
+  dayCircleMissed: { borderColor: Colors.fruit300, backgroundColor: Colors.fruit100 },
+  dayCircleUnscheduled: { borderColor: Colors.ink100, backgroundColor: Colors.cream50 },
   dayCaption: {
     minHeight: 28,
     color: Colors.fgMuted,
@@ -1465,132 +1394,70 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     textAlign: 'center',
   },
-  compactWeekProgress: {
-    gap: 3,
+
+  // Next Stop
+  nextStopCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
-  compactWeekLabel: {
-    color: Colors.fgPrimary,
-    fontSize: 15,
-    lineHeight: 21,
+  nextStopIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: Colors.leaf50,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nextStopCopy: { flex: 1, minWidth: 0 },
+  nextStopCaption: {
+    color: Colors.gold700,
+    fontSize: 11,
     fontWeight: '900',
   },
-  compactWeekMeta: {
+  nextStopTitle: {
+    marginTop: 2,
+    color: Colors.fgPrimary,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '900',
+  },
+  nextStopNote: {
+    marginTop: 2,
     color: Colors.fgMuted,
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '700',
-  },
-  weekInsight: {
-    marginTop: 8,
-    borderRadius: 8,
-    backgroundColor: Colors.leaf50,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 7,
-    paddingHorizontal: 9,
-    paddingVertical: 8,
-  },
-  weekInsightText: {
-    flex: 1,
-    color: Colors.fgSecondary,
     fontSize: 11,
     lineHeight: 16,
     fontWeight: '700',
   },
-  timeline: {
-    paddingHorizontal: 2,
-  },
-  timelineRow: {
-    flexDirection: 'row',
-    minHeight: 62,
-  },
-  timelineRail: {
-    width: 36,
-    alignItems: 'center',
-  },
-  timelineNode: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: Colors.ink100,
-    backgroundColor: Colors.cream50,
+  rewardBadge: {
+    minHeight: 26,
+    borderRadius: 13,
+    backgroundColor: Colors.gold100,
+    paddingHorizontal: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 1,
   },
-  timelineNodeCompleted: {
-    borderColor: Colors.success,
-    backgroundColor: Colors.success,
-  },
-  timelineNodeNext: {
-    borderColor: Colors.gold500,
-    backgroundColor: Colors.gold100,
-  },
-  timelineLine: {
-    flex: 1,
-    width: 1,
-    backgroundColor: Colors.hairline,
-  },
-  timelineContent: {
-    flex: 1,
-    minWidth: 0,
-    paddingLeft: 6,
-    paddingBottom: 12,
-  },
-  timelineContentDivider: {
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.hairline,
-    marginBottom: 10,
-  },
-  timelineTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  timelineTitle: {
-    flex: 1,
-    minWidth: 0,
-    color: Colors.fgPrimary,
-    fontSize: 13,
-    lineHeight: 18,
+  rewardBadgeText: {
+    color: Colors.gold700,
+    fontSize: 12,
     fontWeight: '900',
   },
-  timelineDetail: {
-    marginTop: 3,
-    color: Colors.fgMuted,
+
+  // Agreed reward note
+  rewardNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 2,
+  },
+  rewardNoteText: {
+    color: Colors.fgSecondary,
     fontSize: 12,
     lineHeight: 17,
     fontWeight: '700',
   },
-  statusBadge: {
-    minHeight: 26,
-    maxWidth: 112,
-    borderRadius: 7,
-    backgroundColor: Colors.cream100,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-  },
-  statusBadgeCompleted: {
-    backgroundColor: Colors.leaf50,
-  },
-  statusBadgeNext: {
-    backgroundColor: Colors.gold100,
-  },
-  statusBadgeText: {
-    color: Colors.fgMuted,
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: '900',
-    textAlign: 'center',
-  },
-  statusBadgeTextCompleted: {
-    color: Colors.leaf700,
-  },
-  statusBadgeTextNext: {
-    color: Colors.gold700,
-  },
+
+  // Together Review
   reviewCard: {
     minHeight: 82,
     flexDirection: 'row',
@@ -1607,10 +1474,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  reviewCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
+  reviewCopy: { flex: 1, minWidth: 0 },
   reviewPrompt: {
     color: Colors.fgSecondary,
     fontSize: 12,
@@ -1632,6 +1496,8 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     fontWeight: '700',
   },
+
+  // More
   recordList: {
     borderTopWidth: 1,
     borderBottomWidth: 1,
@@ -1649,19 +1515,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.hairline,
   },
-  recordDateWrap: {
-    width: 58,
-  },
+  recordDateWrap: { width: 58 },
   recordDate: {
     color: Colors.fgSecondary,
     fontSize: 11,
     lineHeight: 16,
     fontWeight: '900',
   },
-  recordCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
+  recordCopy: { flex: 1, minWidth: 0 },
   recordDetail: {
     color: Colors.fgPrimary,
     fontSize: 12,
@@ -1675,14 +1536,15 @@ const styles = StyleSheet.create({
     lineHeight: 15,
   },
   detailsRow: {
-    minHeight: 64,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
+    minHeight: 60,
+    borderRadius: 8,
+    borderWidth: 1,
     borderColor: Colors.hairline,
+    backgroundColor: Colors.bgSurface,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingHorizontal: 2,
+    paddingHorizontal: 12,
     paddingVertical: 8,
   },
   detailsIcon: {
@@ -1693,20 +1555,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  detailsCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
   detailsTitle: {
+    flex: 1,
     color: Colors.fgPrimary,
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '900',
-  },
-  detailsMeta: {
-    marginTop: 2,
-    color: Colors.fgMuted,
-    fontSize: 11,
-    lineHeight: 16,
   },
 });

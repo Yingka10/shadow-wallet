@@ -15,14 +15,17 @@
 //   STAGING_LT_PROGRESSION=1 npx jest supabase/verify/staging/__tests__/longTermProgressionVerticalSlice
 // ─────────────────────────────────────────────────────────────────────────
 
+import React from 'react';
 import dayjs from 'dayjs';
 import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
+import { render, screen } from '@testing-library/react-native';
 
 import { supabase } from '../../../../src/lib/supabase';
 import { buildGoalPresentation } from '../../../../src/screens/child/longTermGoalPresentation';
 import { loadLongTermSharedPlan, resolveLongTermProgression } from '../../../../src/lib/longTerm';
 import type { LongTermGoal, Task } from '../../../../src/types/database';
+import LongTermGoalDetailView from '../../../../src/components/child/LongTermGoalDetailView';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -142,5 +145,40 @@ suite('LT-FINAL-1R · staging vertical slice', () => {
     const { task, goal, completions } = await load();
     const view = buildGoalPresentation(task, goal, completions, dayjs().tz(TZ));
     expect(view.milestones).toEqual([]);
+  });
+
+  // LT-FINAL-2 §28 — Final Visual Shell 接的是真實 staging 資料，不是手工
+  // 湊出來的 fixture。這一支把整條線走完：DB → buildGoalPresentation →
+  // 真正的 LongTermGoalDetailView，證明主 demo case 在真資料下渲染不會炸，
+  // 而且畫面上看得到的字跟資料真相一致。
+  it('用真實 staging 資料渲染 Final Visual Shell 不會炸，而且畫面誠實', async () => {
+    const { task, goal, completions } = await load();
+    const shared = await loadLongTermSharedPlan({ taskId: TASK_ID, childId: goal.child_id });
+    const view = buildGoalPresentation(task, goal, completions, dayjs().tz(TZ), {
+      childPlan: shared?.childPlan ?? null,
+      agreedReward: shared?.agreedReward ?? null,
+      legacyReward: shared?.legacyReward ?? false,
+    });
+
+    render(
+      React.createElement(LongTermGoalDetailView, {
+        presentation: view,
+        isCompletedToday: false,
+        checking: false,
+        onComplete: () => {},
+        onSelectTimeWindow: () => {},
+      }),
+    );
+
+    expect(screen.getByTestId('goal-hero')).toBeTruthy();
+    expect(screen.getByTestId('goal-today')).toBeTruthy();
+    expect(screen.getByTestId('goal-week')).toBeTruthy();
+    expect(screen.getByText(view.todayAction)).toBeTruthy();
+    expect(screen.getByText(view.weekProgressLabel)).toBeTruthy();
+    if (view.agreedReward && !view.legacyReward) {
+      expect(screen.getByText(new RegExp(view.agreedReward.label))).toBeTruthy();
+    }
+    // rhythm 沒有真實 checkpoint，Next Stop 誠實地不出現。
+    expect(screen.queryByTestId('goal-next-stop')).toBeNull();
   });
 });

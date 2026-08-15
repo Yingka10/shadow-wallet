@@ -1,6 +1,13 @@
+// LT-FINAL-2 — Long-Term Final Journey Visual Shell
+//
+// ─────────────────────────────────────────────────────────────────────────
+// 固定骨架：Hero → Today → Progress → Next Stop（有真實 checkpoint 才
+// render）→ Together Review → More。所有 progression 共用，只有 Progress
+// 內部換 renderer（§23 state matrix）。
+// ─────────────────────────────────────────────────────────────────────────
+
 import React from 'react';
 import dayjs from 'dayjs';
-import { StyleSheet } from 'react-native';
 import {
   act,
   fireEvent,
@@ -9,7 +16,6 @@ import {
   within,
   waitFor,
 } from '@testing-library/react-native';
-import { Colors } from '../../../constants/colors';
 import type {
   LongTermGoal,
   PreferredTimeWindow,
@@ -21,149 +27,82 @@ import {
 } from '../../../screens/child/longTermGoalPresentation';
 import LongTermGoalDetailView from '../LongTermGoalDetailView';
 
-const TRUSTED_MILESTONES: GoalPresentation['milestones'] = [
-  {
-    id: 'start',
-    title: '完成第 1 次閱讀',
-    detail: null,
-    status: 'completed',
-  },
-  {
-    id: 'checkpoint-5',
-    title: '完成第 5 次閱讀',
-    detail: '成長幣 +10',
-    status: 'next',
-  },
-  {
-    id: 'final-review',
-    title: '四週後一起回顧',
-    detail: '可以繼續、調整閱讀方式，或讓計畫先告一段落。',
-    status: 'upcoming',
-  },
-];
-
-function makePresentation(
-  overrides: Partial<GoalPresentation> = {},
-): GoalPresentation {
+function makePresentation(overrides: Partial<GoalPresentation> = {}): GoalPresentation {
   return {
-    headerTitle: '自主閱讀計畫',
-    planWeekLabel: '第 1 週／共 4 週',
-    weekProgressLabel: '本週完成 1／5 次',
-    weekCompletedActual: 1,
-    weekTarget: 5,
+    headerTitle: '兩週讀完這本書',
+    progression: 'rhythm',
+    planState: 'active',
+    targetReached: false,
+    categoryLabel: '學習與技能',
+    planWeekLabel: '第 1 週／共 2 週',
+
+    heroPositionLabel: '第 1 週',
+    heroTotalLabel: '共 2 週',
+    heroPositionNote: null,
+    heroMarkerFraction: 0,
+
+    weekCompletedActual: 2,
+    weekTarget: 3,
     weekTargetReached: false,
     weekExtra: 0,
-    weekProgressNote: '還差 4 次到這週約定的節奏',
-    progression: 'rhythm',
-    targetReached: false,
-    planState: 'active',
-    categoryLabel: '學習與技能',
-    overallLabel: '1 / 20 次',
-    overallPercent: 5,
-    focusText: '第一週：先找到適合自己的閱讀節奏',
-    nextText: '今天繼續就好，已完成的閱讀都會保留',
+    weekProgressLabel: '本週 2 / 3',
+    weekProgressNote: '還差 1 次到這週約定的節奏',
+    weekDays: [],
+    weekSummary: '本週 2 / 3',
+
+    overallLabel: '第 1 週 / 共 2 週',
+    overallPercent: 50,
+    focusText: '睡前讀 15 分鐘',
+    nextText: '還差 1 次到這週約定的節奏',
     planNotice: null,
+
     todayTitle: '今天的小步驟',
-    todayAction: '自己選一本喜歡的書，閱讀 15 分鐘',
+    todayAction: '今晚睡前讀 15 分鐘',
     todayStatusText: null,
-    preferredTimeWindow: 'after_dinner',
+    sessionMinutes: 15,
     canCompleteToday: true,
     completionReason: 'available',
-    sessionMinutes: 15,
-    agreedTime: { value: 'after_dinner', label: '晚餐後' },
-    supportsTimeWindow: true,
-    sessionEvidence: { checkedInToday: false, weekSessionCount: 1 },
+
+    agreedTime: { value: 'before_bed', label: '睡前' },
+    preferredTimeWindow: null,
+    supportsTimeWindow: false,
+
+    sessionEvidence: { checkedInToday: false, weekSessionCount: 2 },
+
     childPlan: null,
-    agreedReward: null,
+
+    agreedReward: {
+      policy: 'coin_eligible', coinAmount: 8, payoutBasis: 'per_completion',
+      claimPeriod: 'day', maxClaimsPerPeriod: 1, label: '每完成一次，+8 成長幣',
+    },
     legacyReward: false,
-    weekDays: [
-      {
-        day: 1,
-        label: '一',
-        isoDate: '2026-07-27',
-        isScheduled: true,
-        state: 'completed',
-      },
-      {
-        day: 2,
-        label: '二',
-        isoDate: '2026-07-28',
-        isScheduled: true,
-        state: 'today',
-      },
-      {
-        day: 3,
-        label: '三',
-        isoDate: '2026-07-29',
-        isScheduled: true,
-        state: 'upcoming',
-      },
-      {
-        day: 4,
-        label: '四',
-        isoDate: '2026-07-30',
-        isScheduled: true,
-        state: 'upcoming',
-      },
-      {
-        day: 5,
-        label: '五',
-        isoDate: '2026-07-31',
-        isScheduled: true,
-        state: 'upcoming',
-      },
-      {
-        day: 6,
-        label: '六',
-        isoDate: '2026-08-01',
-        isScheduled: false,
-        state: 'unscheduled',
-      },
-      {
-        day: 0,
-        label: '日',
-        isoDate: '2026-08-02',
-        isScheduled: false,
-        state: 'unscheduled',
-      },
-    ],
-    weekSummary: '少一天沒有關係，找到適合自己的節奏更重要。',
+
     nextReward: null,
+    stagedProgress: null,
+    accumulationProgress: null,
     milestones: [],
-    recentRecords: [
-      {
-        id: 'completion-today',
-        dateLabel: '今天',
-        detail: '閱讀 15 分鐘',
-        timeWindowLabel: '晚餐後',
-      },
-      {
-        id: 'completion-monday',
-        dateLabel: '星期一',
-        detail: '閱讀 15 分鐘',
-        timeWindowLabel: '睡前',
-      },
-    ],
-    planPeriodLabel: '2026-07-27 ～ 2026-08-23（共 4 週）',
-    completionConditionLabel: '完成 20 次',
-    adjustableItemsLabel: '時間、書本、目標次數',
-    finalRewardText: '四週後一起回顧，可以繼續、調整，或讓計畫先告一段落。',
-    reviewTitle: '週末一起回顧',
-    reviewPrompt: '這週哪個時間最適合閱讀？',
+    recentRecords: [],
+    planPeriodLabel: '2026-08-10 ～ 2026-08-23（共 2 週）',
+    completionConditionLabel: '2 週計畫 · 每週 3 次',
+    adjustableItemsLabel: '執行時段、每週次數、任務內容',
+    finalRewardText: '第 2 週結束後一起回顧',
+    reviewTitle: '一起回顧這段成長',
+    reviewPrompt: '這週什麼時候讀起來最順？',
     ...overrides,
   };
 }
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
-    id: 'task-visual-state',
+    id: 'task-visual-shell',
     family_id: 'family-1',
-    name: '自主閱讀計畫',
+    name: '兩週讀完這本書',
     category: 'D',
-    day_type: 'custom',
+    day_type: 'both',
     long_term_type: 'habit',
     is_long_term: true,
     base_time_min: 15,
+    estimated_minutes: 15,
     difficulty: 1,
     coin_override: null,
     is_system_default: false,
@@ -172,32 +111,41 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     max_age: 9,
     is_active: true,
     time_saving_min: 0,
-    recurrence_days: [1, 2, 3, 4, 5],
+    recurrence_days: null,
+    progress_model: null,
+    schedule_mode: null,
+    weekly_frequency: null,
+    claim_period: 'day',
+    max_claims_per_period: 1,
+    next_step: null,
+    completion_description: null,
+    preferred_time: null,
+    preferred_time_custom: null,
     due_date: null,
-    created_at: '2026-07-27T00:00:00+08:00',
+    created_at: '2026-08-10T00:00:00+08:00',
     ...overrides,
-  };
+  } as unknown as Task;
 }
 
 function makeGoal(overrides: Partial<LongTermGoal> = {}): LongTermGoal {
   return {
-    id: 'goal-visual-state',
+    id: 'goal-visual-shell',
     child_id: 'child-1',
-    task_id: 'task-visual-state',
+    task_id: 'task-visual-shell',
     goal_type: 'habit',
-    total_days: 20,
+    total_days: 14,
     current_day: 0,
     status: 'active',
     checkpoint_rewards: null,
     motivation_note: null,
-    started_at: '2026-07-27',
+    started_at: '2026-08-10',
     next_review_at: null,
     completed_at: null,
-    created_at: '2026-07-27T00:00:00+08:00',
+    created_at: '2026-08-10T00:00:00+08:00',
     min_age: 6,
     interrupt_count: 0,
     last_active_date: null,
-    active_days: [1, 2, 3, 4, 5],
+    active_days: null,
     preferred_time_window: null,
     level_definitions: null,
     current_level: null,
@@ -229,685 +177,388 @@ function renderView(
     ...overrides,
   };
 
-  return {
-    ...render(<LongTermGoalDetailView {...props} />),
-    props,
-  };
+  return { ...render(<LongTermGoalDetailView {...props} />), props };
 }
 
-describe('LongTermGoalDetailView', () => {
-  it('puts the current week first without showing a percentage or game-like next stop', () => {
-    renderView();
+// ---------------------------------------------------------------------------
 
-    expect(screen.getByText('第 1 週／共 4 週')).toBeTruthy();
-    expect(screen.getByText('本週完成 1／5 次')).toBeTruthy();
-    expect(screen.getByText('第一週：先找到適合自己的閱讀節奏')).toBeTruthy();
-    expect(screen.getByText('今天繼續就好，已完成的閱讀都會保留')).toBeTruthy();
-    expect(screen.queryByText('5%')).toBeNull();
-    expect(screen.queryByText(/下一站/)).toBeNull();
+describe('固定骨架（§2）', () => {
+  it('rhythm 計畫依序看得到 Hero → Today → Progress → Together Review → More', () => {
+    renderView();
+    expect(screen.getByTestId('goal-hero')).toBeTruthy();
+    expect(screen.getByTestId('goal-today')).toBeTruthy();
+    expect(screen.getByTestId('goal-week')).toBeTruthy();
+    expect(screen.getByTestId('goal-review')).toBeTruthy();
+    expect(screen.getByTestId('goal-more')).toBeTruthy();
   });
 
-  it('uses product icons instead of emoji for formal section headings', () => {
-    renderView();
+  it('沒有真實 checkpoint 就不 render Next Stop', () => {
+    renderView(makePresentation({ milestones: [] }));
+    expect(screen.queryByTestId('goal-next-stop')).toBeNull();
+    expect(screen.queryByText('這段路上的下一站')).toBeNull();
+  });
+});
 
-    for (const heading of [
-      '今天的小步驟',
-      '本週安排',
-      '週末一起回顧',
-      '最近紀錄',
-      '計畫詳情',
-    ]) {
-      expect(screen.getByText(heading)).toBeTruthy();
+describe('Journey Hero（§4、§5）', () => {
+  // marker 是 SVG <Circle>，RNTL 對 react-native-svg 子節點抓不到 testID ——
+  // 「只有一顆可數 marker」這件事改用原始碼保證：GoalHero 只畫一個
+  // fill={Colors.gold500} 的 Circle，其餘全是裝飾（光暈、路徑虛線），
+  // 沒有第二顆語意上的節點。
+
+  it('沒有 canonical 證據時第三行不render，不自己編一句話', () => {
+    renderView(makePresentation({ heroPositionNote: null }));
+    expect(screen.getByText('第 1 週')).toBeTruthy();
+    expect(screen.getByText('共 2 週')).toBeTruthy();
+    expect(screen.queryByText(/正在找到/)).toBeNull();
+  });
+
+  it('有孩子寫的行動摘要時才顯示第三行', () => {
+    renderView(makePresentation({ heroPositionNote: '平日睡前讀 15 分鐘' }));
+    expect(screen.getByText('平日睡前讀 15 分鐘')).toBeTruthy();
+  });
+
+  it('accumulation 沒有 total 這一行', () => {
+    renderView(makePresentation({
+      progression: 'accumulation',
+      heroPositionLabel: '目前 2 / 5 本',
+      heroTotalLabel: null,
+      heroPositionNote: null,
+      accumulationProgress: { current: 2, target: 5, unit: '本' },
+    }));
+    expect(screen.getByText('目前 2 / 5 本')).toBeTruthy();
+    expect(screen.queryByText(/^共 /)).toBeNull();
+  });
+});
+
+describe('Today（§6-§9）', () => {
+  it('CTA 文字統一是「記下今天的完成」，不是打卡／過關／領獎', async () => {
+    const onComplete = jest.fn();
+    renderView(makePresentation(), { onComplete });
+    const button = screen.getByLabelText('記下今天的完成');
+    expect(button).toBeTruthy();
+    for (const forbidden of ['打卡', '過關', '領獎', '階段完成', '恭喜升級']) {
+      expect(screen.queryByText(forbidden)).toBeNull();
     }
-
-    for (const emoji of ['🌱', '📚', '📊', '⭐', '❤️', '🌿', '🌳']) {
-      expect(screen.queryByText(emoji)).toBeNull();
-    }
-  });
-
-  it('expands and collapses the small-step explanation accessibly', () => {
-    renderView();
-
-    const expandButton = screen.getByLabelText('展開小步驟說明');
-    expect(expandButton.props.accessibilityState).toEqual({ expanded: false });
-
-    fireEvent.press(expandButton);
-
-    const collapseButton = screen.getByLabelText('收合小步驟說明');
-    expect(collapseButton.props.accessibilityState).toEqual({ expanded: true });
-    expect(
-      screen.getAllByText('第一週：先找到適合自己的閱讀節奏').length,
-    ).toBeGreaterThan(1);
-    expect(screen.getByText(/先完成今天最小的一步/)).toBeTruthy();
-
-    fireEvent.press(collapseButton);
-    expect(screen.queryByText(/先完成今天最小的一步/)).toBeNull();
-  });
-
-  it('lets an unfinished reading plan adjust its time and record today', async () => {
-    const onComplete = jest.fn(() => false);
-    const onSelectTimeWindow = jest.fn<void, [PreferredTimeWindow]>();
-
-    renderView(makePresentation(), { onComplete, onSelectTimeWindow });
-
-    expect(screen.getByText('今天預計：晚餐後')).toBeTruthy();
-    expect(screen.queryByTestId('time-options')).toBeNull();
-
-    fireEvent.press(screen.getByLabelText('調整今天的預計時段'));
-    expect(screen.getByTestId('time-options')).toBeTruthy();
-    fireEvent.press(screen.getByLabelText('改成睡前'));
-    expect(onSelectTimeWindow).toHaveBeenCalledWith('before_bed');
-
-    await act(async () => {
-      fireEvent.press(screen.getByText('記下今天的完成'));
-    });
+    await act(async () => { fireEvent.press(button); });
     expect(onComplete).toHaveBeenCalledTimes(1);
   });
 
-  it('shows a clear completed status and opens the current record for both actions', () => {
-    const onOpenRecord = jest.fn();
-
-    renderView(makePresentation(), {
-      isCompletedToday: true,
-      onOpenRecord,
-    });
-
-    expect(screen.getByText('今天已完成 15 分鐘')).toBeTruthy();
-    expect(screen.getByText('晚餐後記錄')).toBeTruthy();
-    expect(screen.queryByText('記下今天的完成')).toBeNull();
-
-    fireEvent.press(screen.getByText('查看紀錄'));
-    fireEvent.press(screen.getByText('需要更正'));
-    expect(onOpenRecord).toHaveBeenNthCalledWith(1, 'completion-today');
-    expect(onOpenRecord).toHaveBeenNthCalledWith(2, 'completion-today');
+  it('今天主內容只讀 canonical todayAction，不加工成鼓勵語', () => {
+    renderView(makePresentation({ todayAction: '今晚睡前讀 15 分鐘' }));
+    expect(screen.getByText('今晚睡前讀 15 分鐘')).toBeTruthy();
   });
 
-  it('waits for the controlled completion prop and can reset from true to false', async () => {
-    const onComplete = jest.fn(async () => undefined);
-    const presentation = makePresentation({ recentRecords: [] });
-    const { rerender } = render(
-      <LongTermGoalDetailView
-        presentation={presentation}
-        isCompletedToday={false}
-        checking={false}
-        onComplete={onComplete}
-        onSelectTimeWindow={jest.fn()}
-      />,
-    );
-
-    await act(async () => {
-      fireEvent.press(screen.getByText('記下今天的完成'));
-    });
-    expect(onComplete).toHaveBeenCalledTimes(1);
-    expect(screen.queryByTestId('completion-loading')).toBeNull();
-    expect(screen.queryByText('今天已完成 15 分鐘')).toBeNull();
-
-    rerender(
-      <LongTermGoalDetailView
-        presentation={presentation}
-        isCompletedToday
-        checking={false}
-        onComplete={onComplete}
-        onSelectTimeWindow={jest.fn()}
-      />,
-    );
-    expect(screen.getByText('今天已完成 15 分鐘')).toBeTruthy();
-
-    rerender(
-      <LongTermGoalDetailView
-        presentation={presentation}
-        isCompletedToday={false}
-        checking={false}
-        onComplete={onComplete}
-        onSelectTimeWindow={jest.fn()}
-      />,
-    );
-    expect(screen.queryByText('今天已完成 15 分鐘')).toBeNull();
-    expect(screen.getByText('記下今天的完成')).toBeTruthy();
-  });
-
-  it('does not expose record, review, or details actions without callbacks', () => {
+  it('完成後顯示中性文案，不寫階段完成', () => {
     renderView(makePresentation(), { isCompletedToday: true });
-
-    expect(screen.queryByText('查看紀錄')).toBeNull();
-    expect(screen.queryByText('需要更正')).toBeNull();
-    expect(screen.queryByLabelText('開始週末回顧')).toBeNull();
-    expect(screen.queryByLabelText('查看計畫詳情')).toBeNull();
-    expect(screen.getByText('這週哪個時間最適合閱讀？')).toBeTruthy();
-    expect(screen.getByText('2026-07-27 ～ 2026-08-23（共 4 週） · 完成 20 次')).toBeTruthy();
+    expect(screen.getByText('今天已完成 15 分鐘')).toBeTruthy();
+    expect(screen.queryByText('記下今天的完成')).toBeNull();
   });
 
-  it('lets a child choose a time when no preferred window exists', () => {
-    const onSelectTimeWindow = jest.fn<void, [PreferredTimeWindow]>();
-    renderView(makePresentation({ preferredTimeWindow: null }), {
-      onSelectTimeWindow,
-    });
-
-    expect(screen.getByText('今天預計：尚未選擇時段')).toBeTruthy();
-    fireEvent.press(screen.getByLabelText('選擇今天的預計時段'));
-    expect(screen.getByTestId('time-options')).toBeTruthy();
-
-    fireEvent.press(screen.getByLabelText('改成晚餐後'));
-    expect(onSelectTimeWindow).toHaveBeenCalledWith('after_dinner');
+  it('mascot slot 一律存在，不吃掉主文案', () => {
+    renderView();
+    // GrowSprite 是 accessibilityElementsHidden 的 SVG，主文案（todayAction）
+    // 仍然找得到、沒有被截斷或蓋住。
+    expect(screen.getByText('今晚睡前讀 15 分鐘')).toBeTruthy();
   });
 
-  it('does not show reading time controls on a reading rest day', () => {
-    renderView(makePresentation({
-      todayTitle: '今天是休息日',
-      canCompleteToday: false,
-      preferredTimeWindow: 'after_dinner',
-    }));
-
-    expect(screen.queryByText(/今天預計：/)).toBeNull();
-    expect(screen.queryByLabelText('調整今天的預計時段')).toBeNull();
-    expect(screen.queryByTestId('time-options')).toBeNull();
-  });
-
-  it('does not offer reading time choices to a completable non-reading task', () => {
-    renderView(makePresentation({
-      headerTitle: '鋼琴家之路',
-      progression: 'staged',
-      todayAction: '練習雙手合奏 15 分鐘',
-      canCompleteToday: true,
-      // 這份約定的時段記不下來（不是 after_dinner / before_bed），
-      // 所以不顯示時段選擇。
-      supportsTimeWindow: false,
-      preferredTimeWindow: null,
-      recentRecords: [],
-    }));
-
-    expect(screen.queryByText(/今天預計：/)).toBeNull();
-    expect(screen.queryByLabelText('選擇今天的預計時段')).toBeNull();
-    expect(screen.queryByText('晚餐後')).toBeNull();
-    expect(screen.queryByText('睡前')).toBeNull();
-    expect(screen.getByText('記下今天的完成')).toBeTruthy();
-
-    fireEvent.press(screen.getByLabelText('展開小步驟說明'));
-    expect(screen.getByText(/先完成今天最小的一步/)).toBeTruthy();
-  });
-
-  it.each([
-    ['paused', '暫停中的計畫', '這個計畫暫停中'],
-    ['upcoming', '還沒開始的計畫', '計畫還沒開始'],
-    ['expired', '已經結束的計畫', '一起回顧這段計畫'],
-    ['completed', '完成的計畫', '這段計畫已完成'],
-    ['unplanned', '尚未排定的計畫', '這個計畫尚未安排日期'],
-  ] as const)(
-    'shows the model status for %s',
-    (planState, todayTitle, todayStatusText) => {
-      renderView(makePresentation({
-        planState,
-        todayTitle,
-        todayStatusText,
-        canCompleteToday: false,
-      }));
-
-      expect(screen.getByText(todayTitle)).toBeTruthy();
-      expect(screen.getAllByText(todayStatusText).length).toBeGreaterThanOrEqual(1);
-      expect(
-        screen.queryByText('今天先照自己的節奏前進，需要時再和家人一起確認。'),
-      ).toBeNull();
-
-      // LT-FINAL-1R：「本週進度」那一段講的是這週，不是今天的狀態。
-      const week = within(screen.getByTestId('goal-week'));
-      expect(week.getByText('本週完成 1／5 次')).toBeTruthy();
-      expect(
-        week.getByText('少一天沒有關係，找到適合自己的節奏更重要。'),
-      ).toBeTruthy();
-      expect(week.queryByTestId('goal-day-caption-1')).toBeNull();
-    },
-  );
-
-  it.each(['active', 'unplanned'] as const)(
-    'shows a quiet accessible plan notice for a %s plan',
-    (planState) => {
-      const notice = '目前的日期範圍最多可安排 10 次，和原本的 20 次目標不同。';
-      renderView(makePresentation({ planState, planNotice: notice }));
-
-      const noticeStrip = screen.getByLabelText(`計畫提醒：${notice}`);
-      expect(noticeStrip).toBeTruthy();
-      expect(screen.getByText(notice)).toBeTruthy();
-
-      const noticeStyle = StyleSheet.flatten(noticeStrip.props.style);
-      expect(noticeStyle.backgroundColor).toBe(Colors.gold100);
-      expect(noticeStyle.backgroundColor).not.toBe(Colors.error);
-    },
-  );
-
-  it.each(['paused', 'completed', 'upcoming', 'expired'] as const)(
-    'does not show an adjustment notice for a %s plan',
-    (planState) => {
-      const notice = '目前期間最多安排 10 次，可以和家人一起調整。';
-      renderView(makePresentation({ planState, planNotice: notice }));
-
-      expect(screen.queryByLabelText(`計畫提醒：${notice}`)).toBeNull();
-      expect(screen.queryByText(notice)).toBeNull();
-    },
-  );
-
-  it('guards a pending completion from double submission and allows retry afterward', async () => {
+  it('busy 時顯示 loading，並且防止重複送出', async () => {
     let resolveFirst: ((value: void | boolean) => void) | undefined;
-    const firstCompletion = new Promise<void | boolean>((resolve) => {
-      resolveFirst = resolve;
-    });
-    const onComplete = jest
-      .fn<Promise<void | boolean>, []>()
-      .mockImplementationOnce(() => firstCompletion)
-      .mockResolvedValueOnce(false);
+    const firstCompletion = new Promise<void | boolean>((resolve) => { resolveFirst = resolve; });
+    const onComplete = jest.fn<Promise<void | boolean>, []>()
+      .mockImplementationOnce(() => firstCompletion);
 
     renderView(makePresentation(), { onComplete });
-
-    const completeButton = screen.getByLabelText('記下今天的完成');
-    fireEvent.press(completeButton);
-    fireEvent.press(completeButton);
+    const button = screen.getByLabelText('記下今天的完成');
+    fireEvent.press(button);
+    fireEvent.press(button);
 
     expect(onComplete).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('completion-loading')).toBeTruthy();
 
-    await act(async () => {
-      resolveFirst?.(undefined);
-      await firstCompletion;
-    });
-    await waitFor(() => {
-      expect(screen.queryByTestId('completion-loading')).toBeNull();
-    });
-
-    await act(async () => {
-      fireEvent.press(screen.getByLabelText('記下今天的完成'));
-    });
-    expect(onComplete).toHaveBeenCalledTimes(2);
-    expect(screen.queryByTestId('completion-loading')).toBeNull();
+    await act(async () => { resolveFirst?.(undefined); await firstCompletion; });
+    await waitFor(() => expect(screen.queryByTestId('completion-loading')).toBeNull());
   });
 
-  it('contains completion rejection and restores the action for another try', async () => {
-    const onComplete = jest
-      .fn<Promise<void | boolean>, []>()
-      .mockRejectedValueOnce(new Error('network unavailable'))
-      .mockResolvedValueOnce(false);
-
+  it('完成失敗顯示重試訊息', async () => {
+    const onComplete = jest.fn<Promise<void | boolean>, []>()
+      .mockRejectedValueOnce(new Error('network unavailable'));
     renderView(makePresentation(), { onComplete });
 
-    await act(async () => {
-      fireEvent.press(screen.getByLabelText('記下今天的完成'));
-    });
-    expect(
-      screen.getByText('剛才沒有記錄成功，請再試一次。'),
-    ).toBeTruthy();
-    expect(screen.queryByTestId('completion-loading')).toBeNull();
-
-    await act(async () => {
-      fireEvent.press(screen.getByLabelText('記下今天的完成'));
-    });
-    expect(onComplete).toHaveBeenCalledTimes(2);
-    expect(screen.queryByTestId('completion-loading')).toBeNull();
+    await act(async () => { fireEvent.press(screen.getByLabelText('記下今天的完成')); });
+    expect(screen.getByText('剛才沒有記錄成功，請再試一次。')).toBeTruthy();
   });
+});
 
-  it('allows long hero copy to grow and keeps seven-day captions readable', () => {
-    const longPlanWeek = '第 1 週／這是一段可以依生活節奏慢慢調整的四週計畫';
-    const longWeekProgress = '本週已完成一次，也保留接下來依狀況調整的空間';
-    const longFocus = '這一週先慢慢找出最適合自己的時間，也可以在需要時和家人一起調整閱讀方式。';
-    const longNext = '下一個里程碑：完成第五次閱讀後，一起看看目前的方法是否仍然適合。';
+describe('§10 availability 誠實狀態（不顯示會失敗的按鈕）', () => {
+  it.each([
+    ['schedule_not_defined', '這份計畫還沒安排練習時間'],
+    ['already_recorded_today', '今天先照自己的節奏前進，需要時再和家人一起確認。'],
+    ['not_scheduled_today', '今天沒有安排這一步'],
+    ['claim_limit_reached', '這一段時間的紀錄已經滿了'],
+    ['before_plan', '計畫還沒開始'],
+    ['after_plan', '一起回顧這段計畫'],
+    ['paused', '這個計畫暫停中'],
+    ['unsupported_progression', '這個計畫的進度由家長一起確認'],
+  ] as const)('%s → %s，不顯示可以按的 CTA', (reason, copy) => {
+    renderView(makePresentation({ canCompleteToday: false, completionReason: reason }));
+    expect(screen.queryByLabelText('記下今天的完成')).toBeNull();
+    expect(screen.getByTestId('today-unavailable')).toBeTruthy();
+    expect(screen.getByText(copy)).toBeTruthy();
+  });
+});
+
+describe('Progress renderer（§13 state matrix，§23）', () => {
+  it('rhythm 0/3：三個空節點', () => {
     renderView(makePresentation({
-      planWeekLabel: longPlanWeek,
-      weekProgressLabel: longWeekProgress,
-      focusText: longFocus,
-      nextText: longNext,
+      weekCompletedActual: 0, weekTarget: 3, weekProgressLabel: '本週 0 / 3',
     }));
-
-    expect(screen.getByText(longPlanWeek).props.numberOfLines).toBe(2);
-    expect(screen.getByText(longWeekProgress).props.numberOfLines).toBe(2);
-    expect(screen.getByText(longFocus)).toBeTruthy();
-    expect(screen.getByText(longNext)).toBeTruthy();
-
-    const heroStyle = StyleSheet.flatten(screen.getByTestId('goal-hero').props.style);
-    expect(heroStyle.minHeight).toBeGreaterThanOrEqual(150);
-    expect(heroStyle.height).toBeUndefined();
-
-    const captionStyle = StyleSheet.flatten(
-      screen.getByTestId('goal-day-caption-1').props.style,
-    );
-    expect(captionStyle.fontSize).toBeGreaterThanOrEqual(11);
-    expect(captionStyle.lineHeight).toBeGreaterThanOrEqual(14);
-    expect(captionStyle.minHeight).toBeGreaterThanOrEqual(28);
+    const progress = within(screen.getByTestId('goal-week'));
+    expect(progress.getByText('本週 0 / 3')).toBeTruthy();
   });
 
-  it('describes all seven real schedule states without punitive language', () => {
+  it('rhythm 2/3：本週進度講得出來，不是百分比', () => {
     renderView(makePresentation({
-      weekDays: [
-        {
-          day: 1,
-          label: '一',
-          isoDate: '2026-07-27',
-          isScheduled: true,
-          state: 'completed',
-        },
-        {
-          day: 2,
-          label: '二',
-          isoDate: '2026-07-28',
-          isScheduled: true,
-          state: 'today',
-        },
-        {
-          day: 3,
-          label: '三',
-          isoDate: '2026-07-29',
-          isScheduled: true,
-          state: 'upcoming',
-        },
-        {
-          day: 4,
-          label: '四',
-          isoDate: '2026-07-30',
-          isScheduled: true,
-          state: 'missed',
-        },
-        {
-          day: 5,
-          label: '五',
-          isoDate: '2026-07-31',
-          isScheduled: false,
-          state: 'unscheduled',
-        },
-        {
-          day: 6,
-          label: '六',
-          isoDate: '2026-08-01',
-          isScheduled: true,
-          state: 'upcoming',
-        },
-        {
-          day: 0,
-          label: '日',
-          isoDate: '2026-08-02',
-          isScheduled: false,
-          state: 'unscheduled',
-        },
-      ],
+      weekCompletedActual: 2, weekTarget: 3, weekProgressLabel: '本週 2 / 3',
     }));
-
-    for (const label of [
-      '星期一，已完成',
-      '星期二，今天待完成',
-      '星期三，尚未到',
-      '星期四，尚未記錄',
-      '星期五，沒有安排',
-      '星期六，尚未到',
-      '星期日，沒有安排',
-    ]) {
-      expect(screen.getByLabelText(label)).toBeTruthy();
-    }
-    expect(screen.queryByText(/失敗|連勝|火焰/)).toBeNull();
+    const progress = within(screen.getByTestId('goal-week'));
+    expect(progress.getByText('本週 2 / 3')).toBeTruthy();
+    expect(progress.queryByText('67%')).toBeNull();
   });
 
-  it('distinguishes a scheduled missed day from an unscheduled day', () => {
+  it('rhythm 3/3：已到節奏，仍可再完成', () => {
     renderView(makePresentation({
-      weekDays: [
-        {
-          day: 4,
-          label: '四',
-          isoDate: '2026-07-30',
-          isScheduled: true,
-          state: 'missed',
-        },
-        {
-          day: 5,
-          label: '五',
-          isoDate: '2026-07-31',
-          isScheduled: false,
-          state: 'unscheduled',
-        },
-      ],
-    }));
-
-    expect(screen.getByLabelText('星期四，尚未記錄')).toBeTruthy();
-    expect(screen.getByText('尚未記錄')).toBeTruthy();
-    expect(screen.getByLabelText('星期五，沒有安排')).toBeTruthy();
-    expect(screen.getByText('未安排')).toBeTruthy();
-    expect(screen.queryByText('這次跳過')).toBeNull();
-  });
-
-  it('renders milestones as status-labelled timeline rows', () => {
-    renderView(makePresentation({
-      progression: 'staged',
-      supportsTimeWindow: false,
-      milestones: TRUSTED_MILESTONES,
-    }));
-    const milestones = within(screen.getByTestId('goal-rewards'));
-
-    expect(milestones.getByText('完成第 1 次閱讀')).toBeTruthy();
-    expect(milestones.getByText('完成第 5 次閱讀')).toBeTruthy();
-    expect(milestones.getByText('成長幣 +10')).toBeTruthy();
-    expect(milestones.getByText('已完成')).toBeTruthy();
-    expect(milestones.getByText('下一個里程碑')).toBeTruthy();
-    expect(milestones.getByText('尚未到')).toBeTruthy();
-    expect(screen.queryByText('之後一起回顧')).toBeNull();
-    expect(screen.queryByText('下一站')).toBeNull();
-  });
-
-  it('does not render a milestone or reward section when no trustworthy state exists', () => {
-    renderView(makePresentation({ milestones: [], nextReward: null }));
-
-    expect(screen.queryByTestId('goal-rewards')).toBeNull();
-    expect(screen.queryByText('成長里程碑')).toBeNull();
-  });
-
-  it('labels habit and family checkpoint configuration as a planned node', () => {
-    renderView(makePresentation({
-      progression: 'rhythm',
-      supportsTimeWindow: false,
-      milestones: [
-        {
-          id: 'checkpoint-5',
-          title: '第 5 次的計畫節點',
-          detail: '成長幣 +10（達成時一起確認）',
-          status: 'planned',
-        },
-      ],
-    }));
-
-    const milestones = within(screen.getByTestId('goal-rewards'));
-    expect(milestones.getByText('計畫節點')).toBeTruthy();
-    expect(milestones.queryByText('已完成')).toBeNull();
-  });
-
-  it('opens the weekend review and quiet plan-details entry', () => {
-    const onOpenReview = jest.fn();
-    const onOpenDetails = jest.fn();
-
-    renderView(makePresentation(), { onOpenReview, onOpenDetails });
-
-    fireEvent.press(screen.getByLabelText('開始週末回顧'));
-    fireEvent.press(screen.getByLabelText('查看計畫詳情'));
-    expect(onOpenReview).toHaveBeenCalledTimes(1);
-    expect(onOpenDetails).toHaveBeenCalledTimes(1);
-  });
-
-  it('shows at most three real recent records and opens the selected record', () => {
-    const onOpenRecord = jest.fn();
-    renderView(makePresentation({
-      recentRecords: [
-        ...makePresentation().recentRecords,
-        {
-          id: 'completion-last-week',
-          dateLabel: '上週五',
-          detail: '閱讀 15 分鐘',
-          timeWindowLabel: null,
-        },
-        {
-          id: 'completion-hidden',
-          dateLabel: '上週四',
-          detail: '閱讀 15 分鐘',
-          timeWindowLabel: '晚餐後',
-        },
-      ],
-    }), { onOpenRecord });
-
-    expect(screen.getAllByText('今天').length).toBeGreaterThan(0);
-    expect(screen.getByText('星期一')).toBeTruthy();
-    expect(screen.getByText('上週五')).toBeTruthy();
-    expect(screen.queryByText('上週四')).toBeNull();
-
-    fireEvent.press(screen.getByLabelText('查看今天的紀錄'));
-    expect(onOpenRecord).toHaveBeenCalledWith('completion-today');
-  });
-
-  it('hides the recent-record section when there is no history', () => {
-    renderView(makePresentation({ recentRecords: [] }));
-    expect(screen.queryByText('最近紀錄')).toBeNull();
-  });
-
-  it('keeps skill goals in the same skeleton with a non-reading action', () => {
-    renderView(makePresentation({
-      headerTitle: '鋼琴家之路',
-      progression: 'staged',
-      planWeekLabel: '第 2 階段／共 4 階段',
-      weekProgressLabel: '這週練習 2 次',
-      weekSummary: '這週可以依自己的節奏，繼續目前的練習階段。',
-      categoryLabel: '學習與技能',
-      focusText: '目前階段：雙手合奏',
-      nextText: '下一個里程碑：完整演奏',
-      todayTitle: '今天的小步驟',
-      todayAction: '練習雙手合奏 15 分鐘',
-      preferredTimeWindow: null,
+      weekCompletedActual: 3, weekTarget: 3, weekTargetReached: true,
+      weekProgressLabel: '本週 3 / 3', weekProgressNote: '已到這週約定的節奏',
       canCompleteToday: true,
-      supportsTimeWindow: false,
-      milestones: TRUSTED_MILESTONES,
-      reviewPrompt: '這週哪一段練習最有進步？',
     }));
-
-    for (const testID of [
-      'goal-hero',
-      'goal-today',
-      'goal-week',
-      'goal-rewards',
-      'goal-review',
-      'goal-details',
-    ]) {
-      expect(screen.getByTestId(testID)).toBeTruthy();
-    }
-    expect(screen.getByText('記下今天的完成')).toBeTruthy();
-
-    const week = within(screen.getByTestId('goal-week'));
-    expect(week.getByText('這週練習 2 次')).toBeTruthy();
-    expect(week.getByText('這週可以依自己的節奏，繼續目前的練習階段。')).toBeTruthy();
-    expect(week.queryByTestId('goal-day-caption-1')).toBeNull();
+    expect(screen.getByText('已到這週約定的節奏')).toBeTruthy();
+    expect(screen.getByLabelText('記下今天的完成')).toBeTruthy();
   });
 
-  it('uses compact weekly progress for challenge goals without fake daily cells', () => {
+  it('rhythm 4 vs 3：不寫 4/3、不畫第四顆節點', () => {
+    renderView(makePresentation({
+      weekCompletedActual: 4, weekTarget: 3, weekExtra: 1, weekTargetReached: true,
+      weekProgressLabel: '本週完成 4 次', weekProgressNote: '原本約定 3 次',
+    }));
+    const progress = within(screen.getByTestId('goal-week'));
+    expect(progress.getByText('本週完成 4 次')).toBeTruthy();
+    expect(progress.getByText('原本約定 3 次')).toBeTruthy();
+    expect(progress.queryByText('4 / 3')).toBeNull();
+    expect(progress.queryByText('4/3')).toBeNull();
+    expect(progress.queryByText('133%')).toBeNull();
+  });
+
+  it('rhythm today completed：CTA 換成完成狀態', () => {
+    renderView(makePresentation(), { isCompletedToday: true });
+    expect(screen.queryByLabelText('記下今天的完成')).toBeNull();
+  });
+
+  it('fixed_days：安排日看得到排程格', () => {
+    renderView(makePresentation({
+      progression: 'fixed_days',
+      weekDays: [
+        { day: 1, label: '一', isoDate: '2026-08-10', isScheduled: true, state: 'completed' },
+        { day: 3, label: '三', isoDate: '2026-08-12', isScheduled: true, state: 'today' },
+        { day: 5, label: '五', isoDate: '2026-08-14', isScheduled: false, state: 'unscheduled' },
+      ],
+    }));
+    expect(screen.getByLabelText('星期一，已完成')).toBeTruthy();
+    expect(screen.getByLabelText('星期三，今天待完成')).toBeTruthy();
+    expect(screen.getByLabelText('星期五，沒有安排')).toBeTruthy();
+  });
+
+  it('fixed_days：非安排日（rest day）不能記', () => {
+    renderView(makePresentation({
+      progression: 'fixed_days', canCompleteToday: false, completionReason: 'not_scheduled_today',
+    }));
+    expect(screen.getByText('今天沒有安排這一步')).toBeTruthy();
+  });
+
+  it('staged：can check-in，節點來自真實 level 數', () => {
+    renderView(makePresentation({
+      progression: 'staged', canCompleteToday: true,
+      focusText: '目前階段：雙手合奏',
+      stagedProgress: { current: 2, target: 4, stageNames: ['基礎指法', '簡單曲目', '雙手合奏', '完整演奏'] },
+    }));
+    const progress = within(screen.getByTestId('goal-week'));
+    expect(progress.getByText('已完成 2 / 4 階段')).toBeTruthy();
+    expect(progress.getByText('目前階段：雙手合奏')).toBeTruthy();
+    expect(screen.getByLabelText('記下今天的完成')).toBeTruthy();
+  });
+
+  it('staged：schedule_not_defined 時 Today 誠實顯示未安排，不是可以按的 CTA', () => {
+    renderView(makePresentation({
+      progression: 'staged', canCompleteToday: false, completionReason: 'schedule_not_defined',
+      stagedProgress: { current: 2, target: 4, stageNames: [] },
+    }));
+    expect(screen.getByText('這份計畫還沒安排練習時間')).toBeTruthy();
+    expect(screen.queryByLabelText('記下今天的完成')).toBeNull();
+  });
+
+  it('staged：checked-in today 不會推進 current_level（資料不因畫面重繪而變）', () => {
+    const stagedProgress = { current: 2, target: 4, stageNames: [] };
+    renderView(makePresentation({ progression: 'staged', stagedProgress }), { isCompletedToday: true });
+    const progress = within(screen.getByTestId('goal-week'));
+    expect(progress.getByText('已完成 2 / 4 階段')).toBeTruthy();
+  });
+
+  it('accumulation：2/5，不從標題 parse 數字', () => {
+    renderView(makePresentation({
+      progression: 'accumulation', headerTitle: '暑假讀 5 本書',
+      accumulationProgress: { current: 2, target: 5, unit: '本' },
+    }));
+    const progress = within(screen.getByTestId('goal-week'));
+    expect(progress.getByText('2 / 5 本')).toBeTruthy();
+  });
+
+  it('accumulation：today session check-in 之後 2/5 不變', () => {
     renderView(makePresentation({
       progression: 'accumulation',
-      weekProgressLabel: '目前累積 25／100 頁',
-      weekSummary: '累積進度由家長一起確認。',
-      weekTarget: 5,
-    }));
-
-    const week = within(screen.getByTestId('goal-week'));
-    expect(week.getByText('目前累積 25／100 頁')).toBeTruthy();
-    expect(week.getByText('累積進度由家長一起確認。')).toBeTruthy();
-    expect(week.queryByTestId('goal-day-caption-1')).toBeNull();
+      accumulationProgress: { current: 2, target: 5, unit: '本' },
+    }), { isCompletedToday: true });
+    const progress = within(screen.getByTestId('goal-week'));
+    expect(progress.getByText('2 / 5 本')).toBeTruthy();
   });
 
-  it('renders weekly-frequency reading progress without a weekday judgement timeline', () => {
-    const presentation = buildGoalPresentation(
-      makeTask({
-        schedule_mode: 'weekly_frequency',
-        weekly_frequency: 4,
-        recurrence_days: null,
-        due_date: '2026-08-16',
-      }),
-      makeGoal({
-        total_days: 8,
-        active_days: null,
-        started_at: '2026-08-03',
-        end_date: '2026-08-16',
-      }),
-      [
-        { id: 'monday', completed_at: '2026-08-03T19:00:00+08:00', planned_time_window: null, start_mode: null },
-        { id: 'thursday', completed_at: '2026-08-06T19:00:00+08:00', planned_time_window: null, start_mode: null },
-        { id: 'friday', completed_at: '2026-08-07T10:00:00+08:00', planned_time_window: null, start_mode: null },
+  it('null progression：還沒安排這種進度，不假裝是 staged', () => {
+    renderView(makePresentation({
+      progression: null, canCompleteToday: false, completionReason: 'unsupported_progression',
+      stagedProgress: null, accumulationProgress: null,
+    }));
+    const progress = within(screen.getByTestId('goal-week'));
+    expect(progress.getByText('還沒安排這種進度')).toBeTruthy();
+  });
+});
+
+describe('Next Stop（§14：persisted-only）', () => {
+  it('有真實 checkpoint 才顯示，而且 badge 只讀 milestone.coin', () => {
+    renderView(makePresentation({
+      milestones: [
+        { id: 'a', title: '讀到一半', detail: null, status: 'next', coin: 20 },
       ],
-      dayjs('2026-08-07T12:00:00+08:00'),
+    }));
+    expect(screen.getByText('這段路上的下一站')).toBeTruthy();
+    expect(screen.getByText('讀到一半')).toBeTruthy();
+    expect(screen.getByText('+20')).toBeTruthy();
+  });
+
+  it('沒有 coin 證據就不畫 badge', () => {
+    renderView(makePresentation({
+      milestones: [
+        { id: 'a', title: '讀到一半', detail: null, status: 'next', coin: null },
+      ],
+    }));
+    expect(screen.getByText('讀到一半')).toBeTruthy();
+    expect(screen.queryByText(/^\+\d/)).toBeNull();
+  });
+
+  it('全部 completed（沒有 next/planned）就不顯示', () => {
+    renderView(makePresentation({
+      milestones: [
+        { id: 'a', title: '已累積 2 本', detail: null, status: 'completed', coin: null },
+      ],
+    }));
+    expect(screen.queryByTestId('goal-next-stop')).toBeNull();
+  });
+});
+
+describe('說好的回饋（§15：secondary info）', () => {
+  it('P1 agreedReward 存在時顯示一行，不做價目表', () => {
+    renderView();
+    expect(screen.getByTestId('goal-agreed-reward')).toBeTruthy();
+    expect(screen.getByText(/每完成一次，\+8 成長幣/)).toBeTruthy();
+  });
+
+  it('legacyReward 時不假裝是正式約定', () => {
+    renderView(makePresentation({ legacyReward: true }));
+    expect(screen.queryByTestId('goal-agreed-reward')).toBeNull();
+  });
+
+  it('沒有 agreedReward 就不顯示', () => {
+    renderView(makePresentation({ agreedReward: null }));
+    expect(screen.queryByTestId('goal-agreed-reward')).toBeNull();
+  });
+});
+
+describe('Together Review（§16：接真實現有能力）', () => {
+  it('有 onOpenReview 就是可按的卡片', () => {
+    const onOpenReview = jest.fn();
+    renderView(makePresentation(), { onOpenReview });
+    fireEvent.press(screen.getByLabelText('開始週末回顧'));
+    expect(onOpenReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('沒有 callback 就是純資訊卡，不放假按鈕', () => {
+    renderView();
+    expect(screen.queryByLabelText('開始週末回顧')).toBeNull();
+    expect(screen.getByText('這週什麼時候讀起來最順？')).toBeTruthy();
+  });
+});
+
+describe('More（§17：安靜收斂）', () => {
+  it('點「更多紀錄與計畫」開同一個選單', () => {
+    const onOpenMore = jest.fn();
+    renderView(makePresentation(), { onOpenMore });
+    fireEvent.press(screen.getByLabelText('更多紀錄與計畫'));
+    expect(onOpenMore).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §24 functional regression — 主 demo case 走過 buildGoalPresentation 真實計算，
+// 不是手工湊的 fixture。
+// ---------------------------------------------------------------------------
+
+describe('§24 功能回歸：每週 3 次 · 睡前 · 15 分鐘 · 每次 +8', () => {
+  const task = makeTask({
+    schedule_mode: 'weekly_frequency',
+    weekly_frequency: 3,
+    preferred_time: 'before_bed',
+    next_step: '今晚睡前讀 15 分鐘',
+  });
+  const goal = makeGoal({ started_at: '2026-08-10' });
+
+  it('2/3 狀態：今天尚未做、睡前、15 分鐘、每完成一次 +8，整個 Goal 仍 active', () => {
+    const presentation = buildGoalPresentation(
+      task, goal,
+      [
+        { id: 'c1', completed_at: '2026-08-10T21:00:00+08:00', planned_time_window: null, start_mode: null },
+        { id: 'c2', completed_at: '2026-08-11T21:00:00+08:00', planned_time_window: null, start_mode: null },
+      ],
+      dayjs.tz('2026-08-12T12:00:00', 'Asia/Taipei'),
+      { agreedReward: {
+        policy: 'coin_eligible', coinAmount: 8, payoutBasis: 'per_completion',
+        claimPeriod: 'day', maxClaimsPerPeriod: 1, label: '每完成一次，+8 成長幣',
+      } },
     );
 
-    renderView(presentation);
+    renderView(presentation, { isCompletedToday: false });
 
-    const week = within(screen.getByTestId('goal-week'));
-    expect(screen.getByText('本週進度')).toBeTruthy();
-    expect(week.getByText('本週 3 / 4')).toBeTruthy();
-    expect(week.getByText(/還差 1 次到這週約定的節奏/)).toBeTruthy();
-    expect(week.queryByTestId('goal-day-caption-1')).toBeNull();
-    expect(week.queryByText(/尚未記錄|未安排|漏掉/)).toBeNull();
+    expect(screen.getByText('今晚睡前讀 15 分鐘')).toBeTruthy();
+    expect(screen.getByText(/睡前/)).toBeTruthy();
+    const progress = within(screen.getByTestId('goal-week'));
+    expect(progress.getByText('本週 2 / 3')).toBeTruthy();
+    expect(screen.getByText(/每完成一次，\+8 成長幣/)).toBeTruthy();
+    expect(presentation.planState).toBe('active');
   });
 
-  it.each([
-    [
-      'skill',
-      makeTask({
-        name: '鋼琴家之路',
-        long_term_type: 'skill',
-      }),
-      makeGoal({
-        goal_type: 'skill',
-        current_level: 2,
-        level_count: 4,
-        level_definitions: [
-          { name: '基礎指法' },
-          { name: '簡單曲目' },
-          { name: '雙手合奏' },
-          { name: '完整演奏' },
-        ],
-      }),
-      '第 2 / 4 階段',
-      '這週可以依自己的節奏，繼續目前的練習階段。',
-    ],
-    [
-      'challenge',
-      makeTask({
-        name: '閱讀一百頁',
-        long_term_type: 'challenge',
-      }),
-      makeGoal({
-        goal_type: 'challenge',
-        current_value: 25,
-        target_value: 100,
-        value_unit: '頁',
-      }),
-      '25 / 100 頁',
-      '累積進度會在家長確認後更新。',
-    ],
-  ] as const)(
-    'renders truthful %s compact progress from the presentation builder',
-    (_kind, task, goal, overallLabel, weekProgressLabel) => {
-      const presentation = buildGoalPresentation(
-        task,
-        goal,
-        [],
-        dayjs('2026-07-30T12:00:00+08:00'),
-      );
+  it('3/3 狀態：今天已完成、+8，整個 Goal 仍 active（不是旅程完成）', () => {
+    const presentation = buildGoalPresentation(
+      task, goal,
+      [
+        { id: 'c1', completed_at: '2026-08-10T21:00:00+08:00', planned_time_window: null, start_mode: null },
+        { id: 'c2', completed_at: '2026-08-11T21:00:00+08:00', planned_time_window: null, start_mode: null },
+        { id: 'c3', completed_at: '2026-08-12T21:00:00+08:00', planned_time_window: null, start_mode: null },
+      ],
+      dayjs.tz('2026-08-12T22:00:00', 'Asia/Taipei'),
+    );
 
-      renderView(presentation);
+    renderView(presentation, { isCompletedToday: true });
 
-      const week = within(screen.getByTestId('goal-week'));
-      expect(week.getByText(overallLabel)).toBeTruthy();
-      expect(week.getByText(weekProgressLabel)).toBeTruthy();
-      expect(week.getByText(presentation.weekSummary)).toBeTruthy();
-      expect(week.queryByTestId('goal-day-caption-1')).toBeNull();
-    },
-  );
-
-  it('uses compact weekly status when a habit has no scheduled days', () => {
-    renderView(makePresentation({
-      progression: 'rhythm',
-      planState: 'unplanned',
-      weekProgressLabel: '本週尚未安排',
-      weekSummary: '先和家人一起選出適合的日子。',
-      weekTarget: 0,
-    }));
-
-    const week = within(screen.getByTestId('goal-week'));
-    expect(week.getByText('本週尚未安排')).toBeTruthy();
-    expect(week.getByText('先和家人一起選出適合的日子。')).toBeTruthy();
-    expect(week.queryByTestId('goal-day-caption-1')).toBeNull();
+    const progress = within(screen.getByTestId('goal-week'));
+    expect(progress.getByText('本週 3 / 3')).toBeTruthy();
+    expect(screen.getByText('今天已完成 15 分鐘')).toBeTruthy();
+    expect(presentation.planState).toBe('active');
+    expect(screen.queryByText('旅程完成')).toBeNull();
   });
 });

@@ -326,7 +326,8 @@ describe('LongTermDetailScreen', () => {
     render(<LongTermDetailScreen />);
 
     expect(await screen.findByText('自主閱讀計畫')).toBeTruthy();
-    expect(screen.getAllByText('第 1 週／共 3 週').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('第 1 週').length).toBeGreaterThan(0);
+    expect(screen.getByText('共 3 週')).toBeTruthy();
     expect(screen.getByText('本週 3 / 5')).toBeTruthy();
     expect(screen.getByText('今天預計：晚餐後')).toBeTruthy();
     expect(screen.getByText(/本週 3 \/ 5/)).toBeTruthy();
@@ -759,7 +760,8 @@ describe('LongTermDetailScreen', () => {
     expect(await screen.findByText('今天已完成 15 分鐘')).toBeTruthy();
     // RPC 回了一個 checkpoint，但畫面上的里程碑仍然只來自 goal 的資料 ——
     // 不因為一次完成的回應就宣稱達成。
-    expect(screen.getByText('成長幣 +10（達成時一起確認）')).toBeTruthy();
+    expect(screen.getByText('第 5 次的計畫節點')).toBeTruthy();
+    expect(screen.getByText('+10')).toBeTruthy();
     expect(screen.queryByText(/已達成/)).toBeNull();
   });
 
@@ -783,7 +785,8 @@ describe('LongTermDetailScreen', () => {
     await screen.findByText('今天已完成 15 分鐘');
     // checkpoint 是 fixture 上真的有的（{'5': 10}），所以它在。
     // 這裡要驗的是「RPC 沒回 milestone 時，畫面不會自己宣稱達成」。
-    expect(screen.getByText('成長幣 +10（達成時一起確認）')).toBeTruthy();
+    expect(screen.getByText('第 5 次的計畫節點')).toBeTruthy();
+    expect(screen.getByText('+10')).toBeTruthy();
     expect(screen.queryByText(/已達成/)).toBeNull();
   });
 
@@ -799,11 +802,13 @@ describe('LongTermDetailScreen', () => {
     });
     render(<LongTermDetailScreen />);
 
-    expect(await screen.findByText('成長幣 +10（達成時一起確認）')).toBeTruthy();
+    expect(await screen.findByText('第 5 次的計畫節點')).toBeTruthy();
+    expect(screen.getByText('+10')).toBeTruthy();
     fireEvent.press(screen.getByLabelText('記下今天的完成'));
 
     await screen.findByText('今天已完成 15 分鐘');
-    expect(screen.getByText('成長幣 +10（達成時一起確認）')).toBeTruthy();
+    expect(screen.getByText('第 5 次的計畫節點')).toBeTruthy();
+    expect(screen.getByText('+10')).toBeTruthy();
     expect(screen.queryByText(/已記下/)).toBeNull();
   });
 
@@ -1069,11 +1074,11 @@ describe('LongTermDetailScreen', () => {
     render(<LongTermDetailScreen />);
 
     expect(await screen.findByText('鋼琴家之路')).toBeTruthy();
+    expect(screen.getByText('目前練習：雙手合奏')).toBeTruthy();
     expect(screen.getByText('目前階段：雙手合奏')).toBeTruthy();
     expect(screen.getByTestId('goal-hero')).toBeTruthy();
     expect(screen.getByTestId('goal-today')).toBeTruthy();
     expect(screen.getByTestId('goal-week')).toBeTruthy();
-    expect(screen.getByTestId('goal-rewards')).toBeTruthy();
     expect(screen.getByTestId('goal-review')).toBeTruthy();
     expect(screen.queryByText('錄一段給自己聽')).toBeNull();
   });

@@ -598,12 +598,6 @@ export default function LongTermDetailScreen() {
           <Text style={styles.headerTitle} numberOfLines={1}>
             {presentation?.headerTitle ?? taskName}
           </Text>
-          <View style={styles.weekPill}>
-            <View style={styles.weekDot} />
-            <Text style={styles.weekText} numberOfLines={1}>
-              {presentation?.planWeekLabel ?? '成長旅程'}
-            </Text>
-          </View>
           <TouchableOpacity
             accessibilityRole="button"
             accessibilityLabel="更多計畫選項"
@@ -629,7 +623,7 @@ export default function LongTermDetailScreen() {
             onSelectTimeWindow={setSelectedTimeWindow}
             onOpenRecord={handleOpenRecord}
             onOpenReview={() => setActiveSheet('review')}
-            onOpenDetails={() => setActiveSheet('details')}
+            onOpenMore={() => setActiveSheet('menu')}
             pendingTimeAdjustmentNotice={
               hasOpenRequest ? '已送給爸媽，等一起確認。' : null
             }
@@ -685,31 +679,6 @@ const styles = StyleSheet.create({
     minWidth: 0,
     color: Colors.ink900,
     fontSize: 20,
-    fontWeight: '900',
-  },
-  weekPill: {
-    minHeight: 38,
-    maxWidth: 78,
-    paddingHorizontal: 9,
-    borderRadius: 19,
-    borderWidth: 1,
-    borderColor: Colors.borderSoft,
-    backgroundColor: Colors.bgSurface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-  },
-  weekDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.sage400,
-  },
-  weekText: {
-    flexShrink: 1,
-    color: Colors.ink700,
-    fontSize: 13,
     fontWeight: '900',
   },
   moreButton: {

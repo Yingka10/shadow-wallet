@@ -65,6 +65,11 @@ export type GoalMilestone = {
   title: string;
   detail: string | null;
   status: 'completed' | 'next' | 'upcoming' | 'planned';
+  /**
+   * 這個節點真的有正式回饋證據時才有值（LT-FINAL-2 §14 的 Next Stop badge
+   * 只讀這個欄位，不去 `detail` 字串裡找數字）。
+   */
+  coin: number | null;
 };
 
 export type GoalRecentRecord = {
@@ -103,6 +108,22 @@ export type GoalPresentation = {
   targetReached: boolean;
   categoryLabel: string;
   planWeekLabel: string;
+
+  // ── Journey Hero（LT-FINAL-2 §4）────────────────────────────────────
+  //
+  // Hero 的 path 是「我正在這段旅程裡」，不是可數的進度條 —— 這裡只給
+  // 一個 0..1 的位置分數畫**一顆** marker，不要另外給節點清單。
+  /** 第 1 週 / 第 3 階段 / 目前 2 / 5 本。null progression 給引導語。 */
+  heroPositionLabel: string;
+  /** 共 2 週 / 共 4 階段。accumulation 與沒有期程時是 null（沒有「共幾」這件事）。 */
+  heroTotalLabel: string | null;
+  /**
+   * Hero 第三行。**只讀 canonical 證據**（孩子寫的行動摘要、真實階段名）——
+   * 沒有證據就是 null，不要自己生一句「正在找到節奏」。
+   */
+  heroPositionNote: string | null;
+  /** 0..1，marker 在路徑上的位置。 */
+  heroMarkerFraction: number;
 
   // ── 這一週（§C：不 clamp）────────────────────────────────────────────
   weekCompletedActual: number;
@@ -169,6 +190,25 @@ export type GoalPresentation = {
   legacyReward: boolean;
 
   nextReward: { threshold: number; coin: number } | null;
+
+  // ── Progress renderer 專用數字（LT-FINAL-2 §13）─────────────────────
+  //
+  // Progress 的 staged / accumulation renderer 讀這裡的數字畫節點，
+  // **不**回頭去 parse overallLabel 這種給人看的字串。
+  /** 只有 progression === 'staged' 時有值。 */
+  stagedProgress: {
+    current: number;
+    target: number;
+    /** 真實 level_definitions 名稱，畫節點標籤用。 */
+    stageNames: string[];
+  } | null;
+  /** 只有 progression === 'accumulation' 時有值。 */
+  accumulationProgress: {
+    current: number;
+    target: number;
+    unit: string;
+  } | null;
+
   milestones: GoalMilestone[];
   recentRecords: GoalRecentRecord[];
   planPeriodLabel: string;
@@ -373,6 +413,7 @@ function buildRhythmMilestones(goal: LongTermGoal): GoalMilestone[] {
       title: `第 ${checkpoint.threshold} 次的計畫節點`,
       detail: checkpoint.coin > 0 ? `成長幣 +${checkpoint.coin}（達成時一起確認）` : null,
       status: 'planned' as const,
+      coin: checkpoint.coin > 0 ? checkpoint.coin : null,
     }));
 }
 
@@ -387,15 +428,17 @@ function buildSkillMilestones(
     const level = levels[index];
     const coin = Number(level?.coin);
 
+    const hasCoin = Number.isFinite(coin) && coin > 0;
     return {
       id: `skill-level-${levelNumber}`,
       title: String(level?.name ?? `第 ${levelNumber} 階段`),
-      detail: Number.isFinite(coin) && coin > 0 ? `成長幣 +${coin}` : null,
+      detail: hasCoin ? `成長幣 +${coin}` : null,
       status: levelNumber <= current
         ? 'completed'
         : levelNumber === current + 1
           ? 'next'
           : 'upcoming',
+      coin: hasCoin ? coin : null,
     };
   });
 
@@ -423,6 +466,7 @@ function buildChallengeMilestones(
       title: `已累積 ${current}${unitSuffix}`,
       detail: null,
       status: 'completed',
+      coin: null,
     },
   ];
 
@@ -436,6 +480,7 @@ function buildChallengeMilestones(
         : checkpoint.threshold === nextCheckpoint
           ? 'next'
           : 'upcoming',
+      coin: checkpoint.coin > 0 ? checkpoint.coin : null,
     });
   }
 
@@ -642,6 +687,37 @@ export function buildGoalPresentation(
         ? Math.min(Math.round((currentWeek / totalWeeks) * 100), 100)
         : 0;
 
+  // ── Journey Hero（LT-FINAL-2 §4）─────────────────────────────────────
+  const heroPositionLabel = isStaged
+    ? `第 ${Math.min(stagedCurrent + 1, Math.max(stagedTarget, 1))} 階段`
+    : isAccumulation
+      ? `目前 ${accCurrent} / ${accTarget}${accUnit ? ` ${accUnit}` : ''}`
+      : progression === null
+        ? '還沒安排這種進度'
+        : totalWeeks > 0
+          ? `第 ${currentWeek} 週`
+          : '還沒安排週期';
+  const heroTotalLabel = isStaged
+    ? `共 ${Math.max(stagedTarget, 1)} 階段`
+    : (isRhythm || isFixedDays) && totalWeeks > 0
+      ? `共 ${totalWeeks} 週`
+      : null;
+  // ⚠️ 只讀 canonical 證據。階段制讀真實階段名；節奏／固定星期讀孩子自己
+  // 寫的行動摘要；累積制目前沒有對應的 canonical 欄位，就是 null ——
+  // 不要自己編一句「今天繼續往目標前進」。
+  const heroPositionNote = isStaged
+    ? `目前練習：${getCurrentSkillStage(goal)}`
+    : (isRhythm || isFixedDays)
+      ? (childPlan?.actionPlanSummary ?? null)
+      : null;
+  const heroMarkerFraction = isStaged
+    ? Math.min(stagedCurrent / Math.max(stagedTarget, 1), 1)
+    : isAccumulation
+      ? Math.min(accCurrent / Math.max(accTarget, 1), 1)
+      : totalWeeks > 0
+        ? Math.min(Math.max((currentWeek - 1) / totalWeeks, 0), 1)
+        : 0.08;
+
   const milestones = isStaged
     ? buildSkillMilestones(goal, stagedCurrent, Math.max(stagedTarget, 1))
     : isAccumulation
@@ -671,6 +747,11 @@ export function buildGoalPresentation(
       : planState === 'unplanned' || totalWeeks === 0
         ? '還沒安排週期'
         : `第 ${currentWeek} 週／共 ${totalWeeks} 週`,
+
+    heroPositionLabel,
+    heroTotalLabel,
+    heroPositionNote,
+    heroMarkerFraction,
 
     weekCompletedActual: weekly.weekCompletedActual,
     weekTarget: weekly.weekTarget,
@@ -745,6 +826,18 @@ export function buildGoalPresentation(
     legacyReward: extras.legacyReward ?? false,
 
     nextReward,
+    stagedProgress: isStaged
+      ? {
+        current: stagedCurrent,
+        target: Math.max(stagedTarget, 1),
+        stageNames: (goal.level_definitions ?? []).map(
+          (level, index) => String(level?.name ?? `第 ${index + 1} 階段`),
+        ),
+      }
+      : null,
+    accumulationProgress: isAccumulation
+      ? { current: accCurrent, target: Math.max(accTarget, 1), unit: accUnit }
+      : null,
     milestones,
     recentRecords: buildRecentRecords(task, completions),
     planPeriodLabel: buildPlanPeriodLabel(
