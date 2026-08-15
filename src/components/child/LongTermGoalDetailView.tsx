@@ -719,9 +719,17 @@ function ProgressCard({
 
 function milestoneStatusLabel(milestone: GoalMilestone): string {
   if (milestone.status === 'completed') return '已完成';
+  // 階段型：孩子現在就在練這一階段，講「下一個」會和 Hero 打架。
+  if (milestone.status === 'in_progress') return '進行中';
+  if (milestone.status === 'next_stage') return '下一階段';
   if (milestone.status === 'next') return '下一個里程碑';
   if (milestone.status === 'planned') return '計畫節點';
   return '尚未到';
+}
+
+/** 時間軸上被標示出來的那一列：進行中的階段，或還沒開始的下一個節點。 */
+function isMilestoneHighlighted(milestone: GoalMilestone): boolean {
+  return milestone.status === 'in_progress' || milestone.status === 'next';
 }
 
 function PlanNotice({ notice }: { notice: string }) {
@@ -751,7 +759,7 @@ function MilestoneTimeline({
                 style={[
                   styles.timelineNode,
                   milestone.status === 'completed' && styles.timelineNodeCompleted,
-                  milestone.status === 'next' && styles.timelineNodeNext,
+                  isMilestoneHighlighted(milestone) && styles.timelineNodeNext,
                 ]}
               >
                 {milestone.status === 'completed' ? (
@@ -761,7 +769,7 @@ function MilestoneTimeline({
                     name="milestone"
                     size={14}
                     color={
-                      milestone.status === 'next'
+                      isMilestoneHighlighted(milestone)
                         ? Colors.gold700
                         : Colors.ink300
                     }
@@ -784,14 +792,14 @@ function MilestoneTimeline({
                   style={[
                     styles.statusBadge,
                     milestone.status === 'completed' && styles.statusBadgeCompleted,
-                    milestone.status === 'next' && styles.statusBadgeNext,
+                    isMilestoneHighlighted(milestone) && styles.statusBadgeNext,
                   ]}
                 >
                   <Text
                     style={[
                       styles.statusBadgeText,
                       milestone.status === 'completed' && styles.statusBadgeTextCompleted,
-                      milestone.status === 'next' && styles.statusBadgeTextNext,
+                      isMilestoneHighlighted(milestone) && styles.statusBadgeTextNext,
                     ]}
                   >
                     {milestoneStatusLabel(milestone)}

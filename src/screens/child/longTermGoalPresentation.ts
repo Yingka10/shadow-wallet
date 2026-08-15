@@ -43,11 +43,21 @@ export type GoalDayStatus = {
   state: GoalDayState;
 };
 
+/**
+ * `status` 分成兩組，不要混用：
+ *
+ *   - 階段型（staged_skill）：completed / in_progress / next_stage / upcoming。
+ *     **正在進行的那一階段是 `in_progress`，不是 `next`。** 兩者曾經共用
+ *     `next`，於是 Hero 說「目前階段：雙手合奏」、Progress 卻說
+ *     「下一個里程碑：雙手合奏」，同一個階段被講成兩件事。
+ *   - 累積型 / 節點型：completed / next / upcoming / planned。這裡的 `next`
+ *     指的是真正還沒開始的下一個節點，語意沒有問題。
+ */
 export type GoalMilestone = {
   id: string;
   title: string;
   detail: string | null;
-  status: 'completed' | 'next' | 'upcoming' | 'planned';
+  status: 'completed' | 'in_progress' | 'next_stage' | 'next' | 'upcoming' | 'planned';
 };
 
 export type GoalRecentRecord = {
@@ -404,13 +414,20 @@ function getNextSkillReward(
   };
 }
 
+/**
+ * 正在練習的那一階段的名稱。
+ *
+ * `current_level` 是**已完成的階段數**（建立時寫 0，每完成一階段 +1），所以
+ * 正在進行的階段就是 `level_definitions[current_level]`。這裡不對
+ * `current_level` 做任何 ±1 的語意搬移，只是把索引換成名字。
+ */
 function getCurrentSkillStage(goal: LongTermGoal): string {
   const levels = goal.level_definitions ?? [];
   const index = Math.min(
     Math.max(goal.current_level ?? 0, 0),
     Math.max(levels.length - 1, 0),
   );
-  return String(levels[index]?.name ?? '下一個練習階段');
+  return String(levels[index]?.name ?? `第 ${index + 1} 階段`);
 }
 
 function buildRhythmMilestones(
@@ -434,10 +451,23 @@ function buildRhythmMilestones(
   return milestones;
 }
 
+/**
+ * 階段時間軸。
+ *
+ * `current` 是已完成的階段數，所以：
+ *   - 第 1..current 階段 → 已完成
+ *   - 第 current + 1 階段 → **進行中**（不是「下一個」，孩子現在就在練這個）
+ *   - 第 current + 2 階段 → 下一階段
+ *   - 再往後 → 尚未到
+ *
+ * `isFinished`（計畫已結束）時整條時間軸都不得有「進行中」——家長提早收尾時
+ * 未完成的階段就是沒完成，不補成完成、也不假裝還在進行。
+ */
 function buildSkillMilestones(
   goal: LongTermGoal,
   current: number,
   target: number,
+  isFinished: boolean,
 ): GoalMilestone[] {
   const levels = goal.level_definitions ?? [];
   const milestones = Array.from({ length: target }, (_, index): GoalMilestone => {
@@ -451,9 +481,13 @@ function buildSkillMilestones(
       detail: Number.isFinite(coin) && coin > 0 ? `成長幣 +${coin}` : null,
       status: levelNumber <= current
         ? 'completed'
-        : levelNumber === current + 1
-          ? 'next'
-          : 'upcoming',
+        : isFinished
+          ? 'upcoming'
+          : levelNumber === current + 1
+            ? 'in_progress'
+            : levelNumber === current + 2
+              ? 'next_stage'
+              : 'upcoming',
     };
   });
 
@@ -668,7 +702,11 @@ export function buildGoalPresentation(
     todayIsInsidePlan
     && (isFlexibleWeeklyRhythm || activeDays.includes(today.day()));
   const currentStage = getCurrentSkillStage(goal);
-  const nextSkillLevel = goal.level_definitions?.[current];
+  // 正在第幾階段 = 已完成幾階段 + 1。這是**呈現層**的換算，DB 的
+  // current_level 語意（已完成數）一個字都沒動。
+  const currentStageNumber = Math.min(current + 1, target);
+  const stagedSkillIsFinished =
+    isSkill && (goal.status === 'completed' || current >= target);
   const nextReward = isSkill
     ? getNextSkillReward(goal, current)
     : isChallenge
@@ -748,7 +786,7 @@ export function buildGoalPresentation(
       ? `目前期間最多安排 ${scheduledCapacity} 次，和 ${target} 次目標不一致，可以和家人一起調整。`
       : null;
   const planWeekLabel = isSkill
-    ? `第 ${Math.min(current + 1, target)} 階段／共 ${target} 階段`
+    ? `第 ${currentStageNumber} 階段 · 共 ${target} 階段`
     : hasUnplannedCycle
       ? '尚未安排週期'
       : `第 ${currentWeek} 週／共 ${totalWeeks} 週`;
@@ -767,7 +805,7 @@ export function buildGoalPresentation(
         ? '參與時段、每週次數、任務內容'
         : '執行時段、每週次數、任務內容';
   const milestones = isSkill
-    ? buildSkillMilestones(goal, current, target)
+    ? buildSkillMilestones(goal, current, target, stagedSkillIsFinished)
     : hasChallengeValues
       ? buildChallengeMilestones(goal, current, challengeUnit)
       : buildRhythmMilestones(goal);
@@ -789,7 +827,7 @@ export function buildGoalPresentation(
       : isRhythmGoal
       ? `第 ${currentWeek} 週`
       : isSkill
-        ? `第 ${Math.min(current + 1, target)} 階段`
+        ? `第 ${currentStageNumber} 階段`
         : '成長旅程',
     planWeekLabel,
     weekProgressLabel: isSkill
@@ -809,7 +847,9 @@ export function buildGoalPresentation(
     overallLabel: hasExplicitRhythmPeriod
       ? planWeekLabel
       : isSkill
-      ? `第 ${current} / ${target} 階段`
+      // Hero 講「正在第幾階段」，Progress 講「已完成幾階段」。加上「已完成」
+      // 三個字，兩個數字才不會被讀成同一件事的兩種說法。
+      ? `已完成 ${current} / ${target} 階段`
       : hasChallengeValues
         ? `${current} / ${target}${challengeUnit ? ` ${challengeUnit}` : ''}`
         : `${current} / ${target} 次`,
@@ -823,7 +863,9 @@ export function buildGoalPresentation(
         ? '第 1 週：找到適合自己的執行節奏'
         : `第 ${currentWeek} 週：繼續找到適合自己的執行節奏`
       : isSkill
-        ? `目前階段：${currentStage}`
+        ? stagedSkillIsFinished
+          ? '這段練習已經告一段落'
+          : `目前練習：${currentStage}`
         : hasChallengeValues
           ? `目前已累積 ${current}${challengeUnit ? ` ${challengeUnit}` : ''}`
           : isFamily
@@ -833,8 +875,11 @@ export function buildGoalPresentation(
       ? todayIsActive
         ? '今天繼續就好，已完成的努力都會保留'
         : '下一次繼續就好，已完成的努力都會保留'
-      : isSkill && nextSkillLevel
-        ? `下一個里程碑：${String(nextSkillLevel.name ?? `第 ${current + 1} 階段`)}`
+      // 階段型不講「下一個里程碑」：那個名字指的是孩子**現在**正在練的階段。
+      : isSkill
+        ? stagedSkillIsFinished
+          ? '可以和家人一起回顧這段練習'
+          : `現在正在：${currentStage}`
         : nextReward
           ? hasChallengeValues
             ? `下一個里程碑：累積 ${nextReward.threshold}${challengeUnit ? ` ${challengeUnit}` : ''}`

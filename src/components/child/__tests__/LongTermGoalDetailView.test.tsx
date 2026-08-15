@@ -756,6 +756,40 @@ describe('LongTermGoalDetailView', () => {
     expect(milestones.queryByText(/回顧/)).toBeNull();
   });
 
+  it('labels a staged-skill timeline with 進行中 instead of 下一個里程碑', () => {
+    const presentation = buildGoalPresentation(
+      makeTask({ name: '學鋼琴', long_term_type: 'skill', recurrence_days: null }),
+      makeGoal({
+        goal_type: 'skill',
+        active_days: null,
+        checkpoint_rewards: null,
+        current_level: 2,
+        level_count: 4,
+        level_definitions: [
+          { name: '基礎指法' },
+          { name: '簡單曲目' },
+          { name: '雙手合奏' },
+          { name: '完整演奏' },
+        ],
+      }),
+      [],
+      dayjs('2026-07-30T12:00:00+08:00'),
+    );
+
+    renderView(presentation);
+
+    const progress = within(screen.getByTestId('goal-progress'));
+    expect(progress.getAllByText('已完成')).toHaveLength(2);
+    expect(progress.getByText('進行中')).toBeTruthy();
+    expect(progress.getByText('下一階段')).toBeTruthy();
+    expect(progress.queryByText('下一個里程碑')).toBeNull();
+    expect(progress.queryByText('計畫節點')).toBeNull();
+
+    // 孩子現在練的那一階段，是被標示出來的那一列。
+    expect(progress.getByText('已完成 2 / 4 階段')).toBeTruthy();
+    expect(progress.getByText('現在正在：雙手合奏')).toBeTruthy();
+  });
+
   it('does not render a milestone timeline when no persisted checkpoint exists', () => {
     renderView(makePresentation({
       progression: 'accumulation',
@@ -859,12 +893,12 @@ describe('LongTermGoalDetailView', () => {
     renderView(makePresentation({
       headerTitle: '鋼琴家之路',
       goalKind: 'skill',
-      planWeekLabel: '第 2 階段／共 4 階段',
+      planWeekLabel: '第 3 階段 · 共 4 階段',
       weekProgressLabel: '這週練習 2 次',
       weekSummary: '這週可以依自己的節奏，繼續目前的練習階段。',
       categoryLabel: '學習與技能',
-      focusText: '目前階段：雙手合奏',
-      nextText: '下一個里程碑：完整演奏',
+      focusText: '目前練習：雙手合奏',
+      nextText: '現在正在：雙手合奏',
       todayTitle: '今天的小步驟',
       todayAction: '練習雙手合奏 15 分鐘',
       preferredTimeWindow: null,
@@ -888,7 +922,7 @@ describe('LongTermGoalDetailView', () => {
 
     const week = within(screen.getByTestId('goal-progress'));
     expect(week.getByText('1 / 20 次')).toBeTruthy();
-    expect(week.getByText('下一個里程碑：完整演奏')).toBeTruthy();
+    expect(week.getByText('現在正在：雙手合奏')).toBeTruthy();
     expect(week.getByText('這週可以依自己的節奏，繼續目前的練習階段。')).toBeTruthy();
     expect(week.queryByTestId('goal-day-caption-1')).toBeNull();
   });
@@ -1016,7 +1050,7 @@ describe('LongTermGoalDetailView', () => {
           { name: '完整演奏' },
         ],
       }),
-      '第 2 / 4 階段',
+      '已完成 2 / 4 階段',
       '依自己的節奏練習',
     ],
     [

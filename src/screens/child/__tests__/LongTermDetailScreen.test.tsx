@@ -934,7 +934,7 @@ describe('LongTermDetailScreen', () => {
     };
     rerender(<LongTermDetailScreen />);
 
-    expect(await screen.findByText('目前階段：雙手合奏')).toBeTruthy();
+    expect(await screen.findByText('目前練習：雙手合奏')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '晚餐後' })).toBeNull();
     expect(screen.queryByRole('button', { name: '就照現在這樣' })).toBeNull();
     fireEvent.press(screen.getByLabelText('開始週末回顧'));
@@ -978,7 +978,7 @@ describe('LongTermDetailScreen', () => {
       taskName: '鋼琴家之路',
     };
     rerender(<LongTermDetailScreen />);
-    await screen.findByText('目前階段：雙手合奏');
+    await screen.findByText('目前練習：雙手合奏');
 
     mockRouteParams = {
       goalId: 'goal-reading',
@@ -1016,7 +1016,7 @@ describe('LongTermDetailScreen', () => {
       taskName: '鋼琴家之路',
     };
     rerender(<LongTermDetailScreen />);
-    await screen.findByText('目前階段：雙手合奏');
+    await screen.findByText('目前練習：雙手合奏');
 
     mockRouteParams = {
       goalId: 'goal-reading',
@@ -1139,7 +1139,7 @@ describe('LongTermDetailScreen', () => {
       taskName: '鋼琴家之路',
     };
     rerender(<LongTermDetailScreen />);
-    expect(await screen.findByText('目前階段：雙手合奏')).toBeTruthy();
+    expect(await screen.findByText('目前練習：雙手合奏')).toBeTruthy();
 
     await act(async () => {
       correctionRequest.resolve();
@@ -1162,7 +1162,7 @@ describe('LongTermDetailScreen', () => {
     render(<LongTermDetailScreen />);
 
     expect(await screen.findByText('鋼琴家之路')).toBeTruthy();
-    expect(screen.getByText('目前階段：雙手合奏')).toBeTruthy();
+    expect(screen.getByText('目前練習：雙手合奏')).toBeTruthy();
     expect(screen.getByTestId('goal-hero')).toBeTruthy();
     expect(screen.getByTestId('goal-today')).toBeTruthy();
     expect(screen.getByTestId('goal-progress')).toBeTruthy();

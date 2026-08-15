@@ -122,6 +122,53 @@ function makeWeeklyFrequencyGoal(overrides: Partial<LongTermGoal> = {}): LongTer
   });
 }
 
+function makeStagedSkillTask(overrides: Partial<Task> = {}): Task {
+  return makeTask({
+    id: 'task-piano',
+    name: '學鋼琴',
+    long_term_type: 'skill',
+    recurrence_days: null,
+    ...overrides,
+  });
+}
+
+/**
+ * `current_level` 是**已完成的階段數**，不是「正在第幾階段」。
+ * 建立技能任務時寫入 0（`taskActions.createSkillTask`），每完成一階段 +1
+ * （`completeSkillMilestone` 的 `current_level = current_level + 1`）。
+ * 這個 fixture 用 2 / 4：前兩階段已完成，正在第 3 階段。
+ */
+function makeStagedSkillGoal(overrides: Partial<LongTermGoal> = {}): LongTermGoal {
+  return makeGoal({
+    id: 'goal-piano',
+    task_id: 'task-piano',
+    goal_type: 'skill',
+    total_days: 120,
+    current_day: 0,
+    checkpoint_rewards: null,
+    active_days: null,
+    preferred_time_window: null,
+    current_level: 2,
+    level_count: 4,
+    level_definitions: [
+      { id: '1', name: '基礎指法', coin: 10 },
+      { id: '2', name: '簡單曲目', coin: 20 },
+      { id: '3', name: '雙手合奏', coin: 30 },
+      { id: '4', name: '完整演奏', coin: 40 },
+    ],
+    ...overrides,
+  });
+}
+
+function stagedSkillPresentation(goalOverrides: Partial<LongTermGoal> = {}) {
+  return buildGoalPresentation(
+    makeStagedSkillTask(),
+    makeStagedSkillGoal(goalOverrides),
+    [],
+    dayjs.tz('2026-07-30T12:00:00', 'Asia/Taipei'),
+  );
+}
+
 describe('buildGoalPresentation', () => {
   it('derives the Demo reading-looking plan entirely from structured fields', () => {
     const task = makeTask({
@@ -798,8 +845,8 @@ describe('buildGoalPresentation', () => {
     );
 
     expect(result.headerTitle).toBe('閱讀技能進階');
-    expect(result.overallLabel).toBe('第 2 / 4 階段');
-    expect(result.focusText).toBe('目前階段：雙手合奏');
+    expect(result.overallLabel).toBe('已完成 2 / 4 階段');
+    expect(result.focusText).toBe('目前練習：雙手合奏');
     expect(result.todayAction).toBe('這一階段先練習：雙手合奏');
     expect(result.weekTarget).toBe(0);
     expect(result.weekProgressLabel).toBe('依自己的節奏練習');
@@ -824,18 +871,125 @@ describe('buildGoalPresentation', () => {
         id: 'skill-level-3',
         title: '雙手合奏',
         detail: '成長幣 +30',
-        status: 'next',
+        status: 'in_progress',
       },
       {
         id: 'skill-level-4',
         title: '完整演奏',
         detail: '成長幣 +40',
-        status: 'upcoming',
+        status: 'next_stage',
       },
     ]);
     expect(result.canCompleteToday).toBe(false);
     expect(result.todayTitle).toBe('目前階段');
     expect(result.todayStatusText).toBe('這個階段由家長確認完成');
+  });
+
+  /*
+    真機驗收抓到的矛盾：Hero 說「第 3 階段／目前階段：雙手合奏」，Progress 卻說
+    「第 2 / 4 階段／下一個里程碑：雙手合奏」。同一個階段被同時稱作「目前」和
+    「下一個」，孩子會以為兩邊在打架。
+
+    根因是 `current_level` 的語意被混用：它是**已完成幾個階段**，不是**正在第幾
+    階段**。這一組測試把兩層意思釘死，並且刻意不去動 `current_level` 本身。
+  */
+  describe('staged skill stage semantics', () => {
+    it('separates completed stages from the stage in progress', () => {
+      const result = stagedSkillPresentation();
+
+      // 第一層：現在正在第幾階段（已完成數 + 1）
+      expect(result.weekLabel).toBe('第 3 階段');
+      expect(result.planWeekLabel).toBe('第 3 階段 · 共 4 階段');
+      expect(result.focusText).toBe('目前練習：雙手合奏');
+
+      // 第二層：已完成幾個階段
+      expect(result.overallLabel).toBe('已完成 2 / 4 階段');
+      expect(result.nextText).toBe('現在正在：雙手合奏');
+
+      // 第三層：時間軸上「進行中」與「下一階段」分開
+      expect(result.milestones.map((item) => [item.title, item.status])).toEqual([
+        ['基礎指法', 'completed'],
+        ['簡單曲目', 'completed'],
+        ['雙手合奏', 'in_progress'],
+        ['完整演奏', 'next_stage'],
+      ]);
+    });
+
+    it('treats the first stage as in progress before any stage is completed', () => {
+      const result = stagedSkillPresentation({ current_level: 0 });
+
+      expect(result.weekLabel).toBe('第 1 階段');
+      expect(result.planWeekLabel).toBe('第 1 階段 · 共 4 階段');
+      expect(result.overallLabel).toBe('已完成 0 / 4 階段');
+      expect(result.focusText).toBe('目前練習：基礎指法');
+      expect(result.nextText).toBe('現在正在：基礎指法');
+      expect(result.milestones.map((item) => item.status)).toEqual([
+        'in_progress',
+        'next_stage',
+        'upcoming',
+        'upcoming',
+      ]);
+    });
+
+    it('marks the last stage as in progress when every earlier stage is done', () => {
+      const result = stagedSkillPresentation({ current_level: 3 });
+
+      expect(result.planWeekLabel).toBe('第 4 階段 · 共 4 階段');
+      expect(result.overallLabel).toBe('已完成 3 / 4 階段');
+      expect(result.focusText).toBe('目前練習：完整演奏');
+      expect(result.milestones.map((item) => item.status)).toEqual([
+        'completed',
+        'completed',
+        'completed',
+        'in_progress',
+      ]);
+      // 最後一階段之後沒有「下一階段」可以指。
+      expect(result.milestones.some((item) => item.status === 'next_stage')).toBe(false);
+    });
+
+    it('stops calling any stage in progress once the plan is completed', () => {
+      const result = stagedSkillPresentation({ status: 'completed' });
+
+      expect(result.planState).toBe('completed');
+      expect(result.milestones.map((item) => item.status)).toEqual([
+        'completed',
+        'completed',
+        'upcoming',
+        'upcoming',
+      ]);
+      // 家長提早結束計畫時，「已完成 2 / 4」仍然是實話，不補成 4 / 4。
+      expect(result.overallLabel).toBe('已完成 2 / 4 階段');
+      expect(result.focusText).toBe('這段練習已經告一段落');
+      expect(result.nextText).toBe('可以和家人一起回顧這段練習');
+    });
+
+    it('stops calling any stage in progress once every stage is done', () => {
+      const result = stagedSkillPresentation({ current_level: 4 });
+
+      expect(result.planState).toBe('completed');
+      expect(result.overallLabel).toBe('已完成 4 / 4 階段');
+      expect(result.milestones.every((item) => item.status === 'completed')).toBe(true);
+    });
+
+    it('keeps planning vocabulary out of the child-facing stage copy', () => {
+      const result = stagedSkillPresentation();
+      const childFacingCopy = [
+        result.weekLabel,
+        result.planWeekLabel,
+        result.overallLabel,
+        result.focusText,
+        result.nextText,
+        result.todayTitle,
+        result.todayAction,
+        result.todayStatusText ?? '',
+        result.weekSummary,
+        result.weekProgressLabel,
+        result.completionConditionLabel,
+        ...result.milestones.map((item) => `${item.title} ${item.detail ?? ''}`),
+      ].join(' | ');
+
+      expect(childFacingCopy).not.toMatch(/下一個里程碑|計畫節點|執行節點|KPI/);
+    });
   });
 
   it('uses challenge values consistently for progress and completion meaning', () => {
