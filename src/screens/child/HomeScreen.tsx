@@ -180,18 +180,22 @@ function calcDisplayCoin(task: Task, isPrerequisiteMet: boolean): number {
   return Math.round(base * (isPrerequisiteMet ? 1 : 0.7));
 }
 
-function getGoalTone(name: string): { tone: GoalTone; icon: string; title: string } {
-  const lower = name.toLowerCase();
-  if (name.includes('鋼琴') || lower.includes('piano')) {
-    return { tone: 'piano', icon: '🎹', title: '鋼琴家之路' };
-  }
-  if (name.includes('閱讀') || name.includes('書') || lower.includes('read')) {
-    return { tone: 'book', icon: '📚', title: '小書蟲計畫' };
-  }
-  if (name.includes('睡') || lower.includes('sleep')) {
-    return { tone: 'sleep', icon: '🌙', title: '早睡挑戰' };
-  }
-  return { tone: 'growth', icon: '🌱', title: name };
+/**
+ * 卡片的外觀。**名字由孩子決定，這裡只挑顏色。**
+ *
+ * ⚠️ 這一支以前會照名稱把「每天練琴 15 分鐘」改成「鋼琴家之路」、
+ *    把孩子寫的閱讀計畫改成「小書蟲計畫」。那不是外觀，那是**替他的
+ *    計畫重新命名** —— 而整條 P1 都在保證「你的做法沒有被改掉」，
+ *    結果首頁第一眼就把標題換掉了。
+ *
+ *    色系改由 task.category 決定（結構化欄位，不是內容），
+ *    標題一律 task.name。
+ */
+function getGoalTone(task: TodayTask): { tone: GoalTone; icon: string } {
+  if (task.category === 'D') return { tone: 'book', icon: '📚' };
+  if (task.category === 'B') return { tone: 'sleep', icon: '🤝' };
+  if (task.category === 'A') return { tone: 'piano', icon: '☀️' };
+  return { tone: 'growth', icon: '🌱' };
 }
 
 function getGoalProgress(goal: TodayTask['goal']): { label: string; pct: number } {
@@ -999,7 +1003,7 @@ function ProgressDots({ done, total }: { done: number; total: number }) {
 }
 
 function GoalCard({ task, onPress }: { task: TodayTask; onPress: () => void }) {
-  const info = getGoalTone(task.name);
+  const info = getGoalTone(task);
   const progress = getGoalProgress(task.goal);
 
   return (
@@ -1007,7 +1011,7 @@ function GoalCard({ task, onPress }: { task: TodayTask; onPress: () => void }) {
       <View style={[styles.goalArt, styles[`goalArt_${info.tone}`]]}>
         <Text style={styles.goalIcon}>{info.icon}</Text>
       </View>
-      <Text style={styles.goalTitle} numberOfLines={1}>{info.title}</Text>
+      <Text style={styles.goalTitle} numberOfLines={1}>{task.name}</Text>
       <Text style={styles.goalDays}>{progress.label}</Text>
       <View style={styles.goalTrack}>
         <MotiView

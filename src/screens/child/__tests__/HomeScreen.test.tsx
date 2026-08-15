@@ -213,6 +213,24 @@ describe('HomeScreen', () => {
     expect(screen.getByText('第 2/4 級')).toBeTruthy();
   });
 
+  // LT-FINAL-1 §9：孩子的計畫叫什麼，是孩子決定的。
+  //
+  // 這張卡片以前會照名稱關鍵字把標題換掉 —— 一個叫「每天練琴 15 分鐘」的
+  // 計畫會在首頁變成「鋼琴家之路」。整條 P1 都在保證「你的做法沒有被改掉」，
+  // 而首頁第一眼就把名字換了。
+  it('首頁不替孩子的計畫改名', () => {
+    mockTodayTasksResult = {
+      ...buildTodayTasksResult(),
+      longTermTasks: [{ ...skillLongTermTask, name: '每天練琴 15 分鐘' }],
+    };
+
+    render(<HomeScreen />);
+    expect(screen.getByText('每天練琴 15 分鐘')).toBeTruthy();
+    for (const invented of ['鋼琴家之路', '小書蟲計畫', '早睡挑戰']) {
+      expect(screen.queryByText(invented)).toBeNull();
+    }
+  });
+
   it('renders bottom nav tabs', () => {
     render(<HomeScreen />);
     expect(screen.getByText('首頁')).toBeTruthy();
