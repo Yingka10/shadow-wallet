@@ -210,6 +210,13 @@ function makeGoal(overrides: Partial<LongTermGoal> = {}): LongTermGoal {
   };
 }
 
+/** Hero 小徑對讀屏是隱藏的，查詢它得明講要看隱藏節點。 */
+const HIDDEN = { includeHiddenElements: true } as const;
+
+function journeyMarkers() {
+  return screen.getAllByTestId('goal-journey-marker', HIDDEN);
+}
+
 function renderView(
   presentation = makePresentation(),
   overrides: Partial<React.ComponentProps<typeof LongTermGoalDetailView>> = {},
@@ -271,20 +278,23 @@ describe('LongTermGoalDetailView', () => {
     },
   );
 
-  it('keeps the hero focused on truthful long-term progress', () => {
+  /*
+    Hero 只回答一個問題：「我現在走到哪裡？」
+
+    類別 → 目前位置 → 一句目前狀態，加一行安靜的期間。今天做什麼是 Today 的事，
+    本週完成幾次是 Progress 的事，Hero 不再把它們各講一次。
+  */
+  it('answers only where the plan currently is', () => {
     renderView();
 
     const hero = within(screen.getByTestId('goal-hero'));
     expect(hero.getByText('學習與技能')).toBeTruthy();
-    expect(hero.getByText('第 1 週／共 4 週')).toBeTruthy();
-    const overallProgress = hero.getByRole('progressbar');
-    expect(overallProgress.props.accessibilityLabel).toBe('整體計畫進度');
-    expect(overallProgress.props.accessibilityValue).toEqual({
-      min: 0,
-      max: 100,
-      now: 5,
-    });
+    expect(hero.getByText('第 1 週')).toBeTruthy();
     expect(hero.getByText('第一週：先找到適合自己的閱讀節奏')).toBeTruthy();
+    expect(hero.getByText('共 4 週')).toBeTruthy();
+
+    // 大字已經是「第 1 週」，整串 planWeekLabel 會把同一件事講兩次。
+    expect(hero.queryByText('第 1 週／共 4 週')).toBeNull();
     expect(
       hero.queryByText('今天繼續就好，已完成的閱讀都會保留'),
     ).toBeNull();
@@ -292,6 +302,97 @@ describe('LongTermGoalDetailView', () => {
     expect(screen.getByTestId('goal-hero').props.accessibilityLabel).toBeUndefined();
     expect(screen.queryByText('5%')).toBeNull();
     expect(screen.queryByText(/下一站/)).toBeNull();
+  });
+
+  /*
+    原本 Hero 有一條 overallPercent 進度條。對節奏型計畫那是假的終點進度：
+    「一週三次」沒有「走完幾成」這件事，那個百分比只是「排得下幾次」。
+  */
+  it('does not draw a terminal progress bar for a weekly rhythm', () => {
+    renderView(makePresentation({ progression: 'weekly_rhythm' }));
+
+    const hero = within(screen.getByTestId('goal-hero'));
+    expect(hero.queryByRole('progressbar')).toBeNull();
+    expect(screen.queryByTestId('goal-progress-fill')).toBeNull();
+    expect(hero.queryByText('1 / 20 次')).toBeNull();
+    expect(hero.queryByText('本週 1 / 5')).toBeNull();
+  });
+
+  it('shows the staged-skill current stage without repeating the level timeline', () => {
+    const presentation = buildGoalPresentation(
+      makeTask({ name: '學鋼琴', long_term_type: 'skill', recurrence_days: null }),
+      makeGoal({
+        goal_type: 'skill',
+        active_days: null,
+        checkpoint_rewards: null,
+        current_level: 2,
+        level_count: 4,
+        level_definitions: [
+          { name: '基礎指法' },
+          { name: '簡單曲目' },
+          { name: '雙手合奏' },
+          { name: '完整演奏' },
+        ],
+      }),
+      [],
+      dayjs('2026-07-30T12:00:00+08:00'),
+    );
+
+    renderView(presentation);
+
+    const hero = within(screen.getByTestId('goal-hero'));
+    expect(hero.getByText('第 3 階段')).toBeTruthy();
+    expect(hero.getByText('目前練習：雙手合奏')).toBeTruthy();
+    expect(hero.getByText('共 4 階段')).toBeTruthy();
+
+    // 完整的階段時間軸屬於 Progress，Hero 不再畫一次。
+    expect(hero.queryByText('基礎指法')).toBeNull();
+    expect(hero.queryByText('完整演奏')).toBeNull();
+    expect(hero.queryByTestId('goal-milestones')).toBeNull();
+  });
+
+  it.each([
+    ['weekly rhythm', { progression: 'weekly_rhythm' as const }],
+    ['fixed days', { progression: 'fixed_days' as const }],
+    ['staged skill', { progression: 'staged_skill' as const }],
+    ['accumulation', { progression: 'accumulation' as const }],
+    ['challenge', { progression: 'challenge' as const }],
+    ['unplanned', { progression: null }],
+  ])(
+    'draws one journey marker and no countable path nodes for %s',
+    (_name, overrides) => {
+      renderView(makePresentation(overrides));
+
+      // 小徑上多幾顆圓點就會被讀成「四個階段」——那是畫面自己發明的資料。
+      expect(journeyMarkers()).toHaveLength(1);
+      // 小徑是裝飾，讀屏不該逐段唸它；意思由 Hero 的文字負責。
+      expect(
+        screen.getByTestId('goal-journey-path', HIDDEN).props
+          .accessibilityElementsHidden,
+      ).toBe(true);
+    },
+  );
+
+  it('advances the journey marker with the plan state, not with completion counts', () => {
+    const markerX = () => Number(journeyMarkers()[0].props.cx);
+    const view = renderView(makePresentation({ planState: 'upcoming' }));
+    const show = (presentation: GoalPresentation) =>
+      view.rerender(
+        <LongTermGoalDetailView {...view.props} presentation={presentation} />,
+      );
+
+    const notStarted = markerX();
+    show(makePresentation({ planState: 'active' }));
+    const onTheWay = markerX();
+    show(makePresentation({ planState: 'completed' }));
+    const arrived = markerX();
+
+    expect(notStarted).toBeLessThan(onTheWay);
+    expect(onTheWay).toBeLessThan(arrived);
+
+    // 完成次數變多不會讓 marker 往前——它是位置，不是進度條。
+    show(makePresentation({ planState: 'active', overallPercent: 95 }));
+    expect(markerX()).toBe(onTheWay);
   });
 
   it('uses product icons instead of emoji for formal section headings', () => {
@@ -608,11 +709,13 @@ describe('LongTermGoalDetailView', () => {
   });
 
   it('allows long hero copy to grow and keeps seven-day captions readable', () => {
+    const longWeekLabel = '第 1 週，也是慢慢找節奏的一週';
     const longPlanWeek = '第 1 週／這是一段可以依生活節奏慢慢調整的四週計畫';
     const longWeekProgress = '本週已完成一次，也保留接下來依狀況調整的空間';
     const longFocus = '這一週先慢慢找出最適合自己的時間，也可以在需要時和家人一起調整閱讀方式。';
     const longNext = '下一個里程碑：完成第五次閱讀後，一起看看目前的方法是否仍然適合。';
     renderView(makePresentation({
+      weekLabel: longWeekLabel,
       planWeekLabel: longPlanWeek,
       weekProgressLabel: longWeekProgress,
       focusText: longFocus,
@@ -620,7 +723,10 @@ describe('LongTermGoalDetailView', () => {
       progression: 'fixed_days',
     }));
 
-    expect(screen.getByText(longPlanWeek).props.numberOfLines).toBe(2);
+    expect(screen.getByText(longWeekLabel).props.numberOfLines).toBe(2);
+    // planWeekLabel 裡沒有「共 N …」可以取，Hero 就不顯示期間，不自己合成一句。
+    expect(screen.queryByText(longPlanWeek)).toBeNull();
+    expect(screen.queryByText(/^共 \d+/)).toBeNull();
     expect(screen.queryByText(longWeekProgress)).toBeNull();
     expect(screen.getByText(longFocus)).toBeTruthy();
     expect(screen.queryByText(longNext)).toBeNull();
@@ -893,6 +999,7 @@ describe('LongTermGoalDetailView', () => {
     renderView(makePresentation({
       headerTitle: '鋼琴家之路',
       goalKind: 'skill',
+      weekLabel: '第 3 階段',
       planWeekLabel: '第 3 階段 · 共 4 階段',
       weekProgressLabel: '這週練習 2 次',
       weekSummary: '這週可以依自己的節奏，繼續目前的練習階段。',

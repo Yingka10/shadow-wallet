@@ -364,7 +364,10 @@ describe('LongTermDetailScreen', () => {
     render(<LongTermDetailScreen />);
 
     expect(await screen.findByText('自主閱讀計畫')).toBeTruthy();
-    expect(screen.getAllByText('第 1 週／共 4 週').length).toBeGreaterThan(0);
+    // Journey Hero 把位置和期間分成兩行：大字講「現在」，小字講「總共」。
+    expect(screen.getAllByText('第 1 週').length).toBeGreaterThan(0);
+    expect(screen.getByText('共 4 週')).toBeTruthy();
+    expect(screen.queryByText('第 1 週／共 4 週')).toBeNull();
     expect(screen.queryByText('本週完成 3／5 次')).toBeNull();
     expect(screen.getByText('進度')).toBeTruthy();
     expect(screen.getByText('今天預計：晚餐後')).toBeTruthy();

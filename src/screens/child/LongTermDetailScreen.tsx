@@ -571,7 +571,7 @@ export default function LongTermDetailScreen() {
   return (
     <View style={webScreen}>
       <SafeAreaView style={styles.safe} edges={['bottom']}>
-        <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
           <TouchableOpacity
             accessibilityLabel="返回"
             style={styles.backButton}
@@ -650,12 +650,12 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.bgCanvas,
   },
   header: {
-    minHeight: 74,
+    minHeight: 76,
     paddingHorizontal: 14,
-    paddingBottom: 10,
+    paddingBottom: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 10,
     backgroundColor: Colors.bgCanvas,
   },
   backButton: {
@@ -670,33 +670,39 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     color: Colors.ink900,
-    fontSize: 20,
+    fontSize: 19,
+    lineHeight: 26,
     fontWeight: '900',
+    letterSpacing: -0.2,
   },
+  /*
+    狀態膠囊是次要資訊：比標題安靜、比標題矮，寬度放到裝得下「第 3 階段」，
+    原本 78 會把它截成「第 3 階…」，跟標題擠在一起看起來像兩個標題在搶位置。
+  */
   weekPill: {
-    minHeight: 38,
-    maxWidth: 78,
-    paddingHorizontal: 9,
-    borderRadius: 19,
+    minHeight: 32,
+    maxWidth: 92,
+    paddingHorizontal: 11,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: Colors.borderSoft,
-    backgroundColor: Colors.bgSurface,
+    backgroundColor: Colors.cream50,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 5,
   },
   weekDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: Colors.sage400,
   },
   weekText: {
     flexShrink: 1,
-    color: Colors.ink700,
-    fontSize: 13,
-    fontWeight: '900',
+    color: Colors.ink500,
+    fontSize: 12,
+    fontWeight: '800',
   },
   moreButton: {
     width: 44,

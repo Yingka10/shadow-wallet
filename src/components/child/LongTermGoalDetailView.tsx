@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useId, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -8,7 +8,15 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
+import Svg, {
+  Circle,
+  Defs,
+  Line,
+  LinearGradient,
+  Path,
+  Rect,
+  Stop,
+} from 'react-native-svg';
 import { Colors } from '../../constants/colors';
 import { webMouseDraggableScroll } from '../../constants/webStyles';
 import type { PreferredTimeWindow } from '../../types/database';
@@ -240,7 +248,143 @@ function SectionHeading({
   );
 }
 
+/*
+  ── Journey Hero ──────────────────────────────────────────────────────────
+
+  Hero 只回答一個問題：「我現在走到哪裡？」
+
+  三層資訊，就這三層：類別 → 目前位置 → 一句目前狀態（再加一行安靜的期間）。
+  今天做什麼是 Today 的事，本週完成幾次是 Progress 的事，Hero 不再各講一次。
+
+  這裡**刻意沒有進度條**。原本那條 overallPercent 對節奏型計畫是假的終點進度：
+  「一週三次」沒有「走完幾成」這回事，那個百分比只是「這段期間排得下幾次」。
+  小徑取代它——小徑講位置，不講完成度。
+*/
+const HERO_FOREST = {
+  skyTop: '#28492F',
+  skyBottom: '#1A3322',
+  hillFar: '#2E5637',
+  hillNear: '#1D3B25',
+  pathGlow: 'rgba(154, 208, 102, 0.22)',
+  path: '#6E9B5C',
+} as const;
+
+/**
+ * 小徑：起點 →（目前位置）→ 樹屋。座標在 380 × 56 的路徑帶裡。
+ *
+ * 這是一條**連續**的曲線，中途一顆圓點都沒有。North Star 示意圖上那些圓點只是
+ * 在表達 journey mood；照著放會變成畫面自己發明的「四個階段」。
+ */
+const JOURNEY_START = { x: 20, y: 44 };
+const JOURNEY_C1 = { x: 120, y: 54 };
+const JOURNEY_C2 = { x: 212, y: 10 };
+const JOURNEY_END = { x: 330, y: 20 };
+const JOURNEY_PATH_D =
+  `M${JOURNEY_START.x} ${JOURNEY_START.y}`
+  + `C${JOURNEY_C1.x} ${JOURNEY_C1.y} ${JOURNEY_C2.x} ${JOURNEY_C2.y}`
+  + ` ${JOURNEY_END.x} ${JOURNEY_END.y}`;
+
+function pointOnJourneyPath(t: number): { x: number; y: number } {
+  const u = 1 - t;
+  const w = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t];
+  const points = [JOURNEY_START, JOURNEY_C1, JOURNEY_C2, JOURNEY_END];
+
+  return {
+    x: points.reduce((sum, point, index) => sum + w[index] * point.x, 0),
+    y: points.reduce((sum, point, index) => sum + w[index] * point.y, 0),
+  };
+}
+
+/**
+ * 目前位置落在小徑的哪一段。
+ *
+ * **只看 planState 這一個既有欄位，三個粗略錨點**：還沒出發 / 在路上 / 到了。
+ *
+ * 刻意不吃 overallPercent。對節奏型計畫那個數字是「排得下幾次」，綁上去等於
+ * 把 rhythm capacity 畫成終點進度——正是這一輪要拆掉的東西。小徑是視覺語言，
+ * 不是資料結構。
+ */
+function journeyMarkerPosition(planState: GoalPresentation['planState']): number {
+  if (planState === 'upcoming') return 0.08;
+  if (planState === 'completed' || planState === 'expired') return 0.92;
+  return 0.44;
+}
+
+/**
+ * planWeekLabel 尾巴的「共 N 週 / 共 N 階段」。
+ *
+ * 大字已經是「第 3 階段」，整串 planWeekLabel 會把同一件事講兩次。取不到就
+ * 不顯示——**不自己合成一句期間**。
+ */
+function planTotalLabel(planWeekLabel: string): string | null {
+  return planWeekLabel.match(/共\s*\d+\s*\S+/)?.[0] ?? null;
+}
+
+function JourneyPath({ position }: { position: number }) {
+  const marker = pointOnJourneyPath(position);
+
+  return (
+    <Svg
+      testID="goal-journey-path"
+      style={styles.journeyPath}
+      viewBox="0 0 380 56"
+      preserveAspectRatio="none"
+      accessibilityElementsHidden
+      pointerEvents="none"
+    >
+      {/* 小徑本身：一條柔光襯底 + 一條細線。前後不分色——分了就是進度條。 */}
+      <Path
+        d={JOURNEY_PATH_D}
+        stroke={HERO_FOREST.pathGlow}
+        strokeWidth={8}
+        strokeLinecap="round"
+        fill="none"
+      />
+      <Path
+        d={JOURNEY_PATH_D}
+        stroke={HERO_FOREST.path}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+        fill="none"
+      />
+
+      {/* 起點的嫩芽 */}
+      <Path
+        d={`M${JOURNEY_START.x} ${JOURNEY_START.y}v-9`}
+        stroke={Colors.leaf300}
+        strokeWidth={1.6}
+        strokeLinecap="round"
+        fill="none"
+      />
+      <Path
+        d={`M${JOURNEY_START.x} ${JOURNEY_START.y - 6}c-4.4 0-7-2.4-7-6.4 4.4 0 7 2.4 7 6.4Z`}
+        fill={Colors.leaf300}
+        opacity={0.9}
+      />
+      <Path
+        d={`M${JOURNEY_START.x} ${JOURNEY_START.y - 8}c0-4 2.6-6.4 7-6.4 0 4-2.6 6.4-7 6.4Z`}
+        fill={Colors.leaf200}
+        opacity={0.75}
+      />
+
+      {/* 目前位置：一顆，只有一顆 */}
+      <Circle cx={marker.x} cy={marker.y} r={9.5} fill={Colors.gold300} opacity={0.16} />
+      <Circle
+        testID="goal-journey-marker"
+        cx={marker.x}
+        cy={marker.y}
+        r={4.8}
+        fill={Colors.gold300}
+      />
+      <Circle cx={marker.x} cy={marker.y} r={1.9} fill={HERO_FOREST.skyBottom} />
+    </Svg>
+  );
+}
+
 function GoalHero({ presentation }: { presentation: GoalPresentation }) {
+  const gradientId = useId();
+  const totalLabel = planTotalLabel(presentation.planWeekLabel);
+
   return (
     <View
       testID="goal-hero"
@@ -248,27 +392,27 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
     >
       <Svg
         style={StyleSheet.absoluteFill}
-        viewBox="0 0 380 156"
+        viewBox="0 0 380 164"
         preserveAspectRatio="none"
         accessibilityElementsHidden
       >
-        <Path d="M0 0H380V156H0z" fill={Colors.grass.nightHillBackBottom} />
+        <Defs>
+          <LinearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <Stop offset={0} stopColor={HERO_FOREST.skyTop} />
+            <Stop offset={1} stopColor={HERO_FOREST.skyBottom} />
+          </LinearGradient>
+        </Defs>
+        <Rect x={0} y={0} width={380} height={164} fill={`url(#${gradientId})`} />
+        {/* 兩層坡就夠——多一層就開始像可數的地形 */}
         <Path
-          d="M0 98c80-28 145-20 210 5 70 27 121 10 170-13v66H0V98Z"
-          fill={Colors.grass.nightHillMidBottom}
+          d="M0 104c78-24 148-16 214 7 68 24 118 8 166-12v65H0v-60Z"
+          fill={HERO_FOREST.hillFar}
+          opacity={0.85}
         />
         <Path
-          d="M0 125c81-22 151-10 219 12 68 22 117 5 161-12v31H0v-31Z"
-          fill={Colors.grass.nightHillFrontBottom}
+          d="M0 133c84-20 154-8 222 13 66 20 112 3 158-13v31H0v-31Z"
+          fill={HERO_FOREST.hillNear}
         />
-        <Circle cx={34} cy={29} r={15} fill={Colors.gold100} opacity={0.2} />
-        <Path
-          d="M39 16c-8 4-11 12-8 20 3 8 11 12 19 9-6-2-10-8-10-14 0-6 3-11 8-14-3-2-6-2-9-1Z"
-          fill={Colors.gold300}
-        />
-        <Circle cx={115} cy={21} r={1.7} fill={Colors.gold300} />
-        <Circle cx={158} cy={38} r={1.4} fill={Colors.gold300} />
-        <Circle cx={337} cy={23} r={1.8} fill={Colors.gold300} />
       </Svg>
 
       <Image
@@ -278,37 +422,23 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
         accessibilityIgnoresInvertColors
       />
 
+      <JourneyPath position={journeyMarkerPosition(presentation.planState)} />
+
       <View style={styles.heroCopy}>
-        <View style={styles.categoryBadge}>
-          <Text style={styles.categoryText} numberOfLines={1}>
-            {presentation.categoryLabel}
-          </Text>
-        </View>
-        <Text style={styles.planWeekLabel} numberOfLines={2}>
-          {presentation.planWeekLabel}
+        <Text style={styles.categoryText} numberOfLines={1}>
+          {presentation.categoryLabel}
         </Text>
-        <View
-          style={styles.progressTrack}
-          accessible
-          accessibilityRole="progressbar"
-          accessibilityLabel="整體計畫進度"
-          accessibilityValue={{
-            min: 0,
-            max: 100,
-            now: presentation.overallPercent,
-          }}
-        >
-          <View
-            testID="goal-progress-fill"
-            style={[
-              styles.progressFill,
-              { width: `${presentation.overallPercent}%` as `${number}%` },
-            ]}
-          />
-        </View>
-        <Text style={styles.focusText}>
+        <Text style={styles.heroPosition} numberOfLines={2}>
+          {presentation.weekLabel}
+        </Text>
+        <Text style={styles.focusText} numberOfLines={2}>
           {presentation.focusText}
         </Text>
+        {totalLabel ? (
+          <Text style={styles.heroTotalLabel} numberOfLines={1}>
+            {totalLabel}
+          </Text>
+        ) : null}
       </View>
     </View>
   );
@@ -1080,69 +1210,63 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   hero: {
-    minHeight: 156,
-    borderRadius: 8,
+    // 比 North Star 示意圖再收斂一截，讓第一屏留得住「今天的小步驟」。
+    minHeight: 164,
+    borderRadius: 16,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: Colors.grass.nightHillBackTop,
   },
   treehouse: {
     position: 'absolute',
-    right: -8,
-    bottom: -10,
-    width: 116,
-    height: 116,
+    right: -6,
+    bottom: -4,
+    width: 112,
+    height: 112,
+  },
+  /** 小徑帶固定 56 高，貼著底邊；Hero 長高時它不跟著拉長，marker 才不會被壓扁。 */
+  journeyPath: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 56,
   },
   heroCopy: {
-    minHeight: 154,
-    paddingTop: 12,
-    paddingRight: 108,
-    paddingBottom: 10,
-    paddingLeft: 14,
-  },
-  categoryBadge: {
-    alignSelf: 'flex-start',
-    minHeight: 22,
-    maxWidth: '100%',
-    borderRadius: 7,
-    borderWidth: 1,
-    borderColor: Colors.grass.nightHillBackTop,
-    backgroundColor: Colors.grass.nightHillMidTop,
-    justifyContent: 'center',
-    paddingHorizontal: 7,
+    paddingTop: 16,
+    paddingRight: 106,
+    paddingBottom: 40,
+    paddingLeft: 18,
   },
   categoryText: {
     color: Colors.gold100,
     fontSize: 11,
     lineHeight: 16,
     fontWeight: '800',
+    letterSpacing: 1.4,
+    opacity: 0.82,
   },
-  planWeekLabel: {
-    marginTop: 5,
+  heroPosition: {
+    marginTop: 9,
     color: Colors.bgSurface,
-    fontSize: 18,
-    lineHeight: 22,
+    fontSize: 30,
+    lineHeight: 36,
     fontWeight: '900',
-  },
-  progressTrack: {
-    width: '100%',
-    height: 6,
-    marginTop: 6,
-    borderRadius: 3,
-    overflow: 'hidden',
-    backgroundColor: Colors.grass.nightHillBackTop,
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 3,
-    backgroundColor: Colors.leaf300,
+    letterSpacing: -0.4,
   },
   focusText: {
-    marginTop: 6,
+    marginTop: 4,
     color: Colors.cream100,
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '800',
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '700',
+    opacity: 0.92,
+  },
+  heroTotalLabel: {
+    marginTop: 8,
+    color: Colors.cream200,
+    fontSize: 11.5,
+    lineHeight: 16,
+    fontWeight: '700',
+    opacity: 0.62,
   },
   planNotice: {
     minHeight: 44,
