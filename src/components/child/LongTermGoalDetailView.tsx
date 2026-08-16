@@ -223,6 +223,21 @@ function SectionHeading({ icon, title }: { icon: IconName; title: string }) {
 // 樹屋、小徑、小芽全部可能被裁到框外，只剩中段接近全深綠的天空。
 const HERO_IMAGE_ASPECT_RATIO = 1774 / 887;
 
+// TEMP DEBUG — 三張背景圖（C/D/E）暫時都套這組樣式：紅框看有沒有量到
+// 大小、onLoad/onError 看有沒有真的載入。三個都確認完就整段刪掉。
+const DEBUG_BORDER = { opacity: 1, borderWidth: 3, borderColor: 'red' as const };
+const DEBUG_LABEL = {
+  position: 'absolute' as const,
+  top: 2,
+  left: 2,
+  backgroundColor: 'red',
+  color: 'white',
+  fontSize: 10,
+  fontWeight: '900' as const,
+  paddingHorizontal: 4,
+  zIndex: 999,
+};
+
 const HERO_WAYPOINTS: { x: number; y: number }[] = [
   { x: 0.06, y: 0.90 },
   { x: 0.33, y: 0.74 },
@@ -252,6 +267,9 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
     presentation.heroTotalLabel,
     presentation.heroPositionNote,
   ].filter(Boolean).join('，');
+  // TEMP DEBUG — 拿掉 opacity、加紅框、記 onLoad/onError 狀態，判斷是
+  // asset 沒載入、layout 是 0 大小、還是被別的層蓋住。診斷完就整段刪掉。
+  const [heroImgStatus, setHeroImgStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
 
   return (
     <View
@@ -266,11 +284,17 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
       */}
       <Image
         source={require('../../../assets/images/child/journey-hero-scene.png')}
-        style={StyleSheet.absoluteFill}
+        style={[StyleSheet.absoluteFill, DEBUG_BORDER]}
         resizeMode="cover"
         accessibilityIgnoresInvertColors
         accessibilityElementsHidden
+        onLoad={() => setHeroImgStatus('loaded')}
+        onError={(e) => {
+          setHeroImgStatus('error');
+          console.warn('[debug] hero image error', e.nativeEvent.error);
+        }}
       />
+      <Text style={DEBUG_LABEL}>hero:{heroImgStatus}</Text>
 
       <View
         testID="goal-hero-marker"
@@ -636,6 +660,8 @@ function ProgressCard({ presentation }: { presentation: GoalPresentation }) {
 
   let title: string;
   let body: React.ReactNode;
+  // TEMP DEBUG
+  const [progressImgStatus, setProgressImgStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
 
   if (progression === 'rhythm') {
     title = '這週的節奏';
@@ -725,10 +751,16 @@ function ProgressCard({ presentation }: { presentation: GoalPresentation }) {
           <View style={styles.decorationClip}>
             <Image
               source={require('../../../assets/images/child/journey-progress-path.png')}
-              style={styles.decorationImage}
+              style={[styles.decorationImage, DEBUG_BORDER]}
               resizeMode="cover"
               accessibilityElementsHidden
+              onLoad={() => setProgressImgStatus('loaded')}
+              onError={(e) => {
+                setProgressImgStatus('error');
+                console.warn('[debug] progress image error', e.nativeEvent.error);
+              }}
             />
+            <Text style={DEBUG_LABEL}>progress:{progressImgStatus}</Text>
             <View style={styles.decorationContent}>{body}</View>
           </View>
         </View>
@@ -768,6 +800,8 @@ function DayStatusGlyph({ state }: { state: GoalDayStatus['state'] }) {
 // ── Next Stop（§14：只有真實 checkpoint 才 render）───────────────────────
 
 function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
+  // TEMP DEBUG — 放在任何 early return 之前，不然違反 hooks 規則。
+  const [nextStopImgStatus, setNextStopImgStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
   // staged 的 milestones 就是 level_definitions 逐階段列出來的——跟 Progress
   // 卡的 StageNodeRow／focusText 讀的是同一份資料。這裡再顯示一次「下一
   // 站：雙手合奏」只是把 Progress 已經講過的話重講一次，不是額外的
@@ -791,10 +825,16 @@ function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
         <View style={styles.decorationClip}>
           <Image
             source={require('../../../assets/images/child/journey-nextstop-path.png')}
-            style={styles.decorationImage}
+            style={[styles.decorationImage, DEBUG_BORDER]}
             resizeMode="cover"
             accessibilityElementsHidden
+            onLoad={() => setNextStopImgStatus('loaded')}
+            onError={(e) => {
+              setNextStopImgStatus('error');
+              console.warn('[debug] next-stop image error', e.nativeEvent.error);
+            }}
           />
+          <Text style={DEBUG_LABEL}>nextstop:{nextStopImgStatus}</Text>
           <View style={[styles.decorationContent, styles.nextStopCard]}>
             <View style={styles.nextStopIcon}>
               <DetailIcon name="milestone" color={Colors.bgSurface} />
