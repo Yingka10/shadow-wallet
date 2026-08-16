@@ -22,6 +22,7 @@ import {
 import type { RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import dayjs from 'dayjs';
 import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
@@ -585,6 +586,12 @@ export default function LongTermDetailScreen() {
   return (
     <View style={webScreen}>
       <SafeAreaView style={styles.safe} edges={['bottom']}>
+        {/* 跟首頁同一組暖米色漸層背景，不是純色的 bgCanvas（Visual Integration Spec）。 */}
+        <LinearGradient
+          colors={['#F8F6F1', '#FFFDF8', '#FFF8EE']}
+          locations={[0, 0.58, 1]}
+          style={StyleSheet.absoluteFill}
+        />
         <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
           <TouchableOpacity
             accessibilityLabel="返回"
@@ -664,7 +671,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: Colors.bgCanvas,
   },
   backButton: {
     width: 44,

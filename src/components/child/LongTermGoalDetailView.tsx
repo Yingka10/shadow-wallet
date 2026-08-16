@@ -217,6 +217,12 @@ function SectionHeading({ icon, title }: { icon: IconName; title: string }) {
  * 會依 heroMarkerFraction 移動的 current marker（§4 絕對規則：只能有一顆，
  * 不能疊成可數的 checkpoint 鏈）。
  */
+// C 素材的真實比例（1774×887）。Hero 容器一定要照這個比例算高度，
+// 不能用獨立的 minHeight 亂猜——猜錯的話 resizeMode="cover" 會用
+// 容器實際的高寬比去裁切，容器越「瘦高」，裁掉的左右範圍就越大，
+// 樹屋、小徑、小芽全部可能被裁到框外，只剩中段接近全深綠的天空。
+const HERO_IMAGE_ASPECT_RATIO = 1774 / 887;
+
 const HERO_WAYPOINTS: { x: number; y: number }[] = [
   { x: 0.06, y: 0.90 },
   { x: 0.33, y: 0.74 },
@@ -589,7 +595,7 @@ function RhythmLeafRow({ done, target }: { done: number; target: number }) {
             />
           ) : null}
           <View style={[nodeStyle, filled && styles.leafNodeFilled]}>
-            {filled ? <DetailIcon name="sprout" size={compact ? 12 : 15} color={Colors.bgSurface} /> : null}
+            {filled ? <DetailIcon name="sprout" size={compact ? 13 : 17} color={Colors.bgSurface} /> : null}
           </View>
         </React.Fragment>
       ))}
@@ -828,6 +834,18 @@ function AgreedRewardNote({ presentation }: { presentation: GoalPresentation }) 
 
 // ── Together Review（§16：接真實現有能力）─────────────────────────────────
 
+/**
+ * reviewPrompt 是後端拼好的一句話（例如「這段時間哪裡最順？下一步想怎麼
+ * 調整？」），本來就是兩個問句黏在一起。這裡只是把它拆成兩行分開顯示，
+ * 不是新增或改寫文字內容。
+ */
+function splitReviewQuestions(prompt: string): string[] {
+  return prompt
+    .split('？')
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
 function TogetherReviewCard({
   presentation,
   onOpenReview,
@@ -837,21 +855,36 @@ function TogetherReviewCard({
   onOpenReview?: Props['onOpenReview'];
   pendingTimeAdjustmentNotice?: string | null;
 }) {
+  const questions = splitReviewQuestions(presentation.reviewPrompt);
+
   const content = (
     <>
-      <View style={styles.reviewIcon}>
-        <DetailIcon name="conversation" color={Colors.leaf700} />
+      <View style={styles.reviewQuestions}>
+        {questions.map((question, index) => (
+          <React.Fragment key={question}>
+            {index > 0 ? <View style={styles.reviewDivider} /> : null}
+            <View style={styles.reviewQuestionRow}>
+              <DetailIcon name="sprout" size={14} color={Colors.leaf600} />
+              <Text style={styles.reviewPrompt}>{question}？</Text>
+            </View>
+          </React.Fragment>
+        ))}
       </View>
-      <View style={styles.reviewCopy}>
-        <Text style={styles.reviewPrompt}>{presentation.reviewPrompt}</Text>
+      <View style={styles.reviewMascotColumn}>
+        <Image
+          source={require('../../../assets/images/child/journey-mascot.png')}
+          style={styles.reviewMascotImage}
+          resizeMode="contain"
+          accessibilityElementsHidden
+        />
+        {onOpenReview ? (
+          <View style={styles.reviewActionPill}>
+            <Text style={styles.reviewAction}>開始回顧 →</Text>
+          </View>
+        ) : (
+          <Text style={styles.reviewActionPlain}>週末可以和家人一起聊聊</Text>
+        )}
       </View>
-      {onOpenReview ? (
-        <View style={styles.reviewActionPill}>
-          <Text style={styles.reviewAction}>一起看看 →</Text>
-        </View>
-      ) : (
-        <Text style={styles.reviewActionPlain}>週末可以和家人一起聊聊</Text>
-      )}
     </>
   );
 
@@ -1012,7 +1045,7 @@ const styles = StyleSheet.create({
 
   // Hero
   hero: {
-    minHeight: 214,
+    aspectRatio: HERO_IMAGE_ASPECT_RATIO,
     borderRadius: 22,
     overflow: 'hidden',
     borderWidth: 1,
@@ -1041,7 +1074,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.bgSurface,
   },
   heroCopy: {
-    minHeight: 214,
+    ...StyleSheet.absoluteFillObject,
     paddingTop: 18,
     paddingRight: 110,
     paddingBottom: 16,
@@ -1135,7 +1168,7 @@ const styles = StyleSheet.create({
   decorationClip: { borderRadius: 18, overflow: 'hidden' },
   decorationImage: {
     ...StyleSheet.absoluteFillObject,
-    opacity: 0.2,
+    opacity: 0.28,
   },
   decorationContent: { padding: 16 },
 
@@ -1354,19 +1387,19 @@ const styles = StyleSheet.create({
   // 5-7 次節點縮小，同一條寬度切成更多段，間距自然跟著縮短（§11）。
   leafConnector: {
     flex: 1,
-    height: 3,
-    borderRadius: 1.5,
+    height: 5,
+    borderRadius: 2.5,
     marginHorizontal: 3,
-    backgroundColor: Colors.leaf200,
+    backgroundColor: Colors.leaf100,
   },
   leafConnectorFilled: {
     backgroundColor: Colors.leaf500,
   },
   leafNode: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 1.5,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 2,
     borderColor: Colors.leaf200,
     backgroundColor: Colors.bgSurface,
     alignItems: 'center',
@@ -1532,48 +1565,62 @@ const styles = StyleSheet.create({
 
   // Together Review
   reviewCard: {
-    minHeight: 82,
+    minHeight: 96,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
     borderColor: Colors.cream300,
     backgroundColor: Colors.cream50,
   },
-  reviewIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: Colors.leaf100,
-    alignItems: 'center',
-    justifyContent: 'center',
+  reviewQuestions: { flex: 1, minWidth: 0 },
+  reviewQuestionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
   },
-  reviewCopy: { flex: 1, minWidth: 0 },
+  reviewDivider: {
+    marginVertical: 8,
+    borderTopWidth: 1,
+    borderStyle: 'dashed',
+    borderTopColor: Colors.cream300,
+  },
   reviewPrompt: {
+    flex: 1,
     color: Colors.fgSecondary,
     fontSize: 12,
     lineHeight: 17,
     fontWeight: '700',
   },
+  reviewMascotColumn: {
+    width: 84,
+    alignItems: 'center',
+    gap: 6,
+  },
+  reviewMascotImage: {
+    width: 52,
+    height: 52,
+  },
   reviewActionPill: {
-    minHeight: 34,
-    borderRadius: 17,
+    minHeight: 30,
+    borderRadius: 15,
     backgroundColor: Colors.leaf100,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
   reviewAction: {
     color: Colors.leaf700,
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 11,
+    lineHeight: 15,
     fontWeight: '900',
   },
   reviewActionPlain: {
-    maxWidth: 96,
+    maxWidth: 84,
     color: Colors.fgMuted,
-    fontSize: 11,
-    lineHeight: 15,
+    fontSize: 10,
+    lineHeight: 14,
     fontWeight: '700',
+    textAlign: 'center',
   },
   pendingNoticeText: {
     marginTop: 8,
