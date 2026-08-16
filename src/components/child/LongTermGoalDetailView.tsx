@@ -229,10 +229,19 @@ function SectionHeading({ icon, title }: { icon: IconName; title: string }) {
 // Image 就會正常顯示。差別就是「有沒有字面數字的 width/height」，所以
 // Hero、Progress 裝飾圖、Next Stop 裝飾圖都改成這個模式。
 const HERO_IMAGE_ASPECT_RATIO = 1774 / 887;
-// D／E 只是卡片角落的小張裝飾插圖，尺寸本來就是字面數字（不用等
-// onLayout），照素材真實比例（2172×724、1672×941）算高度即可。
-const PROGRESS_DECORATION_ASPECT_RATIO = 2172 / 724;
-const NEXTSTOP_DECORATION_ASPECT_RATIO = 1672 / 941;
+// D／E 是卡片裡的裝飾插圖，尺寸本來就是字面數字（不用等 onLayout）。
+//
+// 兩張都已經用 Pillow 裁掉沒用的留白／不適合縮小的部分，裁完的檔案
+// 直接存回原本的路徑（尺寸跟原始素材不一樣了）：
+// - D（journey-progress-path.png）：原圖上方 274px 幾乎全空，裁掉後只留
+//   小徑/山丘那段，變成 2159×450 的橫向長條，適合當節奏卡下方的
+//   decorative strip。
+// - E（journey-nextstop-path.png）：原始素材是貫穿整張圖的長對角線路徑，
+//   縮成小圖只會看到一小段線條、認不出是路，不適合右側小插圖。換成
+//   使用者提供的 E2 素材（一小段路＋發光小芽，本來就是為右側小插圖
+//   設計的構圖），裁掉透明留白後存回同一個檔名，變成 1326×947。
+const PROGRESS_DECORATION_ASPECT_RATIO = 2159 / 450;
+const NEXTSTOP_DECORATION_ASPECT_RATIO = 1326 / 947;
 
 const HERO_WAYPOINTS: { x: number; y: number }[] = [
   { x: 0.06, y: 0.90 },
@@ -747,9 +756,9 @@ function ProgressCard({ presentation }: { presentation: GoalPresentation }) {
     <View>
       <SectionHeading icon="calendar" title={title} />
       {progression === 'rhythm' ? (
-        // D 素材只在 rhythm 用，卡片右下角的小張裝飾插圖——不承擔進度
-        // 資訊，純粹補 Journey 感（§11、§27）。普通 in-flow、固定數字
-        // 尺寸、低 opacity，不再鋪滿整張卡片當背景。
+        // D 素材只在 rhythm 用，是節奏節點下方的一條橫向裝飾長條——不
+        // 承擔進度資訊，純粹補 Journey 感（§11、§27）。普通 in-flow、
+        // 固定數字尺寸、低 opacity，不再鋪滿整張卡片當背景。
         <View testID="goal-week" style={styles.card}>
           {body}
           <Image
@@ -812,9 +821,10 @@ function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
   return (
     <View>
       <SectionHeading icon="milestone" title="這段路上的下一站" />
-      {/* E 素材是卡片右下角的小張裝飾插圖——只負責「前方有值得期待的
-          地方」，不承擔 checkpoint 資訊。普通 in-flow、固定數字尺寸、
-          低 opacity，不再鋪滿整張卡片當背景（§17、§27）。 */}
+      {/* E 素材是卡片右側的小型「目的地」插圖——只負責「前方有值得期待
+          的地方」，不承擔 checkpoint 資訊，checkpoint 標題／說明／獎勵
+          數字都還是 icon 旁邊的文字負責。普通 in-flow、固定數字尺寸、
+          跟 icon／文字並排同一列，不再鋪滿整張卡片當背景（§17、§27）。 */}
       <View testID="goal-next-stop" style={styles.card}>
         <View style={styles.nextStopCard}>
           <View style={styles.nextStopIcon}>
@@ -825,20 +835,22 @@ function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
               <Text style={styles.nextStopCaption}>接下來的一站</Text>
             </View>
             <Text style={styles.nextStopTitle}>{next.title}</Text>
-            <Text style={styles.nextStopNote}>到這裡時，可以再一起看看。</Text>
-          </View>
-          {next.coin !== null ? (
-            <View style={styles.rewardBadge}>
-              <Text style={styles.rewardBadgeText}>+{next.coin}</Text>
+            <View style={styles.nextStopNoteRow}>
+              <Text style={styles.nextStopNote}>到這裡時，可以再一起看看。</Text>
+              {next.coin !== null ? (
+                <View style={styles.rewardBadge}>
+                  <Text style={styles.rewardBadgeText}>+{next.coin}</Text>
+                </View>
+              ) : null}
             </View>
-          ) : null}
+          </View>
+          <Image
+            source={require('../../../assets/images/child/journey-nextstop-path.png')}
+            style={styles.nextStopDecorationImage}
+            resizeMode="contain"
+            accessibilityElementsHidden
+          />
         </View>
-        <Image
-          source={require('../../../assets/images/child/journey-nextstop-path.png')}
-          style={styles.nextStopDecorationImage}
-          resizeMode="contain"
-          accessibilityElementsHidden
-        />
       </View>
     </View>
   );
@@ -1141,21 +1153,21 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 1,
   },
-  // D／E 裝飾插圖：卡片右下角一張小圖，字面數字尺寸、低 opacity，
-  // 純粹補 Journey 感，不是背景、不承擔任何進度/checkpoint 資訊。
+  // D：節奏節點下方的橫向裝飾長條。字面數字尺寸、低 opacity，純粹補
+  // Journey 感，不是背景、不承擔任何進度資訊。負 marginTop 讓小徑貼近
+  // 節點列，不要留一塊空白；高度定死在 45–60 這段，卡片不會為它長高
+  // 太多（§11、§27）。
   progressDecorationImage: {
-    alignSelf: 'flex-end',
-    marginTop: 10,
-    width: 140,
-    height: 140 / PROGRESS_DECORATION_ASPECT_RATIO,
-    opacity: 0.32,
+    marginTop: -6,
+    width: '100%',
+    height: 60,
+    opacity: 0.2,
   },
+  // E：Next Stop 卡右側的小型「目的地」插圖（一小段路＋發光小芽），
+  // 跟 icon／文字並排在同一列，不是鋪滿卡片的背景（§17、§27）。
   nextStopDecorationImage: {
-    alignSelf: 'flex-end',
-    marginTop: 8,
-    width: 130,
-    height: 130 / NEXTSTOP_DECORATION_ASPECT_RATIO,
-    opacity: 0.3,
+    width: 128,
+    height: 128 / NEXTSTOP_DECORATION_ASPECT_RATIO,
   },
 
   // Today
@@ -1514,8 +1526,16 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontWeight: '900',
   },
+  nextStopNoteRow: {
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
   nextStopNote: {
-    marginTop: 2,
+    flex: 1,
+    minWidth: 0,
     color: Colors.fgMuted,
     fontSize: 11,
     lineHeight: 16,
