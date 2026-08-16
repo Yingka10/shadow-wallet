@@ -11,17 +11,17 @@
 // 不從 task.name 猜圖示、不自己編一句「正在找到節奏」。
 // ─────────────────────────────────────────────────────────────────────────
 
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  ImageBackground,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import type { LayoutChangeEvent } from 'react-native';
 import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 import { Colors } from '../../constants/colors';
 import { webMouseDraggableScroll } from '../../constants/webStyles';
@@ -218,42 +218,21 @@ function SectionHeading({ icon, title }: { icon: IconName; title: string }) {
  * 會依 heroMarkerFraction 移動的 current marker（§4 絕對規則：只能有一顆，
  * 不能疊成可數的 checkpoint 鏈）。
  */
-// C 素材的真實比例（1774×887）。Hero 容器一定要照這個比例算高度，
-// 不能用獨立的 minHeight 亂猜——猜錯的話 resizeMode="cover" 會用
-// 容器實際的高寬比去裁切，容器越「瘦高」，裁掉的左右範圍就越大，
-// 樹屋、小徑、小芽全部可能被裁到框外，只剩中段接近全深綠的天空。
+// C 素材的真實比例（1774×887）。
+//
+// Hero 圖片是普通 in-flow <Image>，寬度用 onLayout 量外層容器的實際寬度，
+// 高度用 width / HERO_IMAGE_ASPECT_RATIO 明確算成 pixel 數字再指定給
+// Image——不是用 aspectRatio 或 StyleSheet.absoluteFill 讓圖片自己去配
+// 一個算出來的框。實測過：Image 疊 absoluteFill／ImageBackground 在這個
+// 專案的環境下 onLoad 會回報成功、外層 layout 尺寸也正常，但實際像素
+// 完全沒有畫出來；同一個 source 換成固定數字 width/height 的 in-flow
+// Image 就會正常顯示。差別就是「有沒有字面數字的 width/height」，所以
+// Hero、Progress 裝飾圖、Next Stop 裝飾圖都改成這個模式。
 const HERO_IMAGE_ASPECT_RATIO = 1774 / 887;
-
-// TEMP DEBUG — 三張背景圖（C/D/E）暫時都套這組樣式：紅框看有沒有量到
-// 大小、onLoad/onError 看有沒有真的載入。三個都確認完就整段刪掉。
-const DEBUG_BORDER = { opacity: 1, borderWidth: 3, borderColor: 'red' as const };
-const DEBUG_LABEL = {
-  position: 'absolute' as const,
-  top: 2,
-  left: 2,
-  backgroundColor: 'red',
-  color: 'white',
-  fontSize: 10,
-  fontWeight: '900' as const,
-  paddingHorizontal: 4,
-  zIndex: 999,
-};
-const DEBUG_ISOLATION_BLOCK = {
-  marginTop: 20,
-  padding: 12,
-  borderWidth: 2,
-  borderColor: 'blue' as const,
-  gap: 4,
-};
-const DEBUG_ISOLATION_TITLE = { fontSize: 12, fontWeight: '900' as const, color: 'blue' as const };
-const DEBUG_ISOLATION_CAPTION = { fontSize: 11, fontWeight: '700' as const, color: 'blue' as const };
-const DEBUG_ISOLATION_IMAGE = {
-  width: 200,
-  height: 100,
-  borderWidth: 1,
-  borderColor: 'blue' as const,
-  backgroundColor: '#eee',
-};
+// D／E 只是卡片角落的小張裝飾插圖，尺寸本來就是字面數字（不用等
+// onLayout），照素材真實比例（2172×724、1672×941）算高度即可。
+const PROGRESS_DECORATION_ASPECT_RATIO = 2172 / 724;
+const NEXTSTOP_DECORATION_ASPECT_RATIO = 1672 / 941;
 
 const HERO_WAYPOINTS: { x: number; y: number }[] = [
   { x: 0.06, y: 0.90 },
@@ -284,39 +263,42 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
     presentation.heroTotalLabel,
     presentation.heroPositionNote,
   ].filter(Boolean).join('，');
-  // TEMP DEBUG — 拿掉 opacity、加紅框、記 onLoad/onError 狀態，判斷是
-  // asset 沒載入、layout 是 0 大小、還是被別的層蓋住。診斷完就整段刪掉。
-  const [heroImgStatus, setHeroImgStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
+
+  // 量外層容器的實際寬度，換算出字面數字的高度給 Image——見上面
+  // HERO_IMAGE_ASPECT_RATIO 註解，這是繞開背景圖不 render 的關鍵。
+  const [heroWidth, setHeroWidth] = useState(0);
+  const handleHeroLayout = useCallback((event: LayoutChangeEvent) => {
+    const width = event.nativeEvent.layout.width;
+    setHeroWidth((current) => (Math.round(current) === Math.round(width) ? current : width));
+  }, []);
+  const heroHeight = heroWidth > 0 ? heroWidth / HERO_IMAGE_ASPECT_RATIO : 0;
 
   return (
     <View
       testID="goal-hero"
       style={styles.hero}
       accessibilityLabel={accessibleSummary}
+      onLayout={handleHeroLayout}
     >
       {/*
         C 素材本身已經是完整場景（深綠、遠近山坡、樹屋、起點小芽、連續道路、
         暖黃燈光）——是可以直接用的 asset，不是參考圖，前端不再自己畫山坡
         或樹屋。UI 只疊：badge、文字、跟下面那顆 marker。
 
-        TEMP DEBUG：紅框版手動疊 Image 顯示「onLoad 成功、layout 尺寸正常，
-        但像素沒畫出來」——改用 ImageBackground 測試同一組 source 是否
-        繞開這個問題（它內部會把外層算出來的 width/height 明確再套一次到
-        內層 Image，手動疊法沒有這一步）。
+        普通 in-flow <Image>，不是 absoluteFill／ImageBackground——量出容器
+        寬度後才 render，寬高都是字面數字。
       */}
-      <ImageBackground
-        source={require('../../../assets/images/child/journey-hero-scene.png')}
-        style={[StyleSheet.absoluteFill, DEBUG_BORDER]}
-        resizeMode="cover"
-        accessibilityIgnoresInvertColors
-        onLoad={() => setHeroImgStatus('loaded')}
-        onError={(e) => {
-          setHeroImgStatus('error');
-          console.warn('[debug] hero image error', e.nativeEvent.error);
-        }}
-      >
-        <Text style={DEBUG_LABEL}>hero:{heroImgStatus}</Text>
+      {heroWidth > 0 ? (
+        <Image
+          source={require('../../../assets/images/child/journey-hero-scene.png')}
+          style={{ width: heroWidth, height: heroHeight }}
+          resizeMode="cover"
+          accessibilityIgnoresInvertColors
+          accessibilityElementsHidden
+        />
+      ) : null}
 
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
         <View
           testID="goal-hero-marker"
           style={[styles.heroMarkerGlow, markerPosition]}
@@ -324,28 +306,28 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
         />
         <View style={[styles.heroMarker, markerPosition]} accessibilityElementsHidden />
 
-      <View style={styles.heroCopy}>
-        <View style={styles.categoryBadge}>
-          <DetailIcon name="sprout" size={13} color={Colors.gold100} />
-          <Text style={styles.categoryText} numberOfLines={1}>
-            {presentation.categoryLabel}
+        <View style={styles.heroCopy}>
+          <View style={styles.categoryBadge}>
+            <DetailIcon name="sprout" size={13} color={Colors.gold100} />
+            <Text style={styles.categoryText} numberOfLines={1}>
+              {presentation.categoryLabel}
+            </Text>
+          </View>
+          <Text style={styles.heroPosition} numberOfLines={1}>
+            {presentation.heroPositionLabel}
           </Text>
+          {presentation.heroPositionNote ? (
+            <Text style={styles.heroNote} numberOfLines={2}>
+              {presentation.heroPositionNote}
+            </Text>
+          ) : null}
+          {presentation.heroTotalLabel ? (
+            <Text style={styles.heroTotal} numberOfLines={1}>
+              {presentation.heroTotalLabel}
+            </Text>
+          ) : null}
         </View>
-        <Text style={styles.heroPosition} numberOfLines={1}>
-          {presentation.heroPositionLabel}
-        </Text>
-        {presentation.heroPositionNote ? (
-          <Text style={styles.heroNote} numberOfLines={2}>
-            {presentation.heroPositionNote}
-          </Text>
-        ) : null}
-        {presentation.heroTotalLabel ? (
-          <Text style={styles.heroTotal} numberOfLines={1}>
-            {presentation.heroTotalLabel}
-          </Text>
-        ) : null}
       </View>
-      </ImageBackground>
     </View>
   );
 }
@@ -682,8 +664,6 @@ function ProgressCard({ presentation }: { presentation: GoalPresentation }) {
 
   let title: string;
   let body: React.ReactNode;
-  // TEMP DEBUG
-  const [progressImgStatus, setProgressImgStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
 
   if (progression === 'rhythm') {
     title = '這週的節奏';
@@ -767,22 +747,17 @@ function ProgressCard({ presentation }: { presentation: GoalPresentation }) {
     <View>
       <SectionHeading icon="calendar" title={title} />
       {progression === 'rhythm' ? (
-        // D 素材只在 rhythm 用，當卡片右側/底部的淡背景——不承擔進度資訊，
-        // 純粹補 Journey 感（§11、§27）。
-        <View testID="goal-week" style={[styles.card, styles.cardDecorated]}>
-          <ImageBackground
+        // D 素材只在 rhythm 用，卡片右下角的小張裝飾插圖——不承擔進度
+        // 資訊，純粹補 Journey 感（§11、§27）。普通 in-flow、固定數字
+        // 尺寸、低 opacity，不再鋪滿整張卡片當背景。
+        <View testID="goal-week" style={styles.card}>
+          {body}
+          <Image
             source={require('../../../assets/images/child/journey-progress-path.png')}
-            style={[styles.decorationClip, DEBUG_BORDER]}
-            resizeMode="cover"
-            onLoad={() => setProgressImgStatus('loaded')}
-            onError={(e) => {
-              setProgressImgStatus('error');
-              console.warn('[debug] progress image error', e.nativeEvent.error);
-            }}
-          >
-            <Text style={DEBUG_LABEL}>progress:{progressImgStatus}</Text>
-            <View style={styles.decorationContent}>{body}</View>
-          </ImageBackground>
+            style={styles.progressDecorationImage}
+            resizeMode="contain"
+            accessibilityElementsHidden
+          />
         </View>
       ) : (
         <View testID="goal-week" style={styles.card}>
@@ -820,8 +795,6 @@ function DayStatusGlyph({ state }: { state: GoalDayStatus['state'] }) {
 // ── Next Stop（§14：只有真實 checkpoint 才 render）───────────────────────
 
 function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
-  // TEMP DEBUG — 放在任何 early return 之前，不然違反 hooks 規則。
-  const [nextStopImgStatus, setNextStopImgStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
   // staged 的 milestones 就是 level_definitions 逐階段列出來的——跟 Progress
   // 卡的 StageNodeRow／focusText 讀的是同一份資料。這裡再顯示一次「下一
   // 站：雙手合奏」只是把 Progress 已經講過的話重講一次，不是額外的
@@ -839,38 +812,33 @@ function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
   return (
     <View>
       <SectionHeading icon="milestone" title="這段路上的下一站" />
-      {/* E 素材當卡片淡背景——只負責「前方有值得期待的地方」，不承擔
-          checkpoint 資訊，文字/badge 都疊在上面（§17、§27）。 */}
-      <View testID="goal-next-stop" style={[styles.card, styles.cardDecorated]}>
-        <ImageBackground
-          source={require('../../../assets/images/child/journey-nextstop-path.png')}
-          style={[styles.decorationClip, DEBUG_BORDER]}
-          resizeMode="cover"
-          onLoad={() => setNextStopImgStatus('loaded')}
-          onError={(e) => {
-            setNextStopImgStatus('error');
-            console.warn('[debug] next-stop image error', e.nativeEvent.error);
-          }}
-        >
-          <Text style={DEBUG_LABEL}>nextstop:{nextStopImgStatus}</Text>
-          <View style={[styles.decorationContent, styles.nextStopCard]}>
-            <View style={styles.nextStopIcon}>
-              <DetailIcon name="milestone" color={Colors.bgSurface} />
-            </View>
-            <View style={styles.nextStopCopy}>
-              <View style={styles.nextStopCaptionPill}>
-                <Text style={styles.nextStopCaption}>接下來的一站</Text>
-              </View>
-              <Text style={styles.nextStopTitle}>{next.title}</Text>
-              <Text style={styles.nextStopNote}>到這裡時，可以再一起看看。</Text>
-            </View>
-            {next.coin !== null ? (
-              <View style={styles.rewardBadge}>
-                <Text style={styles.rewardBadgeText}>+{next.coin}</Text>
-              </View>
-            ) : null}
+      {/* E 素材是卡片右下角的小張裝飾插圖——只負責「前方有值得期待的
+          地方」，不承擔 checkpoint 資訊。普通 in-flow、固定數字尺寸、
+          低 opacity，不再鋪滿整張卡片當背景（§17、§27）。 */}
+      <View testID="goal-next-stop" style={styles.card}>
+        <View style={styles.nextStopCard}>
+          <View style={styles.nextStopIcon}>
+            <DetailIcon name="milestone" color={Colors.bgSurface} />
           </View>
-        </ImageBackground>
+          <View style={styles.nextStopCopy}>
+            <View style={styles.nextStopCaptionPill}>
+              <Text style={styles.nextStopCaption}>接下來的一站</Text>
+            </View>
+            <Text style={styles.nextStopTitle}>{next.title}</Text>
+            <Text style={styles.nextStopNote}>到這裡時，可以再一起看看。</Text>
+          </View>
+          {next.coin !== null ? (
+            <View style={styles.rewardBadge}>
+              <Text style={styles.rewardBadgeText}>+{next.coin}</Text>
+            </View>
+          ) : null}
+        </View>
+        <Image
+          source={require('../../../assets/images/child/journey-nextstop-path.png')}
+          style={styles.nextStopDecorationImage}
+          resizeMode="contain"
+          accessibilityElementsHidden
+        />
       </View>
     </View>
   );
@@ -1047,31 +1015,6 @@ export default function LongTermGoalDetailView({
         pendingTimeAdjustmentNotice={pendingTimeAdjustmentNotice}
       />
       <MoreCard onOpenMore={onOpenMore} />
-
-      {/* TEMP DEBUG — render isolation：C/D/E 各用同一個 require source，
-          改成普通 in-flow、固定尺寸、resizeMode="contain"，完全不
-          absolute、不動 opacity、不套 clipping，跟上面的背景版本對照。 */}
-      <View style={DEBUG_ISOLATION_BLOCK}>
-        <Text style={DEBUG_ISOLATION_TITLE}>DEBUG: fixed-size in-flow Image</Text>
-        <Text style={DEBUG_ISOLATION_CAPTION}>hero-scene (C)</Text>
-        <Image
-          source={require('../../../assets/images/child/journey-hero-scene.png')}
-          style={DEBUG_ISOLATION_IMAGE}
-          resizeMode="contain"
-        />
-        <Text style={DEBUG_ISOLATION_CAPTION}>progress-path (D)</Text>
-        <Image
-          source={require('../../../assets/images/child/journey-progress-path.png')}
-          style={DEBUG_ISOLATION_IMAGE}
-          resizeMode="contain"
-        />
-        <Text style={DEBUG_ISOLATION_CAPTION}>nextstop-path (E)</Text>
-        <Image
-          source={require('../../../assets/images/child/journey-nextstop-path.png')}
-          style={DEBUG_ISOLATION_IMAGE}
-          resizeMode="contain"
-        />
-      </View>
     </ScrollView>
   );
 }
@@ -1198,16 +1141,22 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 1,
   },
-  // 帶裝飾圖（D／E）的卡片：padding 挪到 decorationContent，讓圖能貼齊卡片
-  // 邊緣；overflow:hidden 放在內層 decorationClip，不放在 card 本身，
-  // 否則會連 shadow 一起被裁掉。
-  cardDecorated: { padding: 0 },
-  decorationClip: { borderRadius: 18, overflow: 'hidden' },
-  decorationImage: {
-    ...StyleSheet.absoluteFillObject,
-    opacity: 0.28,
+  // D／E 裝飾插圖：卡片右下角一張小圖，字面數字尺寸、低 opacity，
+  // 純粹補 Journey 感，不是背景、不承擔任何進度/checkpoint 資訊。
+  progressDecorationImage: {
+    alignSelf: 'flex-end',
+    marginTop: 10,
+    width: 140,
+    height: 140 / PROGRESS_DECORATION_ASPECT_RATIO,
+    opacity: 0.32,
   },
-  decorationContent: { padding: 16 },
+  nextStopDecorationImage: {
+    alignSelf: 'flex-end',
+    marginTop: 8,
+    width: 130,
+    height: 130 / NEXTSTOP_DECORATION_ASPECT_RATIO,
+    opacity: 0.3,
+  },
 
   // Today
   todayAnatomy: {
