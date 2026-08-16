@@ -227,21 +227,13 @@ function SectionHeading({ icon, title }: { icon: IconName; title: string }) {
 // 專案的環境下 onLoad 會回報成功、外層 layout 尺寸也正常，但實際像素
 // 完全沒有畫出來；同一個 source 換成固定數字 width/height 的 in-flow
 // Image 就會正常顯示。差別就是「有沒有字面數字的 width/height」，所以
-// Hero、Progress 裝飾圖、Next Stop 裝飾圖都改成這個模式。
+// Hero 是這個頁面唯一的插畫焦點。
 const HERO_IMAGE_ASPECT_RATIO = 1774 / 887;
-// D／E 是卡片裡的裝飾插圖，尺寸本來就是字面數字（不用等 onLayout）。
 //
-// 兩張都已經用 Pillow 裁掉沒用的留白／不適合縮小的部分，裁完的檔案
-// 直接存回原本的路徑（尺寸跟原始素材不一樣了）：
-// - D（journey-progress-path.png）：原圖上方 274px 幾乎全空，裁掉後只留
-//   小徑/山丘那段，變成 2159×450 的橫向長條，適合當節奏卡下方的
-//   decorative strip。
-// - E（journey-nextstop-path.png）：原始素材是貫穿整張圖的長對角線路徑，
-//   縮成小圖只會看到一小段線條、認不出是路，不適合右側小插圖。換成
-//   使用者提供的 E2 素材（一小段路＋發光小芽，本來就是為右側小插圖
-//   設計的構圖），裁掉透明留白後存回同一個檔名，變成 1326×947。
-const PROGRESS_DECORATION_ASPECT_RATIO = 2159 / 450;
-const NEXTSTOP_DECORATION_ASPECT_RATIO = 1326 / 947;
+// Progress／Next Stop 是資訊功能卡，不是插畫卡——D／E 兩張水彩 raster
+// 圖試過裝飾這兩張卡（右下角小圖、橫向 strip 都試過），實機看起來跟
+// 卡片本身的資訊調性衝突，予以移除。這兩張卡現在純粹用真實 node／
+// rail／icon／文字表達，不放任何 raster 插圖。
 
 const HERO_WAYPOINTS: { x: number; y: number }[] = [
   { x: 0.06, y: 0.90 },
@@ -628,7 +620,11 @@ function RhythmLeafRow({ done, target }: { done: number; target: number }) {
         <React.Fragment key={index}>
           {index > 0 ? (
             <View
-              style={[styles.leafConnector, nodes[index - 1] && filled && styles.leafConnectorFilled]}
+              style={[
+                styles.leafConnector,
+                compact && styles.leafConnectorCompact,
+                nodes[index - 1] && filled && styles.leafConnectorFilled,
+              ]}
             />
           ) : null}
           <View style={[nodeStyle, filled && styles.leafNodeFilled]}>
@@ -755,24 +751,11 @@ function ProgressCard({ presentation }: { presentation: GoalPresentation }) {
   return (
     <View>
       <SectionHeading icon="calendar" title={title} />
-      {progression === 'rhythm' ? (
-        // D 素材只在 rhythm 用，是節奏節點下方的一條橫向裝飾長條——不
-        // 承擔進度資訊，純粹補 Journey 感（§11、§27）。普通 in-flow、
-        // 固定數字尺寸、低 opacity，不再鋪滿整張卡片當背景。
-        <View testID="goal-week" style={styles.card}>
-          {body}
-          <Image
-            source={require('../../../assets/images/child/journey-progress-path.png')}
-            style={styles.progressDecorationImage}
-            resizeMode="contain"
-            accessibilityElementsHidden
-          />
-        </View>
-      ) : (
-        <View testID="goal-week" style={styles.card}>
-          {body}
-        </View>
-      )}
+      {/* Progress 是資訊功能卡，不放插圖——進度完全由真實 node／rail／
+          文字表達（§11、§13）。 */}
+      <View testID="goal-week" style={styles.card}>
+        {body}
+      </View>
     </View>
   );
 }
@@ -821,10 +804,9 @@ function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
   return (
     <View>
       <SectionHeading icon="milestone" title="這段路上的下一站" />
-      {/* E 素材是卡片右側的小型「目的地」插圖——只負責「前方有值得期待
-          的地方」，不承擔 checkpoint 資訊，checkpoint 標題／說明／獎勵
-          數字都還是 icon 旁邊的文字負責。普通 in-flow、固定數字尺寸、
-          跟 icon／文字並排同一列，不再鋪滿整張卡片當背景（§17、§27）。 */}
+      {/* Next Stop 是資訊功能卡，不放插圖。左側是 GrowBook 通用的
+          waypoint SVG icon（不是任務專屬圖），checkpoint 標題／說明／
+          獎勵數字才是這張卡的主體（§17、§19）。 */}
       <View testID="goal-next-stop" style={styles.card}>
         <View style={styles.nextStopCard}>
           <View style={styles.nextStopIcon}>
@@ -835,21 +817,13 @@ function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
               <Text style={styles.nextStopCaption}>接下來的一站</Text>
             </View>
             <Text style={styles.nextStopTitle}>{next.title}</Text>
-            <View style={styles.nextStopNoteRow}>
-              <Text style={styles.nextStopNote}>到這裡時，可以再一起看看。</Text>
-              {next.coin !== null ? (
-                <View style={styles.rewardBadge}>
-                  <Text style={styles.rewardBadgeText}>+{next.coin}</Text>
-                </View>
-              ) : null}
-            </View>
+            <Text style={styles.nextStopNote}>到這裡時，可以再一起看看。</Text>
           </View>
-          <Image
-            source={require('../../../assets/images/child/journey-nextstop-path.png')}
-            style={styles.nextStopDecorationImage}
-            resizeMode="contain"
-            accessibilityElementsHidden
-          />
+          {next.coin !== null ? (
+            <View style={styles.rewardBadge}>
+              <Text style={styles.rewardBadgeText}>+{next.coin}</Text>
+            </View>
+          ) : null}
         </View>
       </View>
     </View>
@@ -1153,23 +1127,6 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 1,
   },
-  // D：節奏節點下方的橫向裝飾長條。字面數字尺寸、低 opacity，純粹補
-  // Journey 感，不是背景、不承擔任何進度資訊。負 marginTop 讓小徑貼近
-  // 節點列，不要留一塊空白；高度定死在 45–60 這段，卡片不會為它長高
-  // 太多（§11、§27）。
-  progressDecorationImage: {
-    marginTop: -6,
-    width: '100%',
-    height: 60,
-    opacity: 0.2,
-  },
-  // E：Next Stop 卡右側的小型「目的地」插圖（一小段路＋發光小芽），
-  // 跟 icon／文字並排在同一列，不是鋪滿卡片的背景（§17、§27）。
-  nextStopDecorationImage: {
-    width: 128,
-    height: 128 / NEXTSTOP_DECORATION_ASPECT_RATIO,
-  },
-
   // Today
   todayAnatomy: {
     flexDirection: 'row',
@@ -1375,20 +1332,25 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '700',
   },
+  // 不用 width:'100%'——rail 的總寬度由節點數量自然決定，target 少的
+  // 時候 rail 跟著短，不勉強撐滿整張卡（不用裝飾圖填空）。
   leafRow: {
     marginTop: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    width: '100%',
+    alignSelf: 'flex-start',
   },
-  // flex:1 讓 connector 平分剩下的寬度——1-4 次節點大、間距自然拉開；
-  // 5-7 次節點縮小，同一條寬度切成更多段，間距自然跟著縮短（§11）。
+  // 固定寬度而不是 flex:1——1-4 次節點大、connector 也寬；5-7 次節點跟
+  // connector 一起縮小，rail 自然變短，不需要撐滿整張卡（§11）。
   leafConnector: {
-    flex: 1,
+    width: 28,
     height: 5,
     borderRadius: 2.5,
     marginHorizontal: 3,
     backgroundColor: Colors.leaf100,
+  },
+  leafConnectorCompact: {
+    width: 16,
   },
   leafConnectorFilled: {
     backgroundColor: Colors.leaf500,
@@ -1526,16 +1488,8 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontWeight: '900',
   },
-  nextStopNoteRow: {
-    marginTop: 4,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
   nextStopNote: {
-    flex: 1,
-    minWidth: 0,
+    marginTop: 2,
     color: Colors.fgMuted,
     fontSize: 11,
     lineHeight: 16,
