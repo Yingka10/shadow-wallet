@@ -550,7 +550,9 @@ const COMPLETION_STATUS_COPY: Record<LongTermCompletionReason, string | null> = 
   before_plan: '計畫還沒開始',
   after_plan: '一起回顧這段計畫',
   paused: '這個計畫暫停中',
-  unsupported_progression: '這個計畫的進度由家長一起確認',
+  // 中性描述，不重新導回「家長一起確認」那種 parent-confirmed 語意
+  // （LT-FINAL Visual Integration Spec §9）。
+  unsupported_progression: '這個計畫還沒安排可以記錄的進度方式',
   schedule_not_defined: '這個計畫還沒排定可以記錄的日子',
 };
 

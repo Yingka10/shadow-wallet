@@ -432,6 +432,8 @@ function unavailableCopy(presentation: GoalPresentation): string {
       return '這份計畫還沒安排練習時間';
     case 'not_scheduled_today':
       return '今天沒有安排這一步';
+    case 'already_recorded_today':
+      return '今天這一步已經記下來了 ✓';
     case 'claim_limit_reached':
       return '這一段時間的紀錄已經滿了';
     case 'before_plan':
@@ -441,7 +443,9 @@ function unavailableCopy(presentation: GoalPresentation): string {
     case 'paused':
       return '這個計畫暫停中';
     case 'unsupported_progression':
-      return '這個計畫的進度由家長一起確認';
+      // 中性描述，不重新導回「家長一起確認」那種 parent-confirmed 語意
+      // （LT-FINAL Visual Integration Spec §9）。
+      return '這個計畫還沒安排可以記錄的進度方式';
     default:
       return '今天先照自己的節奏前進，需要時再和家人一起確認。';
   }
@@ -621,6 +625,10 @@ function RhythmLeafRow({ done, target }: { done: number; target: number }) {
   // ⚠️ 節點數量＝約定次數，是真資料不是裝飾；多做的次數只用文字表達，
   // 不畫第 target+1 顆葉子（§13 rhythm 超標規則）。
   const nodes = Array.from({ length: target }, (_, index) => index < Math.min(done, target));
+  // 1–4 次：單排、節點稍大、平均拉開。5–7 次：仍單排，節點略縮小、間距跟著
+  // 縮短——不要疊成兩排 habit grid（Visual Integration Spec §11）。
+  const compact = target > 4;
+  const nodeStyle = compact ? styles.leafNodeCompact : styles.leafNode;
   return (
     <View style={styles.leafRow} accessibilityElementsHidden>
       {nodes.map((filled, index) => (
@@ -630,8 +638,8 @@ function RhythmLeafRow({ done, target }: { done: number; target: number }) {
               style={[styles.leafConnector, nodes[index - 1] && filled && styles.leafConnectorFilled]}
             />
           ) : null}
-          <View style={[styles.leafNode, filled && styles.leafNodeFilled]}>
-            {filled ? <DetailIcon name="sprout" size={15} color={Colors.bgSurface} /> : null}
+          <View style={[nodeStyle, filled && styles.leafNodeFilled]}>
+            {filled ? <DetailIcon name="sprout" size={compact ? 12 : 15} color={Colors.bgSurface} /> : null}
           </View>
         </React.Fragment>
       ))}
@@ -788,6 +796,13 @@ function DayStatusGlyph({ state }: { state: GoalDayStatus['state'] }) {
 // ── Next Stop（§14：只有真實 checkpoint 才 render）───────────────────────
 
 function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
+  // staged 的 milestones 就是 level_definitions 逐階段列出來的——跟 Progress
+  // 卡的 StageNodeRow／focusText 讀的是同一份資料。這裡再顯示一次「下一
+  // 站：雙手合奏」只是把 Progress 已經講過的話重講一次，不是額外的
+  // checkpoint（Visual Integration Spec §19）。除非之後有真的存在於
+  // level_definitions 之外的 checkpoint，否則 staged 不顯示這一區。
+  if (presentation.progression === 'staged') return null;
+
   // 「已累積 X」這種摘要節點不是真的 checkpoint（見 buildChallengeMilestones），
   // 且它永遠是 completed —— 用 status !== 'completed' 天然把它濾掉，
   // 不需要另外對 id 白名單。
@@ -1323,11 +1338,15 @@ const styles = StyleSheet.create({
     marginTop: 12,
     flexDirection: 'row',
     alignItems: 'center',
+    width: '100%',
   },
+  // flex:1 讓 connector 平分剩下的寬度——1-4 次節點大、間距自然拉開；
+  // 5-7 次節點縮小，同一條寬度切成更多段，間距自然跟著縮短（§11）。
   leafConnector: {
-    width: 22,
+    flex: 1,
     height: 3,
     borderRadius: 1.5,
+    marginHorizontal: 3,
     backgroundColor: Colors.leaf200,
   },
   leafConnectorFilled: {
@@ -1337,6 +1356,16 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
+    borderWidth: 1.5,
+    borderColor: Colors.leaf200,
+    backgroundColor: Colors.bgSurface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  leafNodeCompact: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     borderWidth: 1.5,
     borderColor: Colors.leaf200,
     backgroundColor: Colors.bgSurface,

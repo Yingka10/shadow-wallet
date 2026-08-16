@@ -292,13 +292,13 @@ describe('Today（§6-§9）', () => {
 describe('§10 availability 誠實狀態（不顯示會失敗的按鈕）', () => {
   it.each([
     ['schedule_not_defined', '這份計畫還沒安排練習時間'],
-    ['already_recorded_today', '今天先照自己的節奏前進，需要時再和家人一起確認。'],
+    ['already_recorded_today', '今天這一步已經記下來了 ✓'],
     ['not_scheduled_today', '今天沒有安排這一步'],
     ['claim_limit_reached', '這一段時間的紀錄已經滿了'],
     ['before_plan', '計畫還沒開始'],
     ['after_plan', '一起回顧這段計畫'],
     ['paused', '這個計畫暫停中'],
-    ['unsupported_progression', '這個計畫的進度由家長一起確認'],
+    ['unsupported_progression', '這個計畫還沒安排可以記錄的進度方式'],
   ] as const)('%s → %s，不顯示可以按的 CTA', (reason, copy) => {
     renderView(makePresentation({ canCompleteToday: false, completionReason: reason }));
     expect(screen.queryByLabelText('記下今天的完成')).toBeNull();
