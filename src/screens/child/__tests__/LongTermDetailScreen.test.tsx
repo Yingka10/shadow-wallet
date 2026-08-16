@@ -57,6 +57,7 @@ jest.mock('react-native-safe-area-context', () => ({
 jest.mock('../../../lib/taskActions', () => ({
   completeTask: (...args: unknown[]) => mockCompleteTask(...args),
   recordCompletionContext: (...args: unknown[]) => mockRecordCompletionContext(...args),
+  AlreadyCompletedError: jest.requireActual('../../../lib/taskActions').AlreadyCompletedError,
 }));
 
 const mockBaseGoal = {
@@ -272,6 +273,7 @@ jest.mock('../../../lib/supabase', () => ({
   },
 }));
 
+import { AlreadyCompletedError } from '../../../lib/taskActions';
 import LongTermDetailScreen from '../LongTermDetailScreen';
 
 function deferred<T>() {
@@ -357,7 +359,7 @@ describe('LongTermDetailScreen', () => {
 
     expect(await screen.findByText('自主閱讀計畫')).toBeTruthy();
     expect(screen.getByText('本週 3 / 5')).toBeTruthy();
-    expect(screen.queryByText('今天已完成 15 分鐘')).toBeNull();
+    expect(screen.queryByText('今天這一步記下來了')).toBeNull();
     expect(
       mockSupabaseEqCalls.filter(({ table, column, value }) =>
         table === 'task_completions'
@@ -487,7 +489,7 @@ describe('LongTermDetailScreen', () => {
     render(<LongTermDetailScreen />);
 
     expect(await screen.findByText('本週 3 / 5')).toBeTruthy();
-    expect(screen.queryByText('今天已完成 15 分鐘')).toBeNull();
+    expect(screen.queryByText('今天這一步記下來了')).toBeNull();
     expect(mockSupabaseEqCalls).toContainEqual({
       table: 'task_completions',
       column: 'status',
@@ -582,8 +584,54 @@ describe('LongTermDetailScreen', () => {
 
     fireEvent.press(await screen.findByLabelText('記下今天的完成'));
 
-    expect(await screen.findByText('今天已完成 15 分鐘')).toBeTruthy();
+    expect(await screen.findByText('今天這一步記下來了')).toBeTruthy();
     expect(screen.queryByLabelText('記下今天的完成')).toBeNull();
+  });
+
+  it('shows the confirmed settlement line only for a session-fresh completion', async () => {
+    mockCompleteTask.mockResolvedValueOnce({
+      completionId: 'completion-thu',
+      milestone: null,
+      settlement: { basis: 'per_completion', coinAmount: 8 },
+    });
+    render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('記下今天的完成'));
+
+    expect(await screen.findByText('+8 成長幣已記入帳本')).toBeTruthy();
+  });
+
+  it('does not show a settlement line when completing without a confirmed settlement', async () => {
+    render(<LongTermDetailScreen />);
+
+    fireEvent.press(await screen.findByLabelText('記下今天的完成'));
+
+    expect(await screen.findByText('今天這一步記下來了')).toBeTruthy();
+    expect(screen.queryByText(/成長幣已記入帳本/)).toBeNull();
+  });
+
+  it('refreshes to the existing completed state instead of alerting on a duplicate-today completion', async () => {
+    mockCompleteTask.mockRejectedValueOnce(new AlreadyCompletedError());
+    render(<LongTermDetailScreen />);
+
+    const completeButton = await screen.findByLabelText('記下今天的完成');
+    // 模擬 race：畫面載入之後、按下去之前，伺服器其實已經記過這一筆了——
+    // completeTask 會回 already_completed，重新整理應該要抓到這筆。
+    mockReadingCompletions = [
+      ...baseReadingCompletions,
+      {
+        id: 'completion-today',
+        completed_at: '2026-07-30T11:00:00.000Z',
+        planned_time_window: 'after_dinner',
+        start_mode: 'self_started',
+        status: 'completed',
+      },
+    ];
+    fireEvent.press(completeButton);
+
+    expect(await screen.findByText('今天這一步記下來了')).toBeTruthy();
+    expect(screen.queryByText('剛剛沒有記成功，可以再試一次。')).toBeNull();
+    expect(Alert.alert).not.toHaveBeenCalledWith('記錄失敗', expect.anything());
   });
 
   it('keeps the completion but not an unsaved time when context recording fails', async () => {
@@ -592,15 +640,15 @@ describe('LongTermDetailScreen', () => {
 
     fireEvent.press(await screen.findByLabelText('記下今天的完成'));
 
-    expect(await screen.findByText('今天已完成 15 分鐘')).toBeTruthy();
+    expect(await screen.findByText('今天這一步記下來了')).toBeTruthy();
     await waitFor(() => {
       expect(Alert.alert).toHaveBeenCalledWith('閱讀時段尚未記下', 'network');
     });
-    expect(screen.queryByText('晚餐後記錄')).toBeNull();
+    expect(screen.queryByText('15 分鐘 · 晚餐後')).toBeNull();
 
     fireEvent.press(screen.getByLabelText('查看紀錄'));
     expect(screen.getByText('尚未記錄時段')).toBeTruthy();
-    expect(screen.queryByText('晚餐後記錄')).toBeNull();
+    expect(screen.queryByText('15 分鐘 · 晚餐後')).toBeNull();
   });
 
   it('shows the chosen time only after context recording succeeds', async () => {
@@ -610,15 +658,15 @@ describe('LongTermDetailScreen', () => {
 
     fireEvent.press(await screen.findByLabelText('記下今天的完成'));
 
-    expect(await screen.findByText('今天已完成 15 分鐘')).toBeTruthy();
-    expect(screen.queryByText('晚餐後記錄')).toBeNull();
+    expect(await screen.findByText('今天這一步記下來了')).toBeTruthy();
+    expect(screen.queryByText('15 分鐘 · 晚餐後')).toBeNull();
 
     await act(async () => {
       contextRequest.resolve();
       await contextRequest.promise;
     });
 
-    expect(await screen.findByText('晚餐後記錄')).toBeTruthy();
+    expect(await screen.findByText('15 分鐘 · 晚餐後')).toBeTruthy();
     fireEvent.press(screen.getByLabelText('查看紀錄'));
     expect(screen.getByText('完成時段')).toBeTruthy();
     expect(screen.getAllByText('晚餐後').length).toBeGreaterThan(0);
@@ -633,7 +681,7 @@ describe('LongTermDetailScreen', () => {
     render(<LongTermDetailScreen />);
 
     fireEvent.press(await screen.findByLabelText('記下今天的完成'));
-    expect(await screen.findByText('今天已完成 15 分鐘')).toBeTruthy();
+    expect(await screen.findByText('今天這一步記下來了')).toBeTruthy();
     await waitFor(() => {
       expect(mockRecordCompletionContext).toHaveBeenCalledTimes(1);
     });
@@ -671,9 +719,9 @@ describe('LongTermDetailScreen', () => {
       await correctionRequest.promise;
     });
 
-    expect(await screen.findByText('睡前記錄')).toBeTruthy();
+    expect(await screen.findByText('15 分鐘 · 睡前')).toBeTruthy();
     expect(screen.getAllByText('睡前').length).toBeGreaterThan(0);
-    expect(screen.queryByText('晚餐後記錄')).toBeNull();
+    expect(screen.queryByText('15 分鐘 · 晚餐後')).toBeNull();
   });
 
   it('preserves context write order across unmount and remount', async () => {
@@ -735,9 +783,9 @@ describe('LongTermDetailScreen', () => {
       await correctionRequest.promise;
     });
 
-    expect(await screen.findByText('睡前記錄')).toBeTruthy();
+    expect(await screen.findByText('15 分鐘 · 睡前')).toBeTruthy();
     expect(screen.getAllByText('睡前').length).toBeGreaterThan(0);
-    expect(screen.queryByText('晚餐後記錄')).toBeNull();
+    expect(screen.queryByText('15 分鐘 · 晚餐後')).toBeNull();
   });
 
   it('keeps a returned reading checkpoint out of the child progress UI', async () => {
@@ -757,7 +805,7 @@ describe('LongTermDetailScreen', () => {
     expect(screen.queryByText(/第 4 天/)).toBeNull();
     fireEvent.press(screen.getByLabelText('記下今天的完成'));
 
-    expect(await screen.findByText('今天已完成 15 分鐘')).toBeTruthy();
+    expect(await screen.findByText('今天這一步記下來了')).toBeTruthy();
     // RPC 回了一個 checkpoint，但畫面上的里程碑仍然只來自 goal 的資料 ——
     // 不因為一次完成的回應就宣稱達成。
     expect(screen.getByText('第 5 次的計畫節點')).toBeTruthy();
@@ -782,7 +830,7 @@ describe('LongTermDetailScreen', () => {
     expect(screen.queryByText(/第 4 天/)).toBeNull();
     fireEvent.press(screen.getByLabelText('記下今天的完成'));
 
-    await screen.findByText('今天已完成 15 分鐘');
+    await screen.findByText('今天這一步記下來了');
     // checkpoint 是 fixture 上真的有的（{'5': 10}），所以它在。
     // 這裡要驗的是「RPC 沒回 milestone 時，畫面不會自己宣稱達成」。
     expect(screen.getByText('第 5 次的計畫節點')).toBeTruthy();
@@ -806,7 +854,7 @@ describe('LongTermDetailScreen', () => {
     expect(screen.getByText('+10')).toBeTruthy();
     fireEvent.press(screen.getByLabelText('記下今天的完成'));
 
-    await screen.findByText('今天已完成 15 分鐘');
+    await screen.findByText('今天這一步記下來了');
     expect(screen.getByText('第 5 次的計畫節點')).toBeTruthy();
     expect(screen.getByText('+10')).toBeTruthy();
     expect(screen.queryByText(/已記下/)).toBeNull();
@@ -915,7 +963,7 @@ describe('LongTermDetailScreen', () => {
       await Promise.resolve();
     });
 
-    expect(screen.queryByText('今天已完成 15 分鐘')).toBeNull();
+    expect(screen.queryByText('今天這一步記下來了')).toBeNull();
     expect(mockRecordCompletionContext).not.toHaveBeenCalled();
     expect(Alert.alert).not.toHaveBeenCalled();
   });

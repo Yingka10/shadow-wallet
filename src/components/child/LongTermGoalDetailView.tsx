@@ -25,6 +25,7 @@ import type { LayoutChangeEvent } from 'react-native';
 import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 import { Colors } from '../../constants/colors';
 import { webMouseDraggableScroll } from '../../constants/webStyles';
+import type { SettlementResult } from '../../lib/taskActions';
 import type { PreferredTimeWindow } from '../../types/database';
 import type {
   GoalDayStatus,
@@ -36,6 +37,12 @@ type Props = {
   presentation: GoalPresentation;
   isCompletedToday: boolean;
   checking: boolean;
+  /**
+   * 今天這一次完成剛才是不是真的形成了一次 reward event。只有這個 session
+   * 裡剛完成才有值——不是缺陷，見 LongTermDetailScreen 裡 todaySettlement
+   * 的註解（LT-FINAL-3 §5）。
+   */
+  todaySettlement?: SettlementResult | null;
   onComplete: () => void | boolean | Promise<void | boolean>;
   onSelectTimeWindow: (window: PreferredTimeWindow) => void;
   onOpenRecord?: (completionId?: string) => void;
@@ -340,22 +347,34 @@ type TodayStepCardProps = Pick<
   | 'presentation'
   | 'isCompletedToday'
   | 'checking'
+  | 'todaySettlement'
   | 'onComplete'
   | 'onSelectTimeWindow'
   | 'onOpenRecord'
 >;
 
+/**
+ * 完成後的收斂狀態（LT-FINAL-3 §5、§6）：一行標題用「記下來了」，不宣稱
+ * 系統驗證孩子真的完成；分鐘數／時段合併成一行 meta；成長幣那行只在
+ * 這次真的形成 reward event（todaySettlement 有值）才出現。沒有 confetti、
+ * 沒有大卡片、沒有「領取」CTA。
+ */
 function CompletedTodayState({
   presentation,
   completion,
+  settlement,
   onOpenRecord,
 }: {
   presentation: GoalPresentation;
   completion?: GoalRecentRecord;
+  settlement?: SettlementResult | null;
   onOpenRecord?: Props['onOpenRecord'];
 }) {
   const minutes = presentation.sessionMinutes;
-  const completedLabel = minutes ? `今天已完成 ${minutes} 分鐘` : '今天已完成';
+  const metaParts = [
+    minutes ? `${minutes} 分鐘` : null,
+    completion?.timeWindowLabel ?? null,
+  ].filter((part): part is string => Boolean(part));
   const openRecord = () => onOpenRecord?.(completion?.id);
 
   return (
@@ -365,9 +384,14 @@ function CompletedTodayState({
           <DetailIcon name="check" size={18} color={Colors.bgSurface} />
         </View>
         <View style={styles.completedCopy}>
-          <Text style={styles.completedTitle}>{completedLabel}</Text>
-          {completion?.timeWindowLabel ? (
-            <Text style={styles.completedMeta}>{completion.timeWindowLabel}記錄</Text>
+          <Text style={styles.completedTitle}>今天這一步記下來了</Text>
+          {metaParts.length > 0 ? (
+            <Text style={styles.completedMeta}>{metaParts.join(' · ')}</Text>
+          ) : null}
+          {settlement ? (
+            <Text style={styles.completedSettlement}>
+              +{settlement.coinAmount} 成長幣已記入帳本
+            </Text>
           ) : null}
         </View>
       </View>
@@ -427,6 +451,7 @@ function TodayStepCard({
   presentation,
   isCompletedToday,
   checking,
+  todaySettlement,
   onComplete,
   onSelectTimeWindow,
   onOpenRecord,
@@ -450,7 +475,7 @@ function TodayStepCard({
     try {
       await onComplete();
     } catch {
-      setCompletionError('剛才沒有記錄成功，請再試一次。');
+      setCompletionError('剛剛沒有記成功，可以再試一次。');
     } finally {
       completionPendingRef.current = false;
       setCompleting(false);
@@ -526,6 +551,7 @@ function TodayStepCard({
               <CompletedTodayState
                 presentation={presentation}
                 completion={todayCompletion}
+                settlement={todaySettlement}
                 onOpenRecord={onOpenRecord}
               />
             ) : presentation.canCompleteToday ? (
@@ -539,7 +565,10 @@ function TodayStepCard({
                 activeOpacity={0.78}
               >
                 {busy ? (
-                  <ActivityIndicator testID="completion-loading" size="small" color={Colors.bgSurface} />
+                  <>
+                    <ActivityIndicator testID="completion-loading" size="small" color={Colors.bgSurface} />
+                    <Text style={styles.completeButtonText}>正在記下…</Text>
+                  </>
                 ) : (
                   <>
                     <DetailIcon name="check" size={19} color={Colors.bgSurface} />
@@ -810,7 +839,7 @@ function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
       <View testID="goal-next-stop" style={styles.card}>
         <View style={styles.nextStopCard}>
           <View style={styles.nextStopIcon}>
-            <DetailIcon name="milestone" color={Colors.bgSurface} />
+            <DetailIcon name="milestone" size={18} color={Colors.bgSurface} />
           </View>
           <View style={styles.nextStopCopy}>
             <View style={styles.nextStopCaptionPill}>
@@ -882,13 +911,12 @@ function TogetherReviewCard({
           </React.Fragment>
         ))}
       </View>
-      <View style={styles.reviewMascotColumn}>
-        <Image
-          source={require('../../../assets/images/child/journey-mascot.png')}
-          style={styles.reviewMascotImage}
-          resizeMode="contain"
-          accessibilityElementsHidden
-        />
+      {/* mascot 只屬於 Today——這裡改用 native SVG icon，不是 raster
+          插畫（LT-FINAL-3 §13）。 */}
+      <View style={styles.reviewIconColumn}>
+        <View style={styles.reviewIcon}>
+          <DetailIcon name="conversation" color={Colors.leaf700} />
+        </View>
         {onOpenReview ? (
           <View style={styles.reviewActionPill}>
             <Text style={styles.reviewAction}>開始回顧 →</Text>
@@ -969,6 +997,7 @@ export default function LongTermGoalDetailView({
   presentation,
   isCompletedToday,
   checking,
+  todaySettlement,
   onComplete,
   onSelectTimeWindow,
   onOpenRecord,
@@ -988,6 +1017,7 @@ export default function LongTermGoalDetailView({
         presentation={presentation}
         isCompletedToday={isCompletedToday}
         checking={checking}
+        todaySettlement={todaySettlement}
         onComplete={onComplete}
         onSelectTimeWindow={onSelectTimeWindow}
         onOpenRecord={onOpenRecord}
@@ -1282,6 +1312,13 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     fontWeight: '700',
   },
+  completedSettlement: {
+    marginTop: 3,
+    color: Colors.leaf700,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '800',
+  },
   completedActions: {
     minHeight: 44,
     marginTop: 3,
@@ -1460,10 +1497,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
+  // GrowBook 通用 waypoint icon，40–44px（§12）——比其他卡片的 icon 圓小一圈，
+  // 因為這張卡的主體是 checkpoint 文字，icon 只是視覺錨點。
   nextStopIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: Colors.leaf500,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1495,18 +1534,20 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     fontWeight: '700',
   },
+  // reward badge 是 secondary 資訊——checkpoint 標題/說明才是主體
+  // （§12），縮小一點份量，不跟標題搶視覺重量。
   rewardBadge: {
-    minHeight: 26,
-    borderRadius: 13,
+    minHeight: 22,
+    borderRadius: 11,
     backgroundColor: Colors.gold100,
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
   rewardBadgeText: {
     color: Colors.gold700,
-    fontSize: 12,
-    fontWeight: '900',
+    fontSize: 11,
+    fontWeight: '800',
   },
 
   // Agreed reward note
@@ -1551,14 +1592,18 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     fontWeight: '700',
   },
-  reviewMascotColumn: {
+  reviewIconColumn: {
     width: 84,
     alignItems: 'center',
     gap: 6,
   },
-  reviewMascotImage: {
-    width: 52,
-    height: 52,
+  reviewIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: Colors.leaf100,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   reviewActionPill: {
     minHeight: 30,

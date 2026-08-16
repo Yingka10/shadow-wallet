@@ -255,7 +255,8 @@ describe('Today（§6-§9）', () => {
 
   it('完成後顯示中性文案，不寫階段完成', () => {
     renderView(makePresentation(), { isCompletedToday: true });
-    expect(screen.getByText('今天已完成 15 分鐘')).toBeTruthy();
+    expect(screen.getByText('今天這一步記下來了')).toBeTruthy();
+    expect(screen.getByText('15 分鐘')).toBeTruthy();
     expect(screen.queryByText('記下今天的完成')).toBeNull();
   });
 
@@ -290,7 +291,7 @@ describe('Today（§6-§9）', () => {
     renderView(makePresentation(), { onComplete });
 
     await act(async () => { fireEvent.press(screen.getByLabelText('記下今天的完成')); });
-    expect(screen.getByText('剛才沒有記錄成功，請再試一次。')).toBeTruthy();
+    expect(screen.getByText('剛剛沒有記成功，可以再試一次。')).toBeTruthy();
   });
 });
 
@@ -562,7 +563,8 @@ describe('§24 功能回歸：每週 3 次 · 睡前 · 15 分鐘 · 每次 +8',
 
     const progress = within(screen.getByTestId('goal-week'));
     expect(progress.getByText('本週 3 / 3')).toBeTruthy();
-    expect(screen.getByText('今天已完成 15 分鐘')).toBeTruthy();
+    expect(screen.getByText('今天這一步記下來了')).toBeTruthy();
+    expect(screen.getByText('15 分鐘')).toBeTruthy();
     expect(presentation.planState).toBe('active');
     expect(screen.queryByText('旅程完成')).toBeNull();
   });

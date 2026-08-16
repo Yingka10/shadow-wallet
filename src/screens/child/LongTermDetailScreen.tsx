@@ -36,7 +36,12 @@ import LongTermGoalDetailView from '../../components/child/LongTermGoalDetailVie
 import { Colors } from '../../constants/colors';
 import { webScreen } from '../../constants/webStyles';
 import { supabase } from '../../lib/supabase';
-import { completeTask, recordCompletionContext } from '../../lib/taskActions';
+import {
+  AlreadyCompletedError,
+  completeTask,
+  recordCompletionContext,
+  type SettlementResult,
+} from '../../lib/taskActions';
 import type {
   LongTermGoal,
   PreferredTimeWindow,
@@ -221,6 +226,12 @@ export default function LongTermDetailScreen() {
     讀不到就是 null —— legacy 任務本來就沒有，畫面少一段而不是編一段。
   */
   const [sharedPlanModel, setSharedPlanModel] = useState<LongTermSharedPlan | null>(null);
+  /*
+    今天這一次完成，剛才是不是真的形成了一次 reward event（LT-FINAL-3
+    §5）。只在「這個 session 裡剛完成」才有值——重新整理或換頁後拿不到
+    這筆資料就是 null，畫面不顯示幣值那一行，不是缺陷，是誠實。
+  */
+  const [todaySettlement, setTodaySettlement] = useState<SettlementResult | null>(null);
 
   /*
     孩子的身分來自已載入的 goal，不從 route params 猜。goal 還沒回來之前
@@ -350,6 +361,7 @@ export default function LongTermDetailScreen() {
     setSelectedTimeWindow(null);
     setChecking(false);
     setCorrectingTimeWindow(false);
+    setTodaySettlement(null);
     setLoading(true);
     setError(null);
   }, [goalId, taskId]);
@@ -435,6 +447,7 @@ export default function LongTermDetailScreen() {
       };
 
       setCompletions((current) => [...current, completion]);
+      setTodaySettlement(result.settlement);
       const milestoneDay = result.milestone?.day ?? null;
       if (goal.goal_type === 'habit' && milestoneDay !== null) {
         setGoal((current) => {
@@ -489,6 +502,14 @@ export default function LongTermDetailScreen() {
       return true;
     } catch (caught) {
       if (!isCurrentGeneration()) return false;
+
+      // 今天已經記過了，不是失敗——重新讀最新資料讓畫面自然變成已完成
+      // 狀態，不彈 destructive error（LT-FINAL-3 §8）。
+      if (caught instanceof AlreadyCompletedError) {
+        await load();
+        return true;
+      }
+
       Alert.alert(
         '記錄失敗',
         caught instanceof Error ? caught.message : '請稍後再試。',
@@ -504,6 +525,7 @@ export default function LongTermDetailScreen() {
     goal,
     goalId,
     isCompletedToday,
+    load,
     selectedTimeWindow,
     task,
     taskId,
@@ -626,6 +648,7 @@ export default function LongTermDetailScreen() {
             presentation={presentation}
             isCompletedToday={isCompletedToday}
             checking={checking}
+            todaySettlement={todaySettlement}
             onComplete={handleComplete}
             onSelectTimeWindow={setSelectedTimeWindow}
             onOpenRecord={handleOpenRecord}

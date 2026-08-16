@@ -300,6 +300,18 @@ export type SettlementResult = {
   coinAmount: number;
 };
 
+/**
+ * 今天已經記過一次了——這不是失敗，是重複點擊／畫面沒同步到最新狀態。
+ * 呼叫端要把它跟真正的網路/RPC 失敗分開處理：不彈 destructive error，
+ * 直接重新讀最新資料讓畫面自然變成已完成狀態（LT-FINAL-3 §8）。
+ */
+export class AlreadyCompletedError extends Error {
+  constructor(message = '今天已經完成過這個任務了') {
+    super(message);
+    this.name = 'AlreadyCompletedError';
+  }
+}
+
 export type CompletionResult = {
   completionId: string;
   /**
@@ -373,7 +385,7 @@ export async function completeTask(
   };
 
   if (result.error === 'already_completed') {
-    throw new Error('今天已經完成過這個任務了');
+    throw new AlreadyCompletedError();
   }
 
   return {

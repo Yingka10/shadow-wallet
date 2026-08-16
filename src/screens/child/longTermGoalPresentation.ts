@@ -871,6 +871,6 @@ export function buildGoalPresentation(
     reviewTitle: '一起回顧這段成長',
     reviewPrompt: isStaged
       ? '哪一段練習最有感？下一步想怎麼調整？'
-      : '這段時間哪裡最順？下一步想怎麼調整？',
+      : '這段時間哪裡做起來最順？下一步想繼續這樣，還是換個方式？',
   };
 }
