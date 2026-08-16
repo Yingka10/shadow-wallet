@@ -212,7 +212,7 @@ function SectionHeading({ icon, title }: { icon: IconName; title: string }) {
 // ── Journey Hero（§4、§5、§27：C 素材當滿版背景）──────────────────────────
 
 /**
- * marker 在 C 素材（journey-hero-bg.png）那條路上的落點，用相對整張圖的
+ * marker 在 C 素材（journey-hero-scene.png）那條路上的落點，用相對整張圖的
  * 百分比座標估的——C 本身已經畫好連續道路，前端不重畫路徑線，只疊一顆
  * 會依 heroMarkerFraction 移動的 current marker（§4 絕對規則：只能有一顆，
  * 不能疊成可數的 checkpoint 鏈）。
@@ -265,7 +265,7 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
         或樹屋。UI 只疊：badge、文字、跟下面那顆 marker。
       */}
       <Image
-        source={require('../../../assets/images/child/journey-hero-bg.png')}
+        source={require('../../../assets/images/child/journey-hero-scene.png')}
         style={StyleSheet.absoluteFill}
         resizeMode="cover"
         accessibilityIgnoresInvertColors
@@ -724,7 +724,7 @@ function ProgressCard({ presentation }: { presentation: GoalPresentation }) {
         <View testID="goal-week" style={[styles.card, styles.cardDecorated]}>
           <View style={styles.decorationClip}>
             <Image
-              source={require('../../../assets/images/child/journey-progress-bg.png')}
+              source={require('../../../assets/images/child/journey-progress-path.png')}
               style={styles.decorationImage}
               resizeMode="cover"
               accessibilityElementsHidden
@@ -790,7 +790,7 @@ function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
       <View testID="goal-next-stop" style={[styles.card, styles.cardDecorated]}>
         <View style={styles.decorationClip}>
           <Image
-            source={require('../../../assets/images/child/journey-nextstop-bg.png')}
+            source={require('../../../assets/images/child/journey-nextstop-path.png')}
             style={styles.decorationImage}
             resizeMode="cover"
             accessibilityElementsHidden
@@ -916,56 +916,11 @@ function TogetherReviewCard({
   );
 }
 
-// ── 最近紀錄（§17：從 More 點進去的其中一項；緊貼在 More 之前，
-//    保留孩子更正過去某一天紀錄的能力，不是拿掉再假裝路徑還在）─────────────
-
-function RecentRecords({
-  records,
-  onOpenRecord,
-}: {
-  records: GoalRecentRecord[];
-  onOpenRecord?: Props['onOpenRecord'];
-}) {
-  const visibleRecords = records.slice(0, 3);
-  if (visibleRecords.length === 0) return null;
-
-  return (
-    <View>
-      <SectionHeading icon="document" title="最近紀錄" />
-      <View style={styles.recordList}>
-        {visibleRecords.map((record, index) => (
-          <TouchableOpacity
-            key={record.id}
-            style={[
-              styles.recordRow,
-              index < visibleRecords.length - 1 && styles.recordRowDivider,
-            ]}
-            onPress={() => onOpenRecord?.(record.id)}
-            disabled={!onOpenRecord}
-            accessibilityRole={onOpenRecord ? 'button' : undefined}
-            accessibilityLabel={`查看${record.dateLabel}的紀錄`}
-            activeOpacity={0.72}
-          >
-            <View style={styles.recordDateWrap}>
-              <Text style={styles.recordDate}>{record.dateLabel}</Text>
-            </View>
-            <View style={styles.recordCopy}>
-              <Text style={styles.recordDetail}>{record.detail}</Text>
-              {record.timeWindowLabel ? (
-                <Text style={styles.recordTime}>{record.timeWindowLabel}</Text>
-              ) : null}
-            </View>
-            {onOpenRecord ? (
-              <DetailIcon name="chevron" size={18} color={Colors.ink300} />
-            ) : null}
-          </TouchableOpacity>
-        ))}
-      </View>
-    </View>
-  );
-}
-
 // ── More（§17：安靜收斂，不一進頁全部攤開）─────────────────────────────────
+//
+// 最近紀錄不再獨立成一區——跟示意圖一樣直接收進「更多紀錄與計畫」，
+// 孩子更正過去紀錄的入口還在（那個選單本來就會開同一個 record 選單），
+// 只是首頁不再重複列一次清單。
 
 function MoreCard({ onOpenMore }: { onOpenMore?: Props['onOpenMore'] }) {
   const content = (
@@ -1033,7 +988,6 @@ export default function LongTermGoalDetailView({
         onOpenReview={onOpenReview}
         pendingTimeAdjustmentNotice={pendingTimeAdjustmentNotice}
       />
-      <RecentRecords records={presentation.recentRecords} onOpenRecord={onOpenRecord} />
       <MoreCard onOpenMore={onOpenMore} />
     </ScrollView>
   );
@@ -1632,43 +1586,6 @@ const styles = StyleSheet.create({
   },
 
   // More
-  recordList: {
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: Colors.hairline,
-  },
-  recordRow: {
-    minHeight: 58,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 2,
-    paddingVertical: 7,
-  },
-  recordRowDivider: {
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.hairline,
-  },
-  recordDateWrap: { width: 58 },
-  recordDate: {
-    color: Colors.fgSecondary,
-    fontSize: 11,
-    lineHeight: 16,
-    fontWeight: '900',
-  },
-  recordCopy: { flex: 1, minWidth: 0 },
-  recordDetail: {
-    color: Colors.fgPrimary,
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '800',
-  },
-  recordTime: {
-    marginTop: 2,
-    color: Colors.fgMuted,
-    fontSize: 11,
-    lineHeight: 15,
-  },
   detailsRow: {
     minHeight: 60,
     borderRadius: 18,

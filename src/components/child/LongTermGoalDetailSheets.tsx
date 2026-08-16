@@ -16,6 +16,7 @@ import type { PreferredTimeWindow } from '../../types/database';
 import type {
   GoalCompletionRecord,
   GoalPresentation,
+  GoalRecentRecord,
 } from '../../screens/child/longTermGoalPresentation';
 
 export type LongTermSheet =
@@ -68,6 +69,8 @@ type Props = {
   activeSheet: LongTermSheet;
   onClose: () => void;
   onOpenSheet: (sheet: OpenSheet) => void;
+  /** 選一筆最近紀錄去更正——menu 選單裡「最近紀錄」那段用的。 */
+  onOpenRecord?: (completionId?: string) => void;
   presentation: GoalPresentation;
   completion: GoalCompletionRecord | null;
   taskMinutes: number;
@@ -380,12 +383,17 @@ function formatCompletionTime(completedAt: string): string {
 }
 
 function MenuSheet({
+  recentRecords,
   onOpenSheet,
+  onOpenRecord,
   onPause,
 }: {
+  recentRecords: GoalRecentRecord[];
   onOpenSheet: (sheet: OpenSheet) => void;
+  onOpenRecord?: (completionId?: string) => void;
   onPause: () => void;
 }) {
+  const visibleRecords = recentRecords.slice(0, 3);
   return (
     <View>
       <MenuRow
@@ -406,6 +414,32 @@ function MenuSheet({
         icon="pause"
         onPress={onPause}
       />
+      {onOpenRecord && visibleRecords.length > 0 ? (
+        <View style={styles.recordSection}>
+          <Text style={styles.recordSectionTitle}>最近紀錄</Text>
+          {visibleRecords.map((record) => (
+            <TouchableOpacity
+              key={record.id}
+              style={styles.recordRow}
+              onPress={() => onOpenRecord(record.id)}
+              accessibilityRole="button"
+              accessibilityLabel={`查看${record.dateLabel}的紀錄`}
+              activeOpacity={0.72}
+            >
+              <Text style={styles.recordDate}>{record.dateLabel}</Text>
+              <View style={styles.recordCopy}>
+                <Text style={styles.recordDetail}>{record.detail}</Text>
+                {record.timeWindowLabel ? (
+                  <Text style={styles.recordTime}>{record.timeWindowLabel}</Text>
+                ) : null}
+              </View>
+              <Text style={styles.chevron} accessibilityElementsHidden>
+                ›
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -776,6 +810,7 @@ export default function LongTermGoalDetailSheets({
   activeSheet,
   onClose,
   onOpenSheet,
+  onOpenRecord,
   presentation,
   completion,
   taskMinutes,
@@ -834,7 +869,12 @@ export default function LongTermGoalDetailSheets({
   switch (activeSheet) {
     case 'menu':
       content = (
-        <MenuSheet onOpenSheet={onOpenSheet} onPause={handlePause} />
+        <MenuSheet
+          recentRecords={presentation.recentRecords}
+          onOpenSheet={onOpenSheet}
+          onOpenRecord={onOpenRecord}
+          onPause={handlePause}
+        />
       );
       break;
     case 'details':
@@ -1011,6 +1051,44 @@ const styles = StyleSheet.create({
     color: Colors.fgMuted,
     fontSize: 28,
     lineHeight: 30,
+  },
+  recordSection: {
+    marginTop: 18,
+  },
+  recordSectionTitle: {
+    marginBottom: 6,
+    color: Colors.fgMuted,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  recordRow: {
+    minHeight: 56,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.hairline,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+  },
+  recordDate: {
+    width: 58,
+    color: Colors.fgSecondary,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '900',
+  },
+  recordCopy: { flex: 1, minWidth: 0 },
+  recordDetail: {
+    color: Colors.fgPrimary,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '800',
+  },
+  recordTime: {
+    marginTop: 2,
+    color: Colors.fgMuted,
+    fontSize: 11,
+    lineHeight: 15,
   },
   detailList: {
     borderTopWidth: StyleSheet.hairlineWidth,

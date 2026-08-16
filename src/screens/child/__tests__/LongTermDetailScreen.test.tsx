@@ -815,6 +815,8 @@ describe('LongTermDetailScreen', () => {
   it('corrects the selected real completion and updates the record sheet', async () => {
     render(<LongTermDetailScreen />);
 
+    // 最近紀錄現在收在「更多計畫選項」選單裡，不再是主頁面上獨立一塊。
+    fireEvent.press(await screen.findByLabelText('更多計畫選項'));
     fireEvent.press(await screen.findByLabelText('查看2026/07/29的紀錄'));
     await act(async () => {
       fireEvent.press(screen.getByText('改成睡前'));
@@ -835,6 +837,7 @@ describe('LongTermDetailScreen', () => {
     mockRecordCompletionContext.mockRejectedValueOnce(new Error('network'));
     render(<LongTermDetailScreen />);
 
+    fireEvent.press(await screen.findByLabelText('更多計畫選項'));
     fireEvent.press(await screen.findByLabelText('查看2026/07/29的紀錄'));
     await act(async () => {
       fireEvent.press(screen.getByText('改成睡前'));
@@ -922,6 +925,7 @@ describe('LongTermDetailScreen', () => {
     mockRecordCompletionContext.mockReturnValueOnce(correctionRequest.promise);
     const { rerender } = render(<LongTermDetailScreen />);
 
+    fireEvent.press(await screen.findByLabelText('更多計畫選項'));
     fireEvent.press(await screen.findByLabelText('查看2026/07/29的紀錄'));
     fireEvent.press(screen.getByText('改成睡前'));
     mockRouteParams = {
@@ -946,6 +950,7 @@ describe('LongTermDetailScreen', () => {
       await Promise.resolve();
     });
 
+    fireEvent.press(screen.getByLabelText('更多計畫選項'));
     fireEvent.press(screen.getByLabelText('查看2026/07/29的紀錄'));
     expect(screen.getAllByText('晚餐後').length).toBeGreaterThan(0);
     expect(screen.queryByText('睡前')).toBeNull();
@@ -981,6 +986,7 @@ describe('LongTermDetailScreen', () => {
     mockRecordCompletionContext.mockReturnValueOnce(correctionRequest.promise);
     const { unmount } = render(<LongTermDetailScreen />);
 
+    fireEvent.press(await screen.findByLabelText('更多計畫選項'));
     fireEvent.press(await screen.findByLabelText('查看2026/07/29的紀錄'));
     fireEvent.press(screen.getByText('改成睡前'));
     unmount();

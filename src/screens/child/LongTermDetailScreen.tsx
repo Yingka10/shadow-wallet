@@ -642,6 +642,7 @@ export default function LongTermDetailScreen() {
             activeSheet={activeSheet}
             onClose={() => setActiveSheet(null)}
             onOpenSheet={setActiveSheet}
+            onOpenRecord={handleOpenRecord}
             presentation={presentation}
             completion={selectedCompletion}
             taskMinutes={task.base_time_min}
