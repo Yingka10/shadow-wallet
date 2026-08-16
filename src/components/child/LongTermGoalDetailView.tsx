@@ -237,6 +237,22 @@ const DEBUG_LABEL = {
   paddingHorizontal: 4,
   zIndex: 999,
 };
+const DEBUG_ISOLATION_BLOCK = {
+  marginTop: 20,
+  padding: 12,
+  borderWidth: 2,
+  borderColor: 'blue' as const,
+  gap: 4,
+};
+const DEBUG_ISOLATION_TITLE = { fontSize: 12, fontWeight: '900' as const, color: 'blue' as const };
+const DEBUG_ISOLATION_CAPTION = { fontSize: 11, fontWeight: '700' as const, color: 'blue' as const };
+const DEBUG_ISOLATION_IMAGE = {
+  width: 200,
+  height: 100,
+  borderWidth: 1,
+  borderColor: 'blue' as const,
+  backgroundColor: '#eee',
+};
 
 const HERO_WAYPOINTS: { x: number; y: number }[] = [
   { x: 0.06, y: 0.90 },
@@ -1029,6 +1045,31 @@ export default function LongTermGoalDetailView({
         pendingTimeAdjustmentNotice={pendingTimeAdjustmentNotice}
       />
       <MoreCard onOpenMore={onOpenMore} />
+
+      {/* TEMP DEBUG — render isolation：C/D/E 各用同一個 require source，
+          改成普通 in-flow、固定尺寸、resizeMode="contain"，完全不
+          absolute、不動 opacity、不套 clipping，跟上面的背景版本對照。 */}
+      <View style={DEBUG_ISOLATION_BLOCK}>
+        <Text style={DEBUG_ISOLATION_TITLE}>DEBUG: fixed-size in-flow Image</Text>
+        <Text style={DEBUG_ISOLATION_CAPTION}>hero-scene (C)</Text>
+        <Image
+          source={require('../../../assets/images/child/journey-hero-scene.png')}
+          style={DEBUG_ISOLATION_IMAGE}
+          resizeMode="contain"
+        />
+        <Text style={DEBUG_ISOLATION_CAPTION}>progress-path (D)</Text>
+        <Image
+          source={require('../../../assets/images/child/journey-progress-path.png')}
+          style={DEBUG_ISOLATION_IMAGE}
+          resizeMode="contain"
+        />
+        <Text style={DEBUG_ISOLATION_CAPTION}>nextstop-path (E)</Text>
+        <Image
+          source={require('../../../assets/images/child/journey-nextstop-path.png')}
+          style={DEBUG_ISOLATION_IMAGE}
+          resizeMode="contain"
+        />
+      </View>
     </ScrollView>
   );
 }
