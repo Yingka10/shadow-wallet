@@ -199,11 +199,16 @@ describe('固定骨架（§2）', () => {
   });
 });
 
-describe('Journey Hero（§4、§5）', () => {
-  // marker 是 SVG <Circle>，RNTL 對 react-native-svg 子節點抓不到 testID ——
-  // 「只有一顆可數 marker」這件事改用原始碼保證：GoalHero 只畫一個
-  // fill={Colors.gold500} 的 Circle，其餘全是裝飾（光暈、路徑虛線），
-  // 沒有第二顆語意上的節點。
+describe('Journey Hero（§4、§5、§27：C 素材當背景）', () => {
+  it('只有一顆 current marker，不是可數的 checkpoint 鏈', () => {
+    renderView();
+    // marker 對螢幕閱讀器是 accessibilityElementsHidden（Hero 本身的
+    // accessibilityLabel 已經講完摘要），查詢要帶 includeHiddenElements
+    // 才找得到——RNTL v12+ 預設把隱藏元素排除在查詢外。
+    expect(
+      screen.getAllByTestId('goal-hero-marker', { includeHiddenElements: true }),
+    ).toHaveLength(1);
+  });
 
   it('沒有 canonical 證據時第三行不render，不自己編一句話', () => {
     renderView(makePresentation({ heroPositionNote: null }));

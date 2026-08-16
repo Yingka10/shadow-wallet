@@ -209,46 +209,19 @@ function SectionHeading({ icon, title }: { icon: IconName; title: string }) {
   );
 }
 
+// ── Journey Hero（§4、§5、§27：C 素材當滿版背景）──────────────────────────
+
 /**
- * progression-neutral 的小夥伴 —— 不從任務名稱猜圖（§11）。純 SVG，沒有
- * asset 時 layout 仍然成立；只負責「有人在陪我走」，不做表情/對話框。
+ * marker 在 C 素材（journey-hero-bg.png）那條路上的落點，用相對整張圖的
+ * 百分比座標估的——C 本身已經畫好連續道路，前端不重畫路徑線，只疊一顆
+ * 會依 heroMarkerFraction 移動的 current marker（§4 絕對規則：只能有一顆，
+ * 不能疊成可數的 checkpoint 鏈）。
  */
-function GrowSprite({ size = 56 }: { size?: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 56 56" accessibilityElementsHidden>
-      <Circle cx={28} cy={34} r={16} fill={Colors.leaf100} />
-      <Circle cx={28} cy={34} r={16} fill="none" stroke={Colors.leaf300} strokeWidth={1.4} />
-      <Circle cx={22} cy={31} r={2.1} fill={Colors.ink700} />
-      <Circle cx={34} cy={31} r={2.1} fill={Colors.ink700} />
-      <Path
-        d="M23 38c2.2 2 7.8 2 10 0"
-        stroke={Colors.ink700}
-        strokeWidth={1.6}
-        strokeLinecap="round"
-        fill="none"
-      />
-      <Path
-        d="M28 18c-5 0-8 3-8 3s3-1 8-1 8 1 8 1-3-3-8-3Z"
-        fill={Colors.leaf500}
-      />
-      <Path
-        d="M28 19V9"
-        stroke={Colors.leaf600}
-        strokeWidth={2}
-        strokeLinecap="round"
-      />
-    </Svg>
-  );
-}
-
-// ── Journey Hero（§4、§5）───────────────────────────────────────────────
-
-/** 路徑上三段折線的端點，marker 依 fraction 在其間線性內插。 */
 const HERO_WAYPOINTS: { x: number; y: number }[] = [
-  { x: 26, y: 166 },
-  { x: 150, y: 130 },
-  { x: 246, y: 96 },
-  { x: 322, y: 73 },
+  { x: 0.06, y: 0.90 },
+  { x: 0.33, y: 0.74 },
+  { x: 0.62, y: 0.56 },
+  { x: 0.85, y: 0.40 },
 ];
 
 function heroMarkerPosition(fraction: number): { x: number; y: number } {
@@ -264,9 +237,10 @@ function heroMarkerPosition(fraction: number): { x: number; y: number } {
 
 function GoalHero({ presentation }: { presentation: GoalPresentation }) {
   const marker = heroMarkerPosition(presentation.heroMarkerFraction);
-  const pathD = HERO_WAYPOINTS
-    .map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x} ${point.y}`)
-    .join(' ');
+  const markerPosition = {
+    left: `${marker.x * 100}%` as `${number}%`,
+    top: `${marker.y * 100}%` as `${number}%`,
+  };
   const accessibleSummary = [
     presentation.heroPositionLabel,
     presentation.heroTotalLabel,
@@ -279,62 +253,25 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
       style={styles.hero}
       accessibilityLabel={accessibleSummary}
     >
-      <Svg
-        style={StyleSheet.absoluteFill}
-        viewBox="0 0 380 220"
-        preserveAspectRatio="none"
-        accessibilityElementsHidden
-      >
-        {/*
-          底色是深綠，不是夜空的藍灰 —— 之前用 nightHillBackBottom（帶藍霧的
-          遠山色）當滿版底色，短版面裡遠山佔比又最大，整張 Hero 看起來偏藍灰、
-          不夠綠。這裡改用兩段深綠垂直過渡，讓「綠底」在任何高度下都成立。
-        */}
-        <Path d="M0 0H380V220H0z" fill={Colors.grass.nightHillMidBottom} />
-        <Path d="M0 0H380V96H0z" fill={Colors.grass.nightHillFrontBottom} opacity={0.55} />
-        <Path
-          d="M0 138c80-30 145-22 210 6 70 29 121 11 170-14v90H0V138Z"
-          fill={Colors.grass.nightHillFrontBottom}
-        />
-        <Circle cx={40} cy={38} r={19} fill={Colors.gold100} opacity={0.2} />
-        <Path
-          d="M47 20c-10 5-14 15-10 25 4 10 14 15 24 11-8-2-13-10-13-17 0-8 4-14 10-18-4-2-7-2-11-1Z"
-          fill={Colors.gold300}
-        />
-        <Circle cx={130} cy={28} r={1.9} fill={Colors.gold300} />
-        <Circle cx={178} cy={50} r={1.6} fill={Colors.gold300} />
-        <Circle cx={352} cy={30} r={2} fill={Colors.gold300} />
-
-        {/*
-          這段路的小徑——只是「我正在這段旅程裡」的意象，不是可數的進度條。
-          唯一可數的東西是下面那顆 marker，就一顆（§4 絕對規則）。
-        */}
-        <Path
-          d={pathD}
-          stroke={Colors.grass.nightBladeTop}
-          strokeWidth={2.5}
-          strokeLinecap="round"
-          strokeDasharray="1 9"
-          fill="none"
-          opacity={0.85}
-        />
-        <Circle cx={marker.x} cy={marker.y} r={7} fill={Colors.gold300} opacity={0.35} />
-        <Circle
-          cx={marker.x}
-          cy={marker.y}
-          r={4.5}
-          fill={Colors.gold500}
-          stroke={Colors.bgSurface}
-          strokeWidth={1.6}
-        />
-      </Svg>
-
+      {/*
+        C 素材本身已經是完整場景（深綠、遠近山坡、樹屋、起點小芽、連續道路、
+        暖黃燈光）——是可以直接用的 asset，不是參考圖，前端不再自己畫山坡
+        或樹屋。UI 只疊：badge、文字、跟下面那顆 marker。
+      */}
       <Image
-        source={require('../../../assets/images/child/treehouse-night.png')}
-        style={styles.treehouse}
-        resizeMode="contain"
+        source={require('../../../assets/images/child/journey-hero-bg.png')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
         accessibilityIgnoresInvertColors
+        accessibilityElementsHidden
       />
+
+      <View
+        testID="goal-hero-marker"
+        style={[styles.heroMarkerGlow, markerPosition]}
+        accessibilityElementsHidden
+      />
+      <View style={[styles.heroMarker, markerPosition]} accessibilityElementsHidden />
 
       <View style={styles.heroCopy}>
         <View style={styles.categoryBadge}>
@@ -498,8 +435,17 @@ function TodayStepCard({
       </View>
       <View testID="goal-today" style={styles.card}>
         <View style={styles.todayAnatomy}>
-          <View style={styles.actionIcon}>
-            <DetailIcon name="sprout" size={22} color={Colors.leaf700} />
+          {/*
+            B 素材：所有任務共用的統一 growth anchor，不是任務 icon——不依
+            task.name 換圖（§6、§28）。後面墊一個淡暖米色圓底。
+          */}
+          <View style={styles.actionVisual}>
+            <Image
+              source={require('../../../assets/images/child/journey-today-anchor.png')}
+              style={styles.actionVisualImage}
+              resizeMode="contain"
+              accessibilityElementsHidden
+            />
           </View>
           <View style={styles.actionCopy}>
             <Text style={styles.actionTitle}>{presentation.todayAction}</Text>
@@ -610,7 +556,11 @@ function TodayStepCard({
             ) : null}
           </View>
           <View style={styles.mascotSlot} accessibilityElementsHidden>
-            <GrowSprite size={52} />
+            <Image
+              source={require('../../../assets/images/child/journey-mascot.png')}
+              style={styles.mascotImage}
+              resizeMode="contain"
+            />
           </View>
         </View>
       </View>
@@ -762,9 +712,25 @@ function ProgressCard({ presentation }: { presentation: GoalPresentation }) {
   return (
     <View>
       <SectionHeading icon="calendar" title={title} />
-      <View testID="goal-week" style={styles.card}>
-        {body}
-      </View>
+      {progression === 'rhythm' ? (
+        // D 素材只在 rhythm 用，當卡片右側/底部的淡背景——不承擔進度資訊，
+        // 純粹補 Journey 感（§11、§27）。
+        <View testID="goal-week" style={[styles.card, styles.cardDecorated]}>
+          <View style={styles.decorationClip}>
+            <Image
+              source={require('../../../assets/images/child/journey-progress-bg.png')}
+              style={styles.decorationImage}
+              resizeMode="cover"
+              accessibilityElementsHidden
+            />
+            <View style={styles.decorationContent}>{body}</View>
+          </View>
+        </View>
+      ) : (
+        <View testID="goal-week" style={styles.card}>
+          {body}
+        </View>
+      )}
     </View>
   );
 }
@@ -813,22 +779,34 @@ function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
   return (
     <View>
       <SectionHeading icon="milestone" title="這段路上的下一站" />
-      <View testID="goal-next-stop" style={[styles.card, styles.nextStopCard]}>
-        <View style={styles.nextStopIcon}>
-          <DetailIcon name="milestone" color={Colors.bgSurface} />
-        </View>
-        <View style={styles.nextStopCopy}>
-          <View style={styles.nextStopCaptionPill}>
-            <Text style={styles.nextStopCaption}>接下來的一站</Text>
+      {/* E 素材當卡片淡背景——只負責「前方有值得期待的地方」，不承擔
+          checkpoint 資訊，文字/badge 都疊在上面（§17、§27）。 */}
+      <View testID="goal-next-stop" style={[styles.card, styles.cardDecorated]}>
+        <View style={styles.decorationClip}>
+          <Image
+            source={require('../../../assets/images/child/journey-nextstop-bg.png')}
+            style={styles.decorationImage}
+            resizeMode="cover"
+            accessibilityElementsHidden
+          />
+          <View style={[styles.decorationContent, styles.nextStopCard]}>
+            <View style={styles.nextStopIcon}>
+              <DetailIcon name="milestone" color={Colors.bgSurface} />
+            </View>
+            <View style={styles.nextStopCopy}>
+              <View style={styles.nextStopCaptionPill}>
+                <Text style={styles.nextStopCaption}>接下來的一站</Text>
+              </View>
+              <Text style={styles.nextStopTitle}>{next.title}</Text>
+              <Text style={styles.nextStopNote}>到這裡時，可以再一起看看。</Text>
+            </View>
+            {next.coin !== null ? (
+              <View style={styles.rewardBadge}>
+                <Text style={styles.rewardBadgeText}>+{next.coin}</Text>
+              </View>
+            ) : null}
           </View>
-          <Text style={styles.nextStopTitle}>{next.title}</Text>
-          <Text style={styles.nextStopNote}>到這裡時，可以再一起看看。</Text>
         </View>
-        {next.coin !== null ? (
-          <View style={styles.rewardBadge}>
-            <Text style={styles.rewardBadgeText}>+{next.coin}</Text>
-          </View>
-        ) : null}
       </View>
     </View>
   );
@@ -1040,17 +1018,32 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.grass.nightHillFrontTop,
   },
-  treehouse: {
+  // 定位用百分比座標置中在 marker 那一點上（負 margin 補回半徑）。
+  heroMarkerGlow: {
     position: 'absolute',
-    right: -14,
-    bottom: -14,
-    width: 168,
-    height: 168,
+    width: 26,
+    height: 26,
+    marginLeft: -13,
+    marginTop: -13,
+    borderRadius: 13,
+    backgroundColor: Colors.gold300,
+    opacity: 0.35,
+  },
+  heroMarker: {
+    position: 'absolute',
+    width: 15,
+    height: 15,
+    marginLeft: -7.5,
+    marginTop: -7.5,
+    borderRadius: 7.5,
+    backgroundColor: Colors.gold500,
+    borderWidth: 2,
+    borderColor: Colors.bgSurface,
   },
   heroCopy: {
-    minHeight: 212,
+    minHeight: 214,
     paddingTop: 18,
-    paddingRight: 130,
+    paddingRight: 110,
     paddingBottom: 16,
     paddingLeft: 18,
   },
@@ -1135,6 +1128,16 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 1,
   },
+  // 帶裝飾圖（D／E）的卡片：padding 挪到 decorationContent，讓圖能貼齊卡片
+  // 邊緣；overflow:hidden 放在內層 decorationClip，不放在 card 本身，
+  // 否則會連 shadow 一起被裁掉。
+  cardDecorated: { padding: 0 },
+  decorationClip: { borderRadius: 18, overflow: 'hidden' },
+  decorationImage: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.2,
+  },
+  decorationContent: { padding: 16 },
 
   // Today
   todayAnatomy: {
@@ -1142,21 +1145,28 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 12,
   },
-  actionIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+  // B 素材後面墊的淡暖米色橢圓底（§6）。
+  actionVisual: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: Colors.leaf200,
-    backgroundColor: Colors.leaf100,
+    backgroundColor: Colors.cream200,
+  },
+  actionVisualImage: {
+    width: 46,
+    height: 46,
   },
   actionCopy: { flex: 1, minWidth: 0 },
   mascotSlot: {
     width: 56,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  mascotImage: {
+    width: 54,
+    height: 54,
   },
   actionTitle: {
     color: Colors.fgPrimary,
