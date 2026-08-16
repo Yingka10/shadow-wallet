@@ -15,6 +15,7 @@ import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  ImageBackground,
   ScrollView,
   StyleSheet,
   Text,
@@ -297,27 +298,31 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
         C 素材本身已經是完整場景（深綠、遠近山坡、樹屋、起點小芽、連續道路、
         暖黃燈光）——是可以直接用的 asset，不是參考圖，前端不再自己畫山坡
         或樹屋。UI 只疊：badge、文字、跟下面那顆 marker。
+
+        TEMP DEBUG：紅框版手動疊 Image 顯示「onLoad 成功、layout 尺寸正常，
+        但像素沒畫出來」——改用 ImageBackground 測試同一組 source 是否
+        繞開這個問題（它內部會把外層算出來的 width/height 明確再套一次到
+        內層 Image，手動疊法沒有這一步）。
       */}
-      <Image
+      <ImageBackground
         source={require('../../../assets/images/child/journey-hero-scene.png')}
         style={[StyleSheet.absoluteFill, DEBUG_BORDER]}
         resizeMode="cover"
         accessibilityIgnoresInvertColors
-        accessibilityElementsHidden
         onLoad={() => setHeroImgStatus('loaded')}
         onError={(e) => {
           setHeroImgStatus('error');
           console.warn('[debug] hero image error', e.nativeEvent.error);
         }}
-      />
-      <Text style={DEBUG_LABEL}>hero:{heroImgStatus}</Text>
+      >
+        <Text style={DEBUG_LABEL}>hero:{heroImgStatus}</Text>
 
-      <View
-        testID="goal-hero-marker"
-        style={[styles.heroMarkerGlow, markerPosition]}
-        accessibilityElementsHidden
-      />
-      <View style={[styles.heroMarker, markerPosition]} accessibilityElementsHidden />
+        <View
+          testID="goal-hero-marker"
+          style={[styles.heroMarkerGlow, markerPosition]}
+          accessibilityElementsHidden
+        />
+        <View style={[styles.heroMarker, markerPosition]} accessibilityElementsHidden />
 
       <View style={styles.heroCopy}>
         <View style={styles.categoryBadge}>
@@ -340,6 +345,7 @@ function GoalHero({ presentation }: { presentation: GoalPresentation }) {
           </Text>
         ) : null}
       </View>
+      </ImageBackground>
     </View>
   );
 }
@@ -764,21 +770,19 @@ function ProgressCard({ presentation }: { presentation: GoalPresentation }) {
         // D 素材只在 rhythm 用，當卡片右側/底部的淡背景——不承擔進度資訊，
         // 純粹補 Journey 感（§11、§27）。
         <View testID="goal-week" style={[styles.card, styles.cardDecorated]}>
-          <View style={styles.decorationClip}>
-            <Image
-              source={require('../../../assets/images/child/journey-progress-path.png')}
-              style={[styles.decorationImage, DEBUG_BORDER]}
-              resizeMode="cover"
-              accessibilityElementsHidden
-              onLoad={() => setProgressImgStatus('loaded')}
-              onError={(e) => {
-                setProgressImgStatus('error');
-                console.warn('[debug] progress image error', e.nativeEvent.error);
-              }}
-            />
+          <ImageBackground
+            source={require('../../../assets/images/child/journey-progress-path.png')}
+            style={[styles.decorationClip, DEBUG_BORDER]}
+            resizeMode="cover"
+            onLoad={() => setProgressImgStatus('loaded')}
+            onError={(e) => {
+              setProgressImgStatus('error');
+              console.warn('[debug] progress image error', e.nativeEvent.error);
+            }}
+          >
             <Text style={DEBUG_LABEL}>progress:{progressImgStatus}</Text>
             <View style={styles.decorationContent}>{body}</View>
-          </View>
+          </ImageBackground>
         </View>
       ) : (
         <View testID="goal-week" style={styles.card}>
@@ -838,18 +842,16 @@ function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
       {/* E 素材當卡片淡背景——只負責「前方有值得期待的地方」，不承擔
           checkpoint 資訊，文字/badge 都疊在上面（§17、§27）。 */}
       <View testID="goal-next-stop" style={[styles.card, styles.cardDecorated]}>
-        <View style={styles.decorationClip}>
-          <Image
-            source={require('../../../assets/images/child/journey-nextstop-path.png')}
-            style={[styles.decorationImage, DEBUG_BORDER]}
-            resizeMode="cover"
-            accessibilityElementsHidden
-            onLoad={() => setNextStopImgStatus('loaded')}
-            onError={(e) => {
-              setNextStopImgStatus('error');
-              console.warn('[debug] next-stop image error', e.nativeEvent.error);
-            }}
-          />
+        <ImageBackground
+          source={require('../../../assets/images/child/journey-nextstop-path.png')}
+          style={[styles.decorationClip, DEBUG_BORDER]}
+          resizeMode="cover"
+          onLoad={() => setNextStopImgStatus('loaded')}
+          onError={(e) => {
+            setNextStopImgStatus('error');
+            console.warn('[debug] next-stop image error', e.nativeEvent.error);
+          }}
+        >
           <Text style={DEBUG_LABEL}>nextstop:{nextStopImgStatus}</Text>
           <View style={[styles.decorationContent, styles.nextStopCard]}>
             <View style={styles.nextStopIcon}>
@@ -868,7 +870,7 @@ function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
               </View>
             ) : null}
           </View>
-        </View>
+        </ImageBackground>
       </View>
     </View>
   );
