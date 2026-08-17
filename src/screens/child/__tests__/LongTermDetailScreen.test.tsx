@@ -582,10 +582,20 @@ describe('LongTermDetailScreen', () => {
   it('immediately controls the completed state after recording today', async () => {
     render(<LongTermDetailScreen />);
 
-    fireEvent.press(await screen.findByLabelText('記下今天的完成'));
+    expect(await screen.findByText('本週 3 / 5')).toBeTruthy();
+    fireEvent.press(screen.getByLabelText('記下今天的完成'));
 
     expect(await screen.findByText('今天這一步記下來了')).toBeTruthy();
     expect(screen.queryByLabelText('記下今天的完成')).toBeNull();
+    // LT-FINAL-3.2 §G：completion 成功後 Progress 必須同一輪 refresh，
+    // 不能讓孩子看到「Today 已成功、下面還是舊數字」。
+    expect(screen.getByText('本週 4 / 5')).toBeTruthy();
+    expect(screen.queryByText('本週 3 / 5')).toBeNull();
+    // LT-FINAL-3.2 §F：完成後 actionTitle 不再跟 CompletedTodayState
+    // 疊在一起——todayAction 這裡跟 headerTitle 剛好是同一個字串
+    // （fixture 沒有 completion_description，退回 task.name），未完成
+    // 時畫面上會出現兩次，完成後只剩 header 那一個。
+    expect(screen.getAllByText('自主閱讀計畫')).toHaveLength(1);
   });
 
   it('shows the confirmed settlement line only for a session-fresh completion', async () => {

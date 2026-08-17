@@ -354,10 +354,11 @@ type TodayStepCardProps = Pick<
 >;
 
 /**
- * 完成後的收斂狀態（LT-FINAL-3 §5、§6）：一行標題用「記下來了」，不宣稱
- * 系統驗證孩子真的完成；分鐘數／時段合併成一行 meta；成長幣那行只在
- * 這次真的形成 reward event（todaySettlement 有值）才出現。沒有 confetti、
- * 沒有大卡片、沒有「領取」CTA。
+ * 完成後的收斂狀態（LT-FINAL-3 §5、§6；LT-FINAL-3.2 §F）：取代 actionTitle／
+ * schedule 那兩行，直接坐在原本 Today white card 的中央——不是另外塞一張
+ * 「卡裡的綠卡」。一行標題用「記下來了」，不宣稱系統驗證孩子真的完成；
+ * 分鐘數／時段合併成一行 meta；成長幣那行只在這次真的形成 reward event
+ * （todaySettlement 有值）才出現。沒有 confetti、沒有大卡片、沒有「領取」CTA。
  */
 function CompletedTodayState({
   presentation,
@@ -381,7 +382,7 @@ function CompletedTodayState({
     <View style={styles.completedState}>
       <View style={styles.completedTitleRow}>
         <View style={styles.completedCheck}>
-          <DetailIcon name="check" size={18} color={Colors.bgSurface} />
+          <DetailIcon name="check" size={16} color={Colors.bgSurface} />
         </View>
         <View style={styles.completedCopy}>
           <Text style={styles.completedTitle}>今天這一步記下來了</Text>
@@ -508,43 +509,50 @@ function TodayStepCard({
             />
           </View>
           <View style={styles.actionCopy}>
-            <Text style={styles.actionTitle}>{presentation.todayAction}</Text>
-            {!showReadingTimeControls && presentation.agreedTime ? (
-              <View style={styles.scheduleLabel}>
-                <DetailIcon name="clock" size={16} color={Colors.fgMuted} />
-                <Text style={styles.scheduleText}>
-                  {presentation.agreedTime.label}
-                  {presentation.sessionMinutes ? `・約 ${presentation.sessionMinutes} 分鐘` : ''}
-                </Text>
-              </View>
-            ) : null}
-            {showReadingTimeControls ? (
-              <View style={styles.scheduleRow}>
-                <View style={styles.scheduleLabel}>
-                  <DetailIcon name="clock" size={16} color={Colors.fgMuted} />
-                  <Text style={styles.scheduleText}>
-                    今天預計：
-                    {presentation.preferredTimeWindow
-                      ? formatTimeWindow(presentation.preferredTimeWindow)
-                      : '尚未選擇時段'}
-                  </Text>
-                </View>
-                {!completed && presentation.canCompleteToday ? (
-                  <TouchableOpacity
-                    style={styles.inlineAction}
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                      presentation.preferredTimeWindow ? '調整今天的預計時段' : '選擇今天的預計時段'
-                    }
-                    onPress={() => setShowTimeOptions((visible) => !visible)}
-                    activeOpacity={0.72}
-                  >
-                    <Text style={styles.inlineActionText}>
-                      {presentation.preferredTimeWindow ? '調整時段' : '選擇時段'}
+            {/* 完成後這一整段直接被 CompletedTodayState 取代，不是疊在
+                下面——中央狀態只變一次，不是「文案 + 卡裡的綠卡」兩層
+                （LT-FINAL-3.2 §F）。 */}
+            {!completed ? (
+              <>
+                <Text style={styles.actionTitle}>{presentation.todayAction}</Text>
+                {!showReadingTimeControls && presentation.agreedTime ? (
+                  <View style={styles.scheduleLabel}>
+                    <DetailIcon name="clock" size={16} color={Colors.fgMuted} />
+                    <Text style={styles.scheduleText}>
+                      {presentation.agreedTime.label}
+                      {presentation.sessionMinutes ? `・約 ${presentation.sessionMinutes} 分鐘` : ''}
                     </Text>
-                  </TouchableOpacity>
+                  </View>
                 ) : null}
-              </View>
+                {showReadingTimeControls ? (
+                  <View style={styles.scheduleRow}>
+                    <View style={styles.scheduleLabel}>
+                      <DetailIcon name="clock" size={16} color={Colors.fgMuted} />
+                      <Text style={styles.scheduleText}>
+                        今天預計：
+                        {presentation.preferredTimeWindow
+                          ? formatTimeWindow(presentation.preferredTimeWindow)
+                          : '尚未選擇時段'}
+                      </Text>
+                    </View>
+                    {presentation.canCompleteToday ? (
+                      <TouchableOpacity
+                        style={styles.inlineAction}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          presentation.preferredTimeWindow ? '調整今天的預計時段' : '選擇今天的預計時段'
+                        }
+                        onPress={() => setShowTimeOptions((visible) => !visible)}
+                        activeOpacity={0.72}
+                      >
+                        <Text style={styles.inlineActionText}>
+                          {presentation.preferredTimeWindow ? '調整時段' : '選擇時段'}
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                ) : null}
+              </>
             ) : null}
 
             {completed ? (
@@ -632,17 +640,51 @@ function TodayStepCard({
   );
 }
 
-// ── Progress（§13）────────────────────────────────────────────────────
+// ── Progress（§13、LT-FINAL-3.2 §A）───────────────────────────────────
+
+/**
+ * node／connector 尺寸表——target 越多次，單顆節點越小，rail 自然變短。
+ * 1 次是單顆置中的大 node；6–7 次是完整排開的小 node。target 只在
+ * 1–7 之間（rhythm 的 weekly_frequency 與 fixed_days 的排定天數都天生
+ * 卡在這個範圍），超過 7 一律走 CompactProgressRail，不逐顆畫。
+ */
+const RHYTHM_NODE_SIZING: Record<number, {
+  size: number;
+  connector: number;
+  borderWidth: number;
+  iconSize: number;
+}> = {
+  1: { size: 44, connector: 22, borderWidth: 2.5, iconSize: 19 },
+  2: { size: 34, connector: 20, borderWidth: 2, iconSize: 15 },
+  3: { size: 33, connector: 18, borderWidth: 2, iconSize: 14 },
+  4: { size: 30, connector: 16, borderWidth: 1.5, iconSize: 13 },
+  5: { size: 28, connector: 14, borderWidth: 1.5, iconSize: 12 },
+  6: { size: 25, connector: 12, borderWidth: 1.5, iconSize: 11 },
+  7: { size: 24, connector: 11, borderWidth: 1.5, iconSize: 10 },
+};
+
+function rhythmNodeSizing(target: number) {
+  return RHYTHM_NODE_SIZING[Math.min(Math.max(Math.round(target), 1), 7)];
+}
+
+/** target > 7 的防呆退路——不逐顆畫節點，改一條 compact 的完成比例 rail。 */
+function CompactProgressRail({ done, target }: { done: number; target: number }) {
+  const ratio = target > 0 ? Math.min(done / target, 1) : 0;
+  return (
+    <View style={styles.compactRailTrack} accessibilityElementsHidden>
+      <View style={[styles.compactRailFill, { width: `${Math.round(ratio * 100)}%` as `${number}%` }]} />
+    </View>
+  );
+}
 
 function RhythmLeafRow({ done, target }: { done: number; target: number }) {
   if (target <= 0) return null;
+  if (target > 7) return <CompactProgressRail done={done} target={target} />;
+
   // ⚠️ 節點數量＝約定次數，是真資料不是裝飾；多做的次數只用文字表達，
   // 不畫第 target+1 顆葉子（§13 rhythm 超標規則）。
   const nodes = Array.from({ length: target }, (_, index) => index < Math.min(done, target));
-  // 1–4 次：單排、節點稍大、平均拉開。5–7 次：仍單排，節點略縮小、間距跟著
-  // 縮短——不要疊成兩排 habit grid（Visual Integration Spec §11）。
-  const compact = target > 4;
-  const nodeStyle = compact ? styles.leafNodeCompact : styles.leafNode;
+  const sizing = rhythmNodeSizing(target);
   return (
     <View style={styles.leafRow} accessibilityElementsHidden>
       {nodes.map((filled, index) => (
@@ -651,13 +693,26 @@ function RhythmLeafRow({ done, target }: { done: number; target: number }) {
             <View
               style={[
                 styles.leafConnector,
-                compact && styles.leafConnectorCompact,
+                { width: sizing.connector },
                 nodes[index - 1] && filled && styles.leafConnectorFilled,
               ]}
             />
           ) : null}
-          <View style={[nodeStyle, filled && styles.leafNodeFilled]}>
-            {filled ? <DetailIcon name="sprout" size={compact ? 13 : 17} color={Colors.bgSurface} /> : null}
+          <View
+            style={[
+              styles.leafNode,
+              {
+                width: sizing.size,
+                height: sizing.size,
+                borderRadius: sizing.size / 2,
+                borderWidth: sizing.borderWidth,
+              },
+              filled && styles.leafNodeFilled,
+            ]}
+          >
+            {filled ? (
+              <DetailIcon name="sprout" size={sizing.iconSize} color={Colors.bgSurface} />
+            ) : null}
           </View>
         </React.Fragment>
       ))}
@@ -672,10 +727,10 @@ function StageNodeRow({ current, target }: { current: number; target: number }) 
     return 'upcoming' as const;
   });
   return (
-    <View style={styles.leafRow} accessibilityElementsHidden>
+    <View style={[styles.leafRow, styles.stageNodeRow]} accessibilityElementsHidden>
       {nodes.map((state, index) => (
         <React.Fragment key={index}>
-          {index > 0 ? <View style={styles.leafConnector} /> : null}
+          {index > 0 ? <View style={[styles.leafConnector, styles.stageNodeConnector]} /> : null}
           <View
             style={[
               styles.stageNode,
@@ -701,14 +756,20 @@ function ProgressCard({ presentation }: { presentation: GoalPresentation }) {
 
   if (progression === 'rhythm') {
     title = '這週的節奏';
+    // 左側文字／右側 node track——右半張卡不再是空白，真實 progress
+    // 本身就是這裡的 visual（§A，不加 D 裝飾圖）。
     body = (
-      <>
-        <Text style={styles.progressPrimary}>{presentation.weekProgressLabel}</Text>
-        {presentation.weekProgressNote ? (
-          <Text style={styles.progressNote}>{presentation.weekProgressNote}</Text>
-        ) : null}
-        <RhythmLeafRow done={presentation.weekCompletedActual} target={presentation.weekTarget} />
-      </>
+      <View style={styles.rhythmRow}>
+        <View style={styles.rhythmLeft}>
+          <Text style={styles.progressPrimary}>{presentation.weekProgressLabel}</Text>
+          {presentation.weekProgressNote ? (
+            <Text style={styles.progressNote}>{presentation.weekProgressNote}</Text>
+          ) : null}
+        </View>
+        <View style={styles.rhythmRight}>
+          <RhythmLeafRow done={presentation.weekCompletedActual} target={presentation.weekTarget} />
+        </View>
+      </View>
     );
   } else if (progression === 'fixed_days') {
     title = '這週的安排';
@@ -835,11 +896,16 @@ function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
       <SectionHeading icon="milestone" title="這段路上的下一站" />
       {/* Next Stop 是資訊功能卡，不放插圖。左側是 GrowBook 通用的
           waypoint SVG icon（不是任務專屬圖），checkpoint 標題／說明／
-          獎勵數字才是這張卡的主體（§17、§19）。 */}
+          獎勵數字才是這張卡的主體（§17、§19）。右下角極淡的 native SVG
+          curve＋sprout 只是路還在往前走的暗示，不是另一張插畫，也不是
+          raster（LT-FINAL-3.2 §B：禁止 E / E2 PNG）。 */}
       <View testID="goal-next-stop" style={styles.card}>
+        <View style={styles.nextStopCueWrap} pointerEvents="none">
+          <NextStopJourneyCue />
+        </View>
         <View style={styles.nextStopCard}>
           <View style={styles.nextStopIcon}>
-            <DetailIcon name="milestone" size={18} color={Colors.bgSurface} />
+            <DetailIcon name="milestone" size={17} color={Colors.bgSurface} />
           </View>
           <View style={styles.nextStopCopy}>
             <View style={styles.nextStopCaptionPill}>
@@ -858,6 +924,34 @@ function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
         </View>
       </View>
     </View>
+  );
+}
+
+/**
+ * 極淡的 native SVG journey cue：一條虛線弧線 + 路徑盡頭一株小芽。
+ * opacity 壓在 0.10–0.16——只是暗示「這段路還在往前走」，不能搶過
+ * checkpoint 標題／說明的視覺重量（§B）。
+ */
+function NextStopJourneyCue() {
+  return (
+    <Svg width={92} height={54} viewBox="0 0 92 54" opacity={0.13} accessibilityElementsHidden>
+      <Path
+        d="M4 46C30 46 34 16 88 8"
+        stroke={Colors.leaf600}
+        strokeWidth={1.4}
+        strokeDasharray="1 7"
+        strokeLinecap="round"
+        fill="none"
+      />
+      <Path
+        d="M88 8v8M83.5 12.5c0-3.3 2-5.6 5.5-5.6.4 3.1-2 5.6-5.5 5.6Z"
+        stroke={Colors.leaf600}
+        strokeWidth={1.4}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
   );
 }
 
@@ -1281,30 +1375,27 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
+  // 直接坐進原本 Today white card 的中央，不是另一張「卡裡的綠卡」——
+  // 沒有自己的邊框／底色，跟 actionTitle 原本佔的位置同一層視覺重量
+  // （LT-FINAL-3.2 §F）。
   completedState: {
-    marginTop: 10,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.leaf100,
-    backgroundColor: Colors.leaf50,
-    paddingHorizontal: 11,
-    paddingTop: 10,
-    paddingBottom: 7,
+    paddingBottom: 2,
   },
   completedTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  // 28–32px 的 soft sage-green 圓底（leaf500 比 success/leaf600 淺一階）。
   completedCheck: {
     width: 30,
     height: 30,
     borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.success,
+    backgroundColor: Colors.leaf500,
   },
   completedCopy: { flex: 1, minWidth: 0 },
   completedTitle: {
     color: Colors.leaf700,
-    fontSize: 14,
-    lineHeight: 19,
+    fontSize: 15,
+    lineHeight: 20,
     fontWeight: '900',
   },
   completedMeta: {
@@ -1371,51 +1462,64 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '700',
   },
-  // 不用 width:'100%'——rail 的總寬度由節點數量自然決定，target 少的
-  // 時候 rail 跟著短，不勉強撐滿整張卡（不用裝飾圖填空）。
-  leafRow: {
-    marginTop: 12,
+  // 左右 composition（LT-FINAL-3.2 §A）：左側文字約 42%，右側 node track
+  // 約 52%，右側自己 center 對齊——node 少的時候不會被硬拉到兩端撐滿。
+  rhythmRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
+    gap: 10,
   },
-  // 固定寬度而不是 flex:1——1-4 次節點大、connector 也寬；5-7 次節點跟
-  // connector 一起縮小，rail 自然變短，不需要撐滿整張卡（§11）。
-  leafConnector: {
-    width: 28,
-    height: 5,
-    borderRadius: 2.5,
-    marginHorizontal: 3,
-    backgroundColor: Colors.leaf100,
+  rhythmLeft: {
+    flex: 42,
+    minWidth: 0,
   },
-  leafConnectorCompact: {
-    width: 16,
-  },
-  leafConnectorFilled: {
-    backgroundColor: Colors.leaf500,
-  },
-  leafNode: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 2,
-    borderColor: Colors.leaf200,
-    backgroundColor: Colors.bgSurface,
+  rhythmRight: {
+    flex: 52,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  leafNodeCompact: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    borderWidth: 1.5,
-    borderColor: Colors.leaf200,
-    backgroundColor: Colors.bgSurface,
+  // rail 的總寬度由節點數量與 rhythmNodeSizing 決定，不勉強撐滿整個
+  // 右側區域（不用裝飾圖填空）。
+  leafRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  // width 由 rhythmNodeSizing 依 target 動態指定——1 次較寬的 connector、
+  // 6–7 次跟著節點一起縮小，rail 自然變短（§A 1–7 responsive 規則）。
+  leafConnector: {
+    height: 4,
+    borderRadius: 2,
+    marginHorizontal: 3,
+    backgroundColor: Colors.leaf100,
+  },
+  leafConnectorFilled: {
+    backgroundColor: Colors.leaf600,
+  },
+  // width/height/borderRadius/borderWidth 由 rhythmNodeSizing 依 target
+  // 動態指定；這裡只放不隨尺寸變的顏色語意：未完成＝warm white 底、
+  // sage 邊；完成＝GrowBook green 實心＋白色小芽（見 leafNodeFilled）。
+  leafNode: {
+    borderColor: Colors.leaf300,
+    backgroundColor: Colors.bgSurfaceWarm,
     alignItems: 'center',
     justifyContent: 'center',
   },
   leafNodeFilled: {
     borderColor: Colors.leaf600,
+    backgroundColor: Colors.leaf600,
+  },
+  // target > 7 的防呆退路（目前 rhythm／fixed_days 的 target 天生卡在
+  // 1–7，這條路徑理論上打不到，但保留一個不逐顆畫的安全網）。
+  compactRailTrack: {
+    width: '100%',
+    height: 10,
+    borderRadius: 5,
+    overflow: 'hidden',
+    backgroundColor: Colors.leaf100,
+  },
+  compactRailFill: {
+    height: '100%',
+    borderRadius: 5,
     backgroundColor: Colors.leaf600,
   },
   stageNode: {
@@ -1436,6 +1540,15 @@ const styles = StyleSheet.create({
     borderWidth: 2.5,
     borderColor: Colors.gold500,
     backgroundColor: Colors.gold100,
+  },
+  // staged 進度不是這輪的範圍——維持它原本疊在文字下方、connector 固定
+  // 28px 寬的樣子，不受 rhythm 左右 composition 改動影響。
+  stageNodeRow: {
+    marginTop: 12,
+    alignSelf: 'flex-start',
+  },
+  stageNodeConnector: {
+    width: 28,
   },
   ratioTrack: {
     marginTop: 10,
@@ -1493,18 +1606,25 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // Next Stop
+  // Next Stop（LT-FINAL-3.2 §B：Journey waypoint card，不是資料表列）
   nextStopCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
-  // GrowBook 通用 waypoint icon，40–44px（§12）——比其他卡片的 icon 圓小一圈，
+  // 極淡的 curve+sprout cue，固定右下角，opacity 已經在 SVG 本身壓低——
+  // 只是方向暗示，不能蓋過 icon／文字（見 NextStopJourneyCue）。
+  nextStopCueWrap: {
+    position: 'absolute',
+    right: 8,
+    bottom: 6,
+  },
+  // GrowBook 通用 waypoint icon，38–42px（§B）——比其他卡片的 icon 圓小一圈，
   // 因為這張卡的主體是 checkpoint 文字，icon 只是視覺錨點。
   nextStopIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: Colors.leaf500,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1522,18 +1642,20 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '900',
   },
+  // 主標要比 badge 明顯拉開一段 vertical rhythm，不能黏在一起像表格
+  // 標籤（§B）——字級也跟著加大一階，扛起這張卡的主體重量。
   nextStopTitle: {
-    marginTop: 2,
+    marginTop: 7,
     color: Colors.fgPrimary,
-    fontSize: 15,
-    lineHeight: 20,
+    fontSize: 17,
+    lineHeight: 22,
     fontWeight: '900',
   },
   nextStopNote: {
-    marginTop: 2,
+    marginTop: 4,
     color: Colors.fgMuted,
-    fontSize: 11,
-    lineHeight: 16,
+    fontSize: 12,
+    lineHeight: 17,
     fontWeight: '700',
   },
   // reward badge 是 secondary 資訊——checkpoint 標題/說明才是主體
