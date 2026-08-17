@@ -440,7 +440,7 @@ describe('Next Stop（§14：persisted-only）', () => {
   it('有真實 checkpoint 才顯示，而且 badge 只讀 milestone.coin', () => {
     renderView(makePresentation({
       milestones: [
-        { id: 'a', title: '第一次一起回顧', detail: null, status: 'next', coin: 20, note: null },
+        { id: 'a', title: '第一次一起回顧', detail: null, status: 'next', coin: 20, note: null, rewardStatus: null },
       ],
     }));
     expect(screen.getByText('這段路上的下一站')).toBeTruthy();
@@ -451,7 +451,7 @@ describe('Next Stop（§14：persisted-only）', () => {
   it('沒有 coin 證據就不畫 badge', () => {
     renderView(makePresentation({
       milestones: [
-        { id: 'a', title: '第一次一起回顧', detail: null, status: 'next', coin: null, note: null },
+        { id: 'a', title: '第一次一起回顧', detail: null, status: 'next', coin: null, note: null, rewardStatus: null },
       ],
     }));
     expect(screen.getByText('第一次一起回顧')).toBeTruthy();
@@ -461,7 +461,7 @@ describe('Next Stop（§14：persisted-only）', () => {
   it('全部 completed（沒有 next/planned）就不顯示', () => {
     renderView(makePresentation({
       milestones: [
-        { id: 'a', title: '已累積 2 本', detail: null, status: 'completed', coin: null, note: null },
+        { id: 'a', title: '已累積 2 本', detail: null, status: 'completed', coin: null, note: null, rewardStatus: null },
       ],
     }));
     expect(screen.queryByTestId('goal-next-stop')).toBeNull();
@@ -477,6 +477,7 @@ describe('Next Stop（§14：persisted-only）', () => {
           status: 'next',
           coin: null,
           note: '到這裡時，看看這段安排做起來怎麼樣，再決定下一段。',
+          rewardStatus: null,
         },
       ],
     }));
@@ -486,7 +487,7 @@ describe('Next Stop（§14：persisted-only）', () => {
   it('沒有 note 時退回通用的一句話', () => {
     renderView(makePresentation({
       milestones: [
-        { id: 'a', title: '第一次一起回顧', detail: null, status: 'next', coin: null, note: null },
+        { id: 'a', title: '第一次一起回顧', detail: null, status: 'next', coin: null, note: null, rewardStatus: null },
       ],
     }));
     expect(screen.getByText('到這裡時，看看這段安排做起來怎麼樣，再決定下一段。')).toBeTruthy();

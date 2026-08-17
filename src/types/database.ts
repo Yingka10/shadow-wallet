@@ -602,6 +602,47 @@ export type {
   ChildProposalAdjustmentStatus,
 } from '../lib/childProposal/types';
 
+// ── P1-M1A/B：canonical milestone reward 三層（唯讀 —— 只由 RPC／trigger 寫）──
+//
+// `type` 不是 `interface` —— 見上面 §Row 型別的註解，interface 在這裡會讓
+// supabase-js 的型別推導整個退化成 never。
+
+export type MilestoneAgreementRow = {
+  id: string;
+  task_id: string;
+  goal_id: string;
+  title: string;
+  note: string | null;
+  completion_criterion: Record<string, any>;
+  reward_coin_amount: number | null;
+  agreement_source: string;
+  parent_confirmed_at: string | null;
+  parent_confirmed_by_parent_id: string | null;
+  effective_at: string;
+  effective_plan_version_id: string | null;
+  supersedes_milestone_id: string | null;
+  superseded_at: string | null;
+  created_at: string;
+};
+
+export type MilestoneAchievementRow = {
+  id: string;
+  milestone_agreement_id: string;
+  child_id: string;
+  achievement_evidence: Record<string, any>;
+  achieved_at: string;
+};
+
+export type MilestoneSettlementRow = {
+  id: string;
+  milestone_achievement_id: string;
+  milestone_agreement_id: string;
+  child_id: string;
+  coin_amount: number;
+  transaction_id: string | null;
+  settled_at: string;
+};
+
 // ── Database 型別（供 createClient<Database> 使用）────────────
 //
 // supabase-js v2 的 GenericTable 要求每個 table 必須包含：
@@ -1163,6 +1204,24 @@ export interface Database {
       };
       child_proposal_status_events: {
         Row: ChildProposalStatusEvent;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      milestone_agreements: {
+        Row: MilestoneAgreementRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      milestone_achievements: {
+        Row: MilestoneAchievementRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      milestone_settlements: {
+        Row: MilestoneSettlementRow;
         Insert: never;
         Update: never;
         Relationships: [];

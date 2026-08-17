@@ -52,7 +52,12 @@ import {
   buildGoalPresentation,
   type GoalCompletionRecord,
 } from './longTermGoalPresentation';
-import { loadLongTermSharedPlan, type LongTermSharedPlan } from '../../lib/longTerm';
+import {
+  loadLongTermSharedPlan,
+  loadMilestoneAgreements,
+  type LongTermSharedPlan,
+  type MilestoneAgreementView,
+} from '../../lib/longTerm';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -227,6 +232,12 @@ export default function LongTermDetailScreen() {
   */
   const [sharedPlanModel, setSharedPlanModel] = useState<LongTermSharedPlan | null>(null);
   /*
+    這個 task 底下的 canonical milestone agreements（P1-M1B）。空陣列 ——
+    今天大多數任務都是這樣——代表沒有正式 milestone，presentation 層會
+    fallback 回 legacy checkpoint_rewards 顯示路徑。
+  */
+  const [milestoneAgreements, setMilestoneAgreements] = useState<MilestoneAgreementView[]>([]);
+  /*
     今天這一次完成，剛才是不是真的形成了一次 reward event（LT-FINAL-3
     §5）。只在「這個 session 裡剛完成」才有值——重新整理或換頁後拿不到
     這筆資料就是 null，畫面不顯示幣值那一行，不是缺陷，是誠實。
@@ -328,11 +339,13 @@ export default function LongTermDetailScreen() {
         dayjs(completion.completed_at).tz(TZ).isSame(dayjs().tz(TZ), 'day'),
       );
 
-      const shared = await loadLongTermSharedPlan({
-        taskId, childId: loadedGoal.child_id,
-      });
+      const [shared, milestones] = await Promise.all([
+        loadLongTermSharedPlan({ taskId, childId: loadedGoal.child_id }),
+        loadMilestoneAgreements({ taskId }),
+      ]);
       if (!isCurrentGeneration()) return;
       setSharedPlanModel(shared);
+      setMilestoneAgreements(milestones);
 
       setGoal(loadedGoal);
       setTask(loadedTask);
@@ -357,6 +370,7 @@ export default function LongTermDetailScreen() {
     setGoal(null);
     setTask(null);
     setSharedPlanModel(null);
+    setMilestoneAgreements([]);
     setCompletions([]);
     setSelectedTimeWindow(null);
     setChecking(false);
@@ -402,10 +416,11 @@ export default function LongTermDetailScreen() {
         childPlan: sharedPlanModel?.childPlan ?? null,
         agreedReward: sharedPlanModel?.agreedReward ?? null,
         legacyReward: sharedPlanModel?.legacyReward ?? false,
+        milestoneAgreements,
       }),
       preferredTimeWindow: selectedTimeWindow,
     };
-  }, [completions, goal, selectedTimeWindow, sharedPlanModel, task]);
+  }, [completions, goal, milestoneAgreements, selectedTimeWindow, sharedPlanModel, task]);
 
   const todayCompletion = useMemo(
     () => completions.find((completion) =>

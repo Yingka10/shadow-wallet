@@ -24,6 +24,7 @@ import type {
   ChildConfirmedPlanView,
   LongTermCompletionReason,
   LongTermProgression,
+  MilestoneAgreementView,
 } from '../../lib/longTerm';
 
 dayjs.extend(utc);
@@ -73,21 +74,12 @@ export type GoalMilestone = {
   coin: number | null;
   /** 這個節點的補充說明。只有真的有人寫過才有值，不補一句「到這裡時可以再看看」。 */
   note: string | null;
-};
-
-/**
- * 一站 canonical milestone agreement 讀回來的畫面用視圖（見
- * supabase/migrations/20260901000000_milestone_achievement_settlement.sql 的
- * milestone_agreements / milestone_achievements / milestone_settlements 三層）。
- * achievedAt / settledAt 是 null 就代表那一層還沒發生 —— 不是「沒有資料」。
- */
-export type MilestoneAgreementView = {
-  id: string;
-  title: string;
-  note: string | null;
-  rewardCoinAmount: number | null;
-  achievedAt: string | null;
-  settledAt: string | null;
+  /**
+   * canonical milestone 才有值：'agreed' = 說好了但還沒入帳，'settled' = 已經
+   * 結算進帳本。沒有幣的 milestone、或走 legacy checkpoint_rewards 路徑，都是
+   * null —— UI 不能因為 status='completed' 就順便宣稱錢已經到了。
+   */
+  rewardStatus: 'agreed' | 'settled' | null;
 };
 
 export type GoalRecentRecord = {
@@ -456,8 +448,11 @@ function buildRhythmMilestones(
 
       // coin badge 只在真的結算過才顯示；achieve 但還沒結算（理論上同一個
       // trigger 內就會發生，這裡仍然保守處理）不宣稱錢已入帳。
-      // 沒有 reward_coin_amount 的 milestone 一律不顯示 coin。
+      // 沒有 reward_coin_amount 的 milestone 一律不顯示 coin、不顯示 rewardStatus。
       const coin = settled ? agreement.rewardCoinAmount : null;
+      const rewardStatus: GoalMilestone['rewardStatus'] = agreement.rewardCoinAmount === null
+        ? null
+        : settled ? 'settled' : 'agreed';
       const detail = agreement.rewardCoinAmount === null
         ? null
         : settled
@@ -473,6 +468,7 @@ function buildRhythmMilestones(
         note: agreement.note,
         status,
         coin,
+        rewardStatus,
       };
     });
   }
@@ -499,6 +495,7 @@ function buildRhythmMilestones(
       note: checkpoint.note,
       status: 'planned' as const,
       coin: checkpoint.coin > 0 ? checkpoint.coin : null,
+      rewardStatus: null,
     }));
 }
 
@@ -525,6 +522,7 @@ function buildSkillMilestones(
           : 'upcoming',
       coin: hasCoin ? coin : null,
       note: null,
+      rewardStatus: null,
     };
   });
 
@@ -554,6 +552,7 @@ function buildChallengeMilestones(
       status: 'completed',
       coin: null,
       note: null,
+      rewardStatus: null,
     },
   ];
 
@@ -569,6 +568,7 @@ function buildChallengeMilestones(
           : 'upcoming',
       coin: checkpoint.coin > 0 ? checkpoint.coin : null,
       note: null,
+      rewardStatus: null,
     });
   }
 

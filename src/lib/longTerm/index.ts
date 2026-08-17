@@ -40,3 +40,6 @@ export { resolveSessionMinutes, resolveTodayAction } from './todayAction';
 
 export { loadLongTermSharedPlan } from './sharedPlanService';
 export type { LongTermSharedPlan } from './sharedPlanService';
+
+export { loadMilestoneAgreements } from './milestoneAgreements';
+export type { MilestoneAgreementView } from './milestoneAgreements';
