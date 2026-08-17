@@ -75,6 +75,21 @@ export type GoalMilestone = {
   note: string | null;
 };
 
+/**
+ * 一站 canonical milestone agreement 讀回來的畫面用視圖（見
+ * supabase/migrations/20260901000000_milestone_achievement_settlement.sql 的
+ * milestone_agreements / milestone_achievements / milestone_settlements 三層）。
+ * achievedAt / settledAt 是 null 就代表那一層還沒發生 —— 不是「沒有資料」。
+ */
+export type MilestoneAgreementView = {
+  id: string;
+  title: string;
+  note: string | null;
+  rewardCoinAmount: number | null;
+  achievedAt: string | null;
+  settledAt: string | null;
+};
+
 export type GoalRecentRecord = {
   id: string;
   dateLabel: string;
@@ -418,8 +433,51 @@ function getCurrentSkillStage(goal: LongTermGoal): string {
   return String(levels[index]?.name ?? '下一個練習階段');
 }
 
-function buildRhythmMilestones(goal: LongTermGoal): GoalMilestone[] {
-  // ⚠️ 只列**真的取過名字**的 checkpoint。
+function buildRhythmMilestones(
+  goal: LongTermGoal,
+  milestoneAgreements?: MilestoneAgreementView[],
+): GoalMilestone[] {
+  // canonical agreement 存在就整個取代 legacy checkpoint_rewards 路徑 ——
+  // ad-hoc checkpoint 的 coin 不再當正式 reward evidence（P1-M0 Phase 4 的
+  // 結論）。status 在這裡才真的按「有沒有 achieve」算，不是永遠回傳
+  // 'planned' 讓呼叫端一律挑陣列第一筆（那是舊版的 latent bug —— 只有一站
+  // 的資料剛好掩蓋掉，站數一多就會永遠停在第一站）。
+  if (milestoneAgreements && milestoneAgreements.length > 0) {
+    let seenUnachieved = false;
+    return milestoneAgreements.map((agreement): GoalMilestone => {
+      const achieved = agreement.achievedAt !== null;
+      const settled = agreement.settledAt !== null;
+      const status: GoalMilestone['status'] = achieved
+        ? 'completed'
+        : !seenUnachieved
+          ? 'next'
+          : 'upcoming';
+      if (!achieved) seenUnachieved = true;
+
+      // coin badge 只在真的結算過才顯示；achieve 但還沒結算（理論上同一個
+      // trigger 內就會發生，這裡仍然保守處理）不宣稱錢已入帳。
+      // 沒有 reward_coin_amount 的 milestone 一律不顯示 coin。
+      const coin = settled ? agreement.rewardCoinAmount : null;
+      const detail = agreement.rewardCoinAmount === null
+        ? null
+        : settled
+          ? `成長幣 +${agreement.rewardCoinAmount}（已記入帳本）`
+          : achieved
+            ? `成長幣 +${agreement.rewardCoinAmount}（結算中）`
+            : `額外成長幣 +${agreement.rewardCoinAmount}（說好的額外回饋）`;
+
+      return {
+        id: `milestone-agreement-${agreement.id}`,
+        title: agreement.title,
+        detail,
+        note: agreement.note,
+        status,
+        coin,
+      };
+    });
+  }
+
+  // ⚠️ legacy 路徑：只列**真的取過名字**的 checkpoint。
   //
   //    之前這裡會拿門檻數字自動生一個「第 N 次的計畫節點」——沒有人取過
   //    這個名字，它是畫面自己生出來的。孩子看到的里程碑必須指得出誰講的
@@ -593,6 +651,13 @@ export type BuildGoalPresentationExtras = {
   agreedReward?: AgreedRewardView | null;
   /** 這筆任務有共同版本，但回饋語意是 legacy 的。 */
   legacyReward?: boolean;
+  /**
+   * 這個 goal 的 canonical milestone agreements（P1-M1A）。有值就整個取代
+   * checkpoint_rewards 當 Next Stop 的資料來源 —— ad-hoc checkpoint 不再是
+   * 正式 reward evidence（見 milestone_agreements 的 migration 註解）。
+   * 沒有傳（今天大多數既有任務）就繼續走 legacy checkpoint_rewards 路徑。
+   */
+  milestoneAgreements?: MilestoneAgreementView[];
 };
 
 export function buildGoalPresentation(
@@ -762,7 +827,7 @@ export function buildGoalPresentation(
     ? buildSkillMilestones(goal, stagedCurrent, Math.max(stagedTarget, 1))
     : isAccumulation
       ? buildChallengeMilestones(goal, accCurrent, Math.max(accTarget, 1), accUnit)
-      : buildRhythmMilestones(goal);
+      : buildRhythmMilestones(goal, extras.milestoneAgreements);
 
   const nextReward = isStaged
     ? getNextSkillReward(goal, stagedCurrent)

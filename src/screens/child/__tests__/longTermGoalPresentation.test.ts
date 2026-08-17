@@ -426,3 +426,79 @@ describe('9. 計畫還沒開始／已經過期', () => {
     expect(view.completionReason).toBe('paused');
   });
 });
+
+describe('10. canonical milestone agreement 取代 legacy checkpoint（P1-M1A）', () => {
+  it('有 milestoneAgreements 就整個取代 checkpoint_rewards，不是兩份合併', () => {
+    const view = build(makeTask(), makeGoal({ checkpoint_rewards: { '3': { coin: 999, title: '不該出現的舊資料' } } }), [], {
+      milestoneAgreements: [
+        { id: 'a1', title: '完成第一段兩週閱讀安排', note: null, rewardCoinAmount: 20, achievedAt: null, settledAt: null },
+      ],
+    });
+    expect(view.milestones).toHaveLength(1);
+    expect(view.milestones[0].title).toBe('完成第一段兩週閱讀安排');
+    expect(JSON.stringify(view.milestones)).not.toContain('不該出現的舊資料');
+  });
+
+  it('未達成：status 是 next，coin 顯示「說好的額外回饋」但不是「已記入帳本」', () => {
+    const view = build(makeTask(), makeGoal(), [], {
+      milestoneAgreements: [
+        { id: 'a1', title: '完成第一段兩週閱讀安排', note: null, rewardCoinAmount: 20, achievedAt: null, settledAt: null },
+      ],
+    });
+    expect(view.milestones[0].status).toBe('next');
+    expect(view.milestones[0].coin).toBeNull();
+    expect(view.milestones[0].detail).toContain('說好的額外回饋');
+  });
+
+  it('已達成但尚未結算：不宣稱錢已入帳', () => {
+    const view = build(makeTask(), makeGoal(), [], {
+      milestoneAgreements: [
+        { id: 'a1', title: '完成第一段兩週閱讀安排', note: null, rewardCoinAmount: 20, achievedAt: '2026-08-17T00:00:00Z', settledAt: null },
+      ],
+    });
+    expect(view.milestones[0].status).toBe('completed');
+    expect(view.milestones[0].coin).toBeNull();
+    expect(view.milestones[0].detail).not.toContain('已記入帳本');
+  });
+
+  it('已結算：coin 有值，文案講「已記入帳本」', () => {
+    const view = build(makeTask(), makeGoal(), [], {
+      milestoneAgreements: [
+        { id: 'a1', title: '完成第一段兩週閱讀安排', note: null, rewardCoinAmount: 20, achievedAt: '2026-08-17T00:00:00Z', settledAt: '2026-08-17T00:00:01Z' },
+      ],
+    });
+    expect(view.milestones[0].coin).toBe(20);
+    expect(view.milestones[0].detail).toContain('已記入帳本');
+  });
+
+  it('沒有幣的 milestone 達成後仍是 completed，但沒有 coin badge', () => {
+    const view = build(makeTask(), makeGoal(), [], {
+      milestoneAgreements: [
+        { id: 'a1', title: '完成第一段兩週閱讀安排', note: null, rewardCoinAmount: null, achievedAt: '2026-08-17T00:00:00Z', settledAt: null },
+      ],
+    });
+    expect(view.milestones[0].status).toBe('completed');
+    expect(view.milestones[0].coin).toBeNull();
+    expect(view.milestones[0].detail).toBeNull();
+  });
+
+  it('第一站達成後，第二站才是 next —— 不會永遠停在第一站（先前的 latent bug）', () => {
+    const view = build(makeTask(), makeGoal(), [], {
+      milestoneAgreements: [
+        { id: 'a1', title: '第一站', note: null, rewardCoinAmount: 20, achievedAt: '2026-08-17T00:00:00Z', settledAt: '2026-08-17T00:00:01Z' },
+        { id: 'a2', title: '第二站', note: null, rewardCoinAmount: 20, achievedAt: null, settledAt: null },
+      ],
+    });
+    expect(view.milestones[0].status).toBe('completed');
+    expect(view.milestones[1].status).toBe('next');
+  });
+
+  it('全部達成後沒有 next/planned —— Next Stop 該收起來', () => {
+    const view = build(makeTask(), makeGoal(), [], {
+      milestoneAgreements: [
+        { id: 'a1', title: '第一站', note: null, rewardCoinAmount: 20, achievedAt: '2026-08-17T00:00:00Z', settledAt: '2026-08-17T00:00:01Z' },
+      ],
+    });
+    expect(view.milestones.some((m) => m.status === 'next' || m.status === 'planned')).toBe(false);
+  });
+});
