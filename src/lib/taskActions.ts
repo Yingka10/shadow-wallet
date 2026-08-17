@@ -261,8 +261,9 @@ export function checkMilestone(
   checkpointRewards: CheckpointRewards | null,
 ): MilestoneResult | null {
   if (!checkpointRewards) return null;
-  const coin = checkpointRewards[String(currentDay)];
-  if (coin === undefined) return null;
+  const entry = checkpointRewards[String(currentDay)];
+  if (entry === undefined) return null;
+  const coin = typeof entry === 'number' ? entry : entry.coin ?? 0;
   return { goalId, day: currentDay, coinReward: coin };
 }
 

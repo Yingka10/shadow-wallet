@@ -244,7 +244,7 @@ describe('3. 不 clamp，但也不寫成 4/3', () => {
   it('2 / 3 講得出還差幾次', () => {
     const view = build(makeTask(), makeGoal(), done('2026-08-10', '2026-08-11'));
     expect(view.weekProgressLabel).toBe('本週 2 / 3');
-    expect(view.weekProgressNote).toBe('還差 1 次到這週約定的節奏');
+    expect(view.weekProgressNote).toBe('再走一小步，這週的節奏就完整了');
     expect(view.weekTargetReached).toBe(false);
   });
 
@@ -371,10 +371,19 @@ describe('7. rhythm 不生成里程碑', () => {
     expect(JSON.stringify(view.milestones)).not.toContain('回顧');
   });
 
-  it('真的有 checkpoint 才列出來', () => {
+  it('checkpoint 沒有真實 title 就不算一個有意義的節點（不再自動生成「第 N 次的計畫節點」）', () => {
     const view = build(makeTask(), makeGoal({ checkpoint_rewards: { '5': 10 } }));
+    expect(view.milestones).toEqual([]);
+  });
+
+  it('checkpoint 有真實 title 才列出來，note/coin 一起帶出', () => {
+    const view = build(makeTask(), makeGoal({
+      checkpoint_rewards: { '3': { coin: 20, title: '第一次一起回顧', note: '到這裡時，看看這段安排做起來怎麼樣，再決定下一段。' } },
+    }));
     expect(view.milestones).toHaveLength(1);
-    expect(view.milestones[0].title).toBe('第 5 次的計畫節點');
+    expect(view.milestones[0].title).toBe('第一次一起回顧');
+    expect(view.milestones[0].note).toBe('到這裡時，看看這段安排做起來怎麼樣，再決定下一段。');
+    expect(view.milestones[0].coin).toBe(20);
   });
 });
 

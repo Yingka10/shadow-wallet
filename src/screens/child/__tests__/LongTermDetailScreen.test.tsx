@@ -68,7 +68,7 @@ const mockBaseGoal = {
   total_days: 20,
   current_day: 3,
   status: 'active',
-  checkpoint_rewards: { '5': 10 },
+  checkpoint_rewards: { '5': { coin: 10, title: '第一次一起檢查' } },
   motivation_note: null,
   started_at: '2026-07-27',
   next_review_at: null,
@@ -338,7 +338,7 @@ describe('LongTermDetailScreen', () => {
     expect(screen.getByTestId('goal-hero')).toBeTruthy();
     // LT-FINAL-1R：這份 fixture **真的有** checkpoint_rewards { '5': 10 }，
     // 所以它會出現 —— 該消失的是憑空生成的那一條「N 週後一起回顧」。
-    expect(screen.getByText('第 5 次的計畫節點')).toBeTruthy();
+    expect(screen.getByText('第一次一起檢查')).toBeTruthy();
     expect(screen.queryByText(/週後一起回顧/)).toBeNull();
   });
 
@@ -808,7 +808,7 @@ describe('LongTermDetailScreen', () => {
     expect(await screen.findByText('今天這一步記下來了')).toBeTruthy();
     // RPC 回了一個 checkpoint，但畫面上的里程碑仍然只來自 goal 的資料 ——
     // 不因為一次完成的回應就宣稱達成。
-    expect(screen.getByText('第 5 次的計畫節點')).toBeTruthy();
+    expect(screen.getByText('第一次一起檢查')).toBeTruthy();
     expect(screen.getByText('+10')).toBeTruthy();
     expect(screen.queryByText(/已達成/)).toBeNull();
   });
@@ -833,7 +833,7 @@ describe('LongTermDetailScreen', () => {
     await screen.findByText('今天這一步記下來了');
     // checkpoint 是 fixture 上真的有的（{'5': 10}），所以它在。
     // 這裡要驗的是「RPC 沒回 milestone 時，畫面不會自己宣稱達成」。
-    expect(screen.getByText('第 5 次的計畫節點')).toBeTruthy();
+    expect(screen.getByText('第一次一起檢查')).toBeTruthy();
     expect(screen.getByText('+10')).toBeTruthy();
     expect(screen.queryByText(/已達成/)).toBeNull();
   });
@@ -850,12 +850,12 @@ describe('LongTermDetailScreen', () => {
     });
     render(<LongTermDetailScreen />);
 
-    expect(await screen.findByText('第 5 次的計畫節點')).toBeTruthy();
+    expect(await screen.findByText('第一次一起檢查')).toBeTruthy();
     expect(screen.getByText('+10')).toBeTruthy();
     fireEvent.press(screen.getByLabelText('記下今天的完成'));
 
     await screen.findByText('今天這一步記下來了');
-    expect(screen.getByText('第 5 次的計畫節點')).toBeTruthy();
+    expect(screen.getByText('第一次一起檢查')).toBeTruthy();
     expect(screen.getByText('+10')).toBeTruthy();
     expect(screen.queryByText(/已記下/)).toBeNull();
   });

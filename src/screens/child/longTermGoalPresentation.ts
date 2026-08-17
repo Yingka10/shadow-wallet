@@ -2,6 +2,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import type {
+  CheckpointRewardEntry,
   LongTermGoal,
   PreferredTimeWindow,
   Task,
@@ -70,6 +71,8 @@ export type GoalMilestone = {
    * 只讀這個欄位，不去 `detail` 字串裡找數字）。
    */
   coin: number | null;
+  /** 這個節點的補充說明。只有真的有人寫過才有值，不補一句「到這裡時可以再看看」。 */
+  note: string | null;
 };
 
 export type GoalRecentRecord = {
@@ -358,6 +361,22 @@ function countScheduledDates(
   return count;
 }
 
+function checkpointCoin(entry: CheckpointRewardEntry | undefined): number {
+  if (typeof entry === 'number') return Number.isFinite(entry) ? entry : 0;
+  const coin = Number(entry?.coin);
+  return Number.isFinite(coin) ? coin : 0;
+}
+
+function checkpointTitle(entry: CheckpointRewardEntry | undefined): string | null {
+  const title = typeof entry === 'object' && entry !== null ? entry.title : null;
+  return typeof title === 'string' && title.trim().length > 0 ? title.trim() : null;
+}
+
+function checkpointNote(entry: CheckpointRewardEntry | undefined): string | null {
+  const note = typeof entry === 'object' && entry !== null ? entry.note : null;
+  return typeof note === 'string' && note.trim().length > 0 ? note.trim() : null;
+}
+
 function getNextCheckpoint(
   goal: LongTermGoal,
   current: number,
@@ -372,7 +391,7 @@ function getNextCheckpoint(
   if (threshold === undefined) return null;
   return {
     threshold,
-    coin: Number(goal.checkpoint_rewards[String(threshold)] ?? 0),
+    coin: checkpointCoin(goal.checkpoint_rewards[String(threshold)]),
   };
 }
 
@@ -400,18 +419,26 @@ function getCurrentSkillStage(goal: LongTermGoal): string {
 }
 
 function buildRhythmMilestones(goal: LongTermGoal): GoalMilestone[] {
-  // ⚠️ 只列**真的存在**的 checkpoint。
+  // ⚠️ 只列**真的取過名字**的 checkpoint。
   //
-  //    之前這裡會補一條「N 週後一起回顧」—— 沒有人約定過那件事，
-  //    它是畫面自己生出來的。孩子看到的里程碑必須全部指得出誰講的。
+  //    之前這裡會拿門檻數字自動生一個「第 N 次的計畫節點」——沒有人取過
+  //    這個名字，它是畫面自己生出來的。孩子看到的里程碑必須指得出誰講的
+  //    （LT Demo Text Spec §9）。沒有 title 的門檻只是幣值設定，不算一個
+  //    有意義的節點，直接濾掉。
   return Object.entries(goal.checkpoint_rewards ?? {})
-    .map(([threshold, coin]) => ({ threshold: Number(threshold), coin: Number(coin) }))
-    .filter(({ threshold }) => Number.isFinite(threshold) && threshold >= 1)
+    .map(([threshold, entry]) => ({
+      threshold: Number(threshold),
+      title: checkpointTitle(entry),
+      note: checkpointNote(entry),
+      coin: checkpointCoin(entry),
+    }))
+    .filter(({ threshold, title }) => Number.isFinite(threshold) && threshold >= 1 && title !== null)
     .sort((left, right) => left.threshold - right.threshold)
     .map((checkpoint) => ({
       id: `checkpoint-${checkpoint.threshold}`,
-      title: `第 ${checkpoint.threshold} 次的計畫節點`,
+      title: checkpoint.title as string,
       detail: checkpoint.coin > 0 ? `成長幣 +${checkpoint.coin}（達成時一起確認）` : null,
+      note: checkpoint.note,
       status: 'planned' as const,
       coin: checkpoint.coin > 0 ? checkpoint.coin : null,
     }));
@@ -439,6 +466,7 @@ function buildSkillMilestones(
           ? 'next'
           : 'upcoming',
       coin: hasCoin ? coin : null,
+      note: null,
     };
   });
 
@@ -453,9 +481,9 @@ function buildChallengeMilestones(
 ): GoalMilestone[] {
   const unitSuffix = unit ? ` ${unit}` : '';
   const checkpoints = Object.entries(goal.checkpoint_rewards ?? {})
-    .map(([threshold, coin]) => ({
+    .map(([threshold, entry]) => ({
       threshold: Number(threshold),
-      coin: Number(coin),
+      coin: checkpointCoin(entry),
     }))
     .filter(({ threshold }) => Number.isFinite(threshold) && threshold > 0)
     .sort((left, right) => left.threshold - right.threshold);
@@ -467,6 +495,7 @@ function buildChallengeMilestones(
       detail: null,
       status: 'completed',
       coin: null,
+      note: null,
     },
   ];
 
@@ -481,6 +510,7 @@ function buildChallengeMilestones(
           ? 'next'
           : 'upcoming',
       coin: checkpoint.coin > 0 ? checkpoint.coin : null,
+      note: null,
     });
   }
 
@@ -704,14 +734,22 @@ export function buildGoalPresentation(
     : (isRhythm || isFixedDays) && totalWeeks > 0
       ? `共 ${totalWeeks} 週`
       : null;
-  // ⚠️ 只讀 canonical 證據。階段制讀真實階段名；節奏／固定星期讀孩子自己
-  // 寫的行動摘要；累積制目前沒有對應的 canonical 欄位，就是 null ——
+  // ⚠️ 只讀 canonical 證據。階段制讀真實階段名；節奏／固定星期優先讀孩子
+  // 自己寫的行動摘要；累積制目前沒有對應的 canonical 欄位，就是 null ——
   // 不要自己編一句「今天繼續往目標前進」。
+  //
+  // 節奏計畫沒有孩子行動摘要時，退回一句由 weekly_frequency 算出來的
+  // 通用句子——這不是憑空的 filler，是這份計畫真的約定過的次數，
+  // 只是動詞刻意保持通用（「安排」），不去猜任務專屬的動詞（LT Demo Text
+  // Spec §2 對 todayAction 的同一條規則：不發明 task-specific 的字）。
   const heroPositionNote = isStaged
     ? `目前練習：${getCurrentSkillStage(goal)}`
-    : (isRhythm || isFixedDays)
-      ? (childPlan?.actionPlanSummary ?? null)
-      : null;
+    : isRhythm
+      ? (childPlan?.actionPlanSummary
+        ?? (weeklyFrequency ? `這一段先每週安排 ${weeklyFrequency} 次` : null))
+      : isFixedDays
+        ? (childPlan?.actionPlanSummary ?? null)
+        : null;
   const heroMarkerFraction = isStaged
     ? Math.min(stagedCurrent / Math.max(stagedTarget, 1), 1)
     : isAccumulation

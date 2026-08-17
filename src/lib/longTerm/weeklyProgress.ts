@@ -86,6 +86,7 @@ export function buildWeeklyProgress(
     };
   }
 
+  const remaining = target - done;
   return {
     weekCompletedActual: done,
     weekTarget: target,
@@ -94,6 +95,9 @@ export function buildWeeklyProgress(
     label: `本週 ${done} / ${target}`,
     note: reached
       ? '已到這週約定的節奏'
-      : `還差 ${target - done} 次到這週約定的節奏`,
+      // 只差最後一次時換一句更有感的話，而不是繼續數「還差 1 次」。
+      : remaining === 1
+        ? '再走一小步，這週的節奏就完整了'
+        : `還差 ${remaining} 次到這週約定的節奏`,
   };
 }

@@ -846,7 +846,9 @@ function NextStopCard({ presentation }: { presentation: GoalPresentation }) {
               <Text style={styles.nextStopCaption}>接下來的一站</Text>
             </View>
             <Text style={styles.nextStopTitle}>{next.title}</Text>
-            <Text style={styles.nextStopNote}>到這裡時，可以再一起看看。</Text>
+            <Text style={styles.nextStopNote}>
+              {next.note ?? '到這裡時，看看這段安排做起來怎麼樣，再決定下一段。'}
+            </Text>
           </View>
           {next.coin !== null ? (
             <View style={styles.rewardBadge}>

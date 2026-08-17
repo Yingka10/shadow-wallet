@@ -1047,7 +1047,13 @@ export default function ParentTaskDetailScreen() {
           const total = longTermGoal.total_days ?? 30;
           const pct = Math.min(Math.round((longTermGoal.current_day / total) * 100), 100);
           const cpEntries = longTermGoal.checkpoint_rewards
-            ? Object.entries(longTermGoal.checkpoint_rewards).sort(([a], [b]) => Number(a) - Number(b))
+            ? Object.entries(longTermGoal.checkpoint_rewards)
+              .map(([day, entry]): [string, number] => [
+                day,
+                typeof entry === 'number' ? entry : Number((entry as { coin?: number })?.coin ?? 0),
+              ])
+              .filter(([day]) => Number.isFinite(Number(day)))
+              .sort(([a], [b]) => Number(a) - Number(b))
             : [];
           return (
             <View style={styles.ltSection}>

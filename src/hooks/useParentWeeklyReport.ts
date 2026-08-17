@@ -318,7 +318,8 @@ type RawLTG = {
   target_value: number | null;
   current_value: number | null;
   value_unit: string | null;
-  checkpoint_rewards: Record<string, number> | null;
+  /** 大多是純數字幣值；rhythm 的 checkpoint 可能是帶 title/note 的物件（見 database.ts CheckpointRewardEntry）。 */
+  checkpoint_rewards: Record<string, number | { coin?: number }> | null;
   last_active_date: string | null;
   status: string;
   tasks: { name: string } | null;
@@ -365,7 +366,8 @@ function mapGoalProgress(
 
     if (nextThreshold !== undefined) {
       nextMilestone = `第 ${nextThreshold} ${unit}`;
-      milestoneReward = rewards[String(nextThreshold)] ?? null;
+      const entry = rewards[String(nextThreshold)];
+      milestoneReward = typeof entry === 'number' ? entry : entry?.coin ?? null;
     }
   }
 

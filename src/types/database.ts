@@ -51,8 +51,15 @@ export type ReportedBy = 'child' | 'parent';
 export type PreferredTimeWindow = 'after_dinner' | 'before_bed';
 export type CompletionStartMode = 'self_started' | 'reminded';
 
-/** Maps day-number (as string key) to coin reward. E.g. {"7": 20, "14": 40, "21": 80} */
-export type CheckpointRewards = Record<string, number>;
+/**
+ * Maps a threshold (as string key) to its reward. E.g. {"7": 20, "14": 40, "21": 80}.
+ *
+ * 大多數 checkpoint 只是一個幣值數字。rhythm 進度的 Next Stop 需要一個真正
+ * 取過名字的 checkpoint 時，同一格可以換成物件——沒有 title 的 checkpoint
+ * 不算「有意義的」節點（見 longTermGoalPresentation.ts 的 buildRhythmMilestones）。
+ */
+export type CheckpointRewardEntry = number | { coin?: number; title?: string; note?: string };
+export type CheckpointRewards = Record<string, CheckpointRewardEntry>;
 
 /**
  * 技能學習類的單一學習階段（里程碑）。

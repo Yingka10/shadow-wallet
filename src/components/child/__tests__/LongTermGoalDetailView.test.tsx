@@ -440,31 +440,56 @@ describe('Next Stop（§14：persisted-only）', () => {
   it('有真實 checkpoint 才顯示，而且 badge 只讀 milestone.coin', () => {
     renderView(makePresentation({
       milestones: [
-        { id: 'a', title: '讀到一半', detail: null, status: 'next', coin: 20 },
+        { id: 'a', title: '第一次一起回顧', detail: null, status: 'next', coin: 20, note: null },
       ],
     }));
     expect(screen.getByText('這段路上的下一站')).toBeTruthy();
-    expect(screen.getByText('讀到一半')).toBeTruthy();
+    expect(screen.getByText('第一次一起回顧')).toBeTruthy();
     expect(screen.getByText('+20')).toBeTruthy();
   });
 
   it('沒有 coin 證據就不畫 badge', () => {
     renderView(makePresentation({
       milestones: [
-        { id: 'a', title: '讀到一半', detail: null, status: 'next', coin: null },
+        { id: 'a', title: '第一次一起回顧', detail: null, status: 'next', coin: null, note: null },
       ],
     }));
-    expect(screen.getByText('讀到一半')).toBeTruthy();
+    expect(screen.getByText('第一次一起回顧')).toBeTruthy();
     expect(screen.queryByText(/^\+\d/)).toBeNull();
   });
 
   it('全部 completed（沒有 next/planned）就不顯示', () => {
     renderView(makePresentation({
       milestones: [
-        { id: 'a', title: '已累積 2 本', detail: null, status: 'completed', coin: null },
+        { id: 'a', title: '已累積 2 本', detail: null, status: 'completed', coin: null, note: null },
       ],
     }));
     expect(screen.queryByTestId('goal-next-stop')).toBeNull();
+  });
+
+  it('顯示真實 checkpoint note，而不是寫死的句子', () => {
+    renderView(makePresentation({
+      milestones: [
+        {
+          id: 'a',
+          title: '第一次一起回顧',
+          detail: null,
+          status: 'next',
+          coin: null,
+          note: '到這裡時，看看這段安排做起來怎麼樣，再決定下一段。',
+        },
+      ],
+    }));
+    expect(screen.getByText('到這裡時，看看這段安排做起來怎麼樣，再決定下一段。')).toBeTruthy();
+  });
+
+  it('沒有 note 時退回通用的一句話', () => {
+    renderView(makePresentation({
+      milestones: [
+        { id: 'a', title: '第一次一起回顧', detail: null, status: 'next', coin: null, note: null },
+      ],
+    }));
+    expect(screen.getByText('到這裡時，看看這段安排做起來怎麼樣，再決定下一段。')).toBeTruthy();
   });
 });
 
