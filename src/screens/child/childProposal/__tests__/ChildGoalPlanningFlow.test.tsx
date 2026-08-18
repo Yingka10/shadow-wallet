@@ -215,8 +215,8 @@ describe('§7 開場只問一題', () => {
     expect(view.getByText(PLANNING_COPY.opening.question)).toBeTruthy();
     // 這一頁只有三個選項，沒有第二題。
     expect(view.queryByTestId('planning-approach-input')).toBeNull();
-    expect(view.queryByText(PLANNING_COPY.ready.cadenceLabel)).toBeNull();
-    expect(view.queryByText(PLANNING_COPY.ready.sessionSizeLabel)).toBeNull();
+    expect(view.queryByText(PLANNING_COPY.ready.rhythmLabel)).toBeNull();
+    expect(view.queryByText(PLANNING_COPY.ready.trialLabel)).toBeNull();
   });
 
   it('只有「我有自己的想法」才追問怎麼做', () => {
@@ -351,7 +351,18 @@ describe('Case 3 / 4｜選項與「我自己想」', () => {
     const view = await openWith(h, 'want_options');
 
     await waitFor(() => expect(view.getByTestId('planning-choice')).toBeTruthy());
+
+    // 選起來**還沒送出** —— 點到哪一個就直接打出去的話，孩子手指滑到
+    // 就決定了，而且那一輪退不回來（已經寫進對話）。
     fireEvent.press(view.getByTestId('planning-option-option-1'));
+    expect(h.requests).toHaveLength(1);
+
+    // 改選也還來得及。
+    fireEvent.press(view.getByTestId('planning-option-option-2'));
+    expect(h.requests).toHaveLength(1);
+
+    fireEvent.press(view.getByTestId('planning-option-option-1'));
+    fireEvent.press(view.getByTestId('planning-choice-confirm'));
 
     await waitFor(() => expect(h.requests).toHaveLength(2));
     expect(h.requests[1].responses).toEqual([
@@ -438,7 +449,7 @@ describe('§14 「我想改一下」不是打開一張表單', () => {
 
     expect(view.getByTestId('planning-write-own')).toBeTruthy();
     // 不是一張把節奏／份量／時段全部攤開的 admin 表單。
-    expect(view.queryByText(PLANNING_COPY.ready.cadenceLabel)).toBeNull();
-    expect(view.queryByText(PLANNING_COPY.ready.sessionSizeLabel)).toBeNull();
+    expect(view.queryByText(PLANNING_COPY.ready.rhythmLabel)).toBeNull();
+    expect(view.queryByText(PLANNING_COPY.ready.trialLabel)).toBeNull();
   });
 });

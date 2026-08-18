@@ -15,6 +15,9 @@
 
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import {
+  isClientRequestId,
+} from '../../parent/tablet/taskDrawer/taskPersistence/clientRequestId';
 
 const mockCreateChildTask = jest.fn(() => {
   throw new Error('這條路不該碰 createChildTask');
@@ -177,7 +180,14 @@ describe('§D 規劃開不起來時不自動送出', () => {
     expect(starts).toHaveLength(2);
     // 換一把新的 id 會真的開出第二場對話。
     expect(starts[0][1].p_command.clientRequestId).toBe(starts[1][1].p_command.clientRequestId);
-    expect(starts[0][1].p_command.clientRequestId).toBeTruthy();
+
+    // ⚠️ 這一條不可以放寬成 toBeTruthy()。
+    //
+    // 原本就是 toBeTruthy()，於是這支測試對
+    // `${Date.now()}-${Math.random()...}` 一路是綠的 —— 而那個字串在真實
+    // production 會讓 start RPC 的 `::uuid` 轉型丟 22P02、PostgREST 回 400，
+    // 孩子看到「這次沒有整理成功」。DB 欄位是 uuid，所以格式本身就是契約。
+    expect(isClientRequestId(starts[0][1].p_command.clientRequestId)).toBe(true);
   });
 
   it('「我自己想」也走同一個冪等的 start，然後直接跳到輸入那一頁', async () => {

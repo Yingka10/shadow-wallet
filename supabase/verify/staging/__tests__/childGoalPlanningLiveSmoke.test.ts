@@ -221,7 +221,9 @@ suite('P1-AI-FINAL staging — Child Goal Planning 真實 Gemini 全鏈', () => 
       .eq('id', publishedPlanVersionId)
       .maybeSingle();
     expect(error).toBeNull();
-    expect(row).not.toBeNull();
+    // expect(...).not.toBeNull() 不會讓 TS 收斂型別，所以這裡要自己擋 ——
+    // 少了這一行，下面每一次 row.xxx 都是 TS18047。
+    if (row === null) throw new Error('讀不到剛剛送出的正式計畫版本');
 
     console.log('\n  [staging] 正式版本：', JSON.stringify({
       authored_by: row.authored_by,
@@ -248,7 +250,21 @@ suite('P1-AI-FINAL staging — Child Goal Planning 真實 Gemini 全鏈', () => 
       .maybeSingle();
     expect(proposalRow?.status).toBe('proposed');
 
-    const { data: sessionRow } = await supabase
+    // ⚠️ child_goal_planning_sessions 還沒有進 src/types/database.ts 的
+    //    generated schema，所以 typed client 認不得這張表（TS2769）。
+    //    這裡**只在這一支驗證腳本裡**退到 untyped client 讀一個欄位 ——
+    //    正式程式碼一律走 RPC，不直接 .from() 這張表，所以不需要為了它
+    //    去改共用型別（那會動到 A 也在碰的檔案）。
+    const untyped = supabase as unknown as {
+      from(table: string): {
+        select(columns: string): {
+          eq(column: string, value: string): {
+            maybeSingle(): Promise<{ data: { status?: string } | null }>;
+          };
+        };
+      };
+    };
+    const { data: sessionRow } = await untyped
       .from('child_goal_planning_sessions')
       .select('status')
       .eq('id', sessionId)

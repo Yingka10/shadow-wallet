@@ -84,6 +84,16 @@ export type ChildGoalPlanningFlowProps = {
   /** 這場對話開始時的 session revision（剛開好的是 0）。 */
   initialRevision: number;
   /**
+   * 孩子在提案上已經講過的時段（`preferred_time_custom ?? preferred_time`）。
+   *
+   * ⚠️ **optional execution detail，不是必填。** 沒有就是沒有 ——
+   *    這一層不追問、不補預設值，summary 也不會出現那一列。
+   *    目前孩子端問卷不收時段，所以多半是 null；它不是死碼，因為
+   *    `child_proposals.preferred_time` 本來就存在，之後若由 optional
+   *    clarification 寫入，這裡不用改就會顯示。
+   */
+  preferredTime?: string | null;
+  /**
    * 直接進「我自己寫怎麼開始」，跳過開場那一題。
    *
    * 用在孩子已經表達過「我自己想」的時候（例如規劃開不起來那一頁）——
@@ -127,6 +137,7 @@ type Phase =
 export default function ChildGoalPlanningFlow({
   ports,
   initialRevision,
+  preferredTime = null,
   startInWriteOwn = false,
   onSendToParents,
   onDone,
@@ -141,6 +152,14 @@ export default function ChildGoalPlanningFlow({
   const [approach, setApproach] = useState('');
   const [answer, setAnswer] = useState('');
   const [writingOwn, setWritingOwn] = useState(startInWriteOwn);
+  /**
+   * needs_choice 這一頁「選起來了、但還沒送出」的那一個。
+   *
+   * 與 openingChoice 分開：那一個是支援強度（本地偏好），這一個會變成
+   * 一則寫進對話的 choice_selection。送出後立刻清掉，下一輪不會帶著上一輪
+   * 的選取狀態進來。
+   */
+  const [chosenOptionId, setChosenOptionId] = useState<string | null>(null);
 
   const exits = useMemo(() => childPlanningSessionExits(session), [session]);
 
@@ -382,6 +401,23 @@ export default function ChildGoalPlanningFlow({
             if (appended.ok) setSession(appended.state);
           }}
         />
+        {/*
+          退回剛剛那一頁（選項／計畫）。
+
+          只有真的有東西可以退回去時才出現 —— latestResult 是 null 時
+          （例如等待中按「先不等」進來的），退回去只會看到一個空畫面。
+          這一步純粹是畫面狀態，不會動到已經記下的那一輪。
+        */}
+        {result !== null ? (
+          <Secondary
+            testID="planning-write-own-back"
+            label={PLANNING_COPY.nav.back}
+            onPress={() => {
+              setAnswer('');
+              setWritingOwn(false);
+            }}
+          />
+        ) : null}
         <Secondary
           testID="planning-send-to-parents"
           label={PLANNING_COPY.requesting.escapeSend}
@@ -432,36 +468,51 @@ export default function ChildGoalPlanningFlow({
   }
 
   if (result?.status === 'needs_choice') {
+    const chosen = result.options.find((o) => o.id === chosenOptionId) ?? null;
     return (
       <ScrollView testID="planning-choice" contentContainerStyle={styles.body}>
         <Text style={styles.question}>{result.question}</Text>
-        <Text style={styles.hint}>{PLANNING_COPY.choice.hint}</Text>
+        <Text style={styles.subtitle}>{PLANNING_COPY.choice.hint}</Text>
 
         <View style={styles.options}>
-          {result.options.map((option) => (
+          {result.options.map((option, index) => (
             <Choice
               key={option.id}
               testID={`planning-option-${option.id}`}
               label={option.text}
-              selected={false}
-              onPress={() =>
-                void runRound({
-                  type: 'choice_selection',
-                  optionId: option.id,
-                  optionText: option.text,
-                })
-              }
+              marker={index + 1}
+              // 只是選起來，還沒送出 —— 可以改選，也可以不選。
+              selected={chosenOptionId === option.id}
+              onPress={() => setChosenOptionId(option.id)}
             />
           ))}
 
-          {/* 永遠在最後，而且永遠存在 —— 不是一個可以被關掉的分支。 */}
+          {/* 永遠在最後，而且永遠存在 —— 不是一個可以被關掉的分支。
+              outlined 而且沒有編號：它是「換一種方式」，不是第四個做法。
+              它通往一個有「上一步」的輸入頁，所以直接進去不算不可逆。 */}
           <Choice
             testID="planning-option-custom"
             label={PLANNING_COPY.choice.custom}
+            variant="outlined"
             selected={false}
             onPress={() => setWritingOwn(true)}
           />
         </View>
+
+        <Primary
+          testID="planning-choice-confirm"
+          label={PLANNING_COPY.choice.confirm}
+          disabled={chosen === null}
+          onPress={() => {
+            if (chosen === null) return;
+            setChosenOptionId(null);
+            void runRound({
+              type: 'choice_selection',
+              optionId: chosen.id,
+              optionText: chosen.text,
+            });
+          }}
+        />
 
         <Secondary
           testID="planning-send-to-parents"
@@ -476,7 +527,8 @@ export default function ChildGoalPlanningFlow({
     return (
       <ScrollView testID="planning-ready" contentContainerStyle={styles.body}>
         <Text style={styles.question}>{PLANNING_COPY.ready.title}</Text>
-        <ReadyPlan plan={result.plan} />
+        <Text style={styles.subtitle}>{PLANNING_COPY.ready.subtitle}</Text>
+        <ReadyPlan plan={result.plan} preferredTime={preferredTime} />
 
         <Primary
           testID="planning-confirm"
@@ -549,24 +601,65 @@ function describeSessionSize(plan: ChildGoalPlan): string | null {
 }
 
 /**
+ * 節奏 ＋ 份量合成一句話：「每週 3 次、每次 15 分鐘」。
+ *
+ * 兩者各自可能缺席，所以是組合而不是樣板字串 —— 只有節奏時就只講節奏，
+ * 補一個沒有人決定過的份量是這份契約整包在防的事。
+ */
+function describeRhythm(plan: ChildGoalPlan): string | null {
+  const cadence = describeCadence(plan);
+  const size = describeSessionSize(plan);
+  if (cadence && size) return `${cadence}、每次 ${size}`;
+  if (cadence) return cadence;
+  return size ? `每次 ${size}` : null;
+}
+
+/**
+ * 先試多久。
+ *
+ * 42 天講成「6 週」是因為孩子（與家長）想的是週，不是天；除不盡才退回天數，
+ * 不四捨五入成一個沒有人講過的數字。
+ */
+function describeTrial(plan: ChildGoalPlan): string | null {
+  if (plan.progressionKind !== 'rhythm' || plan.trialPeriod === null) return null;
+  if ('sessions' in plan.trialPeriod) return `${plan.trialPeriod.sessions} 次`;
+  const { days } = plan.trialPeriod;
+  return days % 7 === 0 ? `${days / 7} 週` : `${days} 天`;
+}
+
+/**
  * 這一輪只做**最窄的孩子端預覽**。
  *
  * 不重畫長期詳情、不顯示分類、不顯示幣值 —— 孩子這一刻只需要回答一件事：
  * 「這是不是我願意先這樣試的方式？」
  */
-function ReadyPlan({ plan }: { plan: ChildGoalPlan }) {
+function ReadyPlan({ plan, preferredTime }: { plan: ChildGoalPlan; preferredTime: string | null }) {
   return (
     <View testID="planning-ready-plan" style={styles.card}>
-      <Row label={PLANNING_COPY.ready.outcomeLabel} value={plan.desiredOutcome} />
-      <Row label={PLANNING_COPY.ready.summaryLabel} value={plan.actionPlanSummary} />
-      <Row label={PLANNING_COPY.ready.nextActionLabel} value={plan.nextAction.text} />
+      {/* ① 想做到什麼 —— 這一頁的主詞，所以是大字，不是欄位表的第一列。 */}
+      <View style={styles.heroBlock}>
+        <Text style={styles.label}>{PLANNING_COPY.ready.outcomeLabel}</Text>
+        <Text style={styles.heroValue}>{plan.desiredOutcome}</Text>
+      </View>
 
-      {plan.progressionKind === 'rhythm' ? (
-        <>
-          <Row label={PLANNING_COPY.ready.cadenceLabel} value={describeCadence(plan)} />
-          <Row label={PLANNING_COPY.ready.sessionSizeLabel} value={describeSessionSize(plan)} />
-        </>
-      ) : null}
+      {/* ② 這一段怎麼做 —— 執行細節收在一起，每一項都是一行短句。 */}
+      <View style={styles.detailBlock}>
+        <InlineRow label={PLANNING_COPY.ready.trialLabel} value={describeTrial(plan)} />
+        <InlineRow label={PLANNING_COPY.ready.rhythmLabel} value={describeRhythm(plan)} />
+        {/*
+          ⚠️ 沒有時段就**整列不出現**。
+          沒有固定時間不是缺漏 —— 不追問、不補假值，見 copy 的 timeLabel。
+        */}
+        <InlineRow label={PLANNING_COPY.ready.timeLabel} value={preferredTime} />
+      </View>
+
+      {/* ③ 今天第一步 —— 唯一今天真的要做的事，所以獨立一塊、給重量。 */}
+      <View style={styles.stepBlock}>
+        <Text style={styles.stepLabel}>{PLANNING_COPY.ready.nextActionLabel}</Text>
+        <Text style={styles.stepValue}>{plan.nextAction.text}</Text>
+      </View>
+
+      <Row label={PLANNING_COPY.ready.summaryLabel} value={plan.actionPlanSummary} />
 
       {plan.progressionKind === 'staged' ? (
         <>
@@ -605,6 +698,22 @@ function Row({ label, value }: { label: string; value: string | null }) {
   );
 }
 
+/**
+ * 標籤在左、值在右的一行。**沒有值就整行消失**（不是顯示「未定」）。
+ *
+ * 顯示「未定」等於把「還沒決定」畫成一個缺口，孩子會覺得計畫沒做完；
+ * 而很多事本來就不需要決定。
+ */
+function InlineRow({ label, value }: { label: string; value: string | null }) {
+  if (value === null || value.length === 0) return null;
+  return (
+    <View style={styles.inlineRow}>
+      <Text style={styles.inlineLabel}>{label}</Text>
+      <Text style={styles.inlineValue}>{value}</Text>
+    </View>
+  );
+}
+
 // ---------------------------------------------------------------------------
 
 function Choice({
@@ -612,23 +721,53 @@ function Choice({
   label,
   selected,
   onPress,
+  marker,
+  variant = 'card',
 }: {
   testID: string;
   label: string;
   selected: boolean;
   onPress: () => void;
+  /**
+   * 選項序號（1／2／3）。**只有 needs_choice 那一頁給。**
+   *
+   * 開場那三個是並列的問句答案，編號會讓它們看起來有先後或優劣；
+   * 這裡的三個則是「幾種做法」，編號純粹是讓孩子講得出「我要第 2 個」。
+   */
+  marker?: number;
+  /**
+   * outlined = 「我自己想」。
+   *
+   * 它不是第四個選項，是**另一種動作** —— 長得跟前三張一樣的話，
+   * 「自己想」會被讀成「第四種 GrowBook 提的做法」。
+   */
+  variant?: 'card' | 'outlined';
 }) {
+  const outlined = variant === 'outlined';
   return (
     <TouchableOpacity
       testID={testID}
-      style={[styles.choice, selected && styles.choiceOn]}
+      style={[styles.choice, outlined && styles.choiceOutlined, selected && styles.choiceOn]}
       onPress={onPress}
       accessibilityRole="radio"
       accessibilityState={{ selected }}
       accessibilityLabel={label}
       activeOpacity={0.85}
     >
-      <Text style={[styles.choiceLabel, selected && styles.choiceLabelOn]}>{label}</Text>
+      {marker !== undefined ? (
+        <View style={styles.marker}>
+          <Text style={styles.markerText}>{marker}</Text>
+        </View>
+      ) : null}
+      <Text
+        style={[
+          styles.choiceLabel,
+          outlined && styles.choiceLabelOutlined,
+          selected && styles.choiceLabelOn,
+        ]}
+      >
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 }
@@ -693,6 +832,20 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   hint: { fontSize: 14, color: Colors.fgMuted, fontWeight: '600', textAlign: 'center' },
+  /**
+   * 靠左的說明行。
+   *
+   * 與 hint 分開是因為對齊方式不同，不是因為顏色不同：hint 服務的是
+   * 置中的等待／完成頁，這一個服務的是靠左標題底下的頁面。置中的說明
+   * 掛在靠左的標題底下，兩行的起點對不上，截圖時特別明顯。
+   */
+  subtitle: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: Colors.fgMuted,
+    fontWeight: '600',
+    marginTop: -4,
+  },
   block: { gap: 8 },
   options: { gap: 10, marginTop: 8 },
   input: {
@@ -715,10 +868,35 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.borderSoft,
     paddingHorizontal: 18,
-    justifyContent: 'center',
+    paddingVertical: 14,
+    // row + center：有沒有編號都垂直置中，長文字則在卡片內換行（見 choiceLabel 的 flex）。
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   choiceOn: { borderColor: Colors.accent, backgroundColor: Colors.leaf50 },
-  choiceLabel: { fontSize: 17, lineHeight: 24, fontWeight: '800', color: Colors.ink900 },
+  /**
+   * 「我自己想」。
+   *
+   * 透明底 ＋ 綠框：白色實心卡是「GrowBook 提的做法」，這一個不是做法，
+   * 是他自己來。用同一種卡片樣式的話，第四張看起來就是第四個建議。
+   */
+  choiceOutlined: {
+    backgroundColor: 'transparent',
+    borderColor: Colors.accent,
+  },
+  choiceLabelOutlined: { color: Colors.leaf700 },
+  marker: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.leaf50,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  markerText: { fontSize: 13, fontWeight: '800', color: Colors.leaf700 },
+  // flex: 1 讓長選項在卡片內換行，而不是把編號擠出去。
+  choiceLabel: { flex: 1, fontSize: 17, lineHeight: 24, fontWeight: '800', color: Colors.ink900 },
   choiceLabelOn: { color: Colors.leaf700 },
   card: {
     borderRadius: 20,
@@ -730,6 +908,48 @@ const styles = StyleSheet.create({
   row: { paddingVertical: 14, gap: 4 },
   label: { fontSize: 13, fontWeight: '800', color: Colors.leaf700 },
   value: { fontSize: 17, lineHeight: 25, fontWeight: '800', color: Colors.ink900 },
+
+  // ① 想做到什麼
+  heroBlock: { paddingTop: 18, paddingBottom: 14, gap: 6 },
+  heroValue: { fontSize: 21, lineHeight: 30, fontWeight: '900', color: Colors.ink900 },
+
+  // ② 執行細節：淡底的一塊，與上下兩塊區隔開，但不搶主標。
+  detailBlock: {
+    backgroundColor: Colors.leaf50,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    marginBottom: 14,
+  },
+  inlineRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    paddingVertical: 9,
+    gap: 16,
+  },
+  inlineLabel: { fontSize: 14, fontWeight: '700', color: Colors.leaf700 },
+  // flex + 靠右：長值換行時仍與標籤對齊，不會把標籤擠掉。
+  inlineValue: {
+    flex: 1,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '800',
+    color: Colors.ink900,
+    textAlign: 'right',
+  },
+
+  // ③ 今天第一步：左側綠邊，視覺上是「現在就能做的那一件」。
+  stepBlock: {
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.accent,
+    paddingLeft: 12,
+    paddingVertical: 2,
+    marginBottom: 4,
+    gap: 4,
+  },
+  stepLabel: { fontSize: 13, fontWeight: '800', color: Colors.leaf700 },
+  stepValue: { fontSize: 18, lineHeight: 26, fontWeight: '900', color: Colors.ink900 },
   primary: {
     minHeight: 56,
     borderRadius: 28,

@@ -52,6 +52,10 @@ import {
 import ChildGoalPlanningFlow, {
   type PlanningFlowPorts,
 } from './childProposal/ChildGoalPlanningFlow';
+// 直接指向那一支檔案，不走 taskPersistence 的 barrel —— barrel 會把整個
+// 家長端抽屜的建立流程拉進孩子端的 bundle，而這裡只需要一個純函式。
+// （src/hooks/useChildSharedPlanTimeAdjustment.ts 也是這樣用同一支。）
+import { newClientRequestId } from '../parent/tablet/taskDrawer/taskPersistence/clientRequestId';
 import { toPlanningRequest } from './childProposal/toPlanningRequest';
 import {
   CADENCE_OPTIONS,
@@ -139,7 +143,13 @@ export default function ChildProposalScreen() {
   const planningServiceRef = useRef(new ChildPlanningSessionService());
   const formalPlanServiceRef = useRef(new ChildFormalPlanService());
   // 同一次「開始規劃」的識別碼。連點兩下不會生出兩場對話。
-  const planningAttemptRef = useRef<string>(`${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  //
+  // ⚠️ 一定要走 newClientRequestId()，不可以自己用 Date.now() 湊一個字串：
+  //    DB 的 client_request_id 是 uuid 欄位，start RPC 第一件事就是
+  //    `NULLIF(...)::uuid`。非 UUID 的字串會在轉型時丟 22P02，PostgREST
+  //    回 400，App 只看得到 PERSISTENCE_FAILED —— 畫面顯示「這次沒有整理
+  //    成功」，看起來像 AI 掛了，其實模型從頭到尾沒有被呼叫。
+  const planningAttemptRef = useRef<string>(newClientRequestId());
 
   /**
    * 這個環境有沒有 Goal Planning。
@@ -447,6 +457,26 @@ export default function ChildProposalScreen() {
         <GradientBackground />
         <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
           <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+            {/*
+              離開整個規劃流程。
+
+              ⚠️ 這**不會**送出，也不會放棄那場對話 —— 想法已經是 draft，
+                 session 留在 in_progress。孩子只是先離開，不是做了決定。
+                 真正的兩個決定（確認計畫／先送給爸媽）都在畫面裡，
+                 不會被一顆返回鍵代替。
+            */}
+            <TouchableOpacity
+              testID="planning-exit"
+              accessibilityRole="button"
+              accessibilityLabel={PLANNING_COPY.nav.leave}
+              style={styles.backBtn}
+              onPress={() => navigation.goBack()}
+              activeOpacity={0.72}
+              hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+            >
+              <Text style={styles.backMark}>‹</Text>
+            </TouchableOpacity>
+
             <Text style={styles.headerTitle}>{PLANNING_COPY.flowTitle}</Text>
           </View>
           <ChildGoalPlanningFlow
