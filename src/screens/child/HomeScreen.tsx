@@ -49,6 +49,7 @@ import { useWallet } from '../../hooks/useWallet';
 import { useChildProposalReview } from '../../hooks/useChildProposalReview';
 import { isChildPlanningReviewCard } from '../../lib/childPlanning/childReview';
 import { buildWeeklyProgress, resolveLongTermProgression } from '../../lib/longTerm';
+import { buildGoalPresentation } from './longTermGoalPresentation';
 import { ChildSharedTermsReviewCard } from '../../components/child/ChildSharedTermsReviewCard';
 import BottomNav from '../../components/BottomNav';
 import GrassGroundScene from '../../components/child/GrassGroundScene';
@@ -82,6 +83,22 @@ type ChildMeta = {
   nickname: string;
 };
 type GoalTone = 'piano' | 'book' | 'sleep' | 'growth';
+
+/**
+ * 一筆長期目標「今天可以留紀錄的那一步」，掛進今天要做的清單。
+ *
+ * 只從 `buildGoalPresentation` 讀 canCompleteToday / todayAction ——
+ * 不在這裡重新猜一次今天排不排得上（LT-FINAL-1R §A 的規則：progression
+ * 與 availability 只問一次，各畫面各猜一次的結果就是首頁與詳情頁對不上）。
+ */
+type GoalTodayEntry = {
+  id: string;
+  taskId: string;
+  goalId: string;
+  goalName: string;
+  actionText: string;
+  isCompleted: boolean;
+};
 
 const TASK_DIFF_OPTIONS = [1, 1.5, 2, 2.5, 3];
 
@@ -266,6 +283,9 @@ function taskIcon(task: TodayTask): string {
 
 function taskRewardText(task: TodayTask, isPrerequisiteMet: boolean): string {
   if (task.category === 'C') return `+${calcDisplayCoin(task, isPrerequisiteMet)} 枚金幣`;
+  // D 類的幣值是家長直接設定（coin_override），不是 calcDisplayCoin 那套
+  // C 專用、看前置任務打折的公式 —— 兩條式子刻意不共用。
+  if (task.category === 'D' && task.coin_override) return `+${task.coin_override} 枚金幣`;
   if (task.category === 'B' && task.time_saving_min > 0) return `省 ${task.time_saving_min} 分鐘`;
   return '完成打卡';
 }
@@ -336,7 +356,11 @@ export default function HomeScreen() {
   const shortTermTasks = isWeekend ? weekendTasks : weekdayTasks;
   const dutyTasks = shortTermTasks.filter(t => t.category === 'A' || t.category === 'B');
   const contributionTasks = shortTermTasks.filter(t => t.category === 'C');
-  const todayTasks = [...dutyTasks, ...contributionTasks];
+  // 短期的 D 類（學習與技能，例如「練鋼琴 30 分鐘」）之前完全沒有進這個清單 ——
+  // 不是設計選擇，是舊碼只挑了 A/B/C 三桶。CHILD-HOME-DEMO-POLISH 需要
+  // 「學習/技能也有成長回饋」這個角色在今天要做的裡看得到，所以補上第四桶。
+  const growthTasks = shortTermTasks.filter(t => t.category === 'D');
+  const todayTasks = [...dutyTasks, ...contributionTasks, ...growthTasks];
   const todayDone = todayTasks.filter(t => t.isCompleted).length;
   const todayTotal = todayTasks.length;
   const allCount = todayTotal + longTermTasks.length;
@@ -345,6 +369,25 @@ export default function HomeScreen() {
     .filter(task => task.isCompleted)
     .reduce((sum, task) => sum + calcDisplayCoin(task, isPrerequisiteMet), 0);
   const visibleLongTermTasks = longTermTasks.filter(task => task.goal).slice(0, 6);
+  const goalTodayEntries: GoalTodayEntry[] = useMemo(
+    () => visibleLongTermTasks.reduce<GoalTodayEntry[]>((entries, task) => {
+      if (!task.goal) return entries;
+      const presentation = buildGoalPresentation(task, task.goal, task.weekCompletions ?? []);
+      if (!presentation.canCompleteToday && !presentation.sessionEvidence.checkedInToday) {
+        return entries;
+      }
+      entries.push({
+        id: task.id,
+        taskId: task.id,
+        goalId: task.goal.id,
+        goalName: presentation.headerTitle,
+        actionText: presentation.todayAction,
+        isCompleted: presentation.sessionEvidence.checkedInToday,
+      });
+      return entries;
+    }, []),
+    [visibleLongTermTasks],
+  );
   const nickname = childMeta?.nickname ?? '小朋友';
   const greeting = getGreeting();
   const isNight = greeting === '晚安';   // 問候語變晚安 → hero 切夜景
@@ -615,37 +658,56 @@ export default function HomeScreen() {
             <ProgressDots done={todayDone} total={Math.max(todayTotal, 7)} />
           </View>
 
-          {visibleLongTermTasks.length > 0 && (
-            <View style={styles.section}>
-              <SectionTitle icon="🌱" title="我的成長目標" action="查看全部" />
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.goalList}
-              >
-                {visibleLongTermTasks.map(task => (
-                  <GoalCard
-                    key={task.id}
-                    task={task}
-                    onPress={() =>
-                      navigation.navigate('LongTermDetail', {
-                        goalId: task.goal!.id,
-                        taskId: task.id,
-                        taskName: task.name,
-                      })
-                    }
-                  />
-                ))}
-              </ScrollView>
-            </View>
-          )}
+          <View style={styles.section}>
+            <SectionTitle icon="🌱" title="我的成長目標" action="查看全部" />
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.goalList}
+            >
+              {visibleLongTermTasks.map(task => (
+                <GoalCard
+                  key={task.id}
+                  task={task}
+                  onPress={() =>
+                    navigation.navigate('LongTermDetail', {
+                      goalId: task.goal!.id,
+                      taskId: task.id,
+                      taskName: task.name,
+                    })
+                  }
+                />
+              ))}
+              {/*
+                孩子端唯一的「我有想做的事」入口，緊接在成長目標卡片後面。
+                走提案流程 —— 不建立正式任務、不發幣，家長之後一起確認。
+                舊的直接建立任務入口見 LEGACY_CHILD_TASK_ENTRY_ENABLED。
+                這張卡是 UI 邀請，不是 visibleLongTermTasks 的一員 ——
+                不讀 goal 資料，永遠顯示。
+              */}
+              <AddGoalCard onPress={() => navigation.navigate('ChildProposal', { childId })} />
+            </ScrollView>
+          </View>
 
           <View style={styles.section}>
             <SectionTitle icon="☀️" title="今天要做的" action={`${remainingToday} 件任務`} />
             {loading ? (
               <ActivityIndicator color={HOME.primaryGreen} style={styles.sectionLoading} />
-            ) : todayTasks.length > 0 ? (
+            ) : todayTasks.length > 0 || goalTodayEntries.length > 0 ? (
               <View style={styles.taskList}>
+                {goalTodayEntries.map(entry => (
+                  <GoalActionRow
+                    key={entry.id}
+                    entry={entry}
+                    onPress={() =>
+                      navigation.navigate('LongTermDetail', {
+                        goalId: entry.goalId,
+                        taskId: entry.taskId,
+                        taskName: entry.goalName,
+                      })
+                    }
+                  />
+                ))}
                 {todayTasks.map(task => (
                   <TodayTaskRow
                     key={task.id}
@@ -716,11 +778,6 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          {/*
-            孩子端唯一的「我有想做的事」入口。
-            走提案流程 —— 不建立正式任務、不發幣，家長之後一起確認。
-            舊的直接建立任務入口見 LEGACY_CHILD_TASK_ENTRY_ENABLED。
-          */}
           {proposalReviewSuccess && <Text style={styles.reviewSuccess}>{proposalReviewSuccess}</Text>}
           {/*
             P1 與 legacy 是兩張卡片，不是一張帶旗標的。
@@ -769,22 +826,6 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
           )}
-          <TouchableOpacity
-            testID="child-proposal-entry"
-            style={styles.addRow}
-            onPress={() => navigation.navigate('ChildProposal', { childId })}
-            activeOpacity={0.72}
-            accessibilityRole="button"
-            accessibilityLabel={PROPOSAL_COPY.entry}
-          >
-            <View style={styles.addPlus}>
-              <Text style={styles.addPlusText}>＋</Text>
-            </View>
-            <View style={styles.addRowTextWrap}>
-              <Text style={styles.addRowText}>{PROPOSAL_COPY.entry}</Text>
-              <Text style={styles.addRowHint}>{PROPOSAL_COPY.entryHint}</Text>
-            </View>
-          </TouchableOpacity>
 
           {LEGACY_CHILD_TASK_ENTRY_ENABLED ? (
             <TouchableOpacity style={styles.addRow} onPress={openAddTask} activeOpacity={0.72}>
@@ -1065,6 +1106,63 @@ function GoalCard({ task, onPress }: { task: TodayTask; onPress: () => void }) {
   );
 }
 
+/**
+ * 成長目標橫列最後一張卡：孩子端唯一的提案入口。
+ *
+ * 填色卡片（不是虛線佔位感）—— 跟真的 GoalCard 同一個圓角家族與陰影，
+ * 用實心圖示圈與沒有進度條這兩件事，讓人一眼看出這張不是 goal 資料，
+ * 是一個邀請。
+ */
+function AddGoalCard({ onPress }: { onPress: () => void }) {
+  return (
+    <TouchableOpacity
+      testID="child-proposal-entry"
+      activeOpacity={0.86}
+      style={styles.addGoalCard}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={PROPOSAL_COPY.entry}
+    >
+      <View style={styles.addGoalPlus}>
+        <Text style={styles.addGoalPlusText}>＋</Text>
+      </View>
+      <Text style={styles.addGoalTitle}>{PROPOSAL_COPY.entry}</Text>
+      <Text style={styles.addGoalHint}>說說你想做到的事</Text>
+    </TouchableOpacity>
+  );
+}
+
+/**
+ * 今天要做的清單裡，屬於某個長期目標的那一列。
+ *
+ * 跟 TodayTaskRow 共用同一組卡片樣式，但多一行成長目標標籤，
+ * 讓人一眼看出這件事屬於哪個目標；點下去導去目標詳情，不是完成 modal ——
+ * 長期任務的紀錄流程（時段等）只有詳情頁有。
+ */
+function GoalActionRow({ entry, onPress }: { entry: GoalTodayEntry; onPress: () => void }) {
+  return (
+    <TouchableOpacity
+      activeOpacity={0.78}
+      onPress={onPress}
+      style={[styles.taskRow, entry.isCompleted && styles.taskRowDone]}
+    >
+      <View style={[styles.checkbox, entry.isCompleted && styles.checkboxDone]}>
+        {entry.isCompleted ? <Text style={styles.checkboxCheck}>✓</Text> : null}
+      </View>
+      <Text style={styles.taskEmoji}>🌱</Text>
+      <View style={styles.taskCopy}>
+        <Text style={styles.goalTagText} numberOfLines={1}>🌱 {entry.goalName}</Text>
+        <Text
+          style={[styles.taskName, entry.isCompleted && styles.taskNameDone]}
+          numberOfLines={2}
+        >
+          {entry.actionText}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 function TodayTaskRow({
   task,
   isPrerequisiteMet,
@@ -1092,10 +1190,10 @@ function TodayTaskRow({
         </Text>
         <Text style={styles.taskReward}>🪙 {taskRewardText(task, isPrerequisiteMet)}</Text>
       </View>
-      {task.category === 'C' ? (
+      {task.category === 'C' || (task.category === 'D' && task.coin_override) ? (
         <View style={styles.taskRewardValue}>
           <Text style={styles.taskCoinText}>
-            +{calcDisplayCoin(task, isPrerequisiteMet)} 🪙
+            +{task.category === 'C' ? calcDisplayCoin(task, isPrerequisiteMet) : task.coin_override} 🪙
           </Text>
         </View>
       ) : null}
@@ -1649,6 +1747,56 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 3,
   },
+  addGoalCard: {
+    width: 164,
+    minHeight: 156,
+    borderRadius: 22,
+    borderWidth: 1.5,
+    borderColor: HOME.primaryGreen,
+    backgroundColor: '#E7F1D6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    gap: 8,
+    shadowColor: Colors.shadowWarm,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  addGoalPlus: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: HOME.primaryGreen,
+  },
+  addGoalPlusText: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '900',
+    marginTop: -1,
+  },
+  addGoalTitle: {
+    color: Colors.leaf700,
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  addGoalHint: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.fgMuted,
+    textAlign: 'center',
+    lineHeight: 15,
+  },
+  goalTagText: {
+    color: Colors.leaf700,
+    fontSize: 11,
+    fontWeight: '800',
+    marginBottom: 2,
+  },
   goalArt: {
     height: 54,
     borderRadius: 18,
@@ -1917,16 +2065,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '900',
     marginTop: -1,
-  },
-  addRowTextWrap: {
-    flex: 1,
-    minWidth: 0,
-    gap: 2,
-  },
-  addRowHint: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.fgMuted,
   },
   addRowText: {
     color: Colors.leaf700,

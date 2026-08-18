@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase';
 import { taipeiDayRange } from '../lib/taipeiDate';
 import { isTaskDueToday } from '../lib/taskSchedule';
 import type { Task, LongTermGoal } from '../types/database';
+import type { GoalCompletionRecord } from '../screens/child/longTermGoalPresentation';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -21,8 +22,11 @@ export type TodayTask = Task & {
    *
    * 首頁的進度以它為準 —— `long_term_goals.current_day` 建立後從來沒有
    *    被遞增過，拿它算進度會永遠顯示 0%。
+   *
+   * 形狀對齊 `GoalCompletionRecord`，讓首頁能直接把這批資料交給
+   * `buildGoalPresentation` 算「今天要做的那一句話」，不必另外重查一次。
    */
-  weekCompletions?: { completed_at: string }[];
+  weekCompletions?: GoalCompletionRecord[];
 };
 
 export type UseTodayTasksResult = {
@@ -120,11 +124,11 @@ export function useTodayTasks(childId: string): UseTodayTasksResult {
       // 這一週的長期完成紀錄，一次查完。
       const weekStart = dayjs().tz('Asia/Taipei').startOf('day');
       const mondayStart = weekStart.subtract((weekStart.day() + 6) % 7, 'day');
-      const weekCompletionsByTask = new Map<string, { completed_at: string }[]>();
+      const weekCompletionsByTask = new Map<string, GoalCompletionRecord[]>();
       if (longTermIds.length > 0) {
         const { data: weekRows, error: weekErr } = await supabase
           .from('task_completions')
-          .select('task_id, completed_at')
+          .select('id, task_id, completed_at, planned_time_window, start_mode')
           .eq('child_id', childId)
           .eq('status', 'completed')
           .in('task_id', longTermIds)
@@ -133,7 +137,12 @@ export function useTodayTasks(childId: string): UseTodayTasksResult {
         if (weekErr) throw weekErr;
         for (const row of weekRows ?? []) {
           const list = weekCompletionsByTask.get(row.task_id) ?? [];
-          list.push({ completed_at: row.completed_at });
+          list.push({
+            id: row.id,
+            completed_at: row.completed_at,
+            planned_time_window: row.planned_time_window,
+            start_mode: row.start_mode,
+          });
           weekCompletionsByTask.set(row.task_id, list);
         }
       }
