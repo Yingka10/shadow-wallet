@@ -9,6 +9,7 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import type { GoalPresentation } from '../../../screens/child/longTermGoalPresentation';
+import { REVIEW_EXPERIENCE_OPTIONS } from '../togetherReviewModel';
 import TogetherReviewSheet, {
   type ReviewCadenceChannel,
   type ReviewTimeChannel,
@@ -354,7 +355,10 @@ describe('Branch C — 換一種做法沿用既有的換時段通道（P0-8M）'
     walkToDirection('想換一種做法');
     fireEvent.press(screen.getByTestId('review-cta'));
     fireEvent.press(screen.getByRole('button', { name: '改成睡前試試' }));
-    expect(screen.getByText('這會改到你們原本說好的安排。')).toBeTruthy();
+    // 換時段用的是比較窄的說法（§7），不是 cadence 那句共同條件宣告。
+    expect(screen.getByText('這個時段是當初一起說好的，改之前先一起確認。'))
+      .toBeTruthy();
+    expect(screen.queryByText('這會改到你們原本說好的安排。')).toBeNull();
 
     fireEvent.press(screen.getByTestId('review-cta'));
     expect(screen.getByText('晚餐後')).toBeTruthy();
@@ -412,5 +416,57 @@ describe('§11：回顧本身不發幣', () => {
 
     expect(visibleText(rendered.toJSON()))
       .not.toMatch(/幣|coin|獎勵|\+5|經驗值|XP|徽章/);
+  });
+});
+
+describe('VISUAL-POLISH — 結構層面的可回歸點', () => {
+  it('第一屏就同時看得到 hero、evidence 與完整的 Step 1', () => {
+    renderSheet();
+
+    expect(screen.getByTestId('review-hero')).toBeTruthy();
+    expect(screen.getByTestId('review-evidence')).toBeTruthy();
+    REVIEW_EXPERIENCE_OPTIONS.forEach((option) => {
+      expect(screen.getByTestId(`review-experience-${option.value}`)).toBeTruthy();
+    });
+  });
+
+  it('Step 之間的過場只在 Step 2 出現時才有', () => {
+    renderSheet();
+
+    expect(screen.queryByTestId('review-journey-cue')).toBeNull();
+    fireEvent.press(screen.getByRole('button', { name: '有時候不太好開始' }));
+    expect(screen.getByTestId('review-journey-cue')).toBeTruthy();
+  });
+
+  it('每個 tile 都有自己的圖示，不是四格共用一個', () => {
+    const icons = new Set(REVIEW_EXPERIENCE_OPTIONS.map((o) => o.icon));
+
+    expect(icons.size).toBe(REVIEW_EXPERIENCE_OPTIONS.length);
+  });
+
+  it('共同條件是一片行動區：說明、差異、CTA 在同一個面板裡', () => {
+    renderSheet({ cadenceChannel: makeCadenceChannel() });
+
+    walkToDirection('想讓它輕鬆一點');
+    fireEvent.press(screen.getByTestId('review-cta'));
+    fireEvent.press(screen.getByRole('button', { name: '一週少一次' }));
+    fireEvent.press(screen.getByTestId('review-cta'));
+
+    const panel = screen.getByTestId('review-shared-term-panel');
+    expect(panel).toBeTruthy();
+    expect(screen.getByTestId('review-shared-term-diff')).toBeTruthy();
+    expect(screen.getByTestId('review-shared-term-strip')).toBeTruthy();
+  });
+
+  it('共同條件面板不使用紅色警示色', () => {
+    const rendered = renderSheet({ cadenceChannel: makeCadenceChannel() });
+
+    walkToDirection('想讓它輕鬆一點');
+    fireEvent.press(screen.getByTestId('review-cta'));
+    fireEvent.press(screen.getByRole('button', { name: '一週少一次' }));
+    fireEvent.press(screen.getByTestId('review-cta'));
+
+    // Colors.error 只給破壞性動作用。重新商量不是錯誤。
+    expect(JSON.stringify(rendered.toJSON())).not.toContain('#C6543A');
   });
 });

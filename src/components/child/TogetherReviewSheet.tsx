@@ -13,6 +13,12 @@
 //
 // ⚠️ Review ≠ Renegotiation。整個回顧可以走完而完全不動任何共同約定。
 // ⚠️ Review 本身 0 coin，這裡不碰任何結算。
+//
+// VISUAL-POLISH（本輪）：只動視覺，IA 與語意一字未改。
+//   - hero band：標題＋evidence＋review 專屬小芽＋很淡的裝飾形狀（不加巢狀卡）
+//   - tile icon 收斂成**同一株芽的不同狀態**，不是八個通用 icon
+//   - selected 是「淡綠底＋深綠框＋角落實心勾＋圖示變綠」，不是把整頁染綠
+//   - Step 1 / Step 2 之間用很淡的虛線 ＋ 小芽當 journey cue，不做遊戲化進度條
 
 import React, { useMemo, useState } from 'react';
 import {
@@ -23,7 +29,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import Svg, { Circle, Path } from 'react-native-svg';
+import Svg, { Circle, Ellipse, Path } from 'react-native-svg';
 import { Colors } from '../../constants/colors';
 import type { GoalPresentation } from '../../screens/child/longTermGoalPresentation';
 import {
@@ -44,10 +50,12 @@ import {
   type LighterDimension,
   type ReviewAdjustmentCapabilities,
   type ReviewDirection,
+  type ReviewEvidence,
   type ReviewExperience,
   type ReviewOption,
   type ReviewTileIcon,
   type ReviewTimeWindow,
+  type SharedTermNoticeKind,
 } from './togetherReviewModel';
 
 /**
@@ -160,7 +168,7 @@ export default function TogetherReviewSheet({
   if (cadenceChannel?.submitted || timeChannel?.submitted) {
     return (
       <View testID="review-submitted">
-        <SheetHeading />
+        <ReviewHero />
         <Text style={styles.confirmationText}>
           {`已經告訴${family}了。一起確認後，計畫才會更新。`}
         </Text>
@@ -172,7 +180,7 @@ export default function TogetherReviewSheet({
   if (phase === 'keep_done') {
     return (
       <View testID="review-keep-confirmation">
-        <SheetHeading />
+        <ReviewHero />
         <Text style={styles.confirmationText}>{KEEP_CONFIRMATION_COPY}</Text>
         <PrimaryCta label="繼續這樣走" onPress={onClose} />
       </View>
@@ -185,7 +193,7 @@ export default function TogetherReviewSheet({
       : '你想怎麼改？';
     return (
       <View testID="review-idea">
-        <SheetHeading />
+        <ReviewHero />
         <Text style={styles.stepQuestion}>{heading}</Text>
         <TextInput
           accessibilityLabel={heading}
@@ -211,7 +219,7 @@ export default function TogetherReviewSheet({
   if (phase === 'lighter') {
     return (
       <View testID="review-lighter">
-        <SheetHeading />
+        <ReviewHero />
         <Text style={styles.stepQuestion}>你比較想從哪裡調整？</Text>
         {dimensions.length > 0 ? (
           <View style={styles.tileGrid}>
@@ -220,7 +228,7 @@ export default function TogetherReviewSheet({
                 key={option.value}
                 testID={`review-dimension-${option.value}`}
                 label={option.label}
-                icon="sparkle"
+                icon="sprout_light"
                 selected={dimension === option.value}
                 onPress={() => setDimension(option.value)}
               />
@@ -249,7 +257,7 @@ export default function TogetherReviewSheet({
   if (phase === 'different_way') {
     return (
       <View testID="review-different-way">
-        <SheetHeading />
+        <ReviewHero />
         <Text style={styles.stepQuestion}>下一段想換成哪一種？</Text>
         {/* 這裡列的是**這份計畫真的換得動**的做法，不是 AI 生的可能性清單。 */}
         <View style={styles.tileGrid}>
@@ -258,7 +266,7 @@ export default function TogetherReviewSheet({
               key={option.value}
               testID={`review-approach-${option.value}`}
               label={option.label}
-              icon="swap"
+              icon="path_branch"
               selected={option.timeWindow !== null && approach === option.timeWindow}
               onPress={() => {
                 if (option.timeWindow === null) {
@@ -272,9 +280,11 @@ export default function TogetherReviewSheet({
         </View>
         {approach !== null ? (
           <>
-            <SharedTermStrip family={family} />
+            {/* 窄的說法：談的是這份計畫當初一起說好的那個時段，
+                不是「任何跟時間有關的事都要家長同意」（§7）。 */}
+            <SharedTermStrip family={family} kind="agreed_time" />
             <PrimaryCta
-              label={buildSharedTermNotice(family).cta}
+              label={buildSharedTermNotice(family, 'agreed_time').cta}
               onPress={() => setPhase('shared_term')}
             />
           </>
@@ -301,6 +311,7 @@ export default function TogetherReviewSheet({
       : timeDiff
         ? { fromLabel: timeDiff.fromLabel, toLabel: timeDiff.toLabel }
         : null;
+    const noticeKind: SharedTermNoticeKind = isCadence ? 'shared_term' : 'agreed_time';
 
     const canSend = channel !== undefined && diff !== null && !channel.pending;
 
@@ -314,31 +325,44 @@ export default function TogetherReviewSheet({
 
     return (
       <View testID="review-shared-term">
-        <SheetHeading />
+        <ReviewHero />
         <Text style={styles.stepQuestion}>這樣改可以嗎？</Text>
-        {diff ? (
-          <View testID="review-shared-term-diff" style={styles.diffCard}>
-            <View style={styles.diffRow}>
-              <Text style={styles.diffLabel}>原本</Text>
-              <Text style={styles.diffFrom}>{diff.fromLabel}</Text>
+
+        {/* §6：訊息、差異、CTA 是同一片 sage/cream 的行動區，不是三塊零件。
+            沒有紅色警示 —— 這是一次重新商量，不是一個錯誤。 */}
+        <View testID="review-shared-term-panel" style={styles.actionPanel}>
+          <View style={styles.actionPanelHead}>
+            <View style={styles.actionPanelIcon}>
+              <TileGlyph name="sprout_steady" selected />
             </View>
-            <View style={styles.diffArrow}>
-              <Text style={styles.diffArrowText}>↓</Text>
-            </View>
-            <View style={styles.diffRow}>
-              <Text style={styles.diffLabel}>想改成</Text>
-              <Text style={styles.diffTo}>{diff.toLabel}</Text>
-            </View>
-          </View>
-        ) : null}
-        <SharedTermStrip family={family} />
-        {channel?.pending ? (
-          <View style={styles.notice}>
-            <Text style={styles.noticeText}>
-              {`已送給${family}，等一起確認。`}
+            <Text testID="review-shared-term-strip" style={styles.actionPanelText}>
+              {buildSharedTermNotice(family, noticeKind).message}
             </Text>
           </View>
-        ) : null}
+
+          {diff ? (
+            <View testID="review-shared-term-diff" style={styles.diffCard}>
+              <View style={styles.diffRow}>
+                <Text style={styles.diffLabel}>原本</Text>
+                <Text style={styles.diffFrom}>{diff.fromLabel}</Text>
+              </View>
+              <View style={styles.diffArrow}>
+                <ArrowDown />
+              </View>
+              <View style={styles.diffRow}>
+                <Text style={styles.diffLabel}>想改成</Text>
+                <Text style={styles.diffTo}>{diff.toLabel}</Text>
+              </View>
+            </View>
+          ) : null}
+
+          {channel?.pending ? (
+            <Text style={styles.actionPanelNote}>
+              {`已送給${family}，等一起確認。`}
+            </Text>
+          ) : null}
+        </View>
+
         {channel?.error ? (
           <Text
             accessibilityRole="alert"
@@ -348,9 +372,10 @@ export default function TogetherReviewSheet({
             {channel.error}
           </Text>
         ) : null}
+
         {canSend ? (
           <PrimaryCta
-            label={buildSharedTermNotice(family).cta}
+            label={buildSharedTermNotice(family, noticeKind).cta}
             loading={channel?.submitting}
             onPress={send}
           />
@@ -363,17 +388,8 @@ export default function TogetherReviewSheet({
 
   return (
     <View testID="review-main">
-      <SheetHeading />
-
-      {/* Evidence：先看見這段發生什麼，不是一開啟就被問問題。 */}
-      <View testID="review-evidence" style={styles.evidencePill}>
-        <Text style={styles.evidenceText}>{evidence.contextSentence}</Text>
-      </View>
-      {evidence.agreedFact ? (
-        <Text testID="review-evidence-fact" style={styles.evidenceFact}>
-          {evidence.agreedFact}
-        </Text>
-      ) : null}
+      {/* Evidence 在 hero 裡：先看見這段發生什麼，不是一開啟就被問問題。 */}
+      <ReviewHero evidence={evidence} />
 
       <StepBlock
         step={1}
@@ -386,7 +402,7 @@ export default function TogetherReviewSheet({
 
       {experience !== null ? (
         <>
-          <View style={styles.stepDivider} />
+          <JourneyCue />
           <StepBlock
             step={2}
             question="下一段，你想怎麼走？"
@@ -398,21 +414,46 @@ export default function TogetherReviewSheet({
         </>
       ) : null}
 
-      {cta ? <PrimaryCta label={cta} onPress={handlePrimary} /> : null}
+      {cta ? <PrimaryCta label={cta} onPress={handlePrimary} withArrow /> : null}
     </View>
   );
 }
 
-// ── 零件 ───────────────────────────────────────────────────────────────
+// ── Hero（§1）────────────────────────────────────────────────────────────
+//
+// 一條很輕的視覺帶，不是一張卡：標題、evidence、一株 review 專屬的小芽，
+// 底下一塊很淡的 sage 形狀。**不重複 Today 的 mascot**。
 
-function SheetHeading() {
+function ReviewHero({ evidence }: { evidence?: ReviewEvidence }) {
   return (
-    <View style={styles.headingRow}>
-      <Text style={styles.heading}>一起回顧</Text>
-      <SproutMark />
+    <View testID="review-hero" style={styles.hero}>
+      <View style={styles.heroBackdrop} pointerEvents="none">
+        <HeroShape />
+      </View>
+
+      <View style={styles.heroRow}>
+        <View style={styles.heroCopy}>
+          <Text style={styles.heading}>一起回顧</Text>
+          {evidence ? (
+            <>
+              <View testID="review-evidence" style={styles.evidencePill}>
+                <Text style={styles.evidenceText}>{evidence.contextSentence}</Text>
+              </View>
+              {evidence.agreedFact ? (
+                <Text testID="review-evidence-fact" style={styles.evidenceFact}>
+                  {evidence.agreedFact}
+                </Text>
+              ) : null}
+            </>
+          ) : null}
+        </View>
+        <ReviewSprout />
+      </View>
     </View>
   );
 }
+
+// ── Step ────────────────────────────────────────────────────────────────
 
 function StepBlock<T extends string>({
   step,
@@ -453,6 +494,30 @@ function StepBlock<T extends string>({
   );
 }
 
+/**
+ * Step 1 → Step 2 之間的過場。只是一條很淡的虛線加一株小芽 ——
+ * 不是進度條、沒有百分比、沒有關卡感（§4）。
+ */
+function JourneyCue() {
+  return (
+    <View testID="review-journey-cue" style={styles.journeyCue} pointerEvents="none">
+      <View style={styles.journeyDots}>
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <View key={i} style={styles.journeyDot} />
+        ))}
+      </View>
+      <View style={styles.journeySprout}>
+        <TileGlyph name="sprout_emerging" selected={false} size={16} />
+      </View>
+      <View style={styles.journeyDots}>
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <View key={i} style={styles.journeyDot} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function ChoiceTile({
   testID,
   label,
@@ -473,15 +538,16 @@ function ChoiceTile({
       accessibilityLabel={label}
       accessibilityState={{ selected }}
       onPress={onPress}
-      activeOpacity={0.82}
-      style={[styles.tile, selected && styles.tileSelected]}
+      activeOpacity={0.86}
+      style={[styles.tile, selected ? styles.tileSelected : styles.tileResting]}
     >
       {selected ? (
         <View style={styles.tileCheck}>
           <CheckMark />
         </View>
       ) : null}
-      <View style={styles.tileIcon}>
+      {/* 圖示放在一圈很淡的底色裡 —— 讓它是一個「東西」，不是浮在空白上。 */}
+      <View style={[styles.tileIconField, selected && styles.tileIconFieldSelected]}>
         <TileGlyph name={icon} selected={selected} />
       </View>
       <Text style={[styles.tileLabel, selected && styles.tileLabelSelected]}>
@@ -491,10 +557,19 @@ function ChoiceTile({
   );
 }
 
-function SharedTermStrip({ family }: { family: string }) {
-  const notice = buildSharedTermNotice(family);
+function SharedTermStrip({
+  family,
+  kind = 'shared_term',
+}: {
+  family: string;
+  kind?: SharedTermNoticeKind;
+}) {
+  const notice = buildSharedTermNotice(family, kind);
   return (
     <View testID="review-shared-term-strip" style={styles.sharedStrip}>
+      <View style={styles.sharedStripIcon}>
+        <TileGlyph name="sprout_steady" selected size={20} />
+      </View>
       <Text style={styles.sharedStripText}>{notice.message}</Text>
     </View>
   );
@@ -504,139 +579,187 @@ function PrimaryCta({
   label,
   onPress,
   loading = false,
+  withArrow = false,
 }: {
   label: string;
   onPress: () => void;
   loading?: boolean;
+  withArrow?: boolean;
 }) {
   return (
-    <TouchableOpacity
-      testID="review-cta"
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ busy: loading, disabled: loading }}
-      disabled={loading}
-      onPress={onPress}
-      activeOpacity={0.85}
-      style={[styles.cta, loading && styles.ctaBusy]}
-    >
-      {loading ? (
-        <ActivityIndicator color={Colors.bgSurface} />
-      ) : (
-        <Text style={styles.ctaText}>{label}</Text>
-      )}
-    </TouchableOpacity>
+    <View style={styles.ctaDock}>
+      <TouchableOpacity
+        testID="review-cta"
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        accessibilityState={{ busy: loading, disabled: loading }}
+        disabled={loading}
+        onPress={onPress}
+        activeOpacity={0.88}
+        style={[styles.cta, loading && styles.ctaBusy]}
+      >
+        {loading ? (
+          <ActivityIndicator color={Colors.bgSurface} />
+        ) : (
+          <View style={styles.ctaRow}>
+            <Text style={styles.ctaText}>{label}</Text>
+            {withArrow ? <ArrowRight /> : null}
+          </View>
+        )}
+      </TouchableOpacity>
+    </View>
   );
 }
 
 // ── 圖形：native SVG，不是 emoji、不是 raster 插畫（§12）─────────────────
+//
+// 八個圖示是**同一株芽的不同狀態**，共用同一組莖線與葉形，只有葉片數量、
+// 角度、傾斜度不同。混用一堆來源不同的通用 icon 會讓四格看起來像四個 app。
 
-function TileGlyph({ name, selected }: { name: ReviewTileIcon; selected: boolean }) {
-  const color = selected ? Colors.leaf700 : Colors.leaf500;
-  const size = 26;
+const STEM = 'M12 20v-7';
 
-  if (name === 'thought') {
+function TileGlyph({
+  name,
+  selected,
+  size = 26,
+}: {
+  name: ReviewTileIcon;
+  selected: boolean;
+  size?: number;
+}) {
+  const stroke = selected ? Colors.leaf700 : Colors.leaf600;
+  const fill = selected ? Colors.leaf200 : Colors.leaf100;
+  const common = {
+    stroke,
+    strokeWidth: 1.5,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+  };
+
+  if (name === 'seed_thought') {
     return (
       <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
-        <Path
-          d="M7.5 15.5a4 4 0 01-.4-7.98A4.5 4.5 0 0116 6.6a3.7 3.7 0 01.6 7.35z"
-          stroke={color}
-          strokeWidth={1.6}
-          fill="none"
-          strokeLinejoin="round"
-        />
-        <Circle cx={8} cy={19} r={1.5} fill={color} />
+        <Ellipse cx={12} cy={17.5} rx={3.6} ry={2.8} fill={fill} {...common} />
+        <Path d="M12 14.7c0-1.5.7-2.6 1.9-3.2" fill="none" {...common} />
+        <Circle cx={15.6} cy={8.4} r={2.6} fill={fill} {...common} />
+        <Circle cx={11.6} cy={11.4} r={1} fill={stroke} />
       </Svg>
     );
   }
 
-  if (name === 'check') {
+  if (name === 'pencil_idea') {
     return (
       <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
-        <Circle cx={12} cy={12} r={9} fill={color} />
         <Path
-          d="M8 12.4l2.6 2.6L16 9.6"
-          stroke={Colors.bgSurface}
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          fill="none"
+          d="M5 19.5l1-3.6 8.6-8.6a1.7 1.7 0 012.4 0l.7.7a1.7 1.7 0 010 2.4L9.1 19z"
+          fill={fill}
+          {...common}
         />
+        <Path d="M13.6 8.6l2.8 2.8" fill="none" {...common} />
+        <Path d="M18.4 3.4l.5 1.3 1.3.5-1.3.5-.5 1.3-.5-1.3-1.3-.5 1.3-.5z" fill={stroke} />
       </Svg>
     );
   }
 
-  if (name === 'swap') {
+  if (name === 'path_branch') {
     return (
       <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
-        <Path
-          d="M5 10a7 7 0 0111.6-3.3M19 14a7 7 0 01-11.6 3.3"
-          stroke={color}
-          strokeWidth={1.8}
-          strokeLinecap="round"
-          fill="none"
-        />
-        <Path
-          d="M16.8 3.6v3.2h-3.2M7.2 20.4v-3.2h3.2"
-          stroke={color}
-          strokeWidth={1.8}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          fill="none"
-        />
+        <Path d="M12 20v-4.5" fill="none" {...common} />
+        <Path d="M12 15.5C12 11.6 9.4 9 6.2 8.6" fill="none" {...common} />
+        <Path d="M12 15.5C12 11.6 14.6 9 17.8 8.6" fill="none" {...common} />
+        <Circle cx={6.2} cy={7.6} r={2} fill={fill} {...common} />
+        <Circle cx={17.8} cy={7.6} r={2} fill={fill} {...common} />
       </Svg>
     );
   }
 
-  if (name === 'pencil') {
+  // 以下四個共用同一條莖，差別只在葉片。
+  if (name === 'leaf_heavy') {
+    // 葉子偏大、往下垂 —— 有點太多／太久。不是「枯掉」，只是重。
     return (
       <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
+        <Path d={STEM} fill="none" {...common} />
         <Path
-          d="M4.5 19.5l1-4L15.3 5.7a1.8 1.8 0 012.6 0l.4.4a1.8 1.8 0 010 2.6L8.5 18.5z"
-          stroke={color}
-          strokeWidth={1.6}
-          fill="none"
-          strokeLinejoin="round"
-        />
-      </Svg>
-    );
-  }
-
-  if (name === 'sparkle') {
-    return (
-      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
-        <Path
-          d="M12 20V11M12 11c0-2.6 1.9-4.7 4.4-5-.2 2.8-2 4.7-4.4 5zM12 13c0-2.3-1.7-4.2-3.9-4.5.1 2.5 1.7 4.2 3.9 4.5z"
-          stroke={color}
-          strokeWidth={1.6}
-          fill="none"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+          d="M12 14.4c1-3 3.8-4.2 6.8-3.6-.6 3-3.2 4.6-6.8 3.6z"
+          fill={fill}
+          {...common}
         />
         <Path
-          d="M18.6 4.4l.5 1.3 1.3.5-1.3.5-.5 1.3-.5-1.3-1.3-.5 1.3-.5z"
-          fill={color}
+          d="M12 17.2c-1-3-3.8-4.2-6.8-3.6.6 3 3.2 4.6 6.8 3.6z"
+          fill={fill}
+          {...common}
         />
       </Svg>
     );
   }
 
-  // sprout / seedling / branch —— 同一株芽的三個生長階段，不是三個不同的東西。
-  const leaves = name === 'sprout'
-    ? 'M12 18v-5M12 13c0-2.2 1.6-4 3.8-4.3-.2 2.4-1.7 4-3.8 4.3z'
-    : name === 'branch'
-      ? 'M12 19v-8M12 13c0-2.2 1.6-4 3.8-4.3-.2 2.4-1.7 4-3.8 4.3zM12 16c0-2-1.5-3.6-3.5-3.9.1 2.2 1.5 3.6 3.5 3.9z'
-      : 'M12 19v-6M12 14c0-2.3 1.7-4.2 4-4.5-.2 2.5-1.8 4.2-4 4.5zM12 17c0-2.3-1.7-4.2-4-4.5.2 2.5 1.8 4.2 4 4.5zM12 11c0-2 1.4-3.6 3.4-3.9-.1 2.1-1.4 3.6-3.4 3.9z';
+  if (name === 'sprout_emerging') {
+    // 才剛冒出來：莖短一截，只有一片小葉。
+    return (
+      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
+        <Path d="M12 20v-4.4" fill="none" {...common} />
+        <Path
+          d="M12 15.6c0-2.3 1.6-3.9 3.9-4.1-.2 2.4-1.7 3.9-3.9 4.1z"
+          fill={fill}
+          {...common}
+        />
+        <Path d="M8.6 20h6.8" fill="none" {...common} />
+      </Svg>
+    );
+  }
 
+  if (name === 'sprout_light') {
+    // 和 healthy 同一株，但小一號、少一片葉 —— 「輕鬆一點」不是「做不好」。
+    return (
+      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
+        <Path d="M12 20v-5.6" fill="none" {...common} />
+        <Path
+          d="M12 14.4c0-2.4 1.7-4.1 4.1-4.3-.2 2.5-1.8 4.1-4.1 4.3z"
+          fill={fill}
+          {...common}
+        />
+        <Path
+          d="M12 16.8c0-1.9-1.4-3.2-3.3-3.4.2 2 1.5 3.2 3.3 3.4z"
+          fill="none"
+          {...common}
+        />
+      </Svg>
+    );
+  }
+
+  if (name === 'sprout_steady') {
+    // healthy ＋ 一條地平線：站得住、維持現在這樣。
+    return (
+      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
+        <Path d={STEM} fill="none" {...common} />
+        <Path
+          d="M12 13c0-2.6 1.8-4.4 4.4-4.6-.2 2.7-1.9 4.4-4.4 4.6z"
+          fill={fill}
+          {...common}
+        />
+        <Path
+          d="M12 15.6c0-2.6-1.8-4.4-4.4-4.6.2 2.7 1.9 4.4 4.4 4.6z"
+          fill={fill}
+          {...common}
+        />
+        <Path d="M8 20h8" fill="none" {...common} />
+      </Svg>
+    );
+  }
+
+  // sprout_healthy：兩片舒展、對稱的葉子。
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
+      <Path d={STEM} fill="none" {...common} />
       <Path
-        d={leaves}
-        stroke={color}
-        strokeWidth={1.6}
-        fill="none"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        d="M12 13c0-2.6 1.8-4.4 4.4-4.6-.2 2.7-1.9 4.4-4.4 4.6z"
+        fill={fill}
+        {...common}
+      />
+      <Path
+        d="M12 15.6c0-2.6-1.8-4.4-4.4-4.6.2 2.7 1.9 4.4 4.4 4.6z"
+        fill={fill}
+        {...common}
       />
     </Svg>
   );
@@ -648,7 +771,7 @@ function CheckMark() {
       <Path
         d="M6 12.5l3.8 3.8L18 8"
         stroke={Colors.bgSurface}
-        strokeWidth={2.6}
+        strokeWidth={2.8}
         strokeLinecap="round"
         strokeLinejoin="round"
         fill="none"
@@ -657,47 +780,117 @@ function CheckMark() {
   );
 }
 
-function SproutMark() {
+function ArrowRight() {
   return (
-    <Svg width={54} height={54} viewBox="0 0 54 54" accessibilityElementsHidden>
-      <Circle cx={27} cy={27} r={26} fill={Colors.leaf50} />
+    <Svg width={18} height={18} viewBox="0 0 24 24" accessibilityElementsHidden>
       <Path
-        d="M27 40V22"
-        stroke={Colors.leaf700}
-        strokeWidth={2.4}
+        d="M5 12h13M13 6.5l5.5 5.5L13 17.5"
+        stroke={Colors.bgSurface}
+        strokeWidth={2.2}
         strokeLinecap="round"
-      />
-      <Path
-        d="M27 26c0-4.4 3.2-8 7.6-8.6-.4 4.8-3.5 8-7.6 8.6zM27 31c0-4.4-3.2-8-7.6-8.6.4 4.8 3.5 8 7.6 8.6z"
-        fill={Colors.leaf300}
-        stroke={Colors.leaf600}
-        strokeWidth={1.4}
         strokeLinejoin="round"
+        fill="none"
       />
     </Svg>
   );
 }
 
+function ArrowDown() {
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24" accessibilityElementsHidden>
+      <Path
+        d="M12 5v13M6.5 12.5L12 18l5.5-5.5"
+        stroke={Colors.leaf500}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
+/** hero 底下那塊很淡的形狀。純裝飾，不帶任何資訊。 */
+function HeroShape() {
+  return (
+    <Svg width="100%" height={110} viewBox="0 0 320 110" accessibilityElementsHidden>
+      <Ellipse cx={252} cy={44} rx={78} ry={62} fill={Colors.leaf50} opacity={0.9} />
+      <Ellipse cx={196} cy={92} rx={96} ry={40} fill={Colors.cream100} opacity={0.75} />
+    </Svg>
+  );
+}
+
+/** Review 專屬的小芽。刻意**不是** Today 的 mascot，也不拿書之類的任務道具。 */
+function ReviewSprout() {
+  return (
+    <Svg width={78} height={78} viewBox="0 0 78 78" accessibilityElementsHidden>
+      <Ellipse cx={39} cy={68} rx={22} ry={5} fill={Colors.leaf100} opacity={0.85} />
+      <Path
+        d="M39 66V34"
+        stroke={Colors.leaf700}
+        strokeWidth={3}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M39 40c0-8.4 6-14.8 14.4-15.8-.4 8.8-6.6 14.8-14.4 15.8z"
+        fill={Colors.leaf300}
+        stroke={Colors.leaf600}
+        strokeWidth={1.6}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M39 50c0-8.4-6-14.8-14.4-15.8.4 8.8 6.6 14.8 14.4 15.8z"
+        fill={Colors.leaf200}
+        stroke={Colors.leaf600}
+        strokeWidth={1.6}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M39 30c0-6.2 4.4-10.9 10.6-11.6-.3 6.5-4.9 10.9-10.6 11.6z"
+        fill={Colors.leaf100}
+        stroke={Colors.leaf500}
+        strokeWidth={1.4}
+        strokeLinejoin="round"
+      />
+      <Circle cx={58} cy={20} r={2.4} fill={Colors.gold300} />
+      <Circle cx={20} cy={28} r={1.8} fill={Colors.gold300} opacity={0.8} />
+    </Svg>
+  );
+}
+
 const styles = StyleSheet.create({
-  headingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 14,
+  // ── Hero ──────────────────────────────────────────────────────────────
+  hero: {
+    marginBottom: 4,
+    paddingBottom: 6,
   },
+  heroBackdrop: {
+    position: 'absolute',
+    top: -22,
+    left: -24,
+    right: -24,
+    height: 110,
+    overflow: 'hidden',
+  },
+  heroRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  heroCopy: { flex: 1, paddingTop: 2 },
   heading: {
-    flex: 1,
     color: Colors.fgPrimary,
-    fontSize: 28,
-    lineHeight: 36,
+    fontSize: 30,
+    lineHeight: 38,
     fontWeight: '900',
+    letterSpacing: 0.3,
+    marginBottom: 12,
   },
 
   evidencePill: {
     alignSelf: 'flex-start',
     backgroundColor: Colors.cream100,
-    borderRadius: 14,
+    borderRadius: 15,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
@@ -714,63 +907,94 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
 
-  stepBlock: { marginTop: 22 },
+  // ── Step ──────────────────────────────────────────────────────────────
+  stepBlock: { marginTop: 24 },
   stepHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 14,
+    gap: 11,
+    marginBottom: 15,
   },
   stepMarker: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: Colors.leaf600,
     alignItems: 'center',
     justifyContent: 'center',
   },
   stepMarkerText: {
     color: Colors.bgSurface,
-    fontSize: 14,
-    fontWeight: '800',
+    fontSize: 15,
+    fontWeight: '900',
   },
   stepQuestion: {
     flex: 1,
     color: Colors.fgPrimary,
-    fontSize: 18,
-    lineHeight: 25,
-    fontWeight: '800',
-  },
-  stepDivider: {
-    marginTop: 24,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: Colors.hairline,
+    fontSize: 19,
+    lineHeight: 27,
+    fontWeight: '900',
+    letterSpacing: 0.2,
   },
 
+  journeyCue: {
+    marginTop: 26,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  journeyDots: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  journeyDot: {
+    flex: 1,
+    height: 1.5,
+    marginHorizontal: 3,
+    borderRadius: 1,
+    backgroundColor: Colors.cream300,
+  },
+  journeySprout: { opacity: 0.85 },
+
+  // ── Tile ──────────────────────────────────────────────────────────────
   tileGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 11,
   },
   tile: {
     // 兩欄。小裝置文字放不下時 flexWrap 會自然掉成一欄，不縮字。
     flexGrow: 1,
     flexBasis: '46%',
     minWidth: 150,
-    minHeight: 108,
-    borderRadius: 16,
+    minHeight: 122,
+    borderRadius: 18,
     borderWidth: 1.5,
-    borderColor: Colors.cream200,
-    backgroundColor: Colors.cream50,
     paddingHorizontal: 12,
     paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
+    gap: 11,
+  },
+  tileResting: {
+    borderColor: Colors.cream200,
+    backgroundColor: Colors.bgSurface,
+    shadowColor: Colors.shadowWarm,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 1,
   },
   tileSelected: {
     borderColor: Colors.leaf500,
     backgroundColor: Colors.leaf50,
+    shadowColor: Colors.leaf700,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.14,
+    shadowRadius: 9,
+    elevation: 3,
   },
   tileCheck: {
     position: 'absolute',
@@ -778,13 +1002,21 @@ const styles = StyleSheet.create({
     right: -1,
     width: 30,
     height: 30,
-    borderTopRightRadius: 15,
-    borderBottomLeftRadius: 15,
+    borderTopRightRadius: 17,
+    borderBottomLeftRadius: 16,
     backgroundColor: Colors.leaf600,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tileIcon: { height: 28, justifyContent: 'center' },
+  tileIconField: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: Colors.cream100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tileIconFieldSelected: { backgroundColor: Colors.leaf100 },
   tileLabel: {
     color: Colors.fgSecondary,
     fontSize: 15,
@@ -792,30 +1024,78 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-  tileLabelSelected: { color: Colors.leaf700 },
+  tileLabelSelected: { color: Colors.leaf700, fontWeight: '800' },
 
+  // ── Shared term ───────────────────────────────────────────────────────
   sharedStrip: {
-    marginTop: 18,
-    borderRadius: 14,
+    marginTop: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 16,
     backgroundColor: Colors.cream100,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 13,
+  },
+  sharedStripIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: Colors.leaf50,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sharedStripText: {
+    flex: 1,
     color: Colors.fgSecondary,
     fontSize: 14,
     lineHeight: 21,
     fontWeight: '600',
   },
 
-  diffCard: {
+  actionPanel: {
     marginTop: 4,
-    borderRadius: 16,
+    borderRadius: 20,
+    backgroundColor: Colors.cream50,
     borderWidth: 1,
     borderColor: Colors.cream200,
-    backgroundColor: Colors.cream50,
     paddingHorizontal: 16,
     paddingVertical: 16,
+    gap: 14,
+  },
+  actionPanelHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  actionPanelIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: Colors.leaf50,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionPanelText: {
+    flex: 1,
+    color: Colors.fgSecondary,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '700',
+  },
+  actionPanelNote: {
+    color: Colors.fgMuted,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+
+  diffCard: {
+    borderRadius: 16,
+    backgroundColor: Colors.bgSurface,
+    borderWidth: 1,
+    borderColor: Colors.cream200,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
   diffRow: {
     flexDirection: 'row',
@@ -825,34 +1105,35 @@ const styles = StyleSheet.create({
   },
   diffLabel: { color: Colors.fgMuted, fontSize: 14, lineHeight: 20 },
   diffFrom: {
-    color: Colors.fgSecondary,
+    color: Colors.fgMuted,
     fontSize: 17,
     lineHeight: 24,
     fontWeight: '700',
+    textDecorationLine: 'line-through',
   },
   diffTo: {
     color: Colors.leaf700,
-    fontSize: 19,
-    lineHeight: 26,
+    fontSize: 20,
+    lineHeight: 27,
     fontWeight: '900',
   },
-  diffArrow: { alignItems: 'center', paddingVertical: 4 },
-  diffArrowText: { color: Colors.leaf500, fontSize: 16, fontWeight: '800' },
+  diffArrow: { alignItems: 'center', paddingVertical: 6 },
 
+  // ── 其他 ──────────────────────────────────────────────────────────────
   confirmationText: {
+    marginTop: 6,
     color: Colors.fgSecondary,
     fontSize: 16,
     lineHeight: 24,
-    marginBottom: 8,
   },
 
   textInput: {
-    marginTop: 4,
-    minHeight: 96,
-    borderRadius: 14,
+    marginTop: 6,
+    minHeight: 104,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: Colors.cream200,
-    backgroundColor: Colors.cream50,
+    backgroundColor: Colors.bgSurface,
     paddingHorizontal: 14,
     paddingVertical: 12,
     color: Colors.fgPrimary,
@@ -863,10 +1144,10 @@ const styles = StyleSheet.create({
 
   notice: {
     marginTop: 14,
-    borderRadius: 12,
+    borderRadius: 14,
     backgroundColor: Colors.cream100,
     paddingHorizontal: 14,
-    paddingVertical: 11,
+    paddingVertical: 12,
   },
   noticeText: { color: Colors.fgMuted, fontSize: 13, lineHeight: 20 },
 
@@ -877,20 +1158,42 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 
+  // ── CTA ───────────────────────────────────────────────────────────────
+  // 底下留一塊暖底的安全區，讓按鈕不是直接貼著 sheet 邊緣。
+  ctaDock: {
+    marginTop: 26,
+    marginHorizontal: -20,
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 8,
+    backgroundColor: Colors.cream50,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
   cta: {
-    marginTop: 22,
-    minHeight: 56,
-    borderRadius: 18,
+    minHeight: 58,
+    borderRadius: 20,
     backgroundColor: Colors.leaf600,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 20,
+    shadowColor: Colors.leaf700,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    elevation: 4,
   },
   ctaBusy: { opacity: 0.72 },
+  ctaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   ctaText: {
     color: Colors.bgSurface,
-    fontSize: 17,
-    lineHeight: 24,
+    fontSize: 17.5,
+    lineHeight: 25,
     fontWeight: '800',
+    letterSpacing: 0.3,
   },
 });

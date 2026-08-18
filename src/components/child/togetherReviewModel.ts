@@ -39,21 +39,27 @@ export type ReviewOption<T extends string> = {
   icon: ReviewTileIcon;
 };
 
+/**
+ * 一整套**同一株芽的不同狀態**，不是八個互不相干的通用 icon。
+ * 每一格說的是「這段長成什麼樣子」或「下一段想長成什麼樣子」。
+ */
 export type ReviewTileIcon =
-  | 'sprout'
-  | 'seedling'
-  | 'branch'
-  | 'thought'
-  | 'check'
-  | 'sparkle'
-  | 'swap'
-  | 'pencil';
+  // Step 1：這段長成什麼樣子
+  | 'sprout_healthy'      // 舒展、對稱，站得穩
+  | 'sprout_emerging'     // 才剛冒出來，莖短、葉小
+  | 'leaf_heavy'          // 葉子偏大、微微下垂 —— 有點太多／太久
+  | 'seed_thought'        // 還在土裡的種子 ＋ 想法泡泡
+  // Step 2：下一段想怎麼長
+  | 'sprout_steady'       // 和 healthy 同型，加一圈穩定的底線
+  | 'sprout_light'        // 同一株，但小一號、葉子少一片
+  | 'path_branch'         // 從同一點分出兩條路
+  | 'pencil_idea';        // 鉛筆 ＋ 一點想法的火花
 
 export const REVIEW_EXPERIENCE_OPTIONS: ReadonlyArray<ReviewOption<ReviewExperience>> = [
-  { value: 'going_well', label: '現在這樣滿順的', icon: 'sprout' },
-  { value: 'hard_to_start', label: '有時候不太好開始', icon: 'branch' },
-  { value: 'too_much', label: '做起來有點太多／太久', icon: 'seedling' },
-  { value: 'something_else', label: '我有別的想法', icon: 'thought' },
+  { value: 'going_well', label: '現在這樣滿順的', icon: 'sprout_healthy' },
+  { value: 'hard_to_start', label: '有時候不太好開始', icon: 'sprout_emerging' },
+  { value: 'too_much', label: '做起來有點太多／太久', icon: 'leaf_heavy' },
+  { value: 'something_else', label: '我有別的想法', icon: 'seed_thought' },
 ];
 
 // ── Step 2：下一段，你想怎麼走 ─────────────────────────────────────────
@@ -61,10 +67,10 @@ export const REVIEW_EXPERIENCE_OPTIONS: ReadonlyArray<ReviewOption<ReviewExperie
 export type ReviewDirection = 'keep' | 'lighter' | 'different_way' | 'own_idea';
 
 export const REVIEW_DIRECTION_OPTIONS: ReadonlyArray<ReviewOption<ReviewDirection>> = [
-  { value: 'keep', label: '就照現在這樣', icon: 'check' },
-  { value: 'lighter', label: '想讓它輕鬆一點', icon: 'sparkle' },
-  { value: 'different_way', label: '想換一種做法', icon: 'swap' },
-  { value: 'own_idea', label: '我自己有想法', icon: 'pencil' },
+  { value: 'keep', label: '就照現在這樣', icon: 'sprout_steady' },
+  { value: 'lighter', label: '想讓它輕鬆一點', icon: 'sprout_light' },
+  { value: 'different_way', label: '想換一種做法', icon: 'path_branch' },
+  { value: 'own_idea', label: '我自己有想法', icon: 'pencil_idea' },
 ];
 
 // ── Evidence（§3：只呈現事實，不評分）────────────────────────────────────
@@ -94,7 +100,7 @@ export function buildReviewEvidence(presentation: GoalPresentation): ReviewEvide
 
   const contextSentence = done > 0
     ? `這週已經完成 ${done} 次，一起看看這段怎麼樣。`
-    : '這週還沒有紀錄，一起看看這段怎麼樣。';
+    : '這週還沒有留下紀錄，也可以一起看看現在的安排。';
 
   return {
     contextSentence,
@@ -282,12 +288,26 @@ export function needsFamilyConfirmation(
   return classification.kind === 'shared_term';
 }
 
-export function buildSharedTermNotice(parentLabel: string = DEFAULT_PARENT_LABEL): {
-  message: string;
-  cta: string;
-} {
+/**
+ * 兩種說法刻意不同（§7）。
+ *
+ *   shared_term   每週次數這類**家庭共同條件** —— 改了就是改到雙方的約定。
+ *   agreed_time   這份計畫當初一起談定的那個時段。
+ *
+ * 後者用比較窄的說法，是因為 Review V2 **不可以讓孩子學到「任何跟時間有關的
+ * 個人調整都要家長同意」**。這裡要談的只是「這一份計畫當初一起說好的那個
+ * 時段」，不是他每天幾點做事的自由。
+ */
+export type SharedTermNoticeKind = 'shared_term' | 'agreed_time';
+
+export function buildSharedTermNotice(
+  parentLabel: string = DEFAULT_PARENT_LABEL,
+  kind: SharedTermNoticeKind = 'shared_term',
+): { message: string; cta: string } {
   return {
-    message: '這會改到你們原本說好的安排。',
+    message: kind === 'agreed_time'
+      ? '這個時段是當初一起說好的，改之前先一起確認。'
+      : '這會改到你們原本說好的安排。',
     cta: `和${parentLabel}一起調整 →`,
   };
 }

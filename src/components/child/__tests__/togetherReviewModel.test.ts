@@ -55,7 +55,8 @@ describe('Evidence（§3：只呈現事實，不評分）', () => {
       sessionEvidence: { checkedInToday: false, weekSessionCount: 0 },
     }));
 
-    expect(evidence.contextSentence).toBe('這週還沒有紀錄，一起看看這段怎麼樣。');
+    expect(evidence.contextSentence)
+      .toBe('這週還沒有留下紀錄，也可以一起看看現在的安排。');
     expect(evidence.contextSentence).not.toMatch(/沒有完成|還差|%|達成/);
   });
 
@@ -223,6 +224,18 @@ describe('§7：Child-owned vs Shared-term', () => {
     expect(buildSharedTermNotice('媽媽').cta).toBe('和媽媽一起調整 →');
     expect(buildSharedTermNotice().cta).toBe('和爸媽一起調整 →');
     expect(buildSharedTermNotice().message).toBe('這會改到你們原本說好的安排。');
+  });
+
+  /*
+    §7：Review V2 **不可以**讓孩子學到「任何跟時間有關的個人調整都要家長同意」。
+    換時段談的只是「這一份計畫當初一起說好的那個時段」，說法要比 cadence 窄。
+  */
+  it('換時段用比較窄的說法，不宣稱所有時間安排都要家長同意', () => {
+    const timeNotice = buildSharedTermNotice('媽媽', 'agreed_time');
+
+    expect(timeNotice.message).toBe('這個時段是當初一起說好的，改之前先一起確認。');
+    expect(timeNotice.message)
+      .not.toBe(buildSharedTermNotice('媽媽', 'shared_term').message);
   });
 });
 
