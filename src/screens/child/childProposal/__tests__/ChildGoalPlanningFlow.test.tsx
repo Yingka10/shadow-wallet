@@ -81,6 +81,32 @@ const CHOICE: ChildGoalPlanningResult = {
   model: 'test-model',
 };
 
+/** 有 title／detail／rhythmHint／rationale 拆解的版本（P6 追加）。 */
+const CHOICE_STRUCTURED: ChildGoalPlanningResult = {
+  status: 'needs_choice',
+  schemaVersion: 1,
+  knownGoal: '我想兩週讀完這本書',
+  question: '你想先用哪一種方式開始？',
+  options: [
+    {
+      id: 'option-1',
+      text: '每次讀 10 分鐘就好，一週選 3 天',
+      title: '先從短時間開始',
+      detail: '每次讀 10 分鐘就好',
+      rhythmHint: '一週 3 天',
+      rationale: 'good_starting_point',
+    },
+    {
+      id: 'option-2',
+      text: '讀到一個段落就停下來',
+      title: '讀一小段就停',
+      detail: '讀到一個段落就停下來',
+    },
+  ],
+  allowCustomAnswer: true,
+  model: 'test-model',
+};
+
 const TIMEOUT: ChildGoalPlanningResult = {
   status: 'unavailable',
   schemaVersion: 1,
@@ -180,11 +206,12 @@ function harness(
   };
 }
 
-function renderFlow(h: Harness) {
+function renderFlow(h: Harness, preferredTime: string | null = null) {
   return render(
     <ChildGoalPlanningFlow
       ports={h.ports}
       initialRevision={0}
+      preferredTime={preferredTime}
       onSendToParents={h.sendToParents}
       onDone={h.done}
     />,
@@ -196,8 +223,9 @@ async function openWith(
   h: Harness,
   choice: 'has_own_idea' | 'want_options' | 'first_step_only' = 'has_own_idea',
   approach?: string,
+  preferredTime: string | null = null,
 ) {
-  const view = renderFlow(h);
+  const view = renderFlow(h, preferredTime);
   fireEvent.press(view.getByTestId(`planning-opening-${choice}`));
   if (approach !== undefined) {
     fireEvent.changeText(view.getByTestId('planning-approach-input'), approach);
@@ -451,5 +479,123 @@ describe('§14 「我想改一下」不是打開一張表單', () => {
     // 不是一張把節奏／份量／時段全部攤開的 admin 表單。
     expect(view.queryByText(PLANNING_COPY.ready.rhythmLabel)).toBeNull();
     expect(view.queryByText(PLANNING_COPY.ready.trialLabel)).toBeNull();
+  });
+});
+
+describe('P6｜needs_choice 與 ready 的視覺還原', () => {
+  it('步驟徽章跟著實際跑過的輪數走，不是寫死的 2／4——只跑 1 輪就到 ready 時分母不會硬湊成 4', async () => {
+    // 開場（不帶 response 的第 1 輪）直接回 CHOICE，選完的第 2 輪直接回 READY——
+    // 全程只有 2 輪，ready 不該出現「4」，因為根本沒有第 3、4 輪發生過。
+    const h = harness([CHOICE, READY]);
+    const view = await openWith(h, 'want_options');
+
+    await waitFor(() => expect(view.getByTestId('planning-choice')).toBeTruthy());
+    // 分母是架構上限（開場 + 最多 3 輪 = 4）：還不知道最後會停在第幾輪。
+    expect(view.getByText('步驟 2 / 4')).toBeTruthy();
+
+    fireEvent.press(view.getByTestId('planning-option-option-1'));
+    fireEvent.press(view.getByTestId('planning-choice-confirm'));
+
+    await waitFor(() => expect(view.getByTestId('planning-ready')).toBeTruthy());
+    // ready 是終點：分母換成自己（走到底＝全部填滿），不是「2 直接跳成 4」。
+    expect(view.getByText('步驟 3 / 3')).toBeTruthy();
+    expect(view.queryByText('步驟 4 / 4')).toBeNull();
+  });
+
+  it('真的問滿 3 輪才到 ready 時，步驟數字才會走到 4／4', async () => {
+    const h = harness([CLARIFICATION, CHOICE, READY]);
+    const view = await openWith(h, 'want_options');
+
+    await waitFor(() => expect(view.getByTestId('planning-clarification')).toBeTruthy());
+    fireEvent.changeText(view.getByTestId('planning-answer-input'), '我想把英文口說變好');
+    fireEvent.press(view.getByTestId('planning-answer-next'));
+
+    await waitFor(() => expect(view.getByTestId('planning-choice')).toBeTruthy());
+    expect(view.getByText('步驟 3 / 4')).toBeTruthy();
+
+    fireEvent.press(view.getByTestId('planning-option-option-1'));
+    fireEvent.press(view.getByTestId('planning-choice-confirm'));
+
+    await waitFor(() => expect(view.getByTestId('planning-ready')).toBeTruthy());
+    expect(view.getByText('步驟 4 / 4')).toBeTruthy();
+  });
+
+  it('「我有自己的方式」兩行文案都在，不是單行「我自己想」', async () => {
+    const h = harness([CHOICE]);
+    const view = await openWith(h, 'want_options');
+
+    await waitFor(() => expect(view.getByTestId('planning-choice')).toBeTruthy());
+    expect(view.getByText(PLANNING_COPY.choice.customTitle)).toBeTruthy();
+    expect(view.getByText(PLANNING_COPY.choice.customSubtitle)).toBeTruthy();
+    expect(view.queryByText('我自己想')).toBeNull();
+  });
+
+  it('preferred time 有真值時顯示建議時間 pill；沒有值時整行不出現，也不會冒出「還沒決定」', async () => {
+    const withTime = harness([READY]);
+    const viewWithTime = await openWith(withTime, 'has_own_idea', '平日睡前讀 15 分鐘', '晚餐後');
+    await waitFor(() => expect(viewWithTime.getByTestId('planning-ready')).toBeTruthy());
+    expect(viewWithTime.getByText(`🕒 ${PLANNING_COPY.ready.timeLabel}：晚餐後`)).toBeTruthy();
+
+    const withoutTime = harness([READY]);
+    const viewWithoutTime = await openWith(withoutTime, 'has_own_idea', '平日睡前讀 15 分鐘', null);
+    await waitFor(() => expect(viewWithoutTime.getByTestId('planning-ready')).toBeTruthy());
+    expect(viewWithoutTime.queryByText(new RegExp(PLANNING_COPY.ready.timeLabel))).toBeNull();
+    expect(viewWithoutTime.queryByText('還沒決定')).toBeNull();
+  });
+
+  it('rhythm 大數字：一週次數與每次分鐘各自成一格', async () => {
+    const h = harness([READY]);
+    const view = await openWith(h, 'has_own_idea', '平日睡前讀 15 分鐘');
+
+    await waitFor(() => expect(view.getByTestId('planning-ready')).toBeTruthy());
+    expect(view.getByText('5')).toBeTruthy();
+    expect(view.getByText('15')).toBeTruthy();
+  });
+
+  it('選項有 title／detail／rhythmHint 時三層都顯示；沒有 detail 的舊選項只退回一行', async () => {
+    const h = harness([CHOICE_STRUCTURED]);
+    const view = await openWith(h, 'want_options');
+
+    await waitFor(() => expect(view.getByTestId('planning-choice')).toBeTruthy());
+    // 選項 1：三層都在。
+    expect(view.getByText('先從短時間開始')).toBeTruthy();
+    expect(view.getByText('每次讀 10 分鐘就好')).toBeTruthy();
+    expect(view.getByText('一週 3 天')).toBeTruthy();
+    // 選項 2：有 title/detail，沒有 rhythmHint——不會冒出空字串或 undefined。
+    expect(view.getByText('讀一小段就停')).toBeTruthy();
+    expect(view.getByText('讀到一個段落就停下來')).toBeTruthy();
+  });
+
+  it('grounded rationale 有值時顯示低權重徽章；沒有值的選項完全不顯示徽章', async () => {
+    const h = harness([CHOICE_STRUCTURED]);
+    const view = await openWith(h, 'want_options');
+
+    await waitFor(() => expect(view.getByTestId('planning-choice')).toBeTruthy());
+    expect(view.getByText(PLANNING_COPY.choice.optionRationale.good_starting_point)).toBeTruthy();
+    expect(
+      view.queryByText(PLANNING_COPY.choice.optionRationale.closer_to_child_input),
+    ).toBeNull();
+  });
+
+  it('沒有 rationale 的一般選項（舊 fixture）不會預設顯示任何徽章，也沒有「推薦方案」', async () => {
+    const h = harness([CHOICE]);
+    const view = await openWith(h, 'want_options');
+
+    await waitFor(() => expect(view.getByTestId('planning-choice')).toBeTruthy());
+    for (const forbidden of [
+      '推薦方案',
+      PLANNING_COPY.choice.optionRationale.good_starting_point,
+      PLANNING_COPY.choice.optionRationale.closer_to_child_input,
+    ]) {
+      expect(view.queryByText(forbidden)).toBeNull();
+    }
+  });
+
+  it('選項上方有微文案，降低「要一次選對」的壓力', async () => {
+    const h = harness([CHOICE]);
+    const view = await openWith(h, 'want_options');
+
+    await waitFor(() => expect(view.getByTestId('planning-choice')).toBeTruthy());
+    expect(view.getByText(PLANNING_COPY.choice.microcopy)).toBeTruthy();
   });
 });

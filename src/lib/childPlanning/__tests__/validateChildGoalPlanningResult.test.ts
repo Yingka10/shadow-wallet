@@ -666,4 +666,71 @@ describe('需要孩子挑一個', () => {
     if (result.status !== 'unavailable') throw new Error('expected unavailable');
     expect(result.rejections).toContain('DOMAIN_AUTHORITY_CLAIM');
   });
+
+  it('有 title／detail／rhythmHint 拆解時會通過，text 仍是唯一的完整句子', () => {
+    const result = validateChildGoalPlanningResult(
+      {
+        ...choice,
+        options: [
+          {
+            id: 'option-1', text: '每天睡前練 10 分鐘，一週 7 天',
+            title: '固定睡前練', detail: '每天睡前練 10 分鐘', rhythmHint: '一週 7 天',
+          },
+          { id: 'option-2', text: '週末一次練久一點', title: '週末練一次', detail: '週末一次練久一點' },
+        ],
+      },
+      INPUT,
+    );
+    expect(result.status).toBe('needs_choice');
+    if (result.status !== 'needs_choice') return;
+    expect(result.options[0]).toMatchObject({
+      title: '固定睡前練', detail: '每天睡前練 10 分鐘', rhythmHint: '一週 7 天',
+    });
+    expect(result.options[1].rhythmHint).toBeUndefined();
+  });
+
+  it('至多一個選項可以有 rationale；兩個以上就是壞掉的回應', () => {
+    const result = validateChildGoalPlanningResult(
+      {
+        ...choice,
+        options: [
+          { id: 'option-1', text: '每天睡前練 10 分鐘', rationale: 'good_starting_point' },
+          { id: 'option-2', text: '週末一次練久一點', rationale: 'closer_to_child_input' },
+        ],
+      },
+      INPUT,
+    );
+    expect(result.status).toBe('unavailable');
+  });
+
+  it('rationale 只能是白名單裡的兩個值', () => {
+    const result = validateChildGoalPlanningResult(
+      {
+        ...choice,
+        options: [
+          { id: 'option-1', text: '每天睡前練 10 分鐘', rationale: 'best_choice' },
+          { id: 'option-2', text: '週末一次練久一點' },
+        ],
+      },
+      INPUT,
+    );
+    expect(result.status).toBe('unavailable');
+  });
+
+  it('單一 rationale 會保留在通過的選項上，其餘選項沒有這個鍵', () => {
+    const result = validateChildGoalPlanningResult(
+      {
+        ...choice,
+        options: [
+          { id: 'option-1', text: '每天睡前練 10 分鐘', rationale: 'good_starting_point' },
+          { id: 'option-2', text: '週末一次練久一點' },
+        ],
+      },
+      INPUT,
+    );
+    expect(result.status).toBe('needs_choice');
+    if (result.status !== 'needs_choice') return;
+    expect(result.options[0].rationale).toBe('good_starting_point');
+    expect(result.options[1].rationale).toBeUndefined();
+  });
 });

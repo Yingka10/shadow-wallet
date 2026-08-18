@@ -159,7 +159,26 @@ export type ChildPlanSessionSize =
 
 export type ChildPlanPhase = { id: string; title: string; observableDoneWhen: string };
 
-export type ChildPlanStartOption = { id: string; text: string };
+/** 與 App 端 ChildPlanStartOptionRationale 同值，由 parity 測試釘住。 */
+export type ChildPlanStartOptionRationale = 'good_starting_point' | 'closer_to_child_input';
+
+export const CHILD_PLAN_START_OPTION_RATIONALES: readonly ChildPlanStartOptionRationale[] = [
+  'good_starting_point',
+  'closer_to_child_input',
+] as const;
+
+/**
+ * `text` 是完整的一句話，仍然是唯一寫進 provenance／下一輪對話歷史的欄位。
+ * `title`／`detail`／`rhythmHint` 只服務 UI 的三層排版。
+ */
+export type ChildPlanStartOption = {
+  id: string;
+  text: string;
+  title?: string;
+  detail?: string;
+  rhythmHint?: string;
+  rationale?: ChildPlanStartOptionRationale;
+};
 
 export type ChildPlanProvenance = {
   childOriginalGoal: string;
@@ -264,6 +283,9 @@ export const CHILD_GOAL_PLANNING_LIMITS = {
   maxDoneWhenLength: 40,
   maxOptionLength: 40,
   maxOptionIdLength: 24,
+  maxOptionTitleLength: 16,
+  maxOptionDetailLength: 26,
+  maxOptionRhythmHintLength: 12,
   maxAnswerLength: 120,
   maxResponses: 8,
   maxUnitLength: 8,
@@ -552,9 +574,26 @@ approach（有目標但連方向都看不出來）、cadence（缺頻率）、se
 target_amount（缺目標數量）。
 
 目標清楚、但他還沒決定怎麼做時：
-{"status":"needs_choice","question":"你想先用哪一種方式開始？","options":["每天睡前讀 15 分鐘","週末一次讀完一章"]}
+{"status":"needs_choice","question":"你想先用哪一種方式開始？","options":[{"title":"先從短時間開始","detail":"每次先讀 10～15 分鐘","rhythmHint":"一週 3 次"},{"title":"讀一小段就停","detail":"每次完成一個小節就休息","rhythmHint":"一週 3 次"},{"title":"用頁數抓份量","detail":"每次先讀 5～10 頁","rhythmHint":"一週 3 次"}]}
 
-options 給 ${L.minChoiceOptions}-${L.maxChoiceOptions} 個，每個 ${L.maxOptionLength} 字內。不要標「推薦」，它們是平等的選項。
+options 給 ${L.minChoiceOptions}-${L.maxChoiceOptions} 個：
+- **每個都要是真的不同的策略**（例如：時間長短／份量單位／固定時段／完成的定義），
+  不要只是換句話說同一件事——「讀 10 分鐘」「讀 12 分鐘」「讀 15 分鐘」是同一個策略
+  換了個數字，不算三個選項。不要為了湊到 ${L.maxChoiceOptions} 個硬造重複的方案，
+  真的只想得出 ${L.minChoiceOptions} 個不同策略時就給 ${L.minChoiceOptions} 個。
+- title ${L.maxOptionTitleLength} 字內（大概 4-10 個中文字），是「這個策略叫什麼名字」，
+  不是它的數字參數，也不是完整句子——「先從短時間開始」，不是「每次讀 10 分鐘就好」
+  也不是「你可以先從短時間開始試試看」。title 不要用「每次」開頭；分鐘數／頁數／次數
+  這些數字正常也不放進 title，那些數字屬於 detail／rhythmHint。選項之間光看 title
+  就要能分得出是不同策略，不能全部長得像同一種東西換了數字。
+- detail ${L.maxOptionDetailLength} 字內，具體怎麼做的一句話（數字放這裡）。
+- rhythmHint 只放節奏本身（例如「一週 3 次」「固定星期二、四」），不要放策略描述；
+  這個方式本來就沒有額外節奏資訊時給 null，不要硬湊一個。
+- 不要標「推薦」，它們是平等的選項。最多**一個**選項可以附加 rationale：
+  "good_starting_point"（一個穩妥的起點，語氣是「可以先試」，不是「這個最好」）或
+  "closer_to_child_input"（只有在這個選項明顯呼應孩子自己說過的話——原話、原因、
+  或對話裡回過的內容——時才給，不是你自己覺得合理）。
+  沒有明顯理由就全部給 null，不要每次都硬找一個。
 
 資訊夠時：
 {"status":"ready","desiredOutcome":"兩週讀完神奇樹屋","goalControlType":"directly_actionable","progressionKind":"rhythm","actionPlanSummary":"平日睡前讀 15 分鐘，兩週把這本書讀完。","currentFocus":"先維持平日睡前的閱讀","nextAction":{"text":"今晚睡前先讀 15 分鐘","source":"child_stated"},"reviewPoint":{"type":"after_days","days":7},"planningContribution":"organized_child_plan","suggestedCadence":null,"sessionSize":{"kind":"minutes","minutes":15},"trialPeriod":{"days":7},"phases":null,"targetValue":null,"targetUnit":null,"currentValue":null,"controllableActions":null}
@@ -715,25 +754,56 @@ function normalizePhases(value: unknown): RawPhase[] | null {
   return phases;
 }
 
-function normalizeOptions(value: unknown): string[] | null {
+/** needs_choice 一個選項的原始拆解——沒有 id、沒有組好的 text（那是組裝端的事）。 */
+export type RawStartOption = {
+  title: string;
+  detail: string;
+  rhythmHint: string | null;
+  rationale: ChildPlanStartOptionRationale | null;
+};
+
+function normalizeOptions(value: unknown): RawStartOption[] | null {
   if (!Array.isArray(value)) return null;
   const L = CHILD_GOAL_PLANNING_LIMITS;
   if (value.length < L.minChoiceOptions || value.length > L.maxChoiceOptions) return null;
 
-  const options: string[] = [];
+  const options: RawStartOption[] = [];
+  let rationaleCount = 0;
   for (const item of value) {
-    const candidate = isRecord(item) ? item.text : item;
-    const parsed = text(candidate, L.maxOptionLength);
-    if (parsed === null) return null;
-    options.push(parsed);
+    if (!isRecord(item)) return null;
+    const title = text(item.title, L.maxOptionTitleLength);
+    const detail = text(item.detail, L.maxOptionDetailLength);
+    if (title === null || detail === null) return null;
+
+    let rhythmHint: string | null = null;
+    if (item.rhythmHint !== null && item.rhythmHint !== undefined) {
+      rhythmHint = text(item.rhythmHint, L.maxOptionRhythmHintLength);
+      if (rhythmHint === null) return null;
+    }
+
+    let rationale: ChildPlanStartOptionRationale | null = null;
+    if (item.rationale !== null && item.rationale !== undefined) {
+      if (
+        typeof item.rationale !== 'string'
+        || !CHILD_PLAN_START_OPTION_RATIONALES.includes(item.rationale as ChildPlanStartOptionRationale)
+      ) {
+        return null;
+      }
+      rationale = item.rationale as ChildPlanStartOptionRationale;
+      rationaleCount += 1;
+    }
+
+    options.push({ title, detail, rhythmHint, rationale });
   }
+  // 至多一個選項可以有 rationale——不是每次都要有，也不能變成挑一個「最好的」。
+  if (rationaleCount > 1) return null;
   return options;
 }
 
 /** 模型的「理解」。沒有 provenance —— 那是組裝端的事。 */
 export type ChildGoalPlanningUnderstanding =
   | { status: 'needs_clarification'; question: { kind: ChildPlanClarificationKind; text: string } }
-  | { status: 'needs_choice'; question: string; options: string[] }
+  | { status: 'needs_choice'; question: string; options: RawStartOption[] }
   | {
       status: 'ready';
       desiredOutcome: string;
@@ -1108,9 +1178,15 @@ export function composeChildGoalPlanningResponse(args: {
       schemaVersion: CHILD_GOAL_PLANNING_SCHEMA_VERSION,
       knownGoal: input.childOriginalGoal.trim(),
       question: understanding.question,
-      options: understanding.options.map((optionText, index) => ({
+      // text 由 detail ＋ rhythmHint deterministic 組出來——不讓模型
+      // 自己另外寫一句完整句子，避免 title/detail 跟 text 各說各話。
+      options: understanding.options.map((option, index) => ({
         id: `option-${index + 1}`,
-        text: optionText,
+        text: option.rhythmHint ? `${option.detail}，${option.rhythmHint}` : option.detail,
+        title: option.title,
+        detail: option.detail,
+        ...(option.rhythmHint !== null ? { rhythmHint: option.rhythmHint } : {}),
+        ...(option.rationale !== null ? { rationale: option.rationale } : {}),
       })),
       // 字面量，不是從模型讀來的。孩子永遠可以說「我自己想」。
       allowCustomAnswer: true,

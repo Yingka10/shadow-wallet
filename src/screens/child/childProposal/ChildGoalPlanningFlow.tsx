@@ -21,6 +21,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -28,6 +29,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 import { Colors } from '../../../constants/colors';
 import {
   childPlanningSessionExits,
@@ -44,7 +46,10 @@ import {
   type ChildPlanningSupportPreference,
   type PublishFormalPlanResult,
 } from '../../../lib/childPlanning';
-import { PLANNING_COPY } from './copy';
+// 直接指向這一支，不走 barrel（barrel 沒有重新匯出這個常數，加一個很小的
+// 直接 import 比為了一個常數改動 barrel 的匯出面安全）。
+import { CHILD_GOAL_PLANNING_MAX_ROUNDS } from '../../../lib/childPlanning/types';
+import { PLANNING_COPY, formatPlanningStep } from './copy';
 
 // ---------------------------------------------------------------------------
 
@@ -120,6 +125,219 @@ const SUPPORT_BY_CHOICE: Record<OpeningChoice, ChildPlanningSupportPreference> =
   want_options: 'give_me_options',
   first_step_only: 'first_step_only',
 };
+
+// ---------------------------------------------------------------------------
+// P6 視覺共用元件 —— 只用在 needs_choice 與 ready 這兩個 capture state。
+// 其餘畫面（開場／等待／澄清／我自己想／逾時）維持原樣，不在這輪範圍內。
+// ---------------------------------------------------------------------------
+
+/**
+ * 頁首的步驟徽章：分段進度條 ＋ 純文字步驟數。
+ *
+ * 兩頁統一用同一套（P6 §1）—— 不用回到左邊那顆「離開」，那顆按鈕本來就
+ * 掛在 ChildProposalScreen 的外層 header，這裡只加「現在在第幾步」。
+ *
+ * ⚠️ 步驟數字**沒有**用圓角 pill 包起來——那顆 pill 跟外層 header 自己
+ *    的圓形返回鍵疊在一起，看起來像同一列冒出第二個圓形按鈕。純文字
+ *    就不會跟返回鍵搶視覺。
+ */
+function ProgressHeader({ step, totalSteps }: { step: number; totalSteps: number }) {
+  return (
+    <View style={styles.progressRow} testID="planning-progress">
+      <View style={styles.progressTrack}>
+        {Array.from({ length: totalSteps }).map((_, index) => (
+          <View
+            // eslint-disable-next-line react/no-array-index-key
+            key={index}
+            style={[styles.progressSegment, index < step - 1 && styles.progressSegmentDone]}
+          />
+        ))}
+      </View>
+      <Text style={styles.progressStepText}>{formatPlanningStep(step, totalSteps)}</Text>
+    </View>
+  );
+}
+
+/**
+ * GrowBook 現有的小芽角色（journey-mascot.png，沿用 LongTerm 已經在用的同一張圖）。
+ *
+ * ⚠️ 不生新插圖：mockup 裡 Step 2「抱著書」、Step 4「拿筆」是兩張不同姿勢的
+ *    插圖，但 repo 裡沒有這兩張、也不該為了兩個畫面各生一張專屬插圖
+ *    （P6 §Illustration：「不要為每個 task 建 task-specific illustration
+ *    system」）。兩頁共用同一張既有的小芽靜態圖。
+ */
+function Mascot({ size = 84 }: { size?: number }) {
+  return (
+    <Image
+      source={require('../../../../assets/images/child/journey-mascot.png')}
+      style={{ width: size, height: size }}
+      resizeMode="contain"
+      accessible={false}
+    />
+  );
+}
+
+function CheckIcon({ size = 14, color = '#FFFFFF' }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M5 12.5l4.5 4.5L19 7"
+        stroke={color}
+        strokeWidth={2.6}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+function ChevronRightIcon({ size = 16, color = Colors.leaf700 }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M9 6l6 6-6 6" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+function PencilIcon({ size = 18, color = Colors.leaf700 }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M16.5 4.5l3 3L8 19l-4 1 1-4L16.5 4.5z"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/**
+ * Step 2 的 AI 選項卡（P6 §5）。
+ *
+ * 左側是編號圓，不是內容相關的圖示 —— option 是模型當場生的自由文字，
+ * 沒有可靠的方式從文字內容判斷「這是時間類/份量類/排程類」而不用關鍵字
+ * 猜（那正是 P6 明講不要做的 task-name sniffing）。編號圓在 mockup 的
+ * 左側圖示位置上，同時是舊版就有的「孩子講得出我要第幾個」的功能。
+ */
+/**
+ * P6 追加：title（大標）／detail（一行細節）／rhythmHint（節奏小標籤）
+ * 三層排版。`detail`／`rhythmHint`／`badge` 都是 optional——舊資料
+ * （或極少數 title 缺席的回應）退回只顯示一行 title，不會空一塊或報錯。
+ *
+ * ⚠️ badge **不是**「推薦方案」的另一種寫法：只有 grounded rationale
+ *    才會有值（見 validateChildGoalPlanningResult 的 rationaleCount<=1），
+ *    低權重純文字，不用綠色實心 chip，免得又讀成「AI 已經幫你選好了」。
+ */
+function StartOptionCard({
+  testID,
+  index,
+  title,
+  detail,
+  rhythmHint,
+  badge,
+  selected,
+  onPress,
+}: {
+  testID: string;
+  index: number;
+  title: string;
+  detail?: string;
+  rhythmHint?: string;
+  badge?: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const a11yLabel = [title, detail, rhythmHint].filter(Boolean).join('。');
+  return (
+    <TouchableOpacity
+      testID={testID}
+      style={[styles.optionCard, selected && styles.optionCardOn]}
+      onPress={onPress}
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      accessibilityLabel={a11yLabel}
+      activeOpacity={0.85}
+    >
+      <View style={[styles.optionMarker, selected && styles.optionMarkerOn]}>
+        <Text style={[styles.optionMarkerText, selected && styles.optionMarkerTextOn]}>{index}</Text>
+      </View>
+      <View style={styles.optionCardCopy}>
+        {badge ? (
+          <Text style={styles.optionBadge}>{badge}</Text>
+        ) : null}
+        <Text style={[styles.optionCardTitle, selected && styles.optionCardTitleOn]}>{title}</Text>
+        {detail ? <Text style={styles.optionCardDetail}>{detail}</Text> : null}
+        {rhythmHint ? <Text style={styles.optionCardRhythmHint}>{rhythmHint}</Text> : null}
+      </View>
+      <View style={[styles.optionIndicator, selected && styles.optionIndicatorOn]}>
+        {selected ? <CheckIcon size={13} /> : null}
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+/**
+ * 「我有自己的方式」（P6 §6）。
+ *
+ * ⚠️ 不是第四個 AI 選項 —— 虛線框、鉛筆圖示、沒有編號圓、右側是 chevron
+ *    不是選取指示。視覺上就不能被讀成「第四種 GrowBook 提的做法」。
+ */
+function CustomOptionRow({
+  testID,
+  title,
+  subtitle,
+  onPress,
+}: {
+  testID: string;
+  title: string;
+  subtitle: string;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      testID={testID}
+      style={styles.customOption}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${title}。${subtitle}`}
+      activeOpacity={0.85}
+    >
+      <View style={styles.customOptionIcon}>
+        <PencilIcon size={18} />
+      </View>
+      <View style={styles.customOptionCopy}>
+        <Text style={styles.customOptionTitle}>{title}</Text>
+        <Text style={styles.customOptionSubtitle}>{subtitle}</Text>
+      </View>
+      <ChevronRightIcon size={18} />
+    </TouchableOpacity>
+  );
+}
+
+/** Step 4 的「我想改一下」——outline，比 primary 弱一階，但仍是完整按鈕（P6 §14）。 */
+function SecondaryOutline({
+  testID,
+  label,
+  onPress,
+}: {
+  testID: string;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      testID={testID}
+      style={styles.secondaryOutline}
+      onPress={onPress}
+      accessibilityRole="button"
+      activeOpacity={0.75}
+    >
+      <Text style={styles.secondaryOutlineText}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
 
 type Phase =
   | { kind: 'opening' }
@@ -370,6 +588,24 @@ export default function ChildGoalPlanningFlow({
   // ── 對話中 ──────────────────────────────────────────────────────────────
   const result = session.latestResult;
 
+  /**
+   * 目前是第幾步（P6 §1 進度條用，只給 needs_choice／ready 這兩個 capture
+   * state）。
+   *
+   * ⚠️ 不能寫死 2／4——這場對話可能 1 輪就到 ready，也可能問到第 3 輪，
+   *    寫死的話會出現「明明只跳了一輪，數字卻從 2 跳到 4」這種看起來
+   *    像算錯的情況（P6 視覺回饋抓到的正是這個）。
+   *
+   *    session.responses 是「目前為止已經完成、而且帶著孩子回答的輪數」；
+   *    第一輪（開場直接叫的那一輪）沒有 response，所以真正跑過的輪數要
+   *    再 +1。currentStep 是「開場（1）＋ 已經跑過的輪數」。
+   */
+  const roundsCompleted = session.responses.length + 1;
+  const currentStep = 1 + roundsCompleted;
+  // 進行中（needs_choice／needs_clarification）用架構上限（開場 + 最多
+  // CHILD_GOAL_PLANNING_MAX_ROUNDS 輪）當分母，因為還不知道最後會停在第幾輪。
+  const inProgressTotalSteps = 1 + CHILD_GOAL_PLANNING_MAX_ROUNDS;
+
   // 孩子自己寫怎麼開始。三輪問完、逾時、或他在等待中按了「先不等」都走這裡。
   if (writingOwn) {
     return (
@@ -471,16 +707,30 @@ export default function ChildGoalPlanningFlow({
     const chosen = result.options.find((o) => o.id === chosenOptionId) ?? null;
     return (
       <ScrollView testID="planning-choice" contentContainerStyle={styles.body}>
-        <Text style={styles.question}>{result.question}</Text>
-        <Text style={styles.subtitle}>{PLANNING_COPY.choice.hint}</Text>
+        <ProgressHeader step={currentStep} totalSteps={inProgressTotalSteps} />
+        <View style={styles.headerRow}>
+          <View style={styles.headerCopy}>
+            {/* 標題直接用 AI 回來的 question——本來就是依 goal 動態生成，
+                不是這裡另外組一句「想用 XX，你想怎麼開始？」去 hardcode 主題。 */}
+            <Text style={styles.question}>{result.question}</Text>
+            <Text style={styles.subtitle}>{PLANNING_COPY.choice.hint}</Text>
+          </View>
+          <Mascot size={80} />
+        </View>
+
+        <Text style={styles.microcopy}>{PLANNING_COPY.choice.microcopy}</Text>
 
         <View style={styles.options}>
           {result.options.map((option, index) => (
-            <Choice
+            <StartOptionCard
               key={option.id}
               testID={`planning-option-${option.id}`}
-              label={option.text}
-              marker={index + 1}
+              index={index + 1}
+              // title 缺席（極少數舊資料）時退回顯示整句 text，不留空。
+              title={option.title ?? option.text}
+              detail={option.title ? option.detail : undefined}
+              rhythmHint={option.rhythmHint}
+              badge={option.rationale ? PLANNING_COPY.choice.optionRationale[option.rationale] : undefined}
               // 只是選起來，還沒送出 —— 可以改選，也可以不選。
               selected={chosenOptionId === option.id}
               onPress={() => setChosenOptionId(option.id)}
@@ -488,16 +738,16 @@ export default function ChildGoalPlanningFlow({
           ))}
 
           {/* 永遠在最後，而且永遠存在 —— 不是一個可以被關掉的分支。
-              outlined 而且沒有編號：它是「換一種方式」，不是第四個做法。
-              它通往一個有「上一步」的輸入頁，所以直接進去不算不可逆。 */}
-          <Choice
+              虛線框、鉛筆、沒有編號：它是「換一種方式」，不是第四個做法。 */}
+          <CustomOptionRow
             testID="planning-option-custom"
-            label={PLANNING_COPY.choice.custom}
-            variant="outlined"
-            selected={false}
+            title={PLANNING_COPY.choice.customTitle}
+            subtitle={PLANNING_COPY.choice.customSubtitle}
             onPress={() => setWritingOwn(true)}
           />
         </View>
+
+        <Text style={styles.reassurance}>{PLANNING_COPY.choice.reassurance}</Text>
 
         <Primary
           testID="planning-choice-confirm"
@@ -526,17 +776,27 @@ export default function ChildGoalPlanningFlow({
   if (result?.status === 'ready') {
     return (
       <ScrollView testID="planning-ready" contentContainerStyle={styles.body}>
-        <Text style={styles.question}>{PLANNING_COPY.ready.title}</Text>
-        <Text style={styles.subtitle}>{PLANNING_COPY.ready.subtitle}</Text>
-        <ReadyPlan plan={result.plan} preferredTime={preferredTime} />
+        {/* ready 是終點——分母用 currentStep 自己，畫面上永遠是「走到底了」
+            （全部 segment 填滿），不是用架構上限硬湊出「4/4」。 */}
+        <ProgressHeader step={currentStep} totalSteps={currentStep} />
+        <View style={styles.headerRow}>
+          <View style={styles.headerCopy}>
+            <Text style={styles.question}>{PLANNING_COPY.ready.title}</Text>
+            <Text style={styles.subtitle}>{PLANNING_COPY.ready.subtitle}</Text>
+          </View>
+          <Mascot size={80} />
+        </View>
+
+        <ReadyPlanV2 plan={result.plan} preferredTime={preferredTime} />
 
         <Primary
           testID="planning-confirm"
           label={PLANNING_COPY.ready.confirm}
           onPress={() => void handleConfirm()}
         />
-        {/* 「我想改一下」不是打開一張表單 —— 是回到他自己決定的那一層。 */}
-        <Secondary
+        {/* 「我想改一下」不是打開一張表單 —— 是回到他自己決定的那一層。
+            Outline，比 primary 弱一階，但仍是完整按鈕（P6 §14 secondary）。 */}
+        <SecondaryOutline
           testID="planning-revise"
           label={PLANNING_COPY.ready.revise}
           onPress={() => setWritingOwn(true)}
@@ -628,88 +888,98 @@ function describeTrial(plan: ChildGoalPlan): string | null {
 }
 
 /**
- * 這一輪只做**最窄的孩子端預覽**。
+ * P6 Step 4 三層 hierarchy：方向 → 這一段先這樣走 → 今天第一步（P6 §10）。
  *
- * 不重畫長期詳情、不顯示分類、不顯示幣值 —— 孩子這一刻只需要回答一件事：
- * 「這是不是我願意先這樣試的方式？」
+ * 不重畫長期詳情、不顯示分類、不顯示幣值、不顯示 actionPlanSummary 全文——
+ * 孩子這一刻只需要回答一件事：「這是不是我願意先這樣試的方式？」
+ *
+ * ⚠️ 沒有幣值／回饋區塊是刻意的，不是漏做：sessionCoinReference 這類
+ *    canonical enriched policy 要到 confirm 之後的 publish() 才會算出來
+ *    （見 formalPlan/toChildPlanEnrichment.ts）——這一頁 confirm 之前根本
+ *    還沒有真的政策結果可以讀，寫死或先猜一個數字都是騙孩子。
  */
-function ReadyPlan({ plan, preferredTime }: { plan: ChildGoalPlan; preferredTime: string | null }) {
+function ReadyPlanV2({ plan, preferredTime }: { plan: ChildGoalPlan; preferredTime: string | null }) {
+  const trial = describeTrial(plan);
+  const cadence = plan.progressionKind === 'rhythm' ? plan.cadence : null;
+  const sessionSize = plan.progressionKind === 'rhythm' ? plan.sessionSize : null;
+  const weeklyCount = cadence?.mode === 'weekly_frequency' ? cadence.weeklyFrequency : null;
+  const sessionMinutes = sessionSize?.kind === 'minutes' ? sessionSize.minutes : null;
+  const rhythmSentence = describeRhythm(plan);
+
   return (
-    <View testID="planning-ready-plan" style={styles.card}>
-      {/* ① 想做到什麼 —— 這一頁的主詞，所以是大字，不是欄位表的第一列。 */}
-      <View style={styles.heroBlock}>
-        <Text style={styles.label}>{PLANNING_COPY.ready.outcomeLabel}</Text>
-        <Text style={styles.heroValue}>{plan.desiredOutcome}</Text>
+    <View testID="planning-ready-plan" style={styles.planCard}>
+      {/* A｜方向 —— 這一頁的主詞，所以是大字，不是欄位表的第一列。 */}
+      <View style={styles.planSection}>
+        <Text style={styles.planSectionLabel}>{PLANNING_COPY.ready.outcomeLabel}</Text>
+        <Text style={styles.planOutcome}>{plan.desiredOutcome}</Text>
+        {/* duration 沒有資料就不 render，不補一個沒有人決定過的週數。 */}
+        {trial !== null ? (
+          <View style={styles.trialBadge}>
+            <Text style={styles.trialBadgeText}>
+              📅 {PLANNING_COPY.ready.trialLabel} {trial}
+            </Text>
+          </View>
+        ) : null}
       </View>
 
-      {/* ② 這一段怎麼做 —— 執行細節收在一起，每一項都是一行短句。 */}
-      <View style={styles.detailBlock}>
-        <InlineRow label={PLANNING_COPY.ready.trialLabel} value={describeTrial(plan)} />
-        <InlineRow label={PLANNING_COPY.ready.rhythmLabel} value={describeRhythm(plan)} />
-        {/*
-          ⚠️ 沒有時段就**整列不出現**。
-          沒有固定時間不是缺漏 —— 不追問、不補假值，見 copy 的 timeLabel。
-        */}
-        <InlineRow label={PLANNING_COPY.ready.timeLabel} value={preferredTime} />
-      </View>
-
-      {/* ③ 今天第一步 —— 唯一今天真的要做的事，所以獨立一塊、給重量。 */}
-      <View style={styles.stepBlock}>
-        <Text style={styles.stepLabel}>{PLANNING_COPY.ready.nextActionLabel}</Text>
-        <Text style={styles.stepValue}>{plan.nextAction.text}</Text>
-      </View>
-
-      <Row label={PLANNING_COPY.ready.summaryLabel} value={plan.actionPlanSummary} />
-
-      {plan.progressionKind === 'staged' ? (
-        <>
-          <Row label={PLANNING_COPY.ready.focusLabel} value={plan.currentFocus} />
-          {/* ⚠️ 標題寫的是「可能的」—— 這是暫定路線，不是正式課程大綱。 */}
-          <Row
-            label={PLANNING_COPY.ready.phasesLabel}
-            value={plan.phases.map((phase) => phase.title).join('、')}
-          />
-        </>
+      {/* B｜這一段先這樣走 —— 只有 rhythm 計畫、而且真的有數字才用大數字兩欄；
+          其他形狀（fixed_days／count 份量／staged／accumulation）退回一句真實文字，
+          不編兩個假數字湊版面。完全沒有資料就整段不 render。 */}
+      {plan.progressionKind === 'rhythm' && weeklyCount !== null && sessionMinutes !== null ? (
+        <View style={styles.planSection}>
+          <Text style={styles.planSectionLabel}>{PLANNING_COPY.ready.rhythmLabel}</Text>
+          <View style={styles.rhythmSurface}>
+            <View style={styles.rhythmCell}>
+              <Text style={styles.rhythmCellLabel}>📅 {PLANNING_COPY.ready.weeklyLabel}</Text>
+              <Text style={styles.rhythmCellValue}>{weeklyCount}</Text>
+              <Text style={styles.rhythmCellUnit}>{PLANNING_COPY.ready.weeklyUnit}</Text>
+            </View>
+            <View style={styles.rhythmDivider} />
+            <View style={styles.rhythmCell}>
+              <Text style={styles.rhythmCellLabel}>🕒 {PLANNING_COPY.ready.sessionLabel}</Text>
+              <Text style={styles.rhythmCellValue}>{sessionMinutes}</Text>
+              <Text style={styles.rhythmCellUnit}>分鐘</Text>
+            </View>
+          </View>
+        </View>
+      ) : plan.progressionKind === 'rhythm' && rhythmSentence !== null ? (
+        <View style={styles.planSection}>
+          <Text style={styles.planSectionLabel}>{PLANNING_COPY.ready.rhythmLabel}</Text>
+          <Text style={styles.rhythmFallback}>{rhythmSentence}</Text>
+        </View>
+      ) : plan.progressionKind === 'staged' ? (
+        <View style={styles.planSection}>
+          <Text style={styles.planSectionLabel}>{PLANNING_COPY.ready.rhythmLabel}</Text>
+          <Text style={styles.rhythmFallback}>
+            {plan.phases.length} 個階段：{plan.phases.map((phase) => phase.title).join('、')}
+          </Text>
+        </View>
+      ) : plan.progressionKind === 'accumulation' ? (
+        <View style={styles.planSection}>
+          <Text style={styles.planSectionLabel}>{PLANNING_COPY.ready.rhythmLabel}</Text>
+          <Text style={styles.rhythmFallback}>
+            {plan.currentValue} / {plan.targetValue} {plan.targetUnit}
+          </Text>
+        </View>
       ) : null}
 
-      {plan.progressionKind === 'accumulation' ? (
-        <>
-          <Row
-            label={PLANNING_COPY.ready.targetLabel}
-            value={`${plan.targetValue} ${plan.targetUnit}`}
-          />
-          <Row
-            label={PLANNING_COPY.ready.currentLabel}
-            value={`${plan.currentValue} ${plan.targetUnit}`}
-          />
-        </>
-      ) : null}
-    </View>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string | null }) {
-  if (value === null || value.length === 0) return null;
-  return (
-    <View style={styles.row}>
-      <Text style={styles.label}>{label}</Text>
-      <Text style={styles.value}>{value}</Text>
-    </View>
-  );
-}
-
-/**
- * 標籤在左、值在右的一行。**沒有值就整行消失**（不是顯示「未定」）。
- *
- * 顯示「未定」等於把「還沒決定」畫成一個缺口，孩子會覺得計畫沒做完；
- * 而很多事本來就不需要決定。
- */
-function InlineRow({ label, value }: { label: string; value: string | null }) {
-  if (value === null || value.length === 0) return null;
-  return (
-    <View style={styles.inlineRow}>
-      <Text style={styles.inlineLabel}>{label}</Text>
-      <Text style={styles.inlineValue}>{value}</Text>
+      {/* C｜今天第一步 —— 唯一今天真的要做的事，所以獨立一塊、給重量。
+          nextAction.text 本身已經是完整文案（見 canonical 契約），這裡不再
+          另外組一句「次要說明」重複同一件事。 */}
+      <View style={styles.planSection}>
+        <Text style={styles.planSectionLabel}>{PLANNING_COPY.ready.nextActionLabel}</Text>
+        <View style={styles.nextActionCard}>
+          <Text style={styles.nextActionText}>{plan.nextAction.text}</Text>
+        </View>
+        {/* ⚠️ 沒有時段就整行不出現，不可以顯示「還沒決定」。 */}
+        {preferredTime !== null && preferredTime.length > 0 ? (
+          <View style={styles.timePill}>
+            <Text style={styles.timePillText}>
+              🕒 {PLANNING_COPY.ready.timeLabel}：{preferredTime}
+            </Text>
+          </View>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -898,58 +1168,181 @@ const styles = StyleSheet.create({
   // flex: 1 讓長選項在卡片內換行，而不是把編號擠出去。
   choiceLabel: { flex: 1, fontSize: 17, lineHeight: 24, fontWeight: '800', color: Colors.ink900 },
   choiceLabelOn: { color: Colors.leaf700 },
-  card: {
+  label: { fontSize: 13, fontWeight: '800', color: Colors.leaf700 },
+
+  // ── P6 §1：頁首分段進度條 ＋ 圓角步驟 pill ──────────────────────────
+  progressRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  progressTrack: { flex: 1, flexDirection: 'row', gap: 6 },
+  progressSegment: { flex: 1, height: 6, borderRadius: 3, backgroundColor: Colors.borderMedium },
+  progressSegmentDone: { backgroundColor: Colors.accent },
+  progressStepText: { fontSize: 12, fontWeight: '800', color: Colors.fgMuted },
+
+  // ── 頁首：標題／說明在左，小芽在右（needs_choice／ready 共用） ─────────
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
+  headerCopy: { flex: 1, gap: 6 },
+  // 選項上方的輕提醒（P6 追加）——比 hint 更小、更弱，純降低壓力，不是規則。
+  microcopy: { fontSize: 12, fontWeight: '600', color: Colors.fgMuted, marginTop: 2 },
+  reassurance: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.fgMuted,
+    textAlign: 'center',
+    marginTop: 2,
+  },
+
+  // ── P6 §5：Step 2 AI 選項卡 ──────────────────────────────────────────
+  optionCard: {
+    minHeight: 72,
     borderRadius: 20,
     backgroundColor: Colors.bgSurface,
     borderWidth: 1,
     borderColor: Colors.borderSoft,
-    paddingHorizontal: 18,
-  },
-  row: { paddingVertical: 14, gap: 4 },
-  label: { fontSize: 13, fontWeight: '800', color: Colors.leaf700 },
-  value: { fontSize: 17, lineHeight: 25, fontWeight: '800', color: Colors.ink900 },
-
-  // ① 想做到什麼
-  heroBlock: { paddingTop: 18, paddingBottom: 14, gap: 6 },
-  heroValue: { fontSize: 21, lineHeight: 30, fontWeight: '900', color: Colors.ink900 },
-
-  // ② 執行細節：淡底的一塊，與上下兩塊區隔開，但不搶主標。
-  detailBlock: {
-    backgroundColor: Colors.leaf50,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 4,
-    marginBottom: 14,
-  },
-  inlineRow: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     flexDirection: 'row',
+    // flex-start，不是 center——title/detail/rhythmHint 疊三行時，
+    // marker 跟右側指示圓要貼齊卡片頂端，不要整組被拉去跟著置中。
     alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    paddingVertical: 9,
-    gap: 16,
+    gap: 14,
   },
-  inlineLabel: { fontSize: 14, fontWeight: '700', color: Colors.leaf700 },
-  // flex + 靠右：長值換行時仍與標籤對齊，不會把標籤擠掉。
-  inlineValue: {
-    flex: 1,
-    fontSize: 15,
-    lineHeight: 22,
+  optionCardOn: { borderColor: Colors.accent, backgroundColor: Colors.leaf50 },
+  optionMarker: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.leaf50,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  optionMarkerOn: { backgroundColor: Colors.bgSurface },
+  optionMarkerText: { fontSize: 14, fontWeight: '800', color: Colors.leaf700 },
+  optionMarkerTextOn: { color: Colors.leaf700 },
+  optionCardCopy: { flex: 1, gap: 3, paddingTop: 4 },
+  // 低權重徽章：純文字＋淡底，不是綠色實心 chip——不能讀成「AI 推薦」。
+  optionBadge: {
+    alignSelf: 'flex-start',
+    fontSize: 11,
     fontWeight: '800',
-    color: Colors.ink900,
-    textAlign: 'right',
+    color: Colors.leaf700,
+    backgroundColor: Colors.leaf50,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    marginBottom: 2,
+    overflow: 'hidden',
   },
+  optionCardTitle: { fontSize: 16, lineHeight: 23, fontWeight: '800', color: Colors.ink900 },
+  optionCardTitleOn: { color: Colors.leaf700 },
+  optionCardDetail: { fontSize: 14, lineHeight: 20, fontWeight: '600', color: Colors.fgSecondary },
+  optionCardRhythmHint: { fontSize: 13, lineHeight: 18, fontWeight: '600', color: Colors.fgMuted },
+  // 右側簡單的空心選取指示；選到了才填滿變成綠底白勾（P6 §5「不用 radio button」
+  // 講的是不要傳統 radio 圖示，這裡的圓仍然是「選取狀態」的最小表達）。
+  optionIndicator: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 1.5,
+    borderColor: Colors.borderMedium,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  optionIndicatorOn: { borderColor: Colors.accent, backgroundColor: Colors.accent },
 
-  // ③ 今天第一步：左側綠邊，視覺上是「現在就能做的那一件」。
-  stepBlock: {
+  // ── P6 §6：「我有自己的方式」——虛線框，跟上面三張視覺語言不同 ────────
+  customOption: {
+    minHeight: 64,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: Colors.borderMedium,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  customOptionIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.cream100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  customOptionCopy: { flex: 1, gap: 2 },
+  customOptionTitle: { fontSize: 15, fontWeight: '800', color: Colors.fgSecondary },
+  customOptionSubtitle: { fontSize: 13, fontWeight: '600', color: Colors.fgMuted },
+
+  // ── P6 §14：Step 4 secondary（「我想改一下」）—— outline，不是純文字 ───
+  secondaryOutline: {
+    minHeight: 52,
+    borderRadius: 26,
+    borderWidth: 1.5,
+    borderColor: Colors.borderMedium,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  secondaryOutlineText: { fontSize: 16, fontWeight: '800', color: Colors.fgSecondary },
+
+  // ── P6 §10：Step 4 三層 hierarchy（方向 → 這一段先這樣走 → 今天第一步）──
+  planCard: {
+    borderRadius: 24,
+    backgroundColor: Colors.bgSurface,
+    borderWidth: 1,
+    borderColor: Colors.borderSoft,
+    padding: 18,
+    gap: 18,
+  },
+  planSection: { gap: 8 },
+  planSectionLabel: { fontSize: 13, fontWeight: '800', color: Colors.leaf700 },
+  // A｜方向
+  planOutcome: { fontSize: 21, lineHeight: 30, fontWeight: '900', color: Colors.ink900 },
+  trialBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: Colors.cream100,
+  },
+  trialBadgeText: { fontSize: 13, fontWeight: '700', color: Colors.fgSecondary },
+  // B｜這一段先這樣走：大數字兩欄
+  rhythmSurface: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.leaf50,
+    borderRadius: 16,
+    paddingVertical: 16,
+  },
+  rhythmCell: { flex: 1, alignItems: 'center', gap: 2 },
+  rhythmCellLabel: { fontSize: 12, fontWeight: '700', color: Colors.leaf700 },
+  rhythmCellValue: { fontSize: 28, lineHeight: 34, fontWeight: '900', color: Colors.ink900 },
+  rhythmCellUnit: { fontSize: 12, fontWeight: '700', color: Colors.fgMuted },
+  rhythmDivider: { width: 1, alignSelf: 'stretch', backgroundColor: Colors.borderMedium, marginVertical: 8 },
+  // B 的退回文字（非 weekly_frequency+minutes 的節奏形狀、staged、accumulation）
+  rhythmFallback: { fontSize: 15, lineHeight: 22, fontWeight: '700', color: Colors.ink900 },
+  // C｜今天第一步：左側綠邊＋淡綠底，視覺上是「現在就能做的那一件」。
+  nextActionCard: {
     borderLeftWidth: 3,
     borderLeftColor: Colors.accent,
-    paddingLeft: 12,
-    paddingVertical: 2,
-    marginBottom: 4,
-    gap: 4,
+    backgroundColor: Colors.leaf50,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
-  stepLabel: { fontSize: 13, fontWeight: '800', color: Colors.leaf700 },
-  stepValue: { fontSize: 18, lineHeight: 26, fontWeight: '900', color: Colors.ink900 },
+  nextActionText: { fontSize: 18, lineHeight: 26, fontWeight: '900', color: Colors.ink900 },
+  timePill: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: Colors.borderMedium,
+  },
+  timePillText: { fontSize: 13, fontWeight: '700', color: Colors.fgSecondary },
+
   primary: {
     minHeight: 56,
     borderRadius: 28,

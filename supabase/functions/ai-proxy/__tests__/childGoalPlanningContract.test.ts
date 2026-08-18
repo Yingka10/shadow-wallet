@@ -294,7 +294,10 @@ describe('Case 4｜孩子有自己的方法', () => {
     const { response, result: choice } = roundTrip(CASE_4_INPUT, {
       status: 'needs_choice',
       question: '你想先用哪一種方式開始？',
-      options: ['先練運球', '先練投籃姿勢'],
+      options: [
+        { title: '先練運球', detail: '先練運球', rhythmHint: null },
+        { title: '先練投籃姿勢', detail: '先練投籃姿勢', rhythmHint: null },
+      ],
     });
     expect(response.status).toBe('unavailable');
     expect(choice.status).toBe('unavailable');
@@ -468,7 +471,10 @@ describe('Case 8｜資訊已經足夠，不該再問', () => {
     const { response } = roundTrip(CASE_8_INPUT, {
       status: 'needs_choice',
       question: '你想先用哪一種方式開始？',
-      options: ['一週兩次', '一週四次'],
+      options: [
+        { title: '一週兩次', detail: '一週兩次', rhythmHint: null },
+        { title: '一週四次', detail: '一週四次', rhythmHint: null },
+      ],
     });
     expect(response.status).toBe('unavailable');
   });
@@ -628,7 +634,16 @@ describe('Case 11｜目標清楚、還沒決定怎麼做', () => {
   const { result } = roundTrip(CASE_11_INPUT, {
     status: 'needs_choice',
     question: '你想先用哪一種方式開始？',
-    options: ['每天睡前讀 15 分鐘', '週末一次讀完一章', '每天上學前讀 10 分鐘'],
+    options: [
+      { title: '固定睡前讀', detail: '每天睡前讀 15 分鐘', rhythmHint: '一週 7 天' },
+      { title: '週末一次讀完', detail: '週末一次讀完一章', rhythmHint: null },
+      {
+        title: '上學前讀一點',
+        detail: '每天上學前讀 10 分鐘',
+        rhythmHint: null,
+        rationale: 'good_starting_point',
+      },
+    ],
   });
 
   it('是 needs_choice，不是 clarification —— 他知道自己要幹嘛', () => {
@@ -643,6 +658,24 @@ describe('Case 11｜目標清楚、還沒決定怎麼做', () => {
       'option-2',
       'option-3',
     ]);
+  });
+
+  it('每個選項都拆成 title／detail，text 由兩者 deterministic 組出來', () => {
+    if (result.status !== 'needs_choice') throw new Error('expected needs_choice');
+    expect(result.options[0]).toMatchObject({
+      title: '固定睡前讀',
+      detail: '每天睡前讀 15 分鐘',
+      rhythmHint: '一週 7 天',
+      text: '每天睡前讀 15 分鐘，一週 7 天',
+    });
+    // 沒有 rhythmHint 的選項：text 就是 detail 本身，不會多一個逗號。
+    expect(result.options[1]).toMatchObject({ title: '週末一次讀完', text: '週末一次讀完一章' });
+  });
+
+  it('至多一個選項可以有 rationale，而且不是每次都有', () => {
+    if (result.status !== 'needs_choice') throw new Error('expected needs_choice');
+    expect(result.options.filter((option) => option.rationale !== undefined)).toHaveLength(1);
+    expect(result.options[2].rationale).toBe('good_starting_point');
   });
 
   it('孩子一定可以說「我自己想」', () => {

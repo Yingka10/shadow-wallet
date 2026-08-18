@@ -37,6 +37,7 @@ import {
   CHILD_PLAN_FIELD_SOURCES,
   CHILD_PLAN_GOAL_CONTROL_TYPES,
   CHILD_PLAN_PROGRESSION_KINDS,
+  CHILD_PLAN_START_OPTION_RATIONALES,
   effectiveChildApproach,
   isChildOwned,
   type ChildGoalPlan,
@@ -259,12 +260,21 @@ function validPhases(value: unknown): ChildPlanPhase[] | null {
   return phases;
 }
 
+function validOptionRationale(value: unknown): ChildPlanStartOption['rationale'] | 'absent' | 'invalid' {
+  if (value === null || value === undefined) return 'absent';
+  return typeof value === 'string'
+    && (CHILD_PLAN_START_OPTION_RATIONALES as readonly string[]).includes(value)
+    ? (value as ChildPlanStartOption['rationale'])
+    : 'invalid';
+}
+
 function validOptions(value: unknown): ChildPlanStartOption[] | null {
   if (!Array.isArray(value)) return null;
   if (value.length < L.minChoiceOptions || value.length > L.maxChoiceOptions) return null;
 
   const options: ChildPlanStartOption[] = [];
   const seen = new Set<string>();
+  let rationaleCount = 0;
   for (const item of value) {
     if (!isRecord(item)) return null;
     const id = nonEmptyString(item.id, L.maxPhaseIdLength);
@@ -272,8 +282,42 @@ function validOptions(value: unknown): ChildPlanStartOption[] | null {
     if (id === null || text === null) return null;
     if (seen.has(id)) return null;
     seen.add(id);
-    options.push({ id, text });
+
+    // title／detail／rhythmHint 是額外的呈現拆解，全部 optional——沒有的話
+    // UI 退回只顯示 text 那一句（跟 P6 剛上線時一樣）。
+    const rawTitle = item.title;
+    const title = rawTitle === null || rawTitle === undefined
+      ? undefined
+      : nonEmptyString(rawTitle, L.maxOptionTitleLength) ?? 'invalid';
+    if (title === 'invalid') return null;
+
+    const rawDetail = item.detail;
+    const detail = rawDetail === null || rawDetail === undefined
+      ? undefined
+      : nonEmptyString(rawDetail, L.maxOptionDetailLength) ?? 'invalid';
+    if (detail === 'invalid') return null;
+
+    const rawRhythmHint = item.rhythmHint;
+    const rhythmHint = rawRhythmHint === null || rawRhythmHint === undefined
+      ? undefined
+      : nonEmptyString(rawRhythmHint, L.maxOptionRhythmHintLength) ?? 'invalid';
+    if (rhythmHint === 'invalid') return null;
+
+    const rationale = validOptionRationale(item.rationale);
+    if (rationale === 'invalid') return null;
+    if (rationale !== 'absent') rationaleCount += 1;
+
+    options.push({
+      id,
+      text,
+      ...(title !== undefined ? { title } : null),
+      ...(detail !== undefined ? { detail } : null),
+      ...(rhythmHint !== undefined ? { rhythmHint } : null),
+      ...(rationale !== 'absent' ? { rationale } : null),
+    });
   }
+  // 至多一個選項可以有 rationale——不是每次都要有，也不能變成挑一個「最好的」。
+  if (rationaleCount > 1) return null;
   return options;
 }
 
@@ -862,12 +906,15 @@ function validateChoice(
   }
 
   const rejections = new Rejections();
-  checkConversationText(
-    [question, ...options.map((option) => option.text)],
-    knownGoal,
-    input,
-    rejections,
-  );
+  // title／detail／rhythmHint 一樣是模型寫的自由文字，跟 text 一樣要掃過
+  // 心理狀態推測與領域權威宣稱——不能因為多了三個新欄位就多一條漏網的路。
+  const optionTexts = options.flatMap((option) => [
+    option.text,
+    ...(option.title !== undefined ? [option.title] : []),
+    ...(option.detail !== undefined ? [option.detail] : []),
+    ...(option.rhythmHint !== undefined ? [option.rhythmHint] : []),
+  ]);
+  checkConversationText([question, ...optionTexts], knownGoal, input, rejections);
 
   // 孩子已經有方法了還在給他選項 —— 那就是把他的方法換掉的前一步。
   // 「已經有方法」包含他上一輪剛挑走的那個選項：再給一次選項，

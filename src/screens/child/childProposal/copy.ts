@@ -78,69 +78,90 @@ export const PLANNING_COPY = {
 
   choice: {
     /**
-     * 三件事一句話講完：可以選、可以自己想、之後可以改。
+     * 固定語意（P6）：可以選、可以自己想、可以改一下。
      *
-     * 「之後都還可以改」不是安撫語 —— 孩子在這一頁最容易卡住的是
-     * 「選了就定了嗎」，講清楚他才敢按下去。
+     * 「之後都還可以改」的安撫感移到頁尾的 reassurance 那一句，
+     * 這裡只負責講清楚「這是幾種可能，不是單選問卷」。
      */
-    hint: '選一個你想先試的，或自己想一個。之後都還可以改。',
+    hint: 'GrowBook 想了幾種方式，你可以選一個、改一下，或自己想。',
+    /** 選項上方的輕提醒（P6 追加）：降低「要一次選對」的壓力。 */
+    microcopy: '不用一次想完整，先挑一個最接近的就好。',
+    /**
+     * 選項的低權重徽章文字。**只有選項真的有 rationale 時才顯示**——
+     * 不是每次都有，也不是「推薦方案」的另一種寫法。兩個值對應
+     * ChildPlanStartOptionRationale 的兩種理由。
+     */
+    optionRationale: {
+      good_starting_point: '可以先試',
+      closer_to_child_input: '比較接近你剛剛的想法',
+    },
     /**
      * 選完之後才送出。
      *
      * 舊版是「點到哪一個就直接送出去」—— 手指滑到就決定了，而且**退不回來**
      * （那一輪已經打出去、已經寫進對話）。孩子在這一頁本來就會想比較一下，
      * 所以選擇與送出必須分成兩個動作。
+     *
+     * 文字講「下一步發生什麼」（P6）：整理成他的計畫，不是模糊的「下一步」。
      */
-    confirm: '就選這個',
+    confirm: '下一步：整理成我的計畫',
     /** 永遠在最後一個位置，而且永遠存在。 */
-    custom: '我自己想',
+    custom: '我有自己的方式',
+    /**
+     * 「我有自己的方式」不是第四個 AI 推薦，是另一種動作（P6 §6）——
+     * 有自己的 title/subtitle 兩行，跟前三張 AI 選項卡不同視覺語言。
+     */
+    customTitle: '我有自己的方式',
+    customSubtitle: '我想自己想想或說說看',
     customQuestion: '你想怎麼開始？',
     customPlaceholder: '例如：每天早上先讀一章',
     customNext: '就這樣',
+    /** 頁尾的輕安撫，不是長篇說明（P6 §7）。 */
+    reassurance: '🌱 選完後也可以再調整，沒關係！',
   },
 
   ready: {
     /**
-     * 問句留著，但主詞從「你願意嗎」換成「這樣開始」——
-     * 前者聽起來像在要他表態，後者是把整理好的東西放在他面前讓他看。
+     * P6 定案文案：頁首是慶祝感的「一起看看」，不是技術性的確認句。
+     * 決定權還在他手上這件事，交給 subtitle 的第二句講。
      */
-    title: '這樣開始，你覺得可以嗎？',
+    title: '一起看看你的計畫！',
     /**
-     * 說清楚這一頁是誰做的：GrowBook 整理，決定權還在他手上。
+     * 兩句合一：GrowBook 做了什麼＋決定權還在孩子手上。
      * 不寫「幫你想好了」—— 那會變成這份計畫是別人的。
      */
-    subtitle: 'GrowBook 把剛剛的想法整理好了',
-    outcomeLabel: '我想做到',
+    subtitle: 'GrowBook 把剛剛的想法整理好了，\n這樣開始，你覺得可以嗎？',
+    outcomeLabel: '🌱 我想做到',
     summaryLabel: '我準備先這樣做',
-    nextActionLabel: '今天第一步',
+    nextActionLabel: '🌱 今天第一步',
+    /** 這一段（B 區塊）的區塊標題，取代舊的 inline label。 */
+    rhythmLabel: '🌱 這一段先這樣走',
+    /** 節奏欄位裡「每週」的小標籤（大數字旁的說明字）。 */
+    weeklyLabel: '每週',
+    weeklyUnit: '次',
+    /** 節奏欄位裡「每次約」的小標籤。 */
+    sessionLabel: '每次約',
     /**
-     * 節奏與份量**合成一列**。
-     *
-     * 拆成「多久做一次／一次做多少」兩列時，這一頁讀起來像欄位表；
-     * 而孩子腦中那件事本來就是一句話：「每週 3 次、每次 15 分鐘」。
-     */
-    rhythmLabel: '這一段怎麼做',
-    /**
-     * 先試多久（trialPeriod）。
+     * 先試多久（trialPeriod）小徽章的前綴。
      *
      * ⚠️ 這**不是** week-by-week roadmap。產品語意是「先把近期變得可執行，
      *    之後再回顧調整」—— 所以只講「先試 6 週」，不展開六週各週要做什麼。
      */
-    trialLabel: '先試試看',
+    trialLabel: '先試',
     /**
-     * 什麼時候做。**只有真的有值才會出現這一列。**
+     * 什麼時候做的小徽章前綴。**只有真的有值才會出現。**
      *
      * 沒有時段不是缺漏 —— 很多計畫本來就沒有固定時間。沒有就不顯示、
-     * 也不追問、更不補一個假的預設值。
+     * 也不追問、更不補一個假的預設值。禁止出現「還沒決定」。
      */
-    timeLabel: '什麼時候做',
+    timeLabel: '建議時間',
     focusLabel: '目前先處理什麼',
     /** ⚠️ 「可能」兩個字不能拿掉：階段是暫定路線，不是正式課程。 */
     phasesLabel: '之後可能的幾個階段',
     targetLabel: '目標總量',
     currentLabel: '目前從哪裡開始',
-    confirm: '就照這樣開始',
-    revise: '我想改一下',
+    confirm: '✓ 就照這樣開始',
+    revise: '✎ 我想改一下',
   },
 
   /** AI 掛掉時孩子看到的。**三條路都要在**，不可以只剩「再試一次」。 */
@@ -315,4 +336,13 @@ export function describeCadence(
 export function describeSeenAs(value: SeenAsChoice): string {
   if (value === 'not_specified') return '還沒決定';
   return SEEN_AS_OPTIONS.find((o) => o.value === value)?.label ?? '還沒決定';
+}
+
+/**
+ * 一起想怎麼開始頁首的步驟徽章文字（P6）。純展示，不參與任何
+ * session/phase 判斷 —— 這個流程實際可以有 1-3 輪對話，這裡只是把
+ * needs_choice／ready 兩個 capture state 標成好懂的「第幾步」。
+ */
+export function formatPlanningStep(step: number, total: number): string {
+  return `步驟 ${step} / ${total}`;
 }

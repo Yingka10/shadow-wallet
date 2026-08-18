@@ -315,10 +315,39 @@ export type ChildPlanClarificationQuestion = {
 // Choice
 // ---------------------------------------------------------------------------
 
-/** 一個可以選的開始方式。**不是唯一最佳答案。** */
+/**
+ * 一個選項「為什麼值得一看」的理由。**至多一個選項可以有值**——
+ * 不是每次都要有，也不能變成挑一個當「最好的」。
+ *
+ *   good_starting_point    一個穩妥的起點，不是「最好」或「推薦」。
+ *   closer_to_child_input  只有在這個選項明顯呼應孩子自己說過的話
+ *                          （原話、原因、或對話中回過的內容）時才給。
+ */
+export type ChildPlanStartOptionRationale = 'good_starting_point' | 'closer_to_child_input';
+
+export const CHILD_PLAN_START_OPTION_RATIONALES: readonly ChildPlanStartOptionRationale[] = [
+  'good_starting_point',
+  'closer_to_child_input',
+] as const;
+
+/**
+ * 一個可以選的開始方式。**不是唯一最佳答案。**
+ *
+ * `text` 是完整的一句話，仍然是**唯一**進 provenance／choice_selection／
+ * 下一輪對話歷史的欄位——沒有它，`text` 底下所有既有的邏輯都要跟著改。
+ * `title`／`detail`／`rhythmHint` 是額外的呈現用拆解，只服務 UI 的三層
+ * 排版，不參與任何決定「孩子挑了什麼」的邏輯。
+ */
 export type ChildPlanStartOption = {
   id: string;
   text: string;
+  /** 短的方法標題（例如「先從短時間開始」）。 */
+  title?: string;
+  /** 具體怎麼做的一句話（例如「每次讀 10 分鐘就好」）。 */
+  detail?: string;
+  /** 節奏的補充（例如「一週 3 天」）。這個方式沒有額外節奏資訊時就沒有。 */
+  rhythmHint?: string;
+  rationale?: ChildPlanStartOptionRationale;
 };
 
 // ---------------------------------------------------------------------------
@@ -683,6 +712,11 @@ export const CHILD_GOAL_PLANNING_LIMITS = {
   maxDoneWhenLength: 40,
   maxOptionLength: 40,
   maxOptionIdLength: 24,
+  // 三個新拆解欄位合起來不能超過 maxOptionLength（detail + '，' + rhythmHint），
+  // 不然組出來的 text 會超過既有上限。
+  maxOptionTitleLength: 16,
+  maxOptionDetailLength: 26,
+  maxOptionRhythmHintLength: 12,
   /** 孩子回答 clarification 的字數上限。比 goal 短：那是一題的答案，不是一篇。 */
   maxAnswerLength: 120,
   /**
