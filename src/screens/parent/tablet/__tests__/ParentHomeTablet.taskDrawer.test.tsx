@@ -204,9 +204,9 @@ describe('P0-4 家長首頁孩子提案', () => {
     await openHome();
 
     expect(mockUseParentProposals).toHaveBeenLastCalledWith('child-1', 'family-1');
-    expect(screen.getByText('承恩有一個新的挑戰想法')).toBeTruthy();
+    expect(screen.getByText('孩子的聲音')).toBeTruthy();
     expect(screen.getByText('我想兩週把這本書讀完')).toBeTruthy();
-    expect(screen.getByText('一週 4 次')).toBeTruthy();
+    expect(screen.getByText('因為同學說這本書很好看')).toBeTruthy();
 
     expect(SOURCE.indexOf('<ParentProposalSection')).toBeLessThan(SOURCE.indexOf('<WeekSummary'));
     expect(SOURCE).toContain('proposalRefresh();');

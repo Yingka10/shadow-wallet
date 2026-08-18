@@ -99,14 +99,24 @@ export const ParentPalette = {
 export const ParentColors = {
   ...ParentPalette,
 
-  // 三平面（v14：中欄＋右欄同一張極亮冷白畫布，內容為白卡）
+  // 三平面（v15：畫布轉成暖 off-white，內容為純白卡）
+  //   冷白畫布（#FBFCFC）跟白卡幾乎同色，卡片浮不出來，逼得卡片自己去上米黃底 ——
+  //   結果整頁像紙本表單。把畫布壓成一點點暖灰，白卡就不必再靠底色證明自己是卡。
   bgSidebar:     '#2C4A3D',   // pine500 — 左側欄
-  bgMain:        '#FBFCFC',   // 極亮冷白紙色畫布
-  bgRail:        '#FBFCFC',   // 與中欄同畫布
-  bgCanvas:      '#FBFCFC',   // 統一畫布色
+  bgMain:        '#F7F8F4',   // 暖 off-white 畫布
+  bgRail:        '#F7F8F4',   // 與中欄同畫布
+  bgCanvas:      '#F7F8F4',   // 統一畫布色
   bgSurface:     '#FFFFFF',   // 截圖感白卡
   bgSurfaceWarm: '#F8F4EB',   // 暖米色次要面
   bgHero:        '#FFF7E8',   // 待你確認 hero 卡的淡蜂蜜色底
+
+  // 提案卡的兩條 band tint —— 極淡 sage，用來標「誰在說話」與「你要決定」，
+  // **不是**替整張卡上色。面積一旦超過一個 band，卡片就會退化成有色紙。
+  //
+  // A 帶佔掉整張卡約四成高，色一濃就會讀成「上半張是另一塊底色」而不是 highlight，
+  // 所以它比 C 帶再淡一階：面積大的那條要更輕，不是更重。
+  tintProposal: '#F6F9F2',   // A 帶：孩子提出的內容（面積大 → 最淡）
+  tintDecision: '#F6F8F1',   // C 帶：家長要做決定的區塊
 
   // 側欄上的前景（深底反白）
   onSidebar:       '#FFFFFF',
@@ -143,6 +153,9 @@ export const ParentColors = {
   // 語義狀態（各司其職，別互借）
   pending: '#C28A3A',   // amber500 — 只給待處理數量
   coin:    '#E0A500',   // gold500 — 只給幣
+  // 幣色的低彩度版本：正文裡的小面積數字用（例如提案卡的「+10」）。
+  // 亮金在白底上會變成整段的視覺焦點，把「回饋」講得比「約定」還重要。
+  coinMuted: '#A87800',   // gold700
   done:    '#5E9A32',   // leaf500 — 只給已完成
 
   // 邊界

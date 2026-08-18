@@ -160,10 +160,13 @@ describe('ParentHomeTablet layout tokens', () => {
     expect(parentHomeTabletStyles).not.toHaveProperty('advisorOpenButton');
   });
 
-  it('uses a cool-white canvas and white card surfaces', () => {
-    expect(ParentColors.bgCanvas).toBe('#FBFCFC');
-    expect(ParentColors.bgMain).toBe('#FBFCFC');
-    expect(ParentColors.bgRail).toBe('#FBFCFC');
+  // v15：畫布從冷白改成暖 off-white。冷白（#FBFCFC）跟白卡幾乎同色，卡片浮不
+  // 出來，逼得個別卡片自己去上米黃底才顯得像卡——整頁於是變成紙本表單。
+  // 畫布退半階、卡片維持純白，卡片感由對比提供，不必再靠上色。
+  it('uses a warm off-white canvas and white card surfaces', () => {
+    expect(ParentColors.bgCanvas).toBe('#F7F8F4');
+    expect(ParentColors.bgMain).toBe('#F7F8F4');
+    expect(ParentColors.bgRail).toBe('#F7F8F4');
     expect(ParentColors.bgSurface).toBe('#FFFFFF');
     expect(ParentColors.bgHero).toBe('#FFF7E8');
   });
