@@ -41,24 +41,27 @@ export type ReviewOption<T extends string> = {
 
 /**
  * 一整套**同一株芽的不同狀態**，不是八個互不相干的通用 icon。
- * 每一格說的是「這段長成什麼樣子」或「下一段想長成什麼樣子」。
+ *
+ * 共用同一組莖線、葉形、筆畫粗細與 sage 色階；差別只在葉片數量、角度、
+ * 莖的長度。全部畫在 40×40 的 viewBox 上——原本畫在 24×24 再放大，
+ * 線條會細到在 tile 裡看起來像雜訊。
  */
 export type ReviewTileIcon =
   // Step 1：這段長成什麼樣子
-  | 'sprout_healthy'      // 舒展、對稱，站得穩
-  | 'sprout_emerging'     // 才剛冒出來，莖短、葉小
-  | 'leaf_heavy'          // 葉子偏大、微微下垂 —— 有點太多／太久
+  | 'sprout_steady'       // 兩片舒展的葉 ＋ 站得住的地面
+  | 'sprout_emerging'     // 才剛冒出來：莖短、一片小葉
+  | 'sprout_drooping'     // 葉子往下垂 —— 有點太多／太久（不是枯掉）
   | 'seed_thought'        // 還在土裡的種子 ＋ 想法泡泡
   // Step 2：下一段想怎麼長
-  | 'sprout_steady'       // 和 healthy 同型，加一圈穩定的底線
-  | 'sprout_light'        // 同一株，但小一號、葉子少一片
+  | 'sprout_check'        // steady ＋ 一個小勾：就照現在這樣
+  | 'sprout_light'        // 同一株，少一片葉 —— 輕鬆一點，不是做不好
   | 'path_branch'         // 從同一點分出兩條路
-  | 'pencil_idea';        // 鉛筆 ＋ 一點想法的火花
+  | 'pencil_sprout';      // 鉛筆 ＋ 一片小葉
 
 export const REVIEW_EXPERIENCE_OPTIONS: ReadonlyArray<ReviewOption<ReviewExperience>> = [
-  { value: 'going_well', label: '現在這樣滿順的', icon: 'sprout_healthy' },
+  { value: 'going_well', label: '現在這樣滿順的', icon: 'sprout_steady' },
   { value: 'hard_to_start', label: '有時候不太好開始', icon: 'sprout_emerging' },
-  { value: 'too_much', label: '做起來有點太多／太久', icon: 'leaf_heavy' },
+  { value: 'too_much', label: '做起來有點太多／太久', icon: 'sprout_drooping' },
   { value: 'something_else', label: '我有別的想法', icon: 'seed_thought' },
 ];
 
@@ -67,10 +70,10 @@ export const REVIEW_EXPERIENCE_OPTIONS: ReadonlyArray<ReviewOption<ReviewExperie
 export type ReviewDirection = 'keep' | 'lighter' | 'different_way' | 'own_idea';
 
 export const REVIEW_DIRECTION_OPTIONS: ReadonlyArray<ReviewOption<ReviewDirection>> = [
-  { value: 'keep', label: '就照現在這樣', icon: 'sprout_steady' },
+  { value: 'keep', label: '就照現在這樣', icon: 'sprout_check' },
   { value: 'lighter', label: '想讓它輕鬆一點', icon: 'sprout_light' },
   { value: 'different_way', label: '想換一種做法', icon: 'path_branch' },
-  { value: 'own_idea', label: '我自己有想法', icon: 'pencil_idea' },
+  { value: 'own_idea', label: '我自己有想法', icon: 'pencil_sprout' },
 ];
 
 // ── Evidence（§3：只呈現事實，不評分）────────────────────────────────────

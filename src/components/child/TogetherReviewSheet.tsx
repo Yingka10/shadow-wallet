@@ -333,7 +333,7 @@ export default function TogetherReviewSheet({
         <View testID="review-shared-term-panel" style={styles.actionPanel}>
           <View style={styles.actionPanelHead}>
             <View style={styles.actionPanelIcon}>
-              <TileGlyph name="sprout_steady" selected />
+              <TileGlyph name="sprout_steady" selected size={26} />
             </View>
             <Text testID="review-shared-term-strip" style={styles.actionPanelText}>
               {buildSharedTermNotice(family, noticeKind).message}
@@ -507,7 +507,7 @@ function JourneyCue() {
         ))}
       </View>
       <View style={styles.journeySprout}>
-        <TileGlyph name="sprout_emerging" selected={false} size={16} />
+        <TileGlyph name="sprout_emerging" selected={false} size={20} />
       </View>
       <View style={styles.journeyDots}>
         {[0, 1, 2, 3, 4, 5].map((i) => (
@@ -546,10 +546,9 @@ function ChoiceTile({
           <CheckMark />
         </View>
       ) : null}
-      {/* 圖示放在一圈很淡的底色裡 —— 讓它是一個「東西」，不是浮在空白上。 */}
-      <View style={[styles.tileIconField, selected && styles.tileIconFieldSelected]}>
-        <TileGlyph name={icon} selected={selected} />
-      </View>
+      {/* 圖示直接站在 tile 上。原本包一圈圓底，等於把它壓成一個小色塊 ——
+          辨識不出來是哪一株芽，四格看起來就都一樣。 */}
+      <TileGlyph name={icon} selected={selected} />
       <Text style={[styles.tileLabel, selected && styles.tileLabelSelected]}>
         {label}
       </Text>
@@ -568,7 +567,7 @@ function SharedTermStrip({
   return (
     <View testID="review-shared-term-strip" style={styles.sharedStrip}>
       <View style={styles.sharedStripIcon}>
-        <TileGlyph name="sprout_steady" selected size={20} />
+        <TileGlyph name="sprout_steady" selected size={22} />
       </View>
       <Text style={styles.sharedStripText}>{notice.message}</Text>
     </View>
@@ -616,12 +615,25 @@ function PrimaryCta({
 // 八個圖示是**同一株芽的不同狀態**，共用同一組莖線與葉形，只有葉片數量、
 // 角度、傾斜度不同。混用一堆來源不同的通用 icon 會讓四格看起來像四個 app。
 
-const STEM = 'M12 20v-7';
+/*
+  八個圖示畫在同一個 40×40 grid 上，共用：
+
+    莖      x = 20 的垂直線
+    葉      同一條 teardrop 曲線，只換角度與長度
+    筆畫    2.2（在 40px 的 tile 裡才有重量；原本 24 grid 上的 1.5 放大後像雜訊）
+    配色    描邊 leaf600/700、填色 leaf100/200
+
+  所以四格看起來是同一株植物的四種狀態，不是四個來源不同的 icon。
+*/
+
+const LEAF_RIGHT = 'M20 22c0-4.6 3.2-7.8 7.8-8.2-.4 4.8-3.4 7.8-7.8 8.2z';
+const LEAF_LEFT = 'M20 27c0-4.6-3.2-7.8-7.8-8.2.4 4.8 3.4 7.8 7.8 8.2z';
+const GROUND = 'M13 34h14';
 
 function TileGlyph({
   name,
   selected,
-  size = 26,
+  size = 40,
 }: {
   name: ReviewTileIcon;
   selected: boolean;
@@ -629,149 +641,113 @@ function TileGlyph({
 }) {
   const stroke = selected ? Colors.leaf700 : Colors.leaf600;
   const fill = selected ? Colors.leaf200 : Colors.leaf100;
-  const common = {
+  const line = {
     stroke,
-    strokeWidth: 1.5,
+    strokeWidth: 2.2,
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
   };
+  const leaf = { ...line, fill };
+  const bare = { ...line, fill: 'none' };
 
   if (name === 'seed_thought') {
     return (
-      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
-        <Ellipse cx={12} cy={17.5} rx={3.6} ry={2.8} fill={fill} {...common} />
-        <Path d="M12 14.7c0-1.5.7-2.6 1.9-3.2" fill="none" {...common} />
-        <Circle cx={15.6} cy={8.4} r={2.6} fill={fill} {...common} />
-        <Circle cx={11.6} cy={11.4} r={1} fill={stroke} />
+      <Svg width={size} height={size} viewBox="0 0 40 40" accessibilityElementsHidden>
+        <Ellipse cx={19} cy={30} rx={6} ry={4.6} {...leaf} />
+        <Circle cx={27.5} cy={13} r={5.4} {...leaf} />
+        <Circle cx={20.6} cy={21.4} r={1.9} fill={stroke} />
       </Svg>
     );
   }
 
-  if (name === 'pencil_idea') {
+  if (name === 'pencil_sprout') {
     return (
-      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
+      <Svg width={size} height={size} viewBox="0 0 40 40" accessibilityElementsHidden>
         <Path
-          d="M5 19.5l1-3.6 8.6-8.6a1.7 1.7 0 012.4 0l.7.7a1.7 1.7 0 010 2.4L9.1 19z"
-          fill={fill}
-          {...common}
+          d="M9 32l1.8-6 14-14a2.6 2.6 0 013.7 0l1 1a2.6 2.6 0 010 3.7l-14 14z"
+          {...leaf}
         />
-        <Path d="M13.6 8.6l2.8 2.8" fill="none" {...common} />
-        <Path d="M18.4 3.4l.5 1.3 1.3.5-1.3.5-.5 1.3-.5-1.3-1.3-.5 1.3-.5z" fill={stroke} />
+        <Path d="M23 13.8l4.8 4.8" {...bare} />
+        <Path d="M30 32c0-3.6 2.6-6.2 6.2-6.5-.3 3.8-2.8 6.2-6.2 6.5z" {...leaf} />
       </Svg>
     );
   }
 
   if (name === 'path_branch') {
     return (
-      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
-        <Path d="M12 20v-4.5" fill="none" {...common} />
-        <Path d="M12 15.5C12 11.6 9.4 9 6.2 8.6" fill="none" {...common} />
-        <Path d="M12 15.5C12 11.6 14.6 9 17.8 8.6" fill="none" {...common} />
-        <Circle cx={6.2} cy={7.6} r={2} fill={fill} {...common} />
-        <Circle cx={17.8} cy={7.6} r={2} fill={fill} {...common} />
+      <Svg width={size} height={size} viewBox="0 0 40 40" accessibilityElementsHidden>
+        <Path d="M20 34v-7" {...bare} />
+        <Path d="M20 27c0-6.6-4.2-11-10.4-11.8" {...bare} />
+        <Path d="M20 27c0-6.6 4.2-11 10.4-11.8" {...bare} />
+        <Circle cx={8.6} cy={13.4} r={3.2} {...leaf} />
+        <Circle cx={31.4} cy={13.4} r={3.2} {...leaf} />
       </Svg>
     );
   }
 
-  // 以下四個共用同一條莖，差別只在葉片。
-  if (name === 'leaf_heavy') {
-    // 葉子偏大、往下垂 —— 有點太多／太久。不是「枯掉」，只是重。
+  if (name === 'sprout_drooping') {
+    // 葉子偏大、往下垂。是「重」，不是「枯」—— 兩片都還完整。
     return (
-      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
-        <Path d={STEM} fill="none" {...common} />
-        <Path
-          d="M12 14.4c1-3 3.8-4.2 6.8-3.6-.6 3-3.2 4.6-6.8 3.6z"
-          fill={fill}
-          {...common}
-        />
-        <Path
-          d="M12 17.2c-1-3-3.8-4.2-6.8-3.6.6 3 3.2 4.6 6.8 3.6z"
-          fill={fill}
-          {...common}
-        />
+      <Svg width={size} height={size} viewBox="0 0 40 40" accessibilityElementsHidden>
+        <Path d="M20 34V16" {...bare} />
+        <Path d="M20 19c4.8-1.6 9 .8 11.2 5.2-4.8 1.8-9-.6-11.2-5.2z" {...leaf} />
+        <Path d="M20 25c-4.8-1.6-9 .8-11.2 5.2 4.8 1.8 9-.6 11.2-5.2z" {...leaf} />
       </Svg>
     );
   }
 
   if (name === 'sprout_emerging') {
-    // 才剛冒出來：莖短一截，只有一片小葉。
+    // 才剛冒出來：莖只有一半高，一片小葉，貼著地面。
     return (
-      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
-        <Path d="M12 20v-4.4" fill="none" {...common} />
-        <Path
-          d="M12 15.6c0-2.3 1.6-3.9 3.9-4.1-.2 2.4-1.7 3.9-3.9 4.1z"
-          fill={fill}
-          {...common}
-        />
-        <Path d="M8.6 20h6.8" fill="none" {...common} />
+      <Svg width={size} height={size} viewBox="0 0 40 40" accessibilityElementsHidden>
+        <Path d="M20 34v-9" {...bare} />
+        <Path d="M20 25c0-3.8 2.6-6.4 6.4-6.8-.4 4-2.8 6.4-6.4 6.8z" {...leaf} />
+        <Path d={GROUND} {...bare} />
       </Svg>
     );
   }
 
   if (name === 'sprout_light') {
-    // 和 healthy 同一株，但小一號、少一片葉 —— 「輕鬆一點」不是「做不好」。
+    // 同一株，但只留一片葉、莖細一截 —— 輕鬆一點，不是做不好。
     return (
-      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
-        <Path d="M12 20v-5.6" fill="none" {...common} />
-        <Path
-          d="M12 14.4c0-2.4 1.7-4.1 4.1-4.3-.2 2.5-1.8 4.1-4.1 4.3z"
-          fill={fill}
-          {...common}
-        />
-        <Path
-          d="M12 16.8c0-1.9-1.4-3.2-3.3-3.4.2 2 1.5 3.2 3.3 3.4z"
-          fill="none"
-          {...common}
-        />
+      <Svg width={size} height={size} viewBox="0 0 40 40" accessibilityElementsHidden>
+        <Path d="M20 34V18" {...bare} />
+        <Path d={LEAF_RIGHT} {...leaf} />
       </Svg>
     );
   }
 
-  if (name === 'sprout_steady') {
-    // healthy ＋ 一條地平線：站得住、維持現在這樣。
+  if (name === 'sprout_check') {
+    // steady ＋ 一個小勾。刻意畫在莖的右下、只有 8 個單位寬，
+    // 不會和右上角那顆選取徽章搞混。
     return (
-      <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
-        <Path d={STEM} fill="none" {...common} />
-        <Path
-          d="M12 13c0-2.6 1.8-4.4 4.4-4.6-.2 2.7-1.9 4.4-4.4 4.6z"
-          fill={fill}
-          {...common}
-        />
-        <Path
-          d="M12 15.6c0-2.6-1.8-4.4-4.4-4.6.2 2.7 1.9 4.4 4.4 4.6z"
-          fill={fill}
-          {...common}
-        />
-        <Path d="M8 20h8" fill="none" {...common} />
+      <Svg width={size} height={size} viewBox="0 0 40 40" accessibilityElementsHidden>
+        <Path d="M20 34V16" {...bare} />
+        <Path d={LEAF_RIGHT} {...leaf} />
+        <Path d={LEAF_LEFT} {...leaf} />
+        <Path d="M25.4 31.2l2.6 2.6 5-5" {...bare} />
       </Svg>
     );
   }
 
-  // sprout_healthy：兩片舒展、對稱的葉子。
+  // sprout_steady：兩片舒展對稱的葉 ＋ 站得住的地面。
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
-      <Path d={STEM} fill="none" {...common} />
-      <Path
-        d="M12 13c0-2.6 1.8-4.4 4.4-4.6-.2 2.7-1.9 4.4-4.4 4.6z"
-        fill={fill}
-        {...common}
-      />
-      <Path
-        d="M12 15.6c0-2.6-1.8-4.4-4.4-4.6.2 2.7 1.9 4.4 4.4 4.6z"
-        fill={fill}
-        {...common}
-      />
+    <Svg width={size} height={size} viewBox="0 0 40 40" accessibilityElementsHidden>
+      <Path d="M20 34V16" {...bare} />
+      <Path d={LEAF_RIGHT} {...leaf} />
+      <Path d={LEAF_LEFT} {...leaf} />
+      <Path d={GROUND} {...bare} />
     </Svg>
   );
 }
 
 function CheckMark() {
   return (
-    <Svg width={16} height={16} viewBox="0 0 24 24" accessibilityElementsHidden>
+    <Svg width={14} height={14} viewBox="0 0 24 24" accessibilityElementsHidden>
       <Path
         d="M6 12.5l3.8 3.8L18 8"
         stroke={Colors.bgSurface}
-        strokeWidth={2.8}
+        strokeWidth={3}
         strokeLinecap="round"
         strokeLinejoin="round"
         fill="none"
@@ -969,18 +945,19 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     flexBasis: '46%',
     minWidth: 150,
-    minHeight: 122,
+    minHeight: 132,
     borderRadius: 18,
     borderWidth: 1.5,
     paddingHorizontal: 12,
-    paddingVertical: 16,
+    paddingVertical: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 11,
+    gap: 12,
   },
   tileResting: {
     borderColor: Colors.cream200,
-    backgroundColor: Colors.bgSurface,
+    // 非常輕的暖白。單一色調，不做多色遊戲化。
+    backgroundColor: Colors.creamWish,
     shadowColor: Colors.shadowWarm,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
@@ -996,27 +973,19 @@ const styles = StyleSheet.create({
     shadowRadius: 9,
     elevation: 3,
   },
+  // 內縮進卡片裡，不再咬出邊界。原本是一塊貼齊圓角的色塊，
+  // 在小螢幕上會看起來像卡片破了一角。
   tileCheck: {
     position: 'absolute',
-    top: -1,
-    right: -1,
-    width: 30,
-    height: 30,
-    borderTopRightRadius: 17,
-    borderBottomLeftRadius: 16,
+    top: 9,
+    right: 9,
+    width: 25,
+    height: 25,
+    borderRadius: 13,
     backgroundColor: Colors.leaf600,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tileIconField: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: Colors.cream100,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tileIconFieldSelected: { backgroundColor: Colors.leaf100 },
   tileLabel: {
     color: Colors.fgSecondary,
     fontSize: 15,

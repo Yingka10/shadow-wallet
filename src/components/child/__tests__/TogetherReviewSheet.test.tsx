@@ -9,7 +9,10 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import type { GoalPresentation } from '../../../screens/child/longTermGoalPresentation';
-import { REVIEW_EXPERIENCE_OPTIONS } from '../togetherReviewModel';
+import {
+  REVIEW_DIRECTION_OPTIONS,
+  REVIEW_EXPERIENCE_OPTIONS,
+} from '../togetherReviewModel';
 import TogetherReviewSheet, {
   type ReviewCadenceChannel,
   type ReviewTimeChannel,
@@ -468,5 +471,75 @@ describe('VISUAL-POLISH — 結構層面的可回歸點', () => {
 
     // Colors.error 只給破壞性動作用。重新商量不是錯誤。
     expect(JSON.stringify(rendered.toJSON())).not.toContain('#C6543A');
+  });
+});
+
+/** 從渲染樹撈出所有 SVG 的實際寬度（react-native-svg 會寫進 bbWidth）。 */
+function svgWidths(node: unknown): number[] {
+  if (Array.isArray(node)) return node.flatMap(svgWidths);
+  if (!node || typeof node !== 'object') return [];
+  const el = node as { props?: Record<string, unknown>; children?: unknown };
+  const own = typeof el.props?.bbWidth === 'number' ? [el.props.bbWidth as number] : [];
+  return [...own, ...svgWidths(el.children)];
+}
+
+function flatStyles(node: unknown): Record<string, unknown>[] {
+  if (Array.isArray(node)) return node.flatMap(flatStyles);
+  if (!node || typeof node !== 'object') return [];
+  const el = node as { props?: { style?: unknown }; children?: unknown };
+  const style = el.props?.style;
+  const own = style && typeof style === 'object' && !Array.isArray(style)
+    ? [style as Record<string, unknown>]
+    : [];
+  return [...own, ...flatStyles(el.children)];
+}
+
+describe('ICON-POLISH — tile 圖示與選取徽章', () => {
+  it('tile 圖示畫得夠大，不是被壓成小色塊', () => {
+    renderSheet();
+
+    const tile = screen.getByTestId('review-experience-going_well');
+    expect(Math.max(...svgWidths(tile))).toBeGreaterThanOrEqual(36);
+  });
+
+  it('圖示外面沒有那圈圓形底了', () => {
+    renderSheet();
+
+    const tile = screen.getByTestId('review-experience-going_well');
+    // 舊版是 46×46 / borderRadius 23 的圓底。
+    const circles = flatStyles(tile).filter((st) => st.borderRadius === 23);
+    expect(circles).toHaveLength(0);
+  });
+
+  it('選取徽章縮小並內縮在卡片裡，不咬出邊界', () => {
+    renderSheet();
+
+    fireEvent.press(screen.getByRole('button', { name: '有時候不太好開始' }));
+    const tile = screen.getByTestId('review-experience-hard_to_start');
+    const badge = flatStyles(tile).find((st) => st.position === 'absolute');
+
+    expect(badge).toBeDefined();
+    expect(badge?.width).toBeLessThanOrEqual(26);
+    expect(badge?.width).toBeGreaterThanOrEqual(24);
+    // 正值＝在卡片內側。負值會讓它壓在圓角上。
+    expect(Number(badge?.top)).toBeGreaterThan(0);
+    expect(Number(badge?.right)).toBeGreaterThan(0);
+  });
+
+  it('Step 2 四格也各有自己的圖示', () => {
+    const icons = new Set(REVIEW_DIRECTION_OPTIONS.map((o) => o.icon));
+
+    expect(icons.size).toBe(REVIEW_DIRECTION_OPTIONS.length);
+  });
+
+  it('Step 1 與 Step 2 共用同一族，沒有跑出家族外的圖示', () => {
+    const family = new Set([
+      'sprout_steady', 'sprout_emerging', 'sprout_drooping', 'seed_thought',
+      'sprout_check', 'sprout_light', 'path_branch', 'pencil_sprout',
+    ]);
+
+    [...REVIEW_EXPERIENCE_OPTIONS, ...REVIEW_DIRECTION_OPTIONS].forEach((option) => {
+      expect(family.has(option.icon)).toBe(true);
+    });
   });
 });
