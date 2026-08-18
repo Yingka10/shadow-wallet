@@ -15,7 +15,8 @@
 // ⚠️ Review 本身 0 coin，這裡不碰任何結算。
 //
 // VISUAL-POLISH（本輪）：只動視覺，IA 與語意一字未改。
-//   - hero band：標題＋evidence＋review 專屬小芽＋很淡的裝飾形狀（不加巢狀卡）
+//   - hero band：標題＋evidence＋review 專屬插圖＋很淡的裝飾形狀（不加巢狀卡）
+//     插圖來源只有 reviewHeroAsset.ts 一個地方，元件不自己 require 圖檔
 //   - tile icon 收斂成**同一株芽的不同狀態**，不是八個通用 icon
 //   - selected 是「淡綠底＋深綠框＋角落實心勾＋圖示變綠」，不是把整頁染綠
 //   - Step 1 / Step 2 之間用很淡的虛線 ＋ 小芽當 journey cue，不做遊戲化進度條
@@ -23,14 +24,23 @@
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import Svg, { Circle, Ellipse, Path } from 'react-native-svg';
 import { Colors } from '../../constants/colors';
+import {
+  REVIEW_HERO_ART_WIDTH,
+  REVIEW_HERO_ART_WIDTH_COMPACT,
+  REVIEW_HERO_ASPECT,
+  REVIEW_HERO_ASSET,
+  REVIEW_HERO_COMPACT_BREAKPOINT,
+} from './reviewHeroAsset';
 import type { GoalPresentation } from '../../screens/child/longTermGoalPresentation';
 import {
   buildAlternativeApproaches,
@@ -425,6 +435,13 @@ export default function TogetherReviewSheet({
 // 底下一塊很淡的 sage 形狀。**不重複 Today 的 mascot**。
 
 function ReviewHero({ evidence }: { evidence?: ReviewEvidence }) {
+  const { width } = useWindowDimensions();
+  const heroWidth = width < REVIEW_HERO_COMPACT_BREAKPOINT
+    ? REVIEW_HERO_ART_WIDTH_COMPACT
+    : REVIEW_HERO_ART_WIDTH;
+  // 字面數字的寬高，不交給 aspectRatio（見 reviewHeroAsset 的註解）。
+  const heroHeight = Math.round(heroWidth * REVIEW_HERO_ASPECT);
+
   return (
     <View testID="review-hero" style={styles.hero}>
       <View style={styles.heroBackdrop} pointerEvents="none">
@@ -447,7 +464,24 @@ function ReviewHero({ evidence }: { evidence?: ReviewEvidence }) {
             </>
           ) : null}
         </View>
-        <ReviewSprout />
+
+        {/* 包一層 pointerEvents="none"：插圖不吃任何點擊，也不擋 close 與
+            拖曳區。pointerEvents 不是 Image 的 prop，要放在容器上。 */}
+        <View
+          testID="review-hero-art-wrap"
+          pointerEvents="none"
+          style={{ width: heroWidth, height: heroHeight }}
+        >
+          <Image
+            testID="review-hero-art"
+            source={REVIEW_HERO_ASSET}
+            accessibilityIgnoresInvertColors
+            accessible={false}
+            importantForAccessibility="no"
+            resizeMode="contain"
+            style={{ width: heroWidth, height: heroHeight }}
+          />
+        </View>
       </View>
     </View>
   );
@@ -796,49 +830,11 @@ function HeroShape() {
   );
 }
 
-/** Review 專屬的小芽。刻意**不是** Today 的 mascot，也不拿書之類的任務道具。 */
-function ReviewSprout() {
-  return (
-    <Svg width={78} height={78} viewBox="0 0 78 78" accessibilityElementsHidden>
-      <Ellipse cx={39} cy={68} rx={22} ry={5} fill={Colors.leaf100} opacity={0.85} />
-      <Path
-        d="M39 66V34"
-        stroke={Colors.leaf700}
-        strokeWidth={3}
-        strokeLinecap="round"
-      />
-      <Path
-        d="M39 40c0-8.4 6-14.8 14.4-15.8-.4 8.8-6.6 14.8-14.4 15.8z"
-        fill={Colors.leaf300}
-        stroke={Colors.leaf600}
-        strokeWidth={1.6}
-        strokeLinejoin="round"
-      />
-      <Path
-        d="M39 50c0-8.4-6-14.8-14.4-15.8.4 8.8 6.6 14.8 14.4 15.8z"
-        fill={Colors.leaf200}
-        stroke={Colors.leaf600}
-        strokeWidth={1.6}
-        strokeLinejoin="round"
-      />
-      <Path
-        d="M39 30c0-6.2 4.4-10.9 10.6-11.6-.3 6.5-4.9 10.9-10.6 11.6z"
-        fill={Colors.leaf100}
-        stroke={Colors.leaf500}
-        strokeWidth={1.4}
-        strokeLinejoin="round"
-      />
-      <Circle cx={58} cy={20} r={2.4} fill={Colors.gold300} />
-      <Circle cx={20} cy={28} r={1.8} fill={Colors.gold300} opacity={0.8} />
-    </Svg>
-  );
-}
-
 const styles = StyleSheet.create({
   // ── Hero ──────────────────────────────────────────────────────────────
   hero: {
-    marginBottom: 4,
-    paddingBottom: 6,
+    marginBottom: 2,
+    paddingBottom: 2,
   },
   heroBackdrop: {
     position: 'absolute',
@@ -851,16 +847,22 @@ const styles = StyleSheet.create({
   heroRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 8,
+    gap: 10,
   },
   heroCopy: { flex: 1, paddingTop: 2 },
+  // 去背圖直接站在 hero 上：沒有圓形外框、沒有底色。固定寬高的 contain box ——
+  // 換圖時不必回來調版面，任何比例都會被收進這個框裡。
+  heroArt: {
+    width: REVIEW_HERO_ART_WIDTH,
+    height: REVIEW_HERO_ART_WIDTH,
+  },
   heading: {
     color: Colors.fgPrimary,
     fontSize: 30,
     lineHeight: 38,
     fontWeight: '900',
     letterSpacing: 0.3,
-    marginBottom: 12,
+    marginBottom: 10,
   },
 
   evidencePill: {
@@ -884,7 +886,7 @@ const styles = StyleSheet.create({
   },
 
   // ── Step ──────────────────────────────────────────────────────────────
-  stepBlock: { marginTop: 24 },
+  stepBlock: { marginTop: 20 },
   stepHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -914,7 +916,7 @@ const styles = StyleSheet.create({
   },
 
   journeyCue: {
-    marginTop: 26,
+    marginTop: 22,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,

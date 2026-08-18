@@ -7,8 +7,9 @@
 //   D  送出之後 → 說的是「還沒生效」，不是「已更新」
 
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen, within } from '@testing-library/react-native';
 import type { GoalPresentation } from '../../../screens/child/longTermGoalPresentation';
+import { REVIEW_HERO_ASSET } from '../reviewHeroAsset';
 import {
   REVIEW_DIRECTION_OPTIONS,
   REVIEW_EXPERIENCE_OPTIONS,
@@ -427,6 +428,7 @@ describe('VISUAL-POLISH — 結構層面的可回歸點', () => {
     renderSheet();
 
     expect(screen.getByTestId('review-hero')).toBeTruthy();
+    expect(screen.getByTestId('review-hero-art')).toBeTruthy();
     expect(screen.getByTestId('review-evidence')).toBeTruthy();
     REVIEW_EXPERIENCE_OPTIONS.forEach((option) => {
       expect(screen.getByTestId(`review-experience-${option.value}`)).toBeTruthy();
@@ -541,5 +543,52 @@ describe('ICON-POLISH — tile 圖示與選取徽章', () => {
     [...REVIEW_EXPERIENCE_OPTIONS, ...REVIEW_DIRECTION_OPTIONS].forEach((option) => {
       expect(family.has(option.icon)).toBe(true);
     });
+  });
+});
+
+describe('HERO-ASSET — 正式插圖接入', () => {
+  it('用的是專屬資產，而且四個 branch 畫面都掛著同一張', () => {
+    renderSheet({ cadenceChannel: makeCadenceChannel() });
+    expect(screen.getByTestId('review-hero-art').props.source)
+      .toBe(REVIEW_HERO_ASSET);
+
+    walkToDirection('就照現在這樣');
+    fireEvent.press(screen.getByTestId('review-cta'));
+    expect(screen.getByTestId('review-hero-art').props.source)
+      .toBe(REVIEW_HERO_ASSET);
+  });
+
+  it('插圖不吃點擊 —— 選項與關閉都不會被它擋住', () => {
+    renderSheet();
+
+    const art = screen.getByTestId('review-hero-art');
+    expect(art.props.accessible).toBe(false);
+    expect(art.props.importantForAccessibility).toBe('no');
+    // pointerEvents 掛在容器上 —— Image 本身沒有這個 prop。
+    expect(screen.getByTestId('review-hero-art-wrap').props.pointerEvents)
+      .toBe('none');
+
+    // 插圖在畫面上，Step 1 仍然完全可以按。
+    fireEvent.press(screen.getByRole('button', { name: '有時候不太好開始' }));
+    expect(screen.getByText('下一段，你想怎麼走？')).toBeTruthy();
+  });
+
+  it('插圖用字面寬高，不靠 aspectRatio 推', () => {
+    renderSheet();
+
+    const style = screen.getByTestId('review-hero-art').props.style;
+    expect(typeof style.width).toBe('number');
+    expect(typeof style.height).toBe('number');
+    expect(style.aspectRatio).toBeUndefined();
+    expect(style.width).toBeGreaterThanOrEqual(84);
+    expect(style.height).toBeLessThanOrEqual(110);
+  });
+
+  it('choice tile 沒有被換成 raster —— 那一層仍然是 native SVG', () => {
+    renderSheet();
+
+    const tile = screen.getByTestId('review-experience-going_well');
+    expect(within(tile).queryByTestId('review-hero-art')).toBeNull();
+    expect(Math.max(...svgWidths(tile))).toBeGreaterThanOrEqual(36);
   });
 });
