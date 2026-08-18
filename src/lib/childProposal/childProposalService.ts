@@ -11,7 +11,10 @@
 
 import { supabase } from '../supabase';
 import { mapPostgresErrorCode } from '../parentTaskCreationService';
-import { CHILD_PROPOSAL_STATUSES } from './types';
+import {
+  CHILD_PROPOSAL_STATUSES,
+  SUPPORTED_CHILD_PROPOSAL_ADJUSTMENT_KINDS,
+} from './types';
 import { buildDirectConfirmCommand } from './directConfirm';
 import {
   buildChildPlanConfirmCommand,
@@ -36,6 +39,7 @@ import {
 } from './reviewCommands';
 import type { AgeGroup } from '../../types/database';
 import type {
+  SupportedChildProposalAdjustmentKind,
   AddChildProposalPlanVersionCommand,
   AddPlanVersionResult,
   AcceptChildProposalResult,
@@ -1041,20 +1045,25 @@ export class SupabaseChildProposalService {
     if (currentError) throw new Error(currentError.message || '讀取目前版本失敗');
     if (!current || current.proposal_id !== proposal.id) return null;
 
+    // 兩條通道一次讀回來。分開發兩次查詢只是多一趟往返，而且會讓兩者的
+    // 「目前有沒有未決請求」在時間上不一致。
     const { data: openRequests, error: requestError } = await supabase
       .from('child_proposal_adjustment_requests')
       .select('*')
       .eq('proposal_id', proposal.id)
       .eq('status', 'open')
-      .eq('adjustment_kind', 'preferred_time')
-      .order('created_at', { ascending: false })
-      .limit(1);
+      .in('adjustment_kind', [...SUPPORTED_CHILD_PROPOSAL_ADJUSTMENT_KINDS])
+      .order('created_at', { ascending: false });
     if (requestError) throw new Error(requestError.message || '讀取調整請求失敗');
+
+    const openByKind = (kind: SupportedChildProposalAdjustmentKind) =>
+      (openRequests ?? []).find(row => row.adjustment_kind === kind) ?? null;
 
     return {
       proposal,
       currentPlanVersion: current as ChildProposalPlanVersion,
-      openPreferredTimeRequest: openRequests?.[0] ?? null,
+      openPreferredTimeRequest: openByKind('preferred_time'),
+      openCadenceRequest: openByKind('cadence'),
     };
   }
 
@@ -1102,7 +1111,7 @@ export class SupabaseChildProposalService {
       .select('*')
       .eq('family_id', familyId)
       .eq('status', 'open')
-      .eq('adjustment_kind', 'preferred_time')
+      .in('adjustment_kind', [...SUPPORTED_CHILD_PROPOSAL_ADJUSTMENT_KINDS])
       .order('created_at', { ascending: false })
       .limit(3);
     if (error) throw new Error(error.message || '讀取調整請求失敗');

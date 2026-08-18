@@ -13,7 +13,6 @@ import type {
 import LongTermGoalDetailSheets, {
   type AdjustmentDraft,
   type LongTermSheet,
-  type ReviewDraft,
 } from '../LongTermGoalDetailSheets';
 
 function makePresentation(
@@ -76,12 +75,6 @@ const completion: GoalCompletionRecord = {
   start_mode: null,
 };
 
-const reviewDraft: ReviewDraft = {
-  favoriteNote: '',
-  preferredWindow: null,
-  nextStep: null,
-};
-
 function renderSheet(
   activeSheet: LongTermSheet,
   overrides: Partial<React.ComponentProps<typeof LongTermGoalDetailSheets>> = {},
@@ -93,9 +86,7 @@ function renderSheet(
     presentation: makePresentation(),
     completion,
     taskMinutes: 15,
-    reviewDraft,
     adjustmentDraft: null,
-    onSaveReviewDraft: jest.fn(),
     onSaveAdjustmentDraft: jest.fn(),
     onCorrectTimeWindow: jest.fn(async () => undefined),
     ...overrides,
@@ -120,48 +111,6 @@ describe('LongTermGoalDetailSheets', () => {
 
     fireEvent.press(screen.getByRole('button', { name: '提出調整' }));
     expect(onOpenSheet).toHaveBeenCalledWith('adjustment');
-  });
-
-  it('saves the exact review draft locally', () => {
-    const onSaveReviewDraft = jest.fn();
-    renderSheet('review', { onSaveReviewDraft });
-
-    expect(
-      screen.getByText('這份回答目前只保留在這個畫面，尚未送出給家長。'),
-    ).toBeTruthy();
-
-    fireEvent.changeText(
-      screen.getByPlaceholderText('想記下這週最有感的一段嗎？'),
-      '神奇樹屋',
-    );
-    fireEvent.press(screen.getByRole('button', { name: '睡前' }));
-    fireEvent.press(screen.getByRole('button', { name: '保留回顧草稿' }));
-
-    expect(onSaveReviewDraft).toHaveBeenCalledWith({
-      favoriteNote: '神奇樹屋',
-      preferredWindow: 'before_bed',
-      nextStep: null,
-    });
-  });
-
-  it('discards an unsaved review edit after close and reopen', () => {
-    const { props, rerender } = renderSheet('review');
-
-    fireEvent.changeText(
-      screen.getByPlaceholderText('想記下這週最有感的一段嗎？'),
-      '還沒保留的內容',
-    );
-    expect(
-      screen.getByPlaceholderText('想記下這週最有感的一段嗎？').props.value,
-    ).toBe('還沒保留的內容');
-
-    fireEvent.press(screen.getByLabelText('關閉週末回顧'));
-    rerender(<LongTermGoalDetailSheets {...props} activeSheet={null} />);
-    rerender(<LongTermGoalDetailSheets {...props} activeSheet="review" />);
-
-    expect(
-      screen.getByPlaceholderText('想記下這週最有感的一段嗎？').props.value,
-    ).toBe('');
   });
 
   it('saves an adjustment draft without claiming it was sent or applied', () => {
@@ -243,9 +192,7 @@ describe('LongTermGoalDetailSheets', () => {
           presentation={makePresentation()}
           completion={completion}
           taskMinutes={15}
-          reviewDraft={reviewDraft}
           adjustmentDraft={null}
-          onSaveReviewDraft={jest.fn()}
           onSaveAdjustmentDraft={onSaveAdjustmentDraft}
           onCorrectTimeWindow={jest.fn(async () => undefined)}
         />
@@ -371,37 +318,19 @@ describe('LongTermGoalDetailSheets', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('uses skill review copy without changing an existing time-window draft', () => {
-    const onSaveReviewDraft = jest.fn();
+  it('回顧對階段型計畫一樣不講閱讀專屬的字', () => {
     const rendered = renderSheet('review', {
       presentation: makePresentation({
         supportsTimeWindow: false,
         progression: 'staged',
         categoryLabel: '可調整的顯示文案',
       }),
-      reviewDraft: {
-        favoriteNote: '',
-        preferredWindow: 'after_dinner',
-        nextStep: null,
-      },
-      onSaveReviewDraft,
     });
 
-    expect(screen.getByText('這週哪一段練習最有感？')).toBeTruthy();
-    expect(screen.getByPlaceholderText('想記下這週最有感的一段嗎？')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '調整進行方式' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '晚餐後' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '睡前' })).toBeNull();
+    // 開場先給事實，不是先問問題。
+    expect(screen.getByText('一起回顧')).toBeTruthy();
+    expect(screen.getByText('這段做起來，哪個最像你？')).toBeTruthy();
     expect(JSON.stringify(rendered.toJSON())).not.toMatch(READING_ONLY_COPY);
-
-    fireEvent.press(screen.getByRole('button', { name: '調整進行方式' }));
-    fireEvent.press(screen.getByRole('button', { name: '保留回顧草稿' }));
-
-    expect(onSaveReviewDraft).toHaveBeenCalledWith({
-      favoriteNote: '',
-      preferredWindow: 'after_dinner',
-      nextStep: 'method',
-    });
   });
 
   it('uses family adjustment copy without reading-only wording', () => {
@@ -448,7 +377,7 @@ describe('LongTermGoalDetailSheets', () => {
       }),
     });
 
-    expect(screen.getByText('這週哪一步最有感？')).toBeTruthy();
+    expect(screen.getByText('這段做起來，哪個最像你？')).toBeTruthy();
     expect(JSON.stringify(review.toJSON())).not.toMatch(READING_ONLY_COPY);
 
     review.rerender(
@@ -491,7 +420,7 @@ describe('LongTermGoalDetailSheets', () => {
       }),
     });
 
-    expect(screen.getByText('這週哪一段最有感？')).toBeTruthy();
+    expect(screen.getByText('這段做起來，哪個最像你？')).toBeTruthy();
     expect(JSON.stringify(review.toJSON())).not.toMatch(READING_ONLY_COPY);
 
     review.rerender(

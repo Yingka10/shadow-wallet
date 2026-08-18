@@ -556,15 +556,18 @@ describe('LongTermDetailScreen', () => {
     expectNoSupabaseWrites();
   });
 
-  it('keeps a weekend review as local draft state', async () => {
+  it('回顧走到選完方向都不寫任何東西進 Supabase', async () => {
     render(<LongTermDetailScreen />);
 
     fireEvent.press(await screen.findByLabelText('開始週末回顧'));
-    fireEvent.changeText(screen.getByLabelText('這週最有感的片段'), '神奇樹屋');
-    fireEvent.press(screen.getByText('保留回顧草稿'));
-    fireEvent.press(screen.getByLabelText('開始週末回顧'));
 
-    expect(screen.getByLabelText('這週最有感的片段').props.value).toBe('神奇樹屋');
+    // 先給事實，不是一開啟就問問題。
+    expect(screen.getByTestId('review-evidence')).toBeTruthy();
+    expect(screen.getByText('這段做起來，哪個最像你？')).toBeTruthy();
+
+    fireEvent.press(screen.getByLabelText('有時候不太好開始'));
+    fireEvent.press(screen.getByLabelText('想讓它輕鬆一點'));
+
     expectNoSupabaseWrites();
   });
 
@@ -914,10 +917,9 @@ describe('LongTermDetailScreen', () => {
     fireEvent.press(screen.getByText('暫停一下'));
     fireEvent.press(screen.getByText('保留調整草稿'));
     fireEvent.press(await screen.findByLabelText('開始週末回顧'));
-    fireEvent.changeText(screen.getByLabelText('這週最有感的片段'), '神奇樹屋');
-    fireEvent.press(screen.getByText('保留回顧草稿'));
-    fireEvent.press(screen.getByLabelText('開始週末回顧'));
-    expect(screen.getByLabelText('這週最有感的片段').props.value).toBe('神奇樹屋');
+    fireEvent.press(screen.getByLabelText('有時候不太好開始'));
+    expect(screen.getByText('下一段，你想怎麼走？')).toBeTruthy();
+    fireEvent.press(screen.getByLabelText('關閉週末回顧'));
 
     mockRouteParams = {
       goalId: 'goal-skill',
@@ -927,10 +929,10 @@ describe('LongTermDetailScreen', () => {
     rerender(<LongTermDetailScreen />);
 
     expect(await screen.findByText('目前階段：雙手合奏')).toBeTruthy();
-    expect(screen.queryByLabelText('這週最有感的片段')).toBeNull();
     fireEvent.press(screen.getByLabelText('開始週末回顧'));
-    expect(screen.getByText('這週哪一段練習最有感？')).toBeTruthy();
-    expect(screen.getByLabelText('這週最有感的片段').props.value).toBe('');
+    // 換了計畫，回顧從第一題重新開始 —— Step 2 還沒該出現。
+    expect(screen.getByText('這段做起來，哪個最像你？')).toBeTruthy();
+    expect(screen.queryByText('下一段，你想怎麼走？')).toBeNull();
     fireEvent.press(screen.getByLabelText('關閉週末回顧'));
     fireEvent.press(screen.getByLabelText('更多計畫選項'));
     fireEvent.press(screen.getByText('提出調整'));

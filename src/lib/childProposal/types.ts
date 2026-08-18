@@ -814,18 +814,52 @@ export type ChildProposalPreferredTimeChanges = {
   preferredTimeCustom?: null;
 };
 
+/**
+ * CHILD-REVIEW-V2：每週次數的重新協商。
+ *
+ * ⚠️ 這個數字**永遠來自孩子在回顧裡選的方向**，不是系統從「完成 2 次 /
+ *    約定 3 次」反推出來的建議。RPC 也不會自己算，只收呼叫端帶進來的值。
+ */
+export type ChildProposalCadenceChanges = {
+  /** 1–7。0 次不是調整，那是暫停，語意與退場都不一樣。 */
+  weeklyFrequency: number;
+};
+
 /** long_term_goals.preferred_time_window 的 CHECK 只允許這兩個值。 */
 export type ChildProposalReadingTimeWindow = 'after_dinner' | 'before_bed';
 
-export type CreateChildProposalAdjustmentRequestCommand = {
-  schemaVersion: typeof CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION;
-  proposalId: string;
-  expectedPlanVersionId: string;
-  adjustmentKind: 'preferred_time';
-  reason: string;
-  requestedChanges: ChildProposalPreferredTimeChanges;
-  clientRequestId?: string;
-};
+/**
+ * kind 與 requestedChanges 是綁在一起的 —— discriminated union，不是兩個
+ * 各自獨立的欄位。RPC 對每一種 kind 都只收它自己那一組鍵，多一個就整筆拒絕。
+ */
+export type CreateChildProposalAdjustmentRequestCommand =
+  | {
+    schemaVersion: typeof CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION;
+    proposalId: string;
+    expectedPlanVersionId: string;
+    adjustmentKind: 'preferred_time';
+    reason: string;
+    requestedChanges: ChildProposalPreferredTimeChanges;
+    clientRequestId?: string;
+  }
+  | {
+    schemaVersion: typeof CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION;
+    proposalId: string;
+    expectedPlanVersionId: string;
+    adjustmentKind: 'cadence';
+    reason: string;
+    requestedChanges: ChildProposalCadenceChanges;
+    clientRequestId?: string;
+  };
+
+/** 目前真的有 workflow 在後面的兩條通道。 */
+export type SupportedChildProposalAdjustmentKind = 'preferred_time' | 'cadence';
+
+export const SUPPORTED_CHILD_PROPOSAL_ADJUSTMENT_KINDS:
+  ReadonlyArray<SupportedChildProposalAdjustmentKind> = [
+    'preferred_time',
+    'cadence',
+  ];
 
 export type AcceptChildProposalAdjustmentCommand = {
   schemaVersion: typeof CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION;
@@ -881,4 +915,11 @@ export type ChildSharedPlanContext = {
   currentPlanVersion: ChildProposalPlanVersion;
   /** 已經送出、家長還沒回應的換時段請求。沒有就是 null。 */
   openPreferredTimeRequest: ChildProposalAdjustmentRequest | null;
+  /**
+   * 已經送出、家長還沒回應的每週次數請求。沒有就是 null。
+   *
+   * 與 openPreferredTimeRequest **各自獨立** —— 送過換時段不該連帶把改次數
+   * 也鎖住，那是兩個不同的談判。
+   */
+  openCadenceRequest: ChildProposalAdjustmentRequest | null;
 };

@@ -30,7 +30,6 @@ import type { RootStackParamList } from '../../../App';
 import LongTermGoalDetailSheets, {
   type AdjustmentDraft,
   type LongTermSheet,
-  type ReviewDraft,
 } from '../../components/child/LongTermGoalDetailSheets';
 import LongTermGoalDetailView from '../../components/child/LongTermGoalDetailView';
 import { Colors } from '../../constants/colors';
@@ -47,7 +46,7 @@ import type {
   PreferredTimeWindow,
   Task,
 } from '../../types/database';
-import { useChildSharedPlanTimeAdjustment } from '../../hooks/useChildSharedPlanTimeAdjustment';
+import { useChildSharedPlanAdjustments } from '../../hooks/useChildSharedPlanAdjustments';
 import {
   buildGoalPresentation,
   type GoalCompletionRecord,
@@ -67,12 +66,6 @@ const completionContextWriteQueue = new Map<string, Promise<void>>();
 
 type LongTermDetailRoute = RouteProp<RootStackParamList, 'LongTermDetail'>;
 type Nav = StackNavigationProp<RootStackParamList, 'LongTermDetail'>;
-
-const EMPTY_REVIEW_DRAFT: ReviewDraft = {
-  favoriteNote: '',
-  preferredWindow: null,
-  nextStep: null,
-};
 
 function enqueueCompletionContextWrite(
   completionId: string,
@@ -221,8 +214,6 @@ export default function LongTermDetailScreen() {
   const [activeSheet, setActiveSheet] = useState<LongTermSheet>(null);
   const [selectedCompletionId, setSelectedCompletionId] =
     useState<string | null>(null);
-  const [reviewDraft, setReviewDraft] =
-    useState<ReviewDraft>(EMPTY_REVIEW_DRAFT);
   const [adjustmentDraft, setAdjustmentDraft] =
     useState<AdjustmentDraft | null>(null);
   const [correctingTimeWindow, setCorrectingTimeWindow] = useState(false);
@@ -252,13 +243,18 @@ export default function LongTermDetailScreen() {
   const {
     sharedPlan,
     currentPreferredTime: sharedPreferredTime,
-    hasOpenRequest,
-    submit: submitTimeAdjustment,
-    submitting: submittingTimeAdjustment,
-    submitError: timeAdjustmentError,
-    justSubmitted: timeAdjustmentSubmitted,
+    hasOpenTimeRequest,
+    submitTime: submitTimeAdjustment,
+    timeSubmitting: submittingTimeAdjustment,
+    timeError: timeAdjustmentError,
+    timeJustSubmitted: timeAdjustmentSubmitted,
+    hasOpenCadenceRequest,
+    submitCadence,
+    cadenceSubmitting,
+    cadenceError,
+    cadenceJustSubmitted,
     refresh: refreshSharedPlan,
-  } = useChildSharedPlanTimeAdjustment(taskId, goal?.child_id ?? null);
+  } = useChildSharedPlanAdjustments(taskId, goal?.child_id ?? null);
 
   const load = useCallback(async () => {
     const loadGeneration = generationRef.current + 1;
@@ -365,7 +361,6 @@ export default function LongTermDetailScreen() {
   useEffect(() => {
     setActiveSheet(null);
     setSelectedCompletionId(null);
-    setReviewDraft(EMPTY_REVIEW_DRAFT);
     setAdjustmentDraft(null);
     setGoal(null);
     setTask(null);
@@ -596,28 +591,46 @@ export default function LongTermDetailScreen() {
   }, [correctingTimeWindow, selectedCompletion]);
 
   /*
-    只有真的讀到一份進行中的共同計畫，才把這條通道交給回顧表單。
-    sharedPlan 是 null（一般家長建立的長期任務）時整個 prop 是 undefined，
-    回顧維持原本的 local draft 行為。
+    只有真的讀到一份進行中的共同計畫，才把通道交給回顧。sharedPlan 是 null
+    （一般家長建立的長期任務）時兩個 prop 都是 undefined —— 此時回顧的
+    Step 2 走得完，但不會長出任何送得出去的調整選項，也不會假裝送得出去。
+
+    兩條各自獨立：一條有未決請求不影響另一條能不能送。
   */
-  const sharedPlanTimeAdjustment = useMemo(() => {
+  const reviewTimeChannel = useMemo(() => {
     if (!sharedPlan) return undefined;
     return {
-      currentPreferredTime: readingWindowFromTask(sharedPreferredTime),
-      pending: hasOpenRequest,
+      pending: hasOpenTimeRequest,
       submitting: submittingTimeAdjustment,
       error: timeAdjustmentError,
       submitted: timeAdjustmentSubmitted,
       onSubmit: submitTimeAdjustment,
     };
   }, [
-    hasOpenRequest,
+    hasOpenTimeRequest,
     sharedPlan,
-    sharedPreferredTime,
     submitTimeAdjustment,
     submittingTimeAdjustment,
     timeAdjustmentError,
     timeAdjustmentSubmitted,
+  ]);
+
+  const reviewCadenceChannel = useMemo(() => {
+    if (!sharedPlan) return undefined;
+    return {
+      pending: hasOpenCadenceRequest,
+      submitting: cadenceSubmitting,
+      error: cadenceError,
+      submitted: cadenceJustSubmitted,
+      onSubmit: submitCadence,
+    };
+  }, [
+    cadenceError,
+    cadenceJustSubmitted,
+    cadenceSubmitting,
+    hasOpenCadenceRequest,
+    sharedPlan,
+    submitCadence,
   ]);
 
   return (
@@ -670,7 +683,9 @@ export default function LongTermDetailScreen() {
             onOpenReview={() => setActiveSheet('review')}
             onOpenMore={() => setActiveSheet('menu')}
             pendingTimeAdjustmentNotice={
-              hasOpenRequest ? '已送給爸媽，等一起確認。' : null
+              hasOpenTimeRequest || hasOpenCadenceRequest
+                ? '已送給爸媽，等一起確認。'
+                : null
             }
           />
         ) : null}
@@ -684,13 +699,12 @@ export default function LongTermDetailScreen() {
             presentation={presentation}
             completion={selectedCompletion}
             taskMinutes={task.base_time_min}
-            reviewDraft={reviewDraft}
             adjustmentDraft={adjustmentDraft}
-            onSaveReviewDraft={setReviewDraft}
             onSaveAdjustmentDraft={setAdjustmentDraft}
             onCorrectTimeWindow={handleCorrectTimeWindow}
             correctingTimeWindow={correctingTimeWindow}
-            sharedPlanTimeAdjustment={sharedPlanTimeAdjustment}
+            reviewTimeChannel={reviewTimeChannel}
+            reviewCadenceChannel={reviewCadenceChannel}
           />
         ) : null}
       </SafeAreaView>
