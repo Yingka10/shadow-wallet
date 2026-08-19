@@ -11,8 +11,26 @@
 
 import { supabase } from '../supabase';
 import { mapPostgresErrorCode } from '../parentTaskCreationService';
-import { CHILD_PROPOSAL_STATUSES } from './types';
+import {
+  CHILD_PROPOSAL_STATUSES,
+  SUPPORTED_CHILD_PROPOSAL_ADJUSTMENT_KINDS,
+} from './types';
 import { buildDirectConfirmCommand } from './directConfirm';
+import {
+  buildChildPlanConfirmCommand,
+  type ConfirmChildPlanningProposalResult,
+} from '../childPlanning/parentAgreement';
+import {
+  buildChildPlanningTermsCommand,
+  type ChildPlanningSharedTerms,
+  type ProposeChildPlanningTermsResult,
+} from '../childPlanning/sharedTerms';
+import {
+  buildChildAcceptCommand,
+  buildChildRequestChangesCommand,
+  type AcceptChildPlanningTermsResult,
+  type RequestChildPlanningTermChangesResult,
+} from '../childPlanning/childReview';
 import {
   buildAcceptReviewCommand,
   buildCloseUnsuitableCommand,
@@ -21,11 +39,13 @@ import {
 } from './reviewCommands';
 import type { AgeGroup } from '../../types/database';
 import type {
+  SupportedChildProposalAdjustmentKind,
   AddChildProposalPlanVersionCommand,
   AddPlanVersionResult,
   AcceptChildProposalResult,
   ChildProposalFailure,
   ChildProposal,
+  ChildProposalChildAction,
   ChildProposalConfirmedReward,
   ChildProposalFailureCode,
   ChildProposalStatus,
@@ -69,6 +89,33 @@ export const REQUEST_CHILD_PROPOSAL_CHANGES_RPC = 'request_child_proposal_change
 export const CLOSE_CHILD_PROPOSAL_UNSUITABLE_RPC = 'close_child_proposal_unsuitable_v1';
 export const ACCEPT_CHILD_PROPOSAL_ADJUSTMENT_RPC = 'accept_child_proposal_adjustment_v1';
 export const DECLINE_CHILD_PROPOSAL_ADJUSTMENT_RPC = 'decline_child_proposal_adjustment_v1';
+/**
+ * P1-A4A：家長同意孩子已經確認且完整的計畫。
+ *
+ * ⚠️ 是 CONFIRM_CHILD_PROPOSAL_RPC 的 **sibling**，不是它的替代。
+ *    AI-authored 的提案永遠走那一支，一個行為都沒改。
+ */
+export const CONFIRM_CHILD_PLANNING_PROPOSAL_RPC = 'confirm_child_planning_proposal_v1';
+
+/**
+ * P1-A4B1：家長對孩子已規劃的計畫提出家庭共同條件。
+ *
+ * ⚠️ 是 REVISE_CHILD_PROPOSAL_PLAN_RPC 的 **sibling**。那一支服務 P0
+ *    （來源是 ai / parent 版本，可改的欄位、reward 語意都不一樣），
+ *    一個字都沒改。
+ */
+export const PROPOSE_CHILD_PLANNING_TERMS_RPC = 'propose_child_planning_terms_v1';
+
+/**
+ * P1-A4B2：孩子對家長提出的共同條件的兩個回覆。
+ *
+ * ⚠️ 是 ACCEPT_CHILD_PROPOSAL_PLAN_RPC / REQUEST_CHILD_PROPOSAL_CHANGES_RPC
+ *    的 **sibling**。那兩支用 P0 的 reward 錨點與 P0 的調整版形狀，
+ *    一個字都沒改。
+ */
+export const ACCEPT_CHILD_PLANNING_TERMS_RPC = 'accept_child_planning_terms_v1';
+export const REQUEST_CHILD_PLANNING_TERM_CHANGES_RPC =
+  'request_child_planning_term_changes_v1';
 
 /**
  * 只有這六支。型別上就不接受任意字串 —— 打錯名字要在編譯期就被抓到，
@@ -81,7 +128,11 @@ type ChildProposalRpcName =
   | typeof RECORD_CHILD_PROPOSAL_TRIAL_RPC
   | typeof CREATE_CHILD_PROPOSAL_ADJUSTMENT_RPC
   | typeof CONFIRM_CHILD_PROPOSAL_RPC
+  | typeof CONFIRM_CHILD_PLANNING_PROPOSAL_RPC
   | typeof REVISE_CHILD_PROPOSAL_PLAN_RPC
+  | typeof PROPOSE_CHILD_PLANNING_TERMS_RPC
+  | typeof ACCEPT_CHILD_PLANNING_TERMS_RPC
+  | typeof REQUEST_CHILD_PLANNING_TERM_CHANGES_RPC
   | typeof ACCEPT_CHILD_PROPOSAL_PLAN_RPC
   | typeof REQUEST_CHILD_PROPOSAL_CHANGES_RPC
   | typeof CLOSE_CHILD_PROPOSAL_UNSUITABLE_RPC
@@ -206,6 +257,12 @@ function isFailure(value: unknown): value is ChildProposalFailure {
  * 少一個鍵就會變成畫面上的 undefined。而且 coin_eligible 一定要有金額 ——
  * DB 有 CHECK 擋，但回傳值經過 PostgREST，這裡再確認一次不算多餘。
  */
+/** 只收 A4B2 那兩個值。舊的轉換沒有 action，legacy 事件也一律是 null。 */
+function isChildAction(value: unknown): value is ChildProposalChildAction {
+  return value === 'accepted_shared_terms_pending_more'
+    || value === 'requested_shared_term_changes';
+}
+
 function isConfirmedReward(value: unknown): value is ChildProposalConfirmedReward {
   if (typeof value !== 'object' || value === null) return false;
   const r = value as Record<string, unknown>;
@@ -278,16 +335,56 @@ export class SupabaseChildProposalService {
     if (versionError) throw new Error(versionError.message || '讀取 GrowBook 計畫失敗');
 
     const byId = new Map((versions ?? []).map(version => [version.id, version]));
+
+    // 孩子在這一版上最後做的事。**這一段拿不到就整張卡片不顯示是錯的** ——
+    // 它只是一句話的差別（「他說可以了」vs「他想再聊聊」），讀不到就當沒有，
+    // 不要讓一個附註把家長的主流程擋掉。
+    const actionByVersion = await this.latestChildActions(currentIds);
+
     return proposals.map(proposal => {
       const version = proposal.current_plan_version_id
         ? byId.get(proposal.current_plan_version_id) ?? null
         : null;
+      // Exact id plus proposal ownership: a mismatched row is not a usable plan.
+      const currentPlanVersion = version?.proposal_id === proposal.id ? version : null;
       return {
         proposal,
-        // Exact id plus proposal ownership: a mismatched row is not a usable plan.
-        currentPlanVersion: version?.proposal_id === proposal.id ? version : null,
+        currentPlanVersion,
+        latestChildAction: currentPlanVersion
+          ? actionByVersion.get(currentPlanVersion.id) ?? null
+          : null,
       };
     });
+  }
+
+  /**
+   * 每一版上孩子最後一次的回覆語意。
+   *
+   * ⚠️ 以 plan_version_id 為鍵，不是 proposal_id：協商到第二輪時，
+   *    第一輪的「我想再調整」還躺在同一個提案下面，用提案當鍵會把它
+   *    貼到新的一版上。
+   */
+  private async latestChildActions(
+    planVersionIds: readonly string[],
+  ): Promise<Map<string, ChildProposalChildAction>> {
+    const found = new Map<string, ChildProposalChildAction>();
+    if (planVersionIds.length === 0) return found;
+
+    const { data, error } = await supabase
+      .from('child_proposal_status_events')
+      .select('plan_version_id, action, created_at')
+      .in('plan_version_id', [...planVersionIds])
+      .not('action', 'is', null)
+      .order('created_at', { ascending: false });
+    if (error) return found;
+
+    for (const row of data ?? []) {
+      const versionId = row.plan_version_id;
+      const action = row.action;
+      if (typeof versionId !== 'string' || !isChildAction(action)) continue;
+      if (!found.has(versionId)) found.set(versionId, action);
+    }
+    return found;
   }
 
   /**
@@ -393,6 +490,104 @@ export class SupabaseChildProposalService {
     };
   }
 
+  /**
+   * P1-A4A：家長同意孩子已經確認且完整的計畫。
+   *
+   * ⚠️ 與 confirmDirect 是**兩支**，不是一支帶旗標的。路由由
+   *    resolveConfirmRoute 決定，而且只看 authorship 與 lineage。
+   */
+  async confirmChildPlanAgreement(
+    card: ParentProposalCardData,
+    childAgeGroup: string,
+  ): Promise<ConfirmChildPlanningProposalResult> {
+    const built = buildChildPlanConfirmCommand(card, childAgeGroup);
+    if (built.ok !== true) return built;
+
+    const fallback = '建立共同約定失敗';
+    const result = await callProposalRpc(
+      CONFIRM_CHILD_PLANNING_PROPOSAL_RPC, built.command, fallback,
+    );
+    if (result.ok !== true) return result;
+
+    const proposalId = requireId(result.payload, 'proposalId', fallback);
+    if (isFailure(proposalId)) return proposalId;
+    const planVersionId = requireId(result.payload, 'planVersionId', fallback);
+    if (isFailure(planVersionId)) return planVersionId;
+    const sourcePlanVersionId = requireId(result.payload, 'sourcePlanVersionId', fallback);
+    if (isFailure(sourcePlanVersionId)) return sourcePlanVersionId;
+    const taskId = requireId(result.payload, 'taskId', fallback);
+    if (isFailure(taskId)) return taskId;
+    if (!isConfirmedReward(result.payload.confirmedReward)) {
+      return {
+        ok: false, code: 'UNKNOWN', reason: 'CONFIRMED_REWARD_MISSING',
+        message: `${fallback}：共同版本缺少確認的回饋紀錄`,
+      };
+    }
+
+    return {
+      ok: true,
+      proposalId,
+      planVersionId,
+      sourcePlanVersionId,
+      taskId,
+      relatedIds: Array.isArray(result.payload.relatedIds)
+        ? result.payload.relatedIds.filter((id): id is string => typeof id === 'string')
+        : [],
+      confirmedReward: result.payload.confirmedReward,
+      idempotentReplay: result.payload.idempotentReplay === true,
+    };
+  }
+
+  /**
+   * P1-A4B1：家長提出家庭共同條件 → 家長草案 ＋ needs_child_review。
+   *
+   * ⚠️ 與 revisePlan 是**兩支**。那一支是 P0 的 material edit；這一支
+   *    的來源必須沿 adopted_from 走得回一份孩子自己規劃的計畫，而且
+   *    只碰共同條件。合成一支的話，每加一個欄位都要先問「這是哪一條的」。
+   *
+   * 終點是 needs_child_review，不是 active：不建任務、不發幣。
+   */
+  async proposeChildPlanningTerms(
+    card: ParentProposalCardData,
+    terms: ChildPlanningSharedTerms,
+    childAgeGroup: string,
+  ): Promise<ProposeChildPlanningTermsResult> {
+    const built = buildChildPlanningTermsCommand(card, terms, childAgeGroup);
+    if (built.ok !== true) return built;
+
+    const fallback = '送出共同條件失敗';
+    const result = await callProposalRpc(
+      PROPOSE_CHILD_PLANNING_TERMS_RPC, built.command, fallback,
+    );
+    if (result.ok !== true) return result;
+
+    const proposalId = requireId(result.payload, 'proposalId', fallback);
+    if (isFailure(proposalId)) return proposalId;
+    const planVersionId = requireId(result.payload, 'planVersionId', fallback);
+    if (isFailure(planVersionId)) return planVersionId;
+    const sourcePlanVersionId = requireId(result.payload, 'sourcePlanVersionId', fallback);
+    if (isFailure(sourcePlanVersionId)) return sourcePlanVersionId;
+    const childPlanVersionId = requireId(result.payload, 'childPlanVersionId', fallback);
+    if (isFailure(childPlanVersionId)) return childPlanVersionId;
+    if (result.payload.status !== 'needs_child_review') {
+      return { ok: false, code: 'UNKNOWN', message: `${fallback}：回應狀態無法辨識` };
+    }
+
+    return {
+      ok: true,
+      proposalId,
+      planVersionId,
+      sourcePlanVersionId,
+      childPlanVersionId,
+      status: 'needs_child_review',
+      requiresParentDecision: Array.isArray(result.payload.requiresParentDecision)
+        ? result.payload.requiresParentDecision.filter(
+          (term): term is string => typeof term === 'string')
+        : [],
+      idempotentReplay: result.payload.idempotentReplay === true,
+    };
+  }
+
   async revisePlan(
     card: ParentProposalCardData,
     edits: ParentProposalMaterialEdits,
@@ -414,6 +609,105 @@ export class SupabaseChildProposalService {
       proposalId,
       planVersionId,
       status: 'needs_child_review',
+      idempotentReplay: result.payload.idempotentReplay === true,
+    };
+  }
+
+  /**
+   * P1-A4B2：孩子接受家長提出的共同條件。
+   *
+   * ⚠️ 回傳的 `activated` 才是「這件事開始了沒有」。條件還沒說完的那一輪
+   *    也是 ok:true —— 那代表「他同意這一輪」，不是「任務開始了」。
+   *    把 ok 當成開始，畫面就會對孩子說謊。
+   */
+  async acceptChildPlanningTerms(
+    review: ChildProposalReviewData,
+    childAgeGroup: string,
+  ): Promise<AcceptChildPlanningTermsResult> {
+    const built = buildChildAcceptCommand(review, childAgeGroup);
+    if (built.ok !== true) return built;
+
+    const fallback = '送出你的回覆失敗';
+    const result = await callProposalRpc(
+      ACCEPT_CHILD_PLANNING_TERMS_RPC, built.command, fallback,
+    );
+    if (result.ok !== true) return result;
+
+    const proposalId = requireId(result.payload, 'proposalId', fallback);
+    if (isFailure(proposalId)) return proposalId;
+    const planVersionId = requireId(result.payload, 'planVersionId', fallback);
+    if (isFailure(planVersionId)) return planVersionId;
+
+    const activated = result.payload.activated === true;
+    const status = result.payload.status;
+    if (status !== 'active' && status !== 'proposed') {
+      return { ok: false, code: 'UNKNOWN', message: `${fallback}：回應狀態無法辨識` };
+    }
+    if (activated !== (status === 'active')) {
+      return { ok: false, code: 'UNKNOWN', message: `${fallback}：回應狀態前後不一致` };
+    }
+
+    let taskId: string | null = null;
+    let confirmedReward: ChildProposalConfirmedReward | null = null;
+    if (activated) {
+      const id = requireId(result.payload, 'taskId', fallback);
+      if (isFailure(id)) return id;
+      taskId = id;
+      if (!isConfirmedReward(result.payload.confirmedReward)) {
+        return {
+          ok: false, code: 'UNKNOWN', reason: 'CONFIRMED_REWARD_MISSING',
+          message: `${fallback}：共同版本缺少確認的回饋紀錄`,
+        };
+      }
+      confirmedReward = result.payload.confirmedReward;
+    }
+
+    return {
+      ok: true,
+      proposalId,
+      planVersionId,
+      status,
+      activated,
+      taskId,
+      childPlanVersionId: typeof result.payload.childPlanVersionId === 'string'
+        ? result.payload.childPlanVersionId
+        : null,
+      requiresParentDecision: Array.isArray(result.payload.requiresParentDecision)
+        ? result.payload.requiresParentDecision.filter(
+          (term): term is string => typeof term === 'string')
+        : [],
+      confirmedReward,
+      idempotentReplay: result.payload.idempotentReplay === true,
+    };
+  }
+
+  /** P1-A4B2：孩子想再和家長談。不建任務、不改任何版本內容。 */
+  async requestChildPlanningTermChanges(
+    review: ChildProposalReviewData,
+    reason?: string,
+  ): Promise<RequestChildPlanningTermChangesResult> {
+    const built = buildChildRequestChangesCommand(review, reason);
+    if (built.ok !== true) return built;
+
+    const fallback = '送出你的想法失敗';
+    const result = await callProposalRpc(
+      REQUEST_CHILD_PLANNING_TERM_CHANGES_RPC, built.command, fallback,
+    );
+    if (result.ok !== true) return result;
+
+    const proposalId = requireId(result.payload, 'proposalId', fallback);
+    if (isFailure(proposalId)) return proposalId;
+    const planVersionId = requireId(result.payload, 'planVersionId', fallback);
+    if (isFailure(planVersionId)) return planVersionId;
+    if (result.payload.status !== 'proposed') {
+      return { ok: false, code: 'UNKNOWN', message: `${fallback}：回應狀態無法辨識` };
+    }
+
+    return {
+      ok: true,
+      proposalId,
+      planVersionId,
+      status: 'proposed',
       idempotentReplay: result.payload.idempotentReplay === true,
     };
   }
@@ -751,20 +1045,25 @@ export class SupabaseChildProposalService {
     if (currentError) throw new Error(currentError.message || '讀取目前版本失敗');
     if (!current || current.proposal_id !== proposal.id) return null;
 
+    // 兩條通道一次讀回來。分開發兩次查詢只是多一趟往返，而且會讓兩者的
+    // 「目前有沒有未決請求」在時間上不一致。
     const { data: openRequests, error: requestError } = await supabase
       .from('child_proposal_adjustment_requests')
       .select('*')
       .eq('proposal_id', proposal.id)
       .eq('status', 'open')
-      .eq('adjustment_kind', 'preferred_time')
-      .order('created_at', { ascending: false })
-      .limit(1);
+      .in('adjustment_kind', [...SUPPORTED_CHILD_PROPOSAL_ADJUSTMENT_KINDS])
+      .order('created_at', { ascending: false });
     if (requestError) throw new Error(requestError.message || '讀取調整請求失敗');
+
+    const openByKind = (kind: SupportedChildProposalAdjustmentKind) =>
+      (openRequests ?? []).find(row => row.adjustment_kind === kind) ?? null;
 
     return {
       proposal,
       currentPlanVersion: current as ChildProposalPlanVersion,
-      openPreferredTimeRequest: openRequests?.[0] ?? null,
+      openPreferredTimeRequest: openByKind('preferred_time'),
+      openCadenceRequest: openByKind('cadence'),
     };
   }
 
@@ -812,7 +1111,7 @@ export class SupabaseChildProposalService {
       .select('*')
       .eq('family_id', familyId)
       .eq('status', 'open')
-      .eq('adjustment_kind', 'preferred_time')
+      .in('adjustment_kind', [...SUPPORTED_CHILD_PROPOSAL_ADJUSTMENT_KINDS])
       .order('created_at', { ascending: false })
       .limit(3);
     if (error) throw new Error(error.message || '讀取調整請求失敗');

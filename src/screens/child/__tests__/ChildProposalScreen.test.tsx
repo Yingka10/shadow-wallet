@@ -488,3 +488,54 @@ describe('節奏選項', () => {
     expect(screen.queryByTestId('proposal-times-8')).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// P1-A2 §3／§27 — Goal Planning 關掉時，這條路徑一個字都沒有變
+//
+// 這一組是**降級路徑的守門員**。P1 的流程在同一個 handleSubmit 裡分岔，
+// 而分岔點只有一個（client === null）。它壞掉的話，症狀不是報錯，是
+// 「AI 關著卻還是開了一場對話」或「兩步送出變成一步」—— 兩者都會安靜地
+// 弄丟 draft → proposed 那段稽核紀錄。
+//
+// 這也是之後換付費 provider 前的降級路徑，所以它必須一直測得到。
+// ---------------------------------------------------------------------------
+
+describe('P1-A2：Goal Planning 關掉時走的仍是既有的兩步送出', () => {
+  it('沒有開任何 planning session', async () => {
+    const screen = render(<ChildProposalScreen />);
+    await fillGoldenPath(screen);
+    fireEvent.press(screen.getByTestId('proposal-submit'));
+
+    await waitFor(() => expect(screen.getByTestId('proposal-success')).toBeTruthy());
+
+    const called = mockRpc.mock.calls.map((call) => call[0] as string);
+    expect(called).not.toContain('start_child_goal_planning_session_v1');
+    expect(called).not.toContain('record_child_goal_planning_round_v1');
+    expect(called).not.toContain('confirm_child_goal_planning_session_v1');
+  });
+
+  it('draft → proposed 的稽核鏈仍然是兩步', async () => {
+    const screen = render(<ChildProposalScreen />);
+    await fillGoldenPath(screen);
+    fireEvent.press(screen.getByTestId('proposal-submit'));
+
+    await waitFor(() => expect(screen.getByTestId('proposal-success')).toBeTruthy());
+
+    // 兩步是刻意的：合成一步的話，child_proposal_status_events 只會留下
+    // 一筆，而「孩子先寫下、再決定送出」那段過程就消失了。
+    const called = mockRpc.mock.calls.map((call) => call[0] as string);
+    expect(called).toContain('create_child_proposal_v1');
+    expect(called).toContain('transition_child_proposal_v1');
+    expect(called.indexOf('create_child_proposal_v1'))
+      .toBeLessThan(called.indexOf('transition_child_proposal_v1'));
+  });
+
+  it('孩子看到的仍然是既有的成功頁，不是規劃頁', async () => {
+    const screen = render(<ChildProposalScreen />);
+    await fillGoldenPath(screen);
+    fireEvent.press(screen.getByTestId('proposal-submit'));
+
+    await waitFor(() => expect(screen.getByTestId('proposal-success')).toBeTruthy());
+    expect(screen.queryByTestId('planning-opening')).toBeNull();
+  });
+});

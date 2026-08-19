@@ -5,7 +5,11 @@
  * Supported `type` values:
  *   classifyTask | suggestTaskCoin | analyzeTask | suggestRewardCoin |
  *   screenRedemptionRequest | suggestCoinWithAI | suggestTaskRewardAmount |
- *   advisorChat | wishClarify | childProposalPlanDraft
+ *   advisorChat | wishClarify | childProposalPlanDraft | childGoalPlanning
+ *
+ * childGoalPlanning（P1-A1）目前還沒有任何 production UI 呼叫它 ——
+ * 它存在的目的是讓新的 planning contract 可以被真的測試，而不是讓既有的
+ * 提案流程改變行為。childProposalPlanDraft 那條路徑一個字都沒有動。
  */
 
 import {
@@ -20,6 +24,8 @@ import { callGemini, parseJson } from './gemini.ts';
 import { handleWishClarify, type WishClarifyHistoryTurn } from './wishClarify.ts';
 import { handleChildProposalPlanDraft } from './childProposalPlanDraft.ts';
 import type { ChildProposalPlanDraftInput } from './childProposalPlanDraftLogic.ts';
+import { handleChildGoalPlanning } from './childGoalPlanning.ts';
+import type { ChildGoalPlanningInput } from './childGoalPlanningLogic.ts';
 import {
   formatWeekdaysZh,
   validateAdvisorSuggestedAction,
@@ -519,6 +525,11 @@ Deno.serve(async (req) => {
       case 'childProposalPlanDraft':
         result = await handleChildProposalPlanDraft(
           payload as unknown as ChildProposalPlanDraftInput,
+        );
+        break;
+      case 'childGoalPlanning':
+        result = await handleChildGoalPlanning(
+          payload as unknown as ChildGoalPlanningInput,
         );
         break;
       default:

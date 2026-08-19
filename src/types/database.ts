@@ -51,8 +51,15 @@ export type ReportedBy = 'child' | 'parent';
 export type PreferredTimeWindow = 'after_dinner' | 'before_bed';
 export type CompletionStartMode = 'self_started' | 'reminded';
 
-/** Maps day-number (as string key) to coin reward. E.g. {"7": 20, "14": 40, "21": 80} */
-export type CheckpointRewards = Record<string, number>;
+/**
+ * Maps a threshold (as string key) to its reward. E.g. {"7": 20, "14": 40, "21": 80}.
+ *
+ * 大多數 checkpoint 只是一個幣值數字。rhythm 進度的 Next Stop 需要一個真正
+ * 取過名字的 checkpoint 時，同一格可以換成物件——沒有 title 的 checkpoint
+ * 不算「有意義的」節點（見 longTermGoalPresentation.ts 的 buildRhythmMilestones）。
+ */
+export type CheckpointRewardEntry = number | { coin?: number; title?: string; note?: string };
+export type CheckpointRewards = Record<string, CheckpointRewardEntry>;
 
 /**
  * 技能學習類的單一學習階段（里程碑）。
@@ -594,6 +601,47 @@ export type {
   ChildProposalAdjustmentKind,
   ChildProposalAdjustmentStatus,
 } from '../lib/childProposal/types';
+
+// ── P1-M1A/B：canonical milestone reward 三層（唯讀 —— 只由 RPC／trigger 寫）──
+//
+// `type` 不是 `interface` —— 見上面 §Row 型別的註解，interface 在這裡會讓
+// supabase-js 的型別推導整個退化成 never。
+
+export type MilestoneAgreementRow = {
+  id: string;
+  task_id: string;
+  goal_id: string;
+  title: string;
+  note: string | null;
+  completion_criterion: Record<string, any>;
+  reward_coin_amount: number | null;
+  agreement_source: string;
+  parent_confirmed_at: string | null;
+  parent_confirmed_by_parent_id: string | null;
+  effective_at: string;
+  effective_plan_version_id: string | null;
+  supersedes_milestone_id: string | null;
+  superseded_at: string | null;
+  created_at: string;
+};
+
+export type MilestoneAchievementRow = {
+  id: string;
+  milestone_agreement_id: string;
+  child_id: string;
+  achievement_evidence: Record<string, any>;
+  achieved_at: string;
+};
+
+export type MilestoneSettlementRow = {
+  id: string;
+  milestone_achievement_id: string;
+  milestone_agreement_id: string;
+  child_id: string;
+  coin_amount: number;
+  transaction_id: string | null;
+  settled_at: string;
+};
 
 // ── Database 型別（供 createClient<Database> 使用）────────────
 //
@@ -1160,6 +1208,24 @@ export interface Database {
         Update: never;
         Relationships: [];
       };
+      milestone_agreements: {
+        Row: MilestoneAgreementRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      milestone_achievements: {
+        Row: MilestoneAchievementRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      milestone_settlements: {
+        Row: MilestoneSettlementRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -1305,6 +1371,48 @@ export interface Database {
       child_proposal_transition_allowed: {
         Args: { p_from: string; p_to: string; p_actor_role?: string | null };
         Returns: boolean;
+      };
+      // P1-A2：孩子的目標規劃對話。與 Plan Version 是兩條線。
+      start_child_goal_planning_session_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      record_child_goal_planning_round_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      confirm_child_goal_planning_session_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      // 放棄規劃 ＋ draft → proposed，同一個交易。
+      submit_child_proposal_without_planning_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      // P1-A3：孩子確認過的規劃 → child-authored 正式 Plan Version
+      // ＋ draft → proposed，同一個交易。計畫內容由 RPC 自己複製。
+      publish_child_confirmed_plan_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      // P1-A4A：家長同意孩子已經確認且完整的計畫 → 共同約定版本 ＋ 正式任務。
+      // confirm_child_proposal_v1 的 sibling，那一支只收 AI-authored。
+      confirm_child_planning_proposal_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      propose_child_planning_terms_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      accept_child_planning_terms_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
+      };
+      request_child_planning_term_changes_v1: {
+        Args: { p_command: object };
+        Returns: unknown;
       };
       mark_task_atomic: {
         Args: {

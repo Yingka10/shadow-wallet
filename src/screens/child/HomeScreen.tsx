@@ -47,6 +47,10 @@ import type { RootStackParamList } from '../../../App';
 import { useTodayTasks, type TodayTask } from '../../hooks/useTodayTasks';
 import { useWallet } from '../../hooks/useWallet';
 import { useChildProposalReview } from '../../hooks/useChildProposalReview';
+import { isChildPlanningReviewCard } from '../../lib/childPlanning/childReview';
+import { buildWeeklyProgress, resolveLongTermProgression } from '../../lib/longTerm';
+import { buildGoalPresentation } from './longTermGoalPresentation';
+import { ChildSharedTermsReviewCard } from '../../components/child/ChildSharedTermsReviewCard';
 import BottomNav from '../../components/BottomNav';
 import GrassGroundScene from '../../components/child/GrassGroundScene';
 import { ChildPlanReviewCard } from '../../components/child/ChildPlanReviewCard';
@@ -79,6 +83,22 @@ type ChildMeta = {
   nickname: string;
 };
 type GoalTone = 'piano' | 'book' | 'sleep' | 'growth';
+
+/**
+ * 一筆長期目標「今天可以留紀錄的那一步」，掛進今天要做的清單。
+ *
+ * 只從 `buildGoalPresentation` 讀 canCompleteToday / todayAction ——
+ * 不在這裡重新猜一次今天排不排得上（LT-FINAL-1R §A 的規則：progression
+ * 與 availability 只問一次，各畫面各猜一次的結果就是首頁與詳情頁對不上）。
+ */
+type GoalTodayEntry = {
+  id: string;
+  taskId: string;
+  goalId: string;
+  goalName: string;
+  actionText: string;
+  isCompleted: boolean;
+};
 
 const TASK_DIFF_OPTIONS = [1, 1.5, 2, 2.5, 3];
 
@@ -178,48 +198,94 @@ function calcDisplayCoin(task: Task, isPrerequisiteMet: boolean): number {
   return Math.round(base * (isPrerequisiteMet ? 1 : 0.7));
 }
 
-function getGoalTone(name: string): { tone: GoalTone; icon: string; title: string } {
-  const lower = name.toLowerCase();
-  if (name.includes('鋼琴') || lower.includes('piano')) {
-    return { tone: 'piano', icon: '🎹', title: '鋼琴家之路' };
-  }
-  if (name.includes('閱讀') || name.includes('書') || lower.includes('read')) {
-    return { tone: 'book', icon: '📚', title: '小書蟲計畫' };
-  }
-  if (name.includes('睡') || lower.includes('sleep')) {
-    return { tone: 'sleep', icon: '🌙', title: '早睡挑戰' };
-  }
-  return { tone: 'growth', icon: '🌱', title: name };
+/**
+ * 卡片的外觀。**名字由孩子決定，這裡只挑顏色。**
+ *
+ * ⚠️ 這一支以前會照名稱把「每天練琴 15 分鐘」改成「鋼琴家之路」、
+ *    把孩子寫的閱讀計畫改成「小書蟲計畫」。那不是外觀，那是**替他的
+ *    計畫重新命名** —— 而整條 P1 都在保證「你的做法沒有被改掉」，
+ *    結果首頁第一眼就把標題換掉了。
+ *
+ *    色系改由 task.category 決定（結構化欄位，不是內容），
+ *    標題一律 task.name。
+ */
+function getGoalTone(task: TodayTask): { tone: GoalTone; icon: string } {
+  if (task.category === 'D') return { tone: 'book', icon: '📚' };
+  if (task.category === 'B') return { tone: 'sleep', icon: '🤝' };
+  if (task.category === 'A') return { tone: 'piano', icon: '☀️' };
+  return { tone: 'growth', icon: '🌱' };
 }
 
-function getGoalProgress(goal: TodayTask['goal']): { label: string; pct: number } {
-  if (!goal) return { label: '第 0/0 天', pct: 0 };
+/**
+ * 首頁那張卡上的進度。**與詳情頁共用同一個 progression resolver。**
+ *
+ * ⚠️ 之前這裡是 `goal_type === 'skill' ? 級 : current_day / total_days`。
+ *    兩個判準都是錯的：`goal_type` 不決定進度（它由兩條路徑寫），
+ *    而 `current_day` 建立後從來沒有被遞增過 —— 一份每天都有在做的
+ *    共同計畫，首頁永遠顯示 0%。
+ *
+ *    真實進度只有一個來源：task_completions（由 useTodayTasks 批次查回）。
+ */
+function getGoalProgress(task: TodayTask): { label: string; pct: number } {
+  const goal = task.goal;
+  if (!goal) return { label: '還沒安排週期', pct: 0 };
 
-  if (goal.goal_type === 'skill') {
-    const total = Math.max(goal.level_count ?? goal.level_definitions?.length ?? 0, 1);
+  const progression = resolveLongTermProgression(task, goal);
+
+  if (progression === 'staged') {
+    const total = Math.max(goal.level_count ?? goal.level_definitions?.length ?? 1, 1);
     const current = Math.min(goal.current_level ?? 0, total);
-    return { label: `第 ${current}/${total} 級`, pct: current / total };
+    return { label: `第 ${current} / ${total} 階段`, pct: current / total };
   }
 
-  const total = Math.max(goal.total_days ?? 30, 1);
-  const current = Math.min(goal.current_day ?? 0, total);
-  return { label: `第 ${current}/${total} 天`, pct: current / total };
+  if (progression === 'accumulation') {
+    const total = Math.max(Number(goal.target_value ?? 0), 1);
+    const current = Math.max(Number(goal.current_value ?? 0), 0);
+    const unit = goal.value_unit?.trim() ?? '';
+    return {
+      label: `${current} / ${total}${unit ? ` ${unit}` : ''}`,
+      pct: Math.min(current / total, 1),
+    };
+  }
+
+  if (progression === 'rhythm' || progression === 'fixed_days') {
+    const target = progression === 'rhythm'
+      ? Number(task.weekly_frequency ?? 0)
+      : (goal.active_days ?? task.recurrence_days ?? []).length;
+    const weekly = buildWeeklyProgress(task.weekCompletions ?? [], target);
+    return {
+      // 超過約定次數時講「本週完成 4 次 · 原本約定 3 次」，不寫 4/3。
+      label: weekly.weekExtra > 0
+        ? `${weekly.label} · 約定 ${weekly.weekTarget} 次`
+        : weekly.label,
+      pct: weekly.weekTarget > 0
+        ? Math.min(weekly.weekCompletedActual / weekly.weekTarget, 1)
+        : 0,
+    };
+  }
+
+  return { label: '還沒安排週期', pct: 0 };
 }
 
+/**
+ * 任務圖示。**只看 category，不看名稱。**
+ *
+ * ⚠️ 之前會因為名字裡有「碗」「垃圾」「鋼琴」換圖示 —— 那是內容嗅探，
+ *    而且會在孩子自己命名的計畫上猜錯。同一條規則已經在 getGoalTone
+ *    上拔過一次（P1-FINAL）。
+ */
 function taskIcon(task: TodayTask): string {
-  const name = task.name;
-  if (name.includes('碗') || name.includes('盤') || name.includes('飯')) return '🍽️';
-  if (name.includes('垃圾')) return '🗑️';
-  if (name.includes('閱讀') || name.includes('書')) return '📚';
-  if (name.includes('睡')) return '🌙';
-  if (name.includes('鋼琴')) return '🎹';
   if (task.category === 'C') return '🤝';
   if (task.category === 'A') return '☀️';
+  if (task.category === 'D') return '📚';
   return '🌿';
 }
 
 function taskRewardText(task: TodayTask, isPrerequisiteMet: boolean): string {
   if (task.category === 'C') return `+${calcDisplayCoin(task, isPrerequisiteMet)} 枚金幣`;
+  // D 類的幣值是家長直接設定（coin_override），不是 calcDisplayCoin 那套
+  // C 專用、看前置任務打折的公式 —— 兩條式子刻意不共用。
+  if (task.category === 'D' && task.coin_override) return `+${task.coin_override} 枚金幣`;
   if (task.category === 'B' && task.time_saving_min > 0) return `省 ${task.time_saving_min} 分鐘`;
   return '完成打卡';
 }
@@ -290,7 +356,11 @@ export default function HomeScreen() {
   const shortTermTasks = isWeekend ? weekendTasks : weekdayTasks;
   const dutyTasks = shortTermTasks.filter(t => t.category === 'A' || t.category === 'B');
   const contributionTasks = shortTermTasks.filter(t => t.category === 'C');
-  const todayTasks = [...dutyTasks, ...contributionTasks];
+  // 短期的 D 類（學習與技能，例如「練鋼琴 30 分鐘」）之前完全沒有進這個清單 ——
+  // 不是設計選擇，是舊碼只挑了 A/B/C 三桶。CHILD-HOME-DEMO-POLISH 需要
+  // 「學習/技能也有成長回饋」這個角色在今天要做的裡看得到，所以補上第四桶。
+  const growthTasks = shortTermTasks.filter(t => t.category === 'D');
+  const todayTasks = [...dutyTasks, ...contributionTasks, ...growthTasks];
   const todayDone = todayTasks.filter(t => t.isCompleted).length;
   const todayTotal = todayTasks.length;
   const allCount = todayTotal + longTermTasks.length;
@@ -299,6 +369,25 @@ export default function HomeScreen() {
     .filter(task => task.isCompleted)
     .reduce((sum, task) => sum + calcDisplayCoin(task, isPrerequisiteMet), 0);
   const visibleLongTermTasks = longTermTasks.filter(task => task.goal).slice(0, 6);
+  const goalTodayEntries: GoalTodayEntry[] = useMemo(
+    () => visibleLongTermTasks.reduce<GoalTodayEntry[]>((entries, task) => {
+      if (!task.goal) return entries;
+      const presentation = buildGoalPresentation(task, task.goal, task.weekCompletions ?? []);
+      if (!presentation.canCompleteToday && !presentation.sessionEvidence.checkedInToday) {
+        return entries;
+      }
+      entries.push({
+        id: task.id,
+        taskId: task.id,
+        goalId: task.goal.id,
+        goalName: presentation.headerTitle,
+        actionText: presentation.todayAction,
+        isCompleted: presentation.sessionEvidence.checkedInToday,
+      });
+      return entries;
+    }, []),
+    [visibleLongTermTasks],
+  );
   const nickname = childMeta?.nickname ?? '小朋友';
   const greeting = getGreeting();
   const isNight = greeting === '晚安';   // 問候語變晚安 → hero 切夜景
@@ -569,37 +658,56 @@ export default function HomeScreen() {
             <ProgressDots done={todayDone} total={Math.max(todayTotal, 7)} />
           </View>
 
-          {visibleLongTermTasks.length > 0 && (
-            <View style={styles.section}>
-              <SectionTitle icon="🌱" title="我的成長目標" action="查看全部" />
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.goalList}
-              >
-                {visibleLongTermTasks.map(task => (
-                  <GoalCard
-                    key={task.id}
-                    task={task}
-                    onPress={() =>
-                      navigation.navigate('LongTermDetail', {
-                        goalId: task.goal!.id,
-                        taskId: task.id,
-                        taskName: task.name,
-                      })
-                    }
-                  />
-                ))}
-              </ScrollView>
-            </View>
-          )}
+          <View style={styles.section}>
+            <SectionTitle icon="🌱" title="我的成長目標" action="查看全部" />
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.goalList}
+            >
+              {visibleLongTermTasks.map(task => (
+                <GoalCard
+                  key={task.id}
+                  task={task}
+                  onPress={() =>
+                    navigation.navigate('LongTermDetail', {
+                      goalId: task.goal!.id,
+                      taskId: task.id,
+                      taskName: task.name,
+                    })
+                  }
+                />
+              ))}
+              {/*
+                孩子端唯一的「我有想做的事」入口，緊接在成長目標卡片後面。
+                走提案流程 —— 不建立正式任務、不發幣，家長之後一起確認。
+                舊的直接建立任務入口見 LEGACY_CHILD_TASK_ENTRY_ENABLED。
+                這張卡是 UI 邀請，不是 visibleLongTermTasks 的一員 ——
+                不讀 goal 資料，永遠顯示。
+              */}
+              <AddGoalCard onPress={() => navigation.navigate('ChildProposal', { childId })} />
+            </ScrollView>
+          </View>
 
           <View style={styles.section}>
             <SectionTitle icon="☀️" title="今天要做的" action={`${remainingToday} 件任務`} />
             {loading ? (
               <ActivityIndicator color={HOME.primaryGreen} style={styles.sectionLoading} />
-            ) : todayTasks.length > 0 ? (
+            ) : todayTasks.length > 0 || goalTodayEntries.length > 0 ? (
               <View style={styles.taskList}>
+                {goalTodayEntries.map(entry => (
+                  <GoalActionRow
+                    key={entry.id}
+                    entry={entry}
+                    onPress={() =>
+                      navigation.navigate('LongTermDetail', {
+                        goalId: entry.goalId,
+                        taskId: entry.taskId,
+                        taskName: entry.goalName,
+                      })
+                    }
+                  />
+                ))}
                 {todayTasks.map(task => (
                   <TodayTaskRow
                     key={task.id}
@@ -670,25 +778,45 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          {/*
-            孩子端唯一的「我有想做的事」入口。
-            走提案流程 —— 不建立正式任務、不發幣，家長之後一起確認。
-            舊的直接建立任務入口見 LEGACY_CHILD_TASK_ENTRY_ENABLED。
-          */}
           {proposalReviewSuccess && <Text style={styles.reviewSuccess}>{proposalReviewSuccess}</Text>}
+          {/*
+            P1 與 legacy 是兩張卡片，不是一張帶旗標的。
+            P1 那張要說「你的做法沒有被改掉」，而那句話對 P0 的家長
+            調整版不成立（那條路徑本來就可以改完成標準）。
+            路由只看 authorship 與 lineage —— **不看它此刻能不能按**。
+            一份現在按不了的 P1 草案還是 P1 的；拿「能不能按」當路由條件，
+            它會掉進 legacy 那張卡片，而那條路的終點是一個永遠失敗的按鈕。
+          */}
           {proposalReviews[0] && (
-            <ChildPlanReviewCard
-              review={proposalReviews[0]}
-              saving={actingProposalId === proposalReviews[0].proposal.id}
-              error={proposalReviewActionError}
-              onAccept={() => {
-                void acceptProposalReview(proposalReviews[0]).then(completed => {
-                  if (completed) refresh();
-                });
-              }}
-              onRequestChanges={() => { void requestProposalChanges(proposalReviews[0]); }}
-              onRetry={() => { void refreshProposalReviews(); }}
-            />
+            isChildPlanningReviewCard(proposalReviews[0]) ? (
+              <ChildSharedTermsReviewCard
+                review={proposalReviews[0]}
+                saving={actingProposalId === proposalReviews[0].proposal.id}
+                error={proposalReviewActionError}
+                onAccept={() => {
+                  void acceptProposalReview(proposalReviews[0]).then(completed => {
+                    if (completed) refresh();
+                  });
+                }}
+                onRequestChanges={reason => {
+                  void requestProposalChanges(proposalReviews[0], reason);
+                }}
+                onRetry={() => { void refreshProposalReviews(); }}
+              />
+            ) : (
+              <ChildPlanReviewCard
+                review={proposalReviews[0]}
+                saving={actingProposalId === proposalReviews[0].proposal.id}
+                error={proposalReviewActionError}
+                onAccept={() => {
+                  void acceptProposalReview(proposalReviews[0]).then(completed => {
+                    if (completed) refresh();
+                  });
+                }}
+                onRequestChanges={() => { void requestProposalChanges(proposalReviews[0]); }}
+                onRetry={() => { void refreshProposalReviews(); }}
+              />
+            )
           )}
           {proposalReviewError && proposalReviews.length === 0 && (
             <View style={styles.reviewError}>
@@ -698,22 +826,6 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
           )}
-          <TouchableOpacity
-            testID="child-proposal-entry"
-            style={styles.addRow}
-            onPress={() => navigation.navigate('ChildProposal', { childId })}
-            activeOpacity={0.72}
-            accessibilityRole="button"
-            accessibilityLabel={PROPOSAL_COPY.entry}
-          >
-            <View style={styles.addPlus}>
-              <Text style={styles.addPlusText}>＋</Text>
-            </View>
-            <View style={styles.addRowTextWrap}>
-              <Text style={styles.addRowText}>{PROPOSAL_COPY.entry}</Text>
-              <Text style={styles.addRowHint}>{PROPOSAL_COPY.entryHint}</Text>
-            </View>
-          </TouchableOpacity>
 
           {LEGACY_CHILD_TASK_ENTRY_ENABLED ? (
             <TouchableOpacity style={styles.addRow} onPress={openAddTask} activeOpacity={0.72}>
@@ -972,15 +1084,15 @@ function ProgressDots({ done, total }: { done: number; total: number }) {
 }
 
 function GoalCard({ task, onPress }: { task: TodayTask; onPress: () => void }) {
-  const info = getGoalTone(task.name);
-  const progress = getGoalProgress(task.goal);
+  const info = getGoalTone(task);
+  const progress = getGoalProgress(task);
 
   return (
     <TouchableOpacity activeOpacity={0.86} style={styles.goalCard} onPress={onPress}>
       <View style={[styles.goalArt, styles[`goalArt_${info.tone}`]]}>
         <Text style={styles.goalIcon}>{info.icon}</Text>
       </View>
-      <Text style={styles.goalTitle} numberOfLines={1}>{info.title}</Text>
+      <Text style={styles.goalTitle} numberOfLines={1}>{task.name}</Text>
       <Text style={styles.goalDays}>{progress.label}</Text>
       <View style={styles.goalTrack}>
         <MotiView
@@ -989,6 +1101,63 @@ function GoalCard({ task, onPress }: { task: TodayTask; onPress: () => void }) {
           transition={{ type: 'timing', duration: 520 }}
           style={styles.goalFill}
         />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+/**
+ * 成長目標橫列最後一張卡：孩子端唯一的提案入口。
+ *
+ * 填色卡片（不是虛線佔位感）—— 跟真的 GoalCard 同一個圓角家族與陰影，
+ * 用實心圖示圈與沒有進度條這兩件事，讓人一眼看出這張不是 goal 資料，
+ * 是一個邀請。
+ */
+function AddGoalCard({ onPress }: { onPress: () => void }) {
+  return (
+    <TouchableOpacity
+      testID="child-proposal-entry"
+      activeOpacity={0.86}
+      style={styles.addGoalCard}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={PROPOSAL_COPY.entry}
+    >
+      <View style={styles.addGoalPlus}>
+        <Text style={styles.addGoalPlusText}>＋</Text>
+      </View>
+      <Text style={styles.addGoalTitle}>{PROPOSAL_COPY.entry}</Text>
+      <Text style={styles.addGoalHint}>說說你想做到的事</Text>
+    </TouchableOpacity>
+  );
+}
+
+/**
+ * 今天要做的清單裡，屬於某個長期目標的那一列。
+ *
+ * 跟 TodayTaskRow 共用同一組卡片樣式，但多一行成長目標標籤，
+ * 讓人一眼看出這件事屬於哪個目標；點下去導去目標詳情，不是完成 modal ——
+ * 長期任務的紀錄流程（時段等）只有詳情頁有。
+ */
+function GoalActionRow({ entry, onPress }: { entry: GoalTodayEntry; onPress: () => void }) {
+  return (
+    <TouchableOpacity
+      activeOpacity={0.78}
+      onPress={onPress}
+      style={[styles.taskRow, entry.isCompleted && styles.taskRowDone]}
+    >
+      <View style={[styles.checkbox, entry.isCompleted && styles.checkboxDone]}>
+        {entry.isCompleted ? <Text style={styles.checkboxCheck}>✓</Text> : null}
+      </View>
+      <Text style={styles.taskEmoji}>🌱</Text>
+      <View style={styles.taskCopy}>
+        <Text style={styles.goalTagText} numberOfLines={1}>🌱 {entry.goalName}</Text>
+        <Text
+          style={[styles.taskName, entry.isCompleted && styles.taskNameDone]}
+          numberOfLines={2}
+        >
+          {entry.actionText}
+        </Text>
       </View>
     </TouchableOpacity>
   );
@@ -1021,10 +1190,10 @@ function TodayTaskRow({
         </Text>
         <Text style={styles.taskReward}>🪙 {taskRewardText(task, isPrerequisiteMet)}</Text>
       </View>
-      {task.category === 'C' ? (
+      {task.category === 'C' || (task.category === 'D' && task.coin_override) ? (
         <View style={styles.taskRewardValue}>
           <Text style={styles.taskCoinText}>
-            +{calcDisplayCoin(task, isPrerequisiteMet)} 🪙
+            +{task.category === 'C' ? calcDisplayCoin(task, isPrerequisiteMet) : task.coin_override} 🪙
           </Text>
         </View>
       ) : null}
@@ -1578,6 +1747,56 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 3,
   },
+  addGoalCard: {
+    width: 164,
+    minHeight: 156,
+    borderRadius: 22,
+    borderWidth: 1.5,
+    borderColor: HOME.primaryGreen,
+    backgroundColor: '#E7F1D6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    gap: 8,
+    shadowColor: Colors.shadowWarm,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  addGoalPlus: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: HOME.primaryGreen,
+  },
+  addGoalPlusText: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '900',
+    marginTop: -1,
+  },
+  addGoalTitle: {
+    color: Colors.leaf700,
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  addGoalHint: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.fgMuted,
+    textAlign: 'center',
+    lineHeight: 15,
+  },
+  goalTagText: {
+    color: Colors.leaf700,
+    fontSize: 11,
+    fontWeight: '800',
+    marginBottom: 2,
+  },
   goalArt: {
     height: 54,
     borderRadius: 18,
@@ -1846,16 +2065,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '900',
     marginTop: -1,
-  },
-  addRowTextWrap: {
-    flex: 1,
-    minWidth: 0,
-    gap: 2,
-  },
-  addRowHint: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.fgMuted,
   },
   addRowText: {
     color: Colors.leaf700,

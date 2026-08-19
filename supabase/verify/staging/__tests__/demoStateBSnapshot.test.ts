@@ -153,7 +153,7 @@ suite('Demo State B — 共同閱讀計畫的執行快照', () => {
       completions as never,
     );
     expect(view.weekTarget).toBe(3);
-    expect(view.weekCompleted).toBe(2);
+    expect(view.weekCompletedActual).toBe(2);
     // 彈性週目標沒有逐日時間軸，不該出現「週三漏掉」這種概念。
     expect(view.weekDays).toEqual([]);
     expect(view.weekSummary).not.toMatch(/週[一二三四五六日]/);

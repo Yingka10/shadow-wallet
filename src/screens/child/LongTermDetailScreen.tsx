@@ -22,6 +22,7 @@ import {
 import type { RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import dayjs from 'dayjs';
 import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
@@ -29,23 +30,33 @@ import type { RootStackParamList } from '../../../App';
 import LongTermGoalDetailSheets, {
   type AdjustmentDraft,
   type LongTermSheet,
-  type ReviewDraft,
 } from '../../components/child/LongTermGoalDetailSheets';
 import LongTermGoalDetailView from '../../components/child/LongTermGoalDetailView';
 import { Colors } from '../../constants/colors';
 import { webScreen } from '../../constants/webStyles';
 import { supabase } from '../../lib/supabase';
-import { completeTask, recordCompletionContext } from '../../lib/taskActions';
+import {
+  AlreadyCompletedError,
+  completeTask,
+  recordCompletionContext,
+  type SettlementResult,
+} from '../../lib/taskActions';
 import type {
   LongTermGoal,
   PreferredTimeWindow,
   Task,
 } from '../../types/database';
-import { useChildSharedPlanTimeAdjustment } from '../../hooks/useChildSharedPlanTimeAdjustment';
+import { useChildSharedPlanAdjustments } from '../../hooks/useChildSharedPlanAdjustments';
 import {
   buildGoalPresentation,
   type GoalCompletionRecord,
 } from './longTermGoalPresentation';
+import {
+  loadLongTermSharedPlan,
+  loadMilestoneAgreements,
+  type LongTermSharedPlan,
+  type MilestoneAgreementView,
+} from '../../lib/longTerm';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -55,12 +66,6 @@ const completionContextWriteQueue = new Map<string, Promise<void>>();
 
 type LongTermDetailRoute = RouteProp<RootStackParamList, 'LongTermDetail'>;
 type Nav = StackNavigationProp<RootStackParamList, 'LongTermDetail'>;
-
-const EMPTY_REVIEW_DRAFT: ReviewDraft = {
-  favoriteNote: '',
-  preferredWindow: null,
-  nextStep: null,
-};
 
 function enqueueCompletionContextWrite(
   completionId: string,
@@ -209,11 +214,26 @@ export default function LongTermDetailScreen() {
   const [activeSheet, setActiveSheet] = useState<LongTermSheet>(null);
   const [selectedCompletionId, setSelectedCompletionId] =
     useState<string | null>(null);
-  const [reviewDraft, setReviewDraft] =
-    useState<ReviewDraft>(EMPTY_REVIEW_DRAFT);
   const [adjustmentDraft, setAdjustmentDraft] =
     useState<AdjustmentDraft | null>(null);
   const [correctingTimeWindow, setCorrectingTimeWindow] = useState(false);
+  /*
+    孩子自己確認過的那份計畫，以及目前有效共同版本的回饋快照。
+    讀不到就是 null —— legacy 任務本來就沒有，畫面少一段而不是編一段。
+  */
+  const [sharedPlanModel, setSharedPlanModel] = useState<LongTermSharedPlan | null>(null);
+  /*
+    這個 task 底下的 canonical milestone agreements（P1-M1B）。空陣列 ——
+    今天大多數任務都是這樣——代表沒有正式 milestone，presentation 層會
+    fallback 回 legacy checkpoint_rewards 顯示路徑。
+  */
+  const [milestoneAgreements, setMilestoneAgreements] = useState<MilestoneAgreementView[]>([]);
+  /*
+    今天這一次完成，剛才是不是真的形成了一次 reward event（LT-FINAL-3
+    §5）。只在「這個 session 裡剛完成」才有值——重新整理或換頁後拿不到
+    這筆資料就是 null，畫面不顯示幣值那一行，不是缺陷，是誠實。
+  */
+  const [todaySettlement, setTodaySettlement] = useState<SettlementResult | null>(null);
 
   /*
     孩子的身分來自已載入的 goal，不從 route params 猜。goal 還沒回來之前
@@ -223,13 +243,18 @@ export default function LongTermDetailScreen() {
   const {
     sharedPlan,
     currentPreferredTime: sharedPreferredTime,
-    hasOpenRequest,
-    submit: submitTimeAdjustment,
-    submitting: submittingTimeAdjustment,
-    submitError: timeAdjustmentError,
-    justSubmitted: timeAdjustmentSubmitted,
+    hasOpenTimeRequest,
+    submitTime: submitTimeAdjustment,
+    timeSubmitting: submittingTimeAdjustment,
+    timeError: timeAdjustmentError,
+    timeJustSubmitted: timeAdjustmentSubmitted,
+    hasOpenCadenceRequest,
+    submitCadence,
+    cadenceSubmitting,
+    cadenceError,
+    cadenceJustSubmitted,
     refresh: refreshSharedPlan,
-  } = useChildSharedPlanTimeAdjustment(taskId, goal?.child_id ?? null);
+  } = useChildSharedPlanAdjustments(taskId, goal?.child_id ?? null);
 
   const load = useCallback(async () => {
     const loadGeneration = generationRef.current + 1;
@@ -310,6 +335,14 @@ export default function LongTermDetailScreen() {
         dayjs(completion.completed_at).tz(TZ).isSame(dayjs().tz(TZ), 'day'),
       );
 
+      const [shared, milestones] = await Promise.all([
+        loadLongTermSharedPlan({ taskId, childId: loadedGoal.child_id }),
+        loadMilestoneAgreements({ taskId }),
+      ]);
+      if (!isCurrentGeneration()) return;
+      setSharedPlanModel(shared);
+      setMilestoneAgreements(milestones);
+
       setGoal(loadedGoal);
       setTask(loadedTask);
       setCompletions(loadedCompletions);
@@ -328,14 +361,16 @@ export default function LongTermDetailScreen() {
   useEffect(() => {
     setActiveSheet(null);
     setSelectedCompletionId(null);
-    setReviewDraft(EMPTY_REVIEW_DRAFT);
     setAdjustmentDraft(null);
     setGoal(null);
     setTask(null);
+    setSharedPlanModel(null);
+    setMilestoneAgreements([]);
     setCompletions([]);
     setSelectedTimeWindow(null);
     setChecking(false);
     setCorrectingTimeWindow(false);
+    setTodaySettlement(null);
     setLoading(true);
     setError(null);
   }, [goalId, taskId]);
@@ -372,10 +407,15 @@ export default function LongTermDetailScreen() {
   const presentation = useMemo(() => {
     if (!goal || !task) return null;
     return {
-      ...buildGoalPresentation(task, goal, completions),
+      ...buildGoalPresentation(task, goal, completions, undefined, {
+        childPlan: sharedPlanModel?.childPlan ?? null,
+        agreedReward: sharedPlanModel?.agreedReward ?? null,
+        legacyReward: sharedPlanModel?.legacyReward ?? false,
+        milestoneAgreements,
+      }),
       preferredTimeWindow: selectedTimeWindow,
     };
-  }, [completions, goal, selectedTimeWindow, task]);
+  }, [completions, goal, milestoneAgreements, selectedTimeWindow, sharedPlanModel, task]);
 
   const todayCompletion = useMemo(
     () => completions.find((completion) =>
@@ -417,6 +457,7 @@ export default function LongTermDetailScreen() {
       };
 
       setCompletions((current) => [...current, completion]);
+      setTodaySettlement(result.settlement);
       const milestoneDay = result.milestone?.day ?? null;
       if (goal.goal_type === 'habit' && milestoneDay !== null) {
         setGoal((current) => {
@@ -471,6 +512,14 @@ export default function LongTermDetailScreen() {
       return true;
     } catch (caught) {
       if (!isCurrentGeneration()) return false;
+
+      // 今天已經記過了，不是失敗——重新讀最新資料讓畫面自然變成已完成
+      // 狀態，不彈 destructive error（LT-FINAL-3 §8）。
+      if (caught instanceof AlreadyCompletedError) {
+        await load();
+        return true;
+      }
+
       Alert.alert(
         '記錄失敗',
         caught instanceof Error ? caught.message : '請稍後再試。',
@@ -486,6 +535,7 @@ export default function LongTermDetailScreen() {
     goal,
     goalId,
     isCompletedToday,
+    load,
     selectedTimeWindow,
     task,
     taskId,
@@ -541,33 +591,57 @@ export default function LongTermDetailScreen() {
   }, [correctingTimeWindow, selectedCompletion]);
 
   /*
-    只有真的讀到一份進行中的共同計畫，才把這條通道交給回顧表單。
-    sharedPlan 是 null（一般家長建立的長期任務）時整個 prop 是 undefined，
-    回顧維持原本的 local draft 行為。
+    只有真的讀到一份進行中的共同計畫，才把通道交給回顧。sharedPlan 是 null
+    （一般家長建立的長期任務）時兩個 prop 都是 undefined —— 此時回顧的
+    Step 2 走得完，但不會長出任何送得出去的調整選項，也不會假裝送得出去。
+
+    兩條各自獨立：一條有未決請求不影響另一條能不能送。
   */
-  const sharedPlanTimeAdjustment = useMemo(() => {
+  const reviewTimeChannel = useMemo(() => {
     if (!sharedPlan) return undefined;
     return {
-      currentPreferredTime: readingWindowFromTask(sharedPreferredTime),
-      pending: hasOpenRequest,
+      pending: hasOpenTimeRequest,
       submitting: submittingTimeAdjustment,
       error: timeAdjustmentError,
       submitted: timeAdjustmentSubmitted,
       onSubmit: submitTimeAdjustment,
     };
   }, [
-    hasOpenRequest,
+    hasOpenTimeRequest,
     sharedPlan,
-    sharedPreferredTime,
     submitTimeAdjustment,
     submittingTimeAdjustment,
     timeAdjustmentError,
     timeAdjustmentSubmitted,
   ]);
 
+  const reviewCadenceChannel = useMemo(() => {
+    if (!sharedPlan) return undefined;
+    return {
+      pending: hasOpenCadenceRequest,
+      submitting: cadenceSubmitting,
+      error: cadenceError,
+      submitted: cadenceJustSubmitted,
+      onSubmit: submitCadence,
+    };
+  }, [
+    cadenceError,
+    cadenceJustSubmitted,
+    cadenceSubmitting,
+    hasOpenCadenceRequest,
+    sharedPlan,
+    submitCadence,
+  ]);
+
   return (
     <View style={webScreen}>
       <SafeAreaView style={styles.safe} edges={['bottom']}>
+        {/* 跟首頁同一組暖米色漸層背景，不是純色的 bgCanvas（Visual Integration Spec）。 */}
+        <LinearGradient
+          colors={['#F8F6F1', '#FFFDF8', '#FFF8EE']}
+          locations={[0, 0.58, 1]}
+          style={StyleSheet.absoluteFill}
+        />
         <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
           <TouchableOpacity
             accessibilityLabel="返回"
@@ -581,12 +655,6 @@ export default function LongTermDetailScreen() {
           <Text style={styles.headerTitle} numberOfLines={1}>
             {presentation?.headerTitle ?? taskName}
           </Text>
-          <View style={styles.weekPill}>
-            <View style={styles.weekDot} />
-            <Text style={styles.weekText} numberOfLines={1}>
-              {presentation?.weekLabel ?? '成長旅程'}
-            </Text>
-          </View>
           <TouchableOpacity
             accessibilityRole="button"
             accessibilityLabel="更多計畫選項"
@@ -608,13 +676,16 @@ export default function LongTermDetailScreen() {
             presentation={presentation}
             isCompletedToday={isCompletedToday}
             checking={checking}
+            todaySettlement={todaySettlement}
             onComplete={handleComplete}
             onSelectTimeWindow={setSelectedTimeWindow}
             onOpenRecord={handleOpenRecord}
             onOpenReview={() => setActiveSheet('review')}
-            onOpenDetails={() => setActiveSheet('details')}
+            onOpenMore={() => setActiveSheet('menu')}
             pendingTimeAdjustmentNotice={
-              hasOpenRequest ? '已送給爸媽，等一起確認。' : null
+              hasOpenTimeRequest || hasOpenCadenceRequest
+                ? '已送給爸媽，等一起確認。'
+                : null
             }
           />
         ) : null}
@@ -624,16 +695,16 @@ export default function LongTermDetailScreen() {
             activeSheet={activeSheet}
             onClose={() => setActiveSheet(null)}
             onOpenSheet={setActiveSheet}
+            onOpenRecord={handleOpenRecord}
             presentation={presentation}
             completion={selectedCompletion}
             taskMinutes={task.base_time_min}
-            reviewDraft={reviewDraft}
             adjustmentDraft={adjustmentDraft}
-            onSaveReviewDraft={setReviewDraft}
             onSaveAdjustmentDraft={setAdjustmentDraft}
             onCorrectTimeWindow={handleCorrectTimeWindow}
             correctingTimeWindow={correctingTimeWindow}
-            sharedPlanTimeAdjustment={sharedPlanTimeAdjustment}
+            reviewTimeChannel={reviewTimeChannel}
+            reviewCadenceChannel={reviewCadenceChannel}
           />
         ) : null}
       </SafeAreaView>
@@ -653,7 +724,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: Colors.bgCanvas,
   },
   backButton: {
     width: 44,
@@ -668,31 +738,6 @@ const styles = StyleSheet.create({
     minWidth: 0,
     color: Colors.ink900,
     fontSize: 20,
-    fontWeight: '900',
-  },
-  weekPill: {
-    minHeight: 38,
-    maxWidth: 78,
-    paddingHorizontal: 9,
-    borderRadius: 19,
-    borderWidth: 1,
-    borderColor: Colors.borderSoft,
-    backgroundColor: Colors.bgSurface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-  },
-  weekDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.sage400,
-  },
-  weekText: {
-    flexShrink: 1,
-    color: Colors.ink700,
-    fontSize: 13,
     fontWeight: '900',
   },
   moreButton: {

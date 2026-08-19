@@ -15,6 +15,11 @@ function plan(overrides: Partial<ChildProposalPlanVersion> = {}): ChildProposalP
     reward_policy_version: 'coin-policy-1.0.0', task_policy_version: 'task-taxonomy-2026-07',
     ai_snapshot: null, ai_model: 'test', ai_request_id: 'request-1',
     adopted_from_plan_version_id: null, ai_suggested_coin_amount: 10,
+    // P1-A3 planning lineage：這一組 fixture 是 AI-authored 的 P0 版本，
+    // 所以四欄都是空的（DB CHECK 也只允許 authored_by='child' 的列帶 lineage）。
+    source_planning_session_id: null, planning_schema_version: null,
+    child_confirmed_plan: null, requires_parent_decision: [], enrichment_status: null,
+    policy_session_coin_reference: null, policy_payout_type: null,
     confirmed_reward_policy: null, confirmed_coin_amount: null,
     confirmed_payout_basis: null, confirmed_claim_period: null,
     confirmed_max_claims_per_period: null, confirmed_reward_policy_version: null,

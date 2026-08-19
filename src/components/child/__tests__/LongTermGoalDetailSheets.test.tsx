@@ -13,7 +13,6 @@ import type {
 import LongTermGoalDetailSheets, {
   type AdjustmentDraft,
   type LongTermSheet,
-  type ReviewDraft,
 } from '../LongTermGoalDetailSheets';
 
 function makePresentation(
@@ -21,15 +20,21 @@ function makePresentation(
 ): GoalPresentation {
   return {
     headerTitle: '自主閱讀計畫',
-    weekLabel: '第 1 週',
     planWeekLabel: '第 1 週／共 4 週',
     weekProgressLabel: '本週完成 1／5 次',
-    weekCompleted: 1,
+    weekCompletedActual: 1,
     weekTarget: 5,
-    totalWeeks: 4,
-    goalKind: 'reading_habit',
+    weekTargetReached: false,
+    weekExtra: 0,
+    weekProgressNote: '還差 4 次到這週約定的節奏',
+    progression: 'rhythm',
+    targetReached: false,
     planState: 'active',
     categoryLabel: '學習與技能',
+    heroPositionLabel: '第 1 週',
+    heroTotalLabel: '共 4 週',
+    heroPositionNote: null,
+    heroMarkerFraction: 0,
     overallLabel: '1 / 20 次',
     overallPercent: 5,
     focusText: '先找到適合自己的閱讀節奏',
@@ -38,10 +43,19 @@ function makePresentation(
     todayAction: '自己選一本喜歡的書，閱讀 15 分鐘',
     preferredTimeWindow: 'after_dinner',
     canCompleteToday: true,
-    isReadingPlan: true,
+    completionReason: 'available',
+    sessionMinutes: 15,
+    agreedTime: { value: 'after_dinner', label: '晚餐後' },
+    supportsTimeWindow: true,
+    sessionEvidence: { checkedInToday: false, weekSessionCount: 1 },
+    childPlan: null,
+    agreedReward: null,
+    legacyReward: false,
     weekDays: [],
     weekSummary: '這週已閱讀 1 次。',
     nextReward: { threshold: 5, coin: 10 },
+    stagedProgress: null,
+    accumulationProgress: null,
     milestones: [],
     recentRecords: [],
     planPeriodLabel: '2026-07-28 至 2026-08-24（共 4 週）',
@@ -50,7 +64,6 @@ function makePresentation(
     finalRewardText: '四週後一起回顧。',
     reviewTitle: '週末一起回顧',
     reviewPrompt: '這週哪個時間最適合閱讀？',
-    sectionOrder: ['hero', 'today', 'week', 'rewards', 'review'],
     ...overrides,
   };
 }
@@ -60,12 +73,6 @@ const completion: GoalCompletionRecord = {
   completed_at: '2026-07-28T12:30:00.000Z',
   planned_time_window: 'after_dinner',
   start_mode: null,
-};
-
-const reviewDraft: ReviewDraft = {
-  favoriteNote: '',
-  preferredWindow: null,
-  nextStep: null,
 };
 
 function renderSheet(
@@ -79,9 +86,7 @@ function renderSheet(
     presentation: makePresentation(),
     completion,
     taskMinutes: 15,
-    reviewDraft,
     adjustmentDraft: null,
-    onSaveReviewDraft: jest.fn(),
     onSaveAdjustmentDraft: jest.fn(),
     onCorrectTimeWindow: jest.fn(async () => undefined),
     ...overrides,
@@ -108,48 +113,6 @@ describe('LongTermGoalDetailSheets', () => {
     expect(onOpenSheet).toHaveBeenCalledWith('adjustment');
   });
 
-  it('saves the exact review draft locally', () => {
-    const onSaveReviewDraft = jest.fn();
-    renderSheet('review', { onSaveReviewDraft });
-
-    expect(
-      screen.getByText('這份回答目前只保留在這個畫面，尚未送出給家長。'),
-    ).toBeTruthy();
-
-    fireEvent.changeText(
-      screen.getByPlaceholderText('想記下哪一本書或哪一段？'),
-      '神奇樹屋',
-    );
-    fireEvent.press(screen.getByRole('button', { name: '睡前' }));
-    fireEvent.press(screen.getByRole('button', { name: '保留回顧草稿' }));
-
-    expect(onSaveReviewDraft).toHaveBeenCalledWith({
-      favoriteNote: '神奇樹屋',
-      preferredWindow: 'before_bed',
-      nextStep: null,
-    });
-  });
-
-  it('discards an unsaved review edit after close and reopen', () => {
-    const { props, rerender } = renderSheet('review');
-
-    fireEvent.changeText(
-      screen.getByPlaceholderText('想記下哪一本書或哪一段？'),
-      '還沒保留的內容',
-    );
-    expect(
-      screen.getByPlaceholderText('想記下哪一本書或哪一段？').props.value,
-    ).toBe('還沒保留的內容');
-
-    fireEvent.press(screen.getByLabelText('關閉週末回顧'));
-    rerender(<LongTermGoalDetailSheets {...props} activeSheet={null} />);
-    rerender(<LongTermGoalDetailSheets {...props} activeSheet="review" />);
-
-    expect(
-      screen.getByPlaceholderText('想記下哪一本書或哪一段？').props.value,
-    ).toBe('');
-  });
-
   it('saves an adjustment draft without claiming it was sent or applied', () => {
     const onSaveAdjustmentDraft = jest.fn();
     renderSheet('adjustment', { onSaveAdjustmentDraft });
@@ -158,7 +121,7 @@ describe('LongTermGoalDetailSheets', () => {
       screen.getByText('這個選擇目前只保留在這個畫面，尚未送出給家長或套用到計畫。'),
     ).toBeTruthy();
 
-    fireEvent.press(screen.getByRole('button', { name: '想調整每週次數' }));
+    fireEvent.press(screen.getByRole('button', { name: '想調整每週安排' }));
     fireEvent.press(screen.getByRole('button', { name: '保留調整草稿' }));
 
     expect(onSaveAdjustmentDraft).toHaveBeenCalledWith('frequency');
@@ -189,7 +152,7 @@ describe('LongTermGoalDetailSheets', () => {
         .accessibilityState,
     ).toEqual(expect.objectContaining({ selected: false }));
 
-    fireEvent.press(screen.getByRole('button', { name: '想調整每週次數' }));
+    fireEvent.press(screen.getByRole('button', { name: '想調整每週安排' }));
     rerender(
       <LongTermGoalDetailSheets
         {...props}
@@ -206,7 +169,7 @@ describe('LongTermGoalDetailSheets', () => {
     );
 
     expect(
-      screen.getByRole('button', { name: '想調整每週次數' }).props
+      screen.getByRole('button', { name: '想調整每週安排' }).props
         .accessibilityState,
     ).toEqual(expect.objectContaining({ selected: false }));
     expect(
@@ -229,9 +192,7 @@ describe('LongTermGoalDetailSheets', () => {
           presentation={makePresentation()}
           completion={completion}
           taskMinutes={15}
-          reviewDraft={reviewDraft}
           adjustmentDraft={null}
-          onSaveReviewDraft={jest.fn()}
           onSaveAdjustmentDraft={onSaveAdjustmentDraft}
           onCorrectTimeWindow={jest.fn(async () => undefined)}
         />
@@ -357,51 +318,33 @@ describe('LongTermGoalDetailSheets', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('uses skill review copy without changing an existing time-window draft', () => {
-    const onSaveReviewDraft = jest.fn();
+  it('回顧對階段型計畫一樣不講閱讀專屬的字', () => {
     const rendered = renderSheet('review', {
       presentation: makePresentation({
-        isReadingPlan: false,
-        goalKind: 'skill',
+        supportsTimeWindow: false,
+        progression: 'staged',
         categoryLabel: '可調整的顯示文案',
       }),
-      reviewDraft: {
-        favoriteNote: '',
-        preferredWindow: 'after_dinner',
-        nextStep: null,
-      },
-      onSaveReviewDraft,
     });
 
-    expect(screen.getByText('這週哪一段練習最有感？')).toBeTruthy();
-    expect(screen.getByPlaceholderText('想記下這週最有感的一段嗎？')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '調整進行方式' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '晚餐後' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '睡前' })).toBeNull();
+    // 開場先給事實，不是先問問題。
+    expect(screen.getByText('一起回顧')).toBeTruthy();
+    expect(screen.getByText('這段做起來，哪個最像你？')).toBeTruthy();
     expect(JSON.stringify(rendered.toJSON())).not.toMatch(READING_ONLY_COPY);
-
-    fireEvent.press(screen.getByRole('button', { name: '調整進行方式' }));
-    fireEvent.press(screen.getByRole('button', { name: '保留回顧草稿' }));
-
-    expect(onSaveReviewDraft).toHaveBeenCalledWith({
-      favoriteNote: '',
-      preferredWindow: 'after_dinner',
-      nextStep: 'method',
-    });
   });
 
   it('uses family adjustment copy without reading-only wording', () => {
     const rendered = renderSheet('adjustment', {
       presentation: makePresentation({
-        isReadingPlan: false,
-        goalKind: 'family',
+        supportsTimeWindow: false,
+        progression: 'rhythm',
         categoryLabel: '可調整的顯示文案',
       }),
     });
 
     expect(screen.getByRole('button', { name: '想調整進行時間' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '想調整每週安排' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '想調整參與內容' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '想調整進行內容' })).toBeTruthy();
     expect(JSON.stringify(rendered.toJSON())).not.toMatch(READING_ONLY_COPY);
   });
 
@@ -409,8 +352,8 @@ describe('LongTermGoalDetailSheets', () => {
     const onCorrectTimeWindow = jest.fn(async () => undefined);
     const rendered = renderSheet('record', {
       presentation: makePresentation({
-        isReadingPlan: false,
-        goalKind: 'challenge',
+        supportsTimeWindow: false,
+        progression: 'accumulation',
         categoryLabel: '可調整的顯示文案',
       }),
       onCorrectTimeWindow,
@@ -428,13 +371,13 @@ describe('LongTermGoalDetailSheets', () => {
   it('uses challenge review and adjustment wording', () => {
     const review = renderSheet('review', {
       presentation: makePresentation({
-        isReadingPlan: false,
-        goalKind: 'challenge',
+        supportsTimeWindow: false,
+        progression: 'accumulation',
         categoryLabel: '可調整的顯示文案',
       }),
     });
 
-    expect(screen.getByText('這週哪一步最有感？')).toBeTruthy();
+    expect(screen.getByText('這段做起來，哪個最像你？')).toBeTruthy();
     expect(JSON.stringify(review.toJSON())).not.toMatch(READING_ONLY_COPY);
 
     review.rerender(
@@ -442,8 +385,8 @@ describe('LongTermGoalDetailSheets', () => {
         {...review.props}
         activeSheet="adjustment"
         presentation={makePresentation({
-          isReadingPlan: false,
-          goalKind: 'challenge',
+          supportsTimeWindow: false,
+          progression: 'accumulation',
           categoryLabel: '可調整的顯示文案',
         })}
       />,
@@ -471,13 +414,13 @@ describe('LongTermGoalDetailSheets', () => {
   it('uses the general fallback for a non-reading habit', () => {
     const review = renderSheet('review', {
       presentation: makePresentation({
-        goalKind: 'habit',
-        isReadingPlan: false,
+        progression: 'rhythm',
+        supportsTimeWindow: false,
         categoryLabel: '學習與技能',
       }),
     });
 
-    expect(screen.getByText('這週哪一段最有感？')).toBeTruthy();
+    expect(screen.getByText('這段做起來，哪個最像你？')).toBeTruthy();
     expect(JSON.stringify(review.toJSON())).not.toMatch(READING_ONLY_COPY);
 
     review.rerender(
@@ -485,8 +428,8 @@ describe('LongTermGoalDetailSheets', () => {
         {...review.props}
         activeSheet="adjustment"
         presentation={makePresentation({
-          goalKind: 'habit',
-          isReadingPlan: false,
+          progression: 'rhythm',
+          supportsTimeWindow: false,
           categoryLabel: '學習與技能',
         })}
       />,

@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SupabaseChildProposalService } from '../lib/childProposal/childProposalService';
 import type { ChildProposalReviewData } from '../lib/childProposal/types';
+import { isChildPlanningReviewCard } from '../lib/childPlanning/childReview';
 
 export type ChildProposalReviewReader = Pick<
   SupabaseChildProposalService,
   'listNeedsReviewForChild' | 'acceptReview' | 'requestChanges'
->;
+> & Partial<Pick<
+  SupabaseChildProposalService,
+  'acceptChildPlanningTerms' | 'requestChildPlanningTermChanges'
+>>;
 
 const defaultReader = new SupabaseChildProposalService();
 
@@ -65,9 +69,15 @@ export function useChildProposalReview(
       setActionError('目前還不能確認這份計畫，請重新整理後再試。');
       return false;
     }
+    // P1 與 legacy 是兩條線。路由只看 authorship 與 lineage —— 內容看起來
+    // 像什麼都不能決定走哪一支。
+    const planningRoute = isChildPlanningReviewCard(review)
+      && typeof reader.acceptChildPlanningTerms === 'function';
     setActingProposalId(review.proposal.id);
     try {
-      const result = await reader.acceptReview(review, childAgeGroup);
+      const result = planningRoute
+        ? await reader.acceptChildPlanningTerms!(review, childAgeGroup)
+        : await reader.acceptReview(review, childAgeGroup);
       if (actionGeneration.current !== generation) return false;
       if (result.ok !== true) {
         setActionError(result.message);
@@ -75,7 +85,13 @@ export function useChildProposalReview(
       }
       await refresh();
       if (actionGeneration.current !== generation) return false;
-      setSuccessMessage('這份計畫一起說好了');
+      // 「同意這一輪」不是「開始了」。訊息說錯的話，孩子會以為今天
+      // 就要開始做，然後在任務清單裡找不到它。
+      setSuccessMessage(
+        planningRoute && 'activated' in result && result.activated !== true
+          ? '好，這些安排你說可以了，還有一項要再和爸媽確認'
+          : '這份計畫一起說好了',
+      );
       return true;
     } catch (caught) {
       if (actionGeneration.current === generation) {
@@ -94,9 +110,13 @@ export function useChildProposalReview(
     const generation = ++actionGeneration.current;
     setActionError(null);
     setSuccessMessage(null);
+    const planningRoute = isChildPlanningReviewCard(review)
+      && typeof reader.requestChildPlanningTermChanges === 'function';
     setActingProposalId(review.proposal.id);
     try {
-      const result = await reader.requestChanges(review, reason);
+      const result = planningRoute
+        ? await reader.requestChildPlanningTermChanges!(review, reason)
+        : await reader.requestChanges(review, reason);
       if (actionGeneration.current !== generation) return false;
       if (result.ok !== true) {
         setActionError(result.message);

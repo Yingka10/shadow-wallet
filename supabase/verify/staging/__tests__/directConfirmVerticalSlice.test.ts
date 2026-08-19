@@ -233,7 +233,7 @@ suite('P0-5A staging — 家長直接確認的完整 vertical slice', () => {
 
     // 本週目標＝孩子選的 4 次。
     expect(view.weekTarget).toBe(4);
-    expect(view.weekCompleted).toBe(0);
+    expect(view.weekCompletedActual).toBe(0);
     // 彈性週目標沒有「星期三漏掉」這種概念 —— 沒有逐日時間軸。
     expect(view.weekDays).toEqual([]);
     // 也不該從「一週 4 次」推導出四個固定星期。

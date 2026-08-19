@@ -262,6 +262,20 @@ export type ChildProposal = {
   updated_at: string;
 };
 
+/**
+ * 還沒決定、而且屬於家庭共同條件的欄位（P1-A3 寫入，P1-A4A 讀）。
+ *
+ * 這裡與 `childPlanning/formalPlan` 的 `RequiresParentDecision` 是同一組值。
+ * 兩邊各宣告一次是刻意的：childProposal 不 import childPlanning，
+ * 否則 P0 的提案契約會開始依賴 P1 的規劃契約。由 parity 測試釘住同值。
+ */
+export type ChildPlanSharedDecision =
+  | 'cadence'
+  | 'session_size'
+  | 'duration'
+  | 'reward'
+  | 'purpose_category';
+
 export type ChildProposalPlanVersion = {
   id: string;
   proposal_id: string;
@@ -319,8 +333,51 @@ export type ChildProposalPlanVersion = {
   ai_snapshot: unknown | null;
   ai_model: string | null;
   ai_request_id: string | null;
-  /** Parent adoption 指向被採用的 AI version；不重用 ai_request_id。 */
+  /**
+   * Parent adoption 指向被採用的來源 version；不重用 ai_request_id。
+   *
+   * 兩條線都用它，而且**只用它**：
+   *   P0  parent agreement → 被採用的 AI version
+   *   P1  parent agreement → 孩子確認過的 child formal version（P1-A4A）
+   * 再造第二條 parent-source lineage 等於讓「這一版從哪來」有兩個答案。
+   */
   adopted_from_plan_version_id: string | null;
+
+  // ── P1-A3 Planning lineage ─────────────────────────────────────────────
+  //
+  // 四欄同進同出（DB CHECK）。有 lineage 的列 authored_by 一定是 'child'，
+  // 所以 parent agreement version 上這四欄永遠是 null / 空 —— 孩子確認過的
+  // canonical 計畫只有一份，家長那一版透過 adopted_from_plan_version_id 指回去。
+
+  /** 這一版正式計畫是從哪一場孩子確認過的規劃對話來的。 */
+  source_planning_session_id: string | null;
+  planning_schema_version: number | null;
+  /**
+   * 孩子確認過的 canonical 計畫（含 progression 結構與逐欄 provenance）。
+   *
+   * ⚠️ 這是產品資料，**不是** ai_snapshot 那種稽核快照。
+   */
+  child_confirmed_plan: unknown | null;
+  /** 還沒決定、而且屬於家庭共同條件的欄位。空陣列不代表可以直接確認。 */
+  requires_parent_decision: ChildPlanSharedDecision[];
+  /** enriched = 政策欄位算完了；unavailable = 當時 policy helper 不可用。 */
+  enrichment_status: 'enriched' | 'unavailable' | null;
+
+  // ── P1-A4A.1 Deterministic policy evidence ─────────────────────────────
+  //
+  // 既有規則鏈（rewardEligibility → coinPolicy）在建版當時算出來的證據。
+  // **不是孩子決定的、不是模型寫的、也不是最終會發的金額。**
+  //
+  // 之所以是正式欄位而不是留在 ai_snapshot 裡：家長同意那一步要拿它跟
+  // 現在重算的結果對帳，而稽核快照的形狀由「某一次 enrichment 回了什麼」
+  // 決定 —— 正式任務建不建得起來，不可以取決於一坨 JSON 裡剛好有沒有
+  // 某個鍵。與 legacy 的 ai_suggested_coin_amount 是不同的兩欄，因為
+  // 這個數字不是 AI 算的。
+
+  /** 規則引擎算出的一次投入參考價。最終金額在 confirmed_coin_amount。 */
+  policy_session_coin_reference: number | null;
+  /** 當時政策支援的結算語意。目前只可能是 per_completion。 */
+  policy_payout_type: 'per_completion' | null;
   /**
    * AI 建議的幣值。**永遠不是最終值。**
    *
@@ -412,6 +469,13 @@ export type ChildProposalStatusEvent = {
   actor_user_id: string | null;
   plan_version_id: string | null;
   reason: string | null;
+  /**
+   * 機器可讀的動作語意（A4B2 起）。legacy 轉換一律是 null。
+   *
+   * ⚠️ 與 reason 分開：那一欄是孩子講的人話，會有錯字、會空白，
+   *    拿它當狀態判斷等於用自由文字當 machine state。
+   */
+  action: ChildProposalChildAction | null;
   snapshot: unknown | null;
   created_at: string;
 };
@@ -502,10 +566,23 @@ export type CreateAdjustmentRequestResult =
   | CreateAdjustmentRequestSuccess
   | ChildProposalFailure;
 
+/**
+ * 孩子在共同條件那一輪做了什麼（child_proposal_status_events.action）。
+ *
+ * ⚠️ 兩者都會把提案送回 proposed、都留在同一個版本上 —— **光看版本資料
+ *    分不出來**，這也正是那一欄存在的原因（A4B2 §9）。分不出來的話，
+ *    家長會在孩子說「可以」之後讀到「他想再聊聊」。
+ */
+export type ChildProposalChildAction =
+  | 'accepted_shared_terms_pending_more'
+  | 'requested_shared_term_changes';
+
 /** 家長首頁的一張卡：Proposal 原話加上 exact current Plan Version。 */
 export type ParentProposalCardData = {
   proposal: ChildProposal;
   currentPlanVersion: ChildProposalPlanVersion | null;
+  /** 這一版上孩子最後一次的回覆。沒有就是 null。 */
+  latestChildAction?: ChildProposalChildAction | null;
 };
 
 /** 孩子 review reader 的完整 lineage；source 由 DB 欄位讀取，不由 UI 猜。 */
@@ -737,18 +814,52 @@ export type ChildProposalPreferredTimeChanges = {
   preferredTimeCustom?: null;
 };
 
+/**
+ * CHILD-REVIEW-V2：每週次數的重新協商。
+ *
+ * ⚠️ 這個數字**永遠來自孩子在回顧裡選的方向**，不是系統從「完成 2 次 /
+ *    約定 3 次」反推出來的建議。RPC 也不會自己算，只收呼叫端帶進來的值。
+ */
+export type ChildProposalCadenceChanges = {
+  /** 1–7。0 次不是調整，那是暫停，語意與退場都不一樣。 */
+  weeklyFrequency: number;
+};
+
 /** long_term_goals.preferred_time_window 的 CHECK 只允許這兩個值。 */
 export type ChildProposalReadingTimeWindow = 'after_dinner' | 'before_bed';
 
-export type CreateChildProposalAdjustmentRequestCommand = {
-  schemaVersion: typeof CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION;
-  proposalId: string;
-  expectedPlanVersionId: string;
-  adjustmentKind: 'preferred_time';
-  reason: string;
-  requestedChanges: ChildProposalPreferredTimeChanges;
-  clientRequestId?: string;
-};
+/**
+ * kind 與 requestedChanges 是綁在一起的 —— discriminated union，不是兩個
+ * 各自獨立的欄位。RPC 對每一種 kind 都只收它自己那一組鍵，多一個就整筆拒絕。
+ */
+export type CreateChildProposalAdjustmentRequestCommand =
+  | {
+    schemaVersion: typeof CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION;
+    proposalId: string;
+    expectedPlanVersionId: string;
+    adjustmentKind: 'preferred_time';
+    reason: string;
+    requestedChanges: ChildProposalPreferredTimeChanges;
+    clientRequestId?: string;
+  }
+  | {
+    schemaVersion: typeof CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION;
+    proposalId: string;
+    expectedPlanVersionId: string;
+    adjustmentKind: 'cadence';
+    reason: string;
+    requestedChanges: ChildProposalCadenceChanges;
+    clientRequestId?: string;
+  };
+
+/** 目前真的有 workflow 在後面的兩條通道。 */
+export type SupportedChildProposalAdjustmentKind = 'preferred_time' | 'cadence';
+
+export const SUPPORTED_CHILD_PROPOSAL_ADJUSTMENT_KINDS:
+  ReadonlyArray<SupportedChildProposalAdjustmentKind> = [
+    'preferred_time',
+    'cadence',
+  ];
 
 export type AcceptChildProposalAdjustmentCommand = {
   schemaVersion: typeof CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION;
@@ -804,4 +915,11 @@ export type ChildSharedPlanContext = {
   currentPlanVersion: ChildProposalPlanVersion;
   /** 已經送出、家長還沒回應的換時段請求。沒有就是 null。 */
   openPreferredTimeRequest: ChildProposalAdjustmentRequest | null;
+  /**
+   * 已經送出、家長還沒回應的每週次數請求。沒有就是 null。
+   *
+   * 與 openPreferredTimeRequest **各自獨立** —— 送過換時段不該連帶把改次數
+   * 也鎖住，那是兩個不同的談判。
+   */
+  openCadenceRequest: ChildProposalAdjustmentRequest | null;
 };

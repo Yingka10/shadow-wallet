@@ -153,7 +153,7 @@ async function snapshot(): Promise<Snapshot> {
     currentDay: goal!.current_day,
     presentation: {
       weekTarget: built.weekTarget,
-      weekCompleted: built.weekCompleted,
+      weekCompleted: built.weekCompletedActual,
       window: resolvePreferredWindow(todayCompletion, goal as LongTermGoal, task as Task),
     },
   };

@@ -16,7 +16,12 @@ import type { PreferredTimeWindow } from '../../types/database';
 import type {
   GoalCompletionRecord,
   GoalPresentation,
+  GoalRecentRecord,
 } from '../../screens/child/longTermGoalPresentation';
+import TogetherReviewSheet, {
+  type ReviewCadenceChannel,
+  type ReviewTimeChannel,
+} from './TogetherReviewSheet';
 
 export type LongTermSheet =
   | 'menu'
@@ -26,12 +31,6 @@ export type LongTermSheet =
   | 'adjustment'
   | null;
 
-export type ReviewDraft = {
-  favoriteNote: string;
-  preferredWindow: PreferredTimeWindow | 'either' | 'unsure' | null;
-  nextStep: 'keep' | 'time' | 'frequency' | 'method' | null;
-};
-
 export type AdjustmentDraft =
   | 'time'
   | 'frequency'
@@ -40,46 +39,29 @@ export type AdjustmentDraft =
   | 'pause'
   | 'discuss';
 
-/**
- * 共同計畫的換時段通道（P0-8M）。
- *
- * 只有在畫面確定「這是一份進行中的共同閱讀計畫」時才會傳進來。傳 undefined
- * 代表沒有這條通道 —— 一般家長建立的長期任務走的就是這條，回顧仍然只留草稿。
- */
-export type SharedPlanTimeAdjustment = {
-  /** 目前雙方談定的時段。用來判斷孩子選的是不是真的不一樣。 */
-  currentPreferredTime: SharedPlanTimeWindow | null;
-  /** 已經送出、等家長確認。此時不能再送第二次。 */
-  pending: boolean;
-  submitting: boolean;
-  error: string | null;
-  submitted: boolean;
-  onSubmit: (preferredTime: SharedPlanTimeWindow) => Promise<boolean>;
-};
-
-type SharedPlanTimeWindow = PreferredTimeWindow;
-
-const PENDING_COPY = '已送給爸媽，等一起確認。';
-const SUBMITTED_COPY = '已經告訴爸媽了。一起確認後，計畫才會更新。';
-
 type OpenSheet = Exclude<LongTermSheet, null>;
 
 type Props = {
   activeSheet: LongTermSheet;
   onClose: () => void;
   onOpenSheet: (sheet: OpenSheet) => void;
+  /** 選一筆最近紀錄去更正——menu 選單裡「最近紀錄」那段用的。 */
+  onOpenRecord?: (completionId?: string) => void;
   presentation: GoalPresentation;
   completion: GoalCompletionRecord | null;
   taskMinutes: number;
-  reviewDraft: ReviewDraft;
   adjustmentDraft: AdjustmentDraft | null;
-  onSaveReviewDraft: (draft: ReviewDraft) => void;
   onSaveAdjustmentDraft: (draft: AdjustmentDraft) => void;
+  /** canonical 家長稱謂。沒有就沿用畫面既有的中性集合稱呼。 */
+  parentLabel?: string | null;
+  /** 每週次數的重新協商通道（P1 cadence lane）。 */
+  reviewCadenceChannel?: ReviewCadenceChannel;
+  /** 換時段的重新協商通道（P0-8M）。 */
+  reviewTimeChannel?: ReviewTimeChannel;
   onCorrectTimeWindow: (
     timeWindow: PreferredTimeWindow,
   ) => void | Promise<void>;
   correctingTimeWindow?: boolean;
-  sharedPlanTimeAdjustment?: SharedPlanTimeAdjustment;
 };
 
 type IconName = 'close' | 'details' | 'adjust' | 'pause' | 'record';
@@ -88,36 +70,6 @@ const TIME_WINDOW_LABELS: Record<PreferredTimeWindow, string> = {
   after_dinner: '晚餐後',
   before_bed: '睡前',
 };
-
-const REVIEW_TIME_OPTIONS: Array<{
-  value: ReviewDraft['preferredWindow'];
-  label: string;
-}> = [
-  { value: 'after_dinner', label: '晚餐後' },
-  { value: 'before_bed', label: '睡前' },
-  { value: 'either', label: '都適合' },
-  { value: 'unsure', label: '還不確定' },
-];
-
-const READING_REVIEW_NEXT_OPTIONS: Array<{
-  value: NonNullable<ReviewDraft['nextStep']>;
-  label: string;
-}> = [
-  { value: 'keep', label: '維持現在安排' },
-  { value: 'time', label: '調整時間' },
-  { value: 'frequency', label: '調整次數' },
-  { value: 'method', label: '調整方式' },
-];
-
-const GENERAL_REVIEW_NEXT_OPTIONS: Array<{
-  value: NonNullable<ReviewDraft['nextStep']>;
-  label: string;
-}> = [
-  { value: 'keep', label: '維持現在安排' },
-  { value: 'time', label: '調整進行時間' },
-  { value: 'frequency', label: '調整每週安排' },
-  { value: 'method', label: '調整進行方式' },
-];
 
 const READING_ADJUSTMENT_OPTIONS: Array<{
   value: AdjustmentDraft;
@@ -131,29 +83,18 @@ const READING_ADJUSTMENT_OPTIONS: Array<{
   { value: 'discuss', label: '想和家人討論' },
 ];
 
-type PresentationKind = GoalPresentation['goalKind'];
-
-function getReviewPrompt(kind: PresentationKind): string {
-  if (kind === 'reading_habit') return '這週最喜歡哪一本書或哪一段？';
-  if (kind === 'skill') return '這週哪一段練習最有感？';
-  if (kind === 'family') return '這週哪一次一起做最有感？';
-  if (kind === 'challenge') return '這週哪一步最有感？';
-  return '這週哪一段最有感？';
-}
+// LT-FINAL-1R：問句依 progression，不依名稱猜出來的「閱讀計畫」。
+type PresentationKind = GoalPresentation['progression'];
 
 function getAdjustmentOptions(
   kind: PresentationKind,
 ): Array<{ value: AdjustmentDraft; label: string }> {
-  if (kind === 'reading_habit') return READING_ADJUSTMENT_OPTIONS;
-
   const contentLabel =
-    kind === 'skill'
+    kind === 'staged'
       ? '想調整練習內容'
-      : kind === 'family'
-        ? '想調整參與內容'
-        : kind === 'challenge'
-          ? '想調整挑戰內容'
-          : '想調整進行內容';
+      : kind === 'accumulation'
+        ? '想調整挑戰內容'
+        : '想調整進行內容';
 
   return [
     { value: 'time', label: '想調整進行時間' },
@@ -164,6 +105,12 @@ function getAdjustmentOptions(
     { value: 'discuss', label: '想和家人討論' },
   ];
 }
+
+/**
+ * review 走 CHILD-REVIEW-V2 的大標題排版（「一起回顧」在內容區，不是標題列），
+ * 所以那一頁不畫 sheetHeader，改成一條 drag handle。
+ */
+const BARE_HEADER_SHEETS: ReadonlyArray<OpenSheet> = ['review'];
 
 const SHEET_TITLES: Record<OpenSheet, string> = {
   menu: '計畫選單',
@@ -385,12 +332,17 @@ function formatCompletionTime(completedAt: string): string {
 }
 
 function MenuSheet({
+  recentRecords,
   onOpenSheet,
+  onOpenRecord,
   onPause,
 }: {
+  recentRecords: GoalRecentRecord[];
   onOpenSheet: (sheet: OpenSheet) => void;
+  onOpenRecord?: (completionId?: string) => void;
   onPause: () => void;
 }) {
+  const visibleRecords = recentRecords.slice(0, 3);
   return (
     <View>
       <MenuRow
@@ -411,6 +363,32 @@ function MenuSheet({
         icon="pause"
         onPress={onPause}
       />
+      {onOpenRecord && visibleRecords.length > 0 ? (
+        <View style={styles.recordSection}>
+          <Text style={styles.recordSectionTitle}>最近紀錄</Text>
+          {visibleRecords.map((record) => (
+            <TouchableOpacity
+              key={record.id}
+              style={styles.recordRow}
+              onPress={() => onOpenRecord(record.id)}
+              accessibilityRole="button"
+              accessibilityLabel={`查看${record.dateLabel}的紀錄`}
+              activeOpacity={0.72}
+            >
+              <Text style={styles.recordDate}>{record.dateLabel}</Text>
+              <View style={styles.recordCopy}>
+                <Text style={styles.recordDetail}>{record.detail}</Text>
+                {record.timeWindowLabel ? (
+                  <Text style={styles.recordTime}>{record.timeWindowLabel}</Text>
+                ) : null}
+              </View>
+              <Text style={styles.chevron} accessibilityElementsHidden>
+                ›
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -506,7 +484,7 @@ function RecordSheet({
     }
   };
   const loading = correctingTimeWindow || localLoading;
-  const isReadingPlan = presentation.goalKind === 'reading_habit';
+  const supportsTimeWindow = presentation.supportsTimeWindow;
 
   return (
     <View>
@@ -522,7 +500,7 @@ function RecordSheet({
         <DetailRow
           label="完成時段"
           value={
-            isReadingPlan
+            supportsTimeWindow
               ? lastConfirmedWindow
                 ? TIME_WINDOW_LABELS[lastConfirmedWindow]
                 : '尚未記錄時段'
@@ -531,7 +509,7 @@ function RecordSheet({
         />
       </View>
 
-      {isReadingPlan ? (
+      {supportsTimeWindow ? (
         <>
           <Text style={styles.questionLabel}>需要更正時段嗎？</Text>
           <View style={styles.optionGrid}>
@@ -590,154 +568,6 @@ function RecordSheet({
   );
 }
 
-/**
- * 孩子選的時段值 —— 只有 after_dinner / before_bed 送得出去。
- * 「都適合」「還不確定」是回顧用的答案，不是一個計畫可以寫進去的時段。
- */
-function submittableWindow(
-  value: ReviewDraft['preferredWindow'],
-): PreferredTimeWindow | null {
-  return value === 'after_dinner' || value === 'before_bed' ? value : null;
-}
-
-function ReviewSheet({
-  presentation,
-  draft,
-  onChange,
-  onSave,
-  sharedPlan,
-  onDismiss,
-}: {
-  presentation: GoalPresentation;
-  draft: ReviewDraft;
-  onChange: (draft: ReviewDraft) => void;
-  onSave: () => void;
-  sharedPlan?: SharedPlanTimeAdjustment;
-  onDismiss: () => void;
-}) {
-  const kind = presentation.goalKind;
-  const isReadingPlan = kind === 'reading_habit';
-  const nextOptions = isReadingPlan
-    ? READING_REVIEW_NEXT_OPTIONS
-    : GENERAL_REVIEW_NEXT_OPTIONS;
-
-  /*
-    什麼情況才真的送出去 —— 五個條件全部成立才行：
-
-      1. 這是共同計畫（sharedPlan 有值）
-      2. 這是閱讀計畫
-      3. 孩子選的下一步是「調整時間」
-      4. 選到的是可送出的時段值
-      5. 那個時段和目前談定的不一樣
-
-    少一個就退回原本的 local draft 行為。特別是 (1)：一般家長建立的長期任務
-    也有「調整時間」這個選項，但它沒有提案，不該進協商 RPC。
-  */
-  const chosenWindow = submittableWindow(draft.preferredWindow);
-  const wantsTimeChange = isReadingPlan && draft.nextStep === 'time';
-  const canSend = Boolean(sharedPlan)
-    && wantsTimeChange
-    && chosenWindow !== null
-    && !sharedPlan!.pending
-    && sharedPlan!.currentPreferredTime !== chosenWindow;
-
-  // 送出失敗時**不**動 draft —— 孩子剛做完回顧，清掉等於要他從頭再選一次。
-  const handleSend = () => { void sharedPlan?.onSubmit(chosenWindow!); };
-
-  if (sharedPlan?.submitted) {
-    return (
-      <View>
-        <Text style={styles.sheetIntro}>{SUBMITTED_COPY}</Text>
-        <PrimaryButton label="知道了" onPress={onDismiss} />
-      </View>
-    );
-  }
-
-  return (
-    <View>
-      <Text style={styles.questionLabel}>{getReviewPrompt(kind)}</Text>
-      <TextInput
-        accessibilityLabel={isReadingPlan ? '最喜歡的閱讀內容' : '這週最有感的片段'}
-        placeholder={
-          isReadingPlan
-            ? '想記下哪一本書或哪一段？'
-            : '想記下這週最有感的一段嗎？'
-        }
-        placeholderTextColor={Colors.fgMuted}
-        value={draft.favoriteNote}
-        onChangeText={(favoriteNote) => onChange({ ...draft, favoriteNote })}
-        multiline
-        maxLength={160}
-        style={styles.textInput}
-      />
-
-      {isReadingPlan ? (
-        <>
-          <Text style={styles.questionLabel}>哪個時間比較適合？</Text>
-          <View style={styles.optionGrid}>
-            {REVIEW_TIME_OPTIONS.map((option) => (
-              <OptionButton
-                key={option.label}
-                label={option.label}
-                selected={draft.preferredWindow === option.value}
-                onPress={() =>
-                  onChange({ ...draft, preferredWindow: option.value })
-                }
-              />
-            ))}
-          </View>
-        </>
-      ) : null}
-
-      <Text style={styles.questionLabel}>下週想維持還是調整？</Text>
-      <View style={styles.optionGrid}>
-        {nextOptions.map((option) => (
-          <OptionButton
-            key={option.value}
-            label={option.label}
-            selected={draft.nextStep === option.value}
-            onPress={() => onChange({ ...draft, nextStep: option.value })}
-          />
-        ))}
-      </View>
-
-      {sharedPlan?.pending ? (
-        <View style={styles.localNotice}>
-          <Text style={styles.localNoticeText}>{PENDING_COPY}</Text>
-        </View>
-      ) : (
-        <View style={styles.localNotice}>
-          <Text style={styles.localNoticeText}>
-            {canSend
-              ? '送出之後爸媽會看到，一起確認後計畫才會更新。'
-              : '這份回答目前只保留在這個畫面，尚未送出給家長。'}
-          </Text>
-        </View>
-      )}
-
-      {sharedPlan?.error ? (
-        <Text
-          accessibilityRole="alert"
-          accessibilityLiveRegion="polite"
-          style={styles.errorText}
-        >
-          {sharedPlan.error}
-        </Text>
-      ) : null}
-
-      {canSend ? (
-        <PrimaryButton
-          label="送給爸媽一起確認"
-          loading={sharedPlan?.submitting}
-          onPress={handleSend}
-        />
-      ) : (
-        <PrimaryButton label="保留回顧草稿" onPress={onSave} />
-      )}
-    </View>
-  );
-}
-
 function AdjustmentSheet({
   presentation,
   selected,
@@ -749,7 +579,7 @@ function AdjustmentSheet({
   onSelect: (draft: AdjustmentDraft) => void;
   onSave: () => void;
 }) {
-  const options = getAdjustmentOptions(presentation.goalKind);
+  const options = getAdjustmentOptions(presentation.progression);
 
   return (
     <View>
@@ -784,30 +614,21 @@ export default function LongTermGoalDetailSheets({
   activeSheet,
   onClose,
   onOpenSheet,
+  onOpenRecord,
   presentation,
   completion,
   taskMinutes,
-  reviewDraft,
   adjustmentDraft,
-  onSaveReviewDraft,
   onSaveAdjustmentDraft,
   onCorrectTimeWindow,
   correctingTimeWindow = false,
-  sharedPlanTimeAdjustment,
+  parentLabel,
+  reviewCadenceChannel,
+  reviewTimeChannel,
 }: Props) {
-  const [localReviewDraft, setLocalReviewDraft] = useState(reviewDraft);
   const [localAdjustmentDraft, setLocalAdjustmentDraft] =
     useState<AdjustmentDraft | null>(adjustmentDraft);
   const pauseRequestRef = useRef(false);
-
-  useEffect(() => {
-    setLocalReviewDraft(reviewDraft);
-  }, [
-    activeSheet,
-    reviewDraft.favoriteNote,
-    reviewDraft.preferredWindow,
-    reviewDraft.nextStep,
-  ]);
 
   useEffect(() => {
     if (activeSheet === 'adjustment' && pauseRequestRef.current) {
@@ -827,11 +648,6 @@ export default function LongTermGoalDetailSheets({
     onOpenSheet('adjustment');
   };
 
-  const handleSaveReview = () => {
-    onSaveReviewDraft(localReviewDraft);
-    onClose();
-  };
-
   const handleSaveAdjustment = () => {
     if (!localAdjustmentDraft) return;
     onSaveAdjustmentDraft(localAdjustmentDraft);
@@ -842,7 +658,12 @@ export default function LongTermGoalDetailSheets({
   switch (activeSheet) {
     case 'menu':
       content = (
-        <MenuSheet onOpenSheet={onOpenSheet} onPause={handlePause} />
+        <MenuSheet
+          recentRecords={presentation.recentRecords}
+          onOpenSheet={onOpenSheet}
+          onOpenRecord={onOpenRecord}
+          onPause={handlePause}
+        />
       );
       break;
     case 'details':
@@ -866,13 +687,12 @@ export default function LongTermGoalDetailSheets({
       break;
     case 'review':
       content = (
-        <ReviewSheet
+        <TogetherReviewSheet
           presentation={presentation}
-          draft={localReviewDraft}
-          onChange={setLocalReviewDraft}
-          onSave={handleSaveReview}
-          sharedPlan={sharedPlanTimeAdjustment}
-          onDismiss={onClose}
+          onClose={onClose}
+          parentLabel={parentLabel}
+          cadenceChannel={reviewCadenceChannel}
+          timeChannel={reviewTimeChannel}
         />
       );
       break;
@@ -905,20 +725,40 @@ export default function LongTermGoalDetailSheets({
         />
         <View
           accessibilityViewIsModal
-          style={styles.sheet}
+          style={[styles.sheet, activeSheet === 'review' && styles.sheetReviewExpanded]}
         >
-          <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>{SHEET_TITLES[activeSheet]}</Text>
-            <TouchableOpacity
-              accessibilityRole="button"
-              accessibilityLabel={CLOSE_LABELS[activeSheet]}
-              onPress={onClose}
-              activeOpacity={0.72}
-              style={styles.closeButton}
-            >
-              <SheetIcon name="close" />
-            </TouchableOpacity>
-          </View>
+          {BARE_HEADER_SHEETS.includes(activeSheet) ? (
+            /*
+              回顧那一頁的標題是內容區那個大字，不是這條標題列 —— 兩個都畫
+              會出現兩次「一起回顧」。改成一條 drag handle。
+              關閉鈕仍然留著：backdrop 對讀螢幕的人是點不到的。
+            */
+            <View style={styles.bareHeader}>
+              <View style={styles.dragHandle} />
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel={CLOSE_LABELS[activeSheet]}
+                onPress={onClose}
+                activeOpacity={0.72}
+                style={styles.bareCloseButton}
+              >
+                <SheetIcon name="close" color={Colors.ink300} />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>{SHEET_TITLES[activeSheet]}</Text>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel={CLOSE_LABELS[activeSheet]}
+                onPress={onClose}
+                activeOpacity={0.72}
+                style={styles.closeButton}
+              >
+                <SheetIcon name="close" />
+              </TouchableOpacity>
+            </View>
+          )}
           <ScrollView
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
@@ -952,6 +792,33 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.13,
     shadowRadius: 16,
     elevation: 12,
+  },
+  // CHILD-REVIEW-V2-COMPACT-VIEWPORT：只有 Review 這張 sheet 提高——目標是
+  // 一般手機 viewport 能同時看到完整 Step 1 + Step 2，其他 sheet（menu／
+  // details／record／adjustment）維持原本的 86%，不連帶跟著長高。
+  sheetReviewExpanded: {
+    maxHeight: '93%',
+  },
+  bareHeader: {
+    paddingTop: 10,
+    paddingBottom: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dragHandle: {
+    width: 44,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: Colors.cream300,
+  },
+  bareCloseButton: {
+    position: 'absolute',
+    top: 0,
+    right: 4,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sheetHeader: {
     minHeight: 64,
@@ -1019,6 +886,44 @@ const styles = StyleSheet.create({
     color: Colors.fgMuted,
     fontSize: 28,
     lineHeight: 30,
+  },
+  recordSection: {
+    marginTop: 18,
+  },
+  recordSectionTitle: {
+    marginBottom: 6,
+    color: Colors.fgMuted,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  recordRow: {
+    minHeight: 56,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.hairline,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+  },
+  recordDate: {
+    width: 58,
+    color: Colors.fgSecondary,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '900',
+  },
+  recordCopy: { flex: 1, minWidth: 0 },
+  recordDetail: {
+    color: Colors.fgPrimary,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '800',
+  },
+  recordTime: {
+    marginTop: 2,
+    color: Colors.fgMuted,
+    fontSize: 11,
+    lineHeight: 15,
   },
   detailList: {
     borderTopWidth: StyleSheet.hairlineWidth,

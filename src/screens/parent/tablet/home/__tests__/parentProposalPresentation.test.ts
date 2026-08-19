@@ -173,6 +173,67 @@ describe('presentParentProposal', () => {
     });
   });
 
+  // ── P1-FINAL ────────────────────────────────────────────────────────────
+  //
+  // 協商第二輪：孩子看過共同條件之後把提案送回 proposed。他可能說的是
+  // 「這些可以，只是還有事沒說定」，也可能是「我想再調整」——
+  // 兩者留在同一個版本上，版本資料裡分不出來。
+
+  function sharedTermDraftCard(latestChildAction?: 'accepted_shared_terms_pending_more') {
+    // A4B1 的草案：家長送出、等孩子看，但**沒有** parent_confirmed_at ——
+    // 這一步沒有任何東西被確認，而那正是它與 P0 調整版唯一穩定的差別。
+    const draft = plan({
+      id: 'version-parent-2', authored_by: 'parent', requires_child_review: true,
+      adopted_from_plan_version_id: 'version-child-1',
+      parent_confirmed_at: null,
+      requires_parent_decision: ['reward'],
+      cadence_weekly_frequency: 3,
+    });
+    const item = card(draft);
+    item.proposal = proposal({ status: 'proposed', current_plan_version_id: draft.id });
+    if (latestChildAction) item.latestChildAction = latestChildAction;
+    return item;
+  }
+
+  it('孩子說「這些可以，還有事沒說定」不顯示成「他想再聊聊」', () => {
+    const view = presentParentProposal(
+      sharedTermDraftCard('accepted_shared_terms_pending_more'), '承恩',
+    );
+    expect(view).toMatchObject({
+      state: 'child_agreed_pending_terms',
+      statusLabel: '孩子說這些可以',
+      waitingMessage: '他說這些安排可以，還有幾件說定之後就會開始',
+      proposeTermsLabel: '把還沒說定的補上',
+    });
+    expect(JSON.stringify(view)).not.toContain('孩子想再一起聊聊');
+  });
+
+  it('沒有那筆事件時維持原本的「想再聊聊」，不猜他同意了', () => {
+    expect(presentParentProposal(sharedTermDraftCard(), '承恩')).toMatchObject({
+      state: 'child_revisit',
+      statusLabel: '孩子想再一起聊聊',
+    });
+  });
+
+  it('共同條件草案不給 P0 的「再調整一下」', () => {
+    // 走過去的話：未決條件被清空、policy evidence 掉了、孩子自己寫的
+    // 完成標準被改掉 —— 那份協商從此走不到 active。
+    expect(presentParentProposal(sharedTermDraftCard(), '承恩').canRevise).toBe(false);
+    expect(presentParentProposal(
+      sharedTermDraftCard('accepted_shared_terms_pending_more'), '承恩',
+    ).canRevise).toBe(false);
+  });
+
+  it('P0 的家長調整版仍然可以再調整 —— 那條路一個字都沒變', () => {
+    const parentPlan = plan({
+      authored_by: 'parent', requires_child_review: true,
+      parent_confirmed_at: '2026-08-11T01:00:00Z', cadence_weekly_frequency: 3,
+    });
+    const item = card(parentPlan);
+    item.proposal = proposal({ status: 'proposed', current_plan_version_id: parentPlan.id });
+    expect(presentParentProposal(item, '承恩').canRevise).toBe(true);
+  });
+
   it('parent revision 的 copied summary 不再作為目前安排 authority', () => {
     const parentPlan = plan({
       authored_by: 'parent', requires_child_review: true,

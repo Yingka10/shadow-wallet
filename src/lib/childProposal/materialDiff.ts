@@ -37,6 +37,7 @@ export function formatPlanCadence(plan: ChildProposalPlanVersion): string {
     const labels = normalizedDays(plan.cadence_days).map(day => DAY_LABELS[day]);
     if (labels.length > 0) return `每${labels.join('、')}`;
   }
+  if (plan.cadence_mode === 'one_time') return '先完成一次';
   return '還沒決定';
 }
 

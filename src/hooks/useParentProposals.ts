@@ -4,11 +4,14 @@ import {
   type ParentProposalCardData,
   type ParentProposalMaterialEdits,
 } from '../lib/childProposal';
+import { resolveConfirmRoute } from '../lib/childPlanning/parentAgreement';
+import type { ChildPlanningSharedTerms } from '../lib/childPlanning/sharedTerms';
 
 export type ParentProposalReader = Pick<SupabaseChildProposalService, 'listProposedForParent'>
   & Partial<Pick<
     SupabaseChildProposalService,
-    'confirmDirect' | 'revisePlan' | 'closeUnsuitable'
+    'confirmDirect' | 'confirmChildPlanAgreement' | 'revisePlan'
+    | 'proposeChildPlanningTerms' | 'closeUnsuitable'
   >>;
 
 const defaultReader = new SupabaseChildProposalService();
@@ -75,20 +78,30 @@ export function useParentProposals(
     const currentAction = ++actionRequestId.current;
     setConfirmError(null);
     setSuccessMessage(null);
-    if (!reader.confirmDirect || !childAgeGroup) {
+
+    // 路由只看 authorship 與 lineage。兩條線是兩支 RPC，語意不同 ——
+    // 合成一支帶旗標的，每加一個條件都要先問「這是哪一條的」。
+    const route = resolveConfirmRoute(card);
+    const confirm = route === 'child_planning_plan'
+      ? reader.confirmChildPlanAgreement
+      : route === 'legacy_ai_plan'
+        ? reader.confirmDirect
+        : undefined;
+
+    if (!confirm || !childAgeGroup) {
       setConfirmError('目前還不能確認這個計畫，請重新整理後再試。');
       return;
     }
 
     setConfirmingProposalId(card.proposal.id);
     try {
-      const result = await reader.confirmDirect(card, childAgeGroup);
+      const result = await confirm.call(reader, card, childAgeGroup);
       if (actionRequestId.current !== currentAction) return;
       if (result.ok !== true) {
         setConfirmError(result.message);
         return;
       }
-      setSuccessMessage('已經一起確認好了');
+      setSuccessMessage(route === 'child_planning_plan' ? '已經一起說定了' : '已經一起確認好了');
       await refresh();
     } catch (caught) {
       setConfirmError(caught instanceof Error ? caught.message : '建立共同計畫失敗');
@@ -129,6 +142,49 @@ export function useParentProposals(
       if (actionRequestId.current === currentAction) setActingProposalId(null);
     }
   }, [reader, refresh]);
+
+  /**
+   * P1-A4B1：家長提出家庭共同條件。
+   *
+   * ⚠️ 與 reviseProposal 是**兩支**。成功訊息也不一樣：這一步沒有
+   *    「存下來」，只有「送出去等他看」—— 講成儲存會讓家長以為定了。
+   */
+  const proposeSharedTerms = useCallback(async (
+    card: ParentProposalCardData,
+    terms: ChildPlanningSharedTerms,
+  ): Promise<boolean> => {
+    const currentAction = ++actionRequestId.current;
+    setActionError(null);
+    setSuccessMessage(null);
+    if (!reader.proposeChildPlanningTerms) {
+      setActionError('目前還不能送出共同條件，請重新整理後再試。');
+      return false;
+    }
+    if (!childAgeGroup) {
+      setActionError('還沒讀到孩子的年齡段，請重新整理後再試。');
+      return false;
+    }
+    setActingProposalId(card.proposal.id);
+    try {
+      const result = await reader.proposeChildPlanningTerms(card, terms, childAgeGroup);
+      if (actionRequestId.current !== currentAction) return false;
+      if (result.ok !== true) {
+        setActionError(result.message);
+        return false;
+      }
+      await refresh();
+      if (actionRequestId.current !== currentAction) return false;
+      setSuccessMessage('已經送給孩子看看了');
+      return true;
+    } catch (caught) {
+      if (actionRequestId.current === currentAction) {
+        setActionError(caught instanceof Error ? caught.message : '送出共同條件失敗');
+      }
+      return false;
+    } finally {
+      if (actionRequestId.current === currentAction) setActingProposalId(null);
+    }
+  }, [childAgeGroup, reader, refresh]);
 
   const closeProposal = useCallback(async (
     card: ParentProposalCardData,
@@ -172,6 +228,7 @@ export function useParentProposals(
     confirmingProposalId,
     confirmError,
     reviseProposal,
+    proposeSharedTerms,
     closeProposal,
     actingProposalId,
     actionError,

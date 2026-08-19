@@ -2701,6 +2701,7 @@ export default function ParentHomeTablet() {
     confirmingProposalId,
     confirmError: proposalConfirmError,
     reviseProposal,
+    proposeSharedTerms,
     closeProposal,
     actingProposalId,
     actionError: proposalActionError,
@@ -2988,6 +2989,7 @@ export default function ParentHomeTablet() {
             confirmingProposalId={confirmingProposalId}
             confirmError={proposalConfirmError}
             onRevise={reviseProposal}
+            onProposeTerms={proposeSharedTerms}
             onCloseProposal={closeProposal}
             actingProposalId={actingProposalId}
             actionError={proposalActionError}

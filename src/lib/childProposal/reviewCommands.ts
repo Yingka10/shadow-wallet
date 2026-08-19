@@ -1,4 +1,7 @@
 import { buildProposalRewardDecision } from './directConfirm';
+// 直接指到葉子模組，不走 sharedTerms barrel —— 那一支會拉進
+// buildChildPlanningTermsCommand → childProposal/directConfirm，繞回這裡。
+import { isParentSharedTermDraft } from '../childPlanning/sharedTerms/isChildPlanningNegotiable';
 import {
   CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION,
   type AcceptChildProposalPlanCommand,
@@ -43,6 +46,24 @@ export function buildRevisionCommand(
     || plan.proposal_id !== card.proposal.id
     || !['ai', 'parent'].includes(plan.authored_by)) {
     return planNotConfirmable('目前沒有可調整的完整計畫，請重新整理後再試。');
+  }
+
+  // P1-FINAL：協商到第二輪時，current 是家長自己的共同條件草案 —— 而它
+  // 也是 authored_by='parent'，所以上面那一關擋不住。
+  //
+  // 這一支是 P0 的 material edit：它會照 source 重建一版，而**沒有**帶上
+  // requires_parent_decision 與 policy evidence 兩組欄位，還允許改
+  // completion_description（那一欄在 P1 是孩子自己寫的）。走過去的結果是
+  // 未決條件被靜靜清空、或孩子端 CHILD_PLAN_INTEGRITY_VIOLATION 死路。
+  //
+  // 想改共同條件請走 propose_child_planning_terms_v1。
+  if (isParentSharedTermDraft(plan)) {
+    return {
+      ok: false,
+      code: 'POLICY_REJECTED',
+      reason: 'CHILD_PLAN_FIELD_NOT_EDITABLE',
+      message: '這份安排要用「一起補幾個安排」提出，不是直接改。',
+    };
   }
 
   return {

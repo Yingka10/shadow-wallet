@@ -54,6 +54,46 @@ export type SubmitProposalResult = SubmitProposalSuccess | SubmitProposalFailure
 /** 只要這幾個方法，不要整包 service —— 測試才不必假造用不到的東西。 */
 export type ProposalSubmitPort = Pick<SupabaseChildProposalService, 'create' | 'transition'>;
 
+export type CreateDraftSuccess = { ok: true; proposalId: string };
+export type CreateDraftResult = CreateDraftSuccess | SubmitProposalFailure;
+
+/**
+ * 只建立 draft，**不送出**（P1-A2）。
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * P1 的流程在這裡分岔：孩子的原話先安全落地成 draft，然後才開始
+ * 「一起想怎麼開始」。這一步刻意只做兩步中的第一步。
+ *
+ * 為什麼不是規劃完再一次建立：因為規劃會失敗。AI 逾時、孩子中途離開、
+ * 網路斷掉 —— 這些都不可以讓他剛剛打的那段話消失。先存下來，
+ * 後面發生什麼事都只是「這份 draft 還沒有規劃」。
+ *
+ * 為什麼不在這裡順便 transition：那是 P1-A3 的事。現在轉 proposed 的話，
+ * 孩子看的是 P1 計畫、家長看到的會是背景跑出來的 P0 草稿 ——
+ * 兩份「真正的計畫」不可以同時存在。
+ *
+ * ⚠️ 這一支**不取代** submitChildProposal。AI 關掉時走的仍然是那一支，
+ *    一個字都沒有變（見 §3 的 legacy 路徑）。
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+export async function createChildProposalDraft(
+  service: Pick<ProposalSubmitPort, 'create'>,
+  command: CreateChildProposalCommand,
+): Promise<CreateDraftResult> {
+  const created = await service.create(command);
+
+  if (!created.ok) {
+    return {
+      ok: false,
+      stage: 'create',
+      code: created.code,
+      message: created.message,
+    };
+  }
+
+  return { ok: true, proposalId: created.proposalId };
+}
+
 /**
  * 建立並送出一份提案。
  *

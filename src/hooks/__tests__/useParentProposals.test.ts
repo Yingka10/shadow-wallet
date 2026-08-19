@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import type {
   ChildProposal,
+  ChildProposalPlanVersion,
   ParentProposalCardData,
   ParentProposalMaterialEdits,
 } from '../../lib/childProposal';
@@ -23,6 +24,50 @@ function proposal(id: string, childId: string): ChildProposal {
 
 function card(id: string, childId: string): ParentProposalCardData {
   return { proposal: proposal(id, childId), currentPlanVersion: null };
+}
+
+/**
+ * 一份可直接確認的 **AI-authored** 計畫版本。
+ *
+ * 確認的路由只看 authorship 與 lineage（P1-A4A §2），所以要測 legacy
+ * confirm 就必須真的給一份 legacy 版本 —— 沒有計畫的卡片在畫面上
+ * 本來就不會出現確認按鈕。
+ */
+function aiPlan(proposalId: string): ChildProposalPlanVersion {
+  return {
+    id: `${proposalId}-v1`, proposal_id: proposalId, version_no: 1,
+    authored_by: 'ai', author_user_id: null,
+    plan_title: '兩週閱讀挑戰', plan_summary: '一週安排 4 天閱讀',
+    purpose_category: 'D', completion_description: '完成一次約定的閱讀時段',
+    progress_model: 'weekly_rhythm', next_step: '拿出書讀 15 分鐘',
+    cadence_mode: 'weekly_frequency', cadence_weekly_frequency: 4, cadence_days: null,
+    preferred_time: 'after_dinner', preferred_time_custom: null, estimated_minutes: 15,
+    duration_type: 'long_term', duration_days: 14, start_date: null, end_date: null,
+    reward_policy: 'coin_eligible', reward_eligibility: 'allowed',
+    reward_policy_version: 'coin-policy@test', task_policy_version: 'task-policy@test',
+    ai_snapshot: null, ai_model: null, ai_request_id: null,
+    adopted_from_plan_version_id: null, ai_suggested_coin_amount: 10,
+    source_planning_session_id: null, planning_schema_version: null,
+    child_confirmed_plan: null, requires_parent_decision: [], enrichment_status: null,
+    // legacy AI 版本沒有 P1 policy evidence，錨點仍是 ai_suggested_coin_amount。
+    policy_session_coin_reference: null, policy_payout_type: null,
+    confirmed_reward_policy: null, confirmed_coin_amount: null, confirmed_payout_basis: null,
+    confirmed_claim_period: null, confirmed_max_claims_per_period: null,
+    confirmed_reward_policy_version: null, confirmed_task_policy_version: null,
+    confirmed_source_task_id: null, confirmed_by_user_id: null, confirmed_at: null,
+    requires_child_review: false, child_accepted_at: null, parent_confirmed_at: null,
+    effective_at: null, superseded_at: null, created_at: '2026-08-11T00:00:00Z',
+  };
+}
+
+/** 帶著可確認 AI 計畫的卡片 —— legacy confirm 路由需要它。 */
+function legacyCard(id: string, childId: string): ParentProposalCardData {
+  const base = proposal(id, childId);
+  const plan = aiPlan(id);
+  return {
+    proposal: { ...base, current_plan_version_id: plan.id },
+    currentPlanVersion: plan,
+  };
 }
 
 function deferred<T>() {
@@ -108,7 +153,7 @@ describe('useParentProposals', () => {
   });
 
   it('confirm 時提供 loading，成功後 refresh 讓 proposed card 消失', async () => {
-    const item = card('p-a', 'child-a');
+    const item = legacyCard('p-a', 'child-a');
     const confirm = deferred<{ ok: true; taskId: string }>();
     const reader: ParentProposalReader = {
       listProposedForParent: jest.fn()
@@ -135,7 +180,7 @@ describe('useParentProposals', () => {
   });
 
   it('typed confirm failure 保留訊息，不把 card 當成功移除', async () => {
-    const item = card('p-a', 'child-a');
+    const item = legacyCard('p-a', 'child-a');
     const reader: ParentProposalReader = {
       listProposedForParent: jest.fn().mockResolvedValue([item]),
       confirmDirect: jest.fn().mockResolvedValue({

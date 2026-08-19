@@ -261,8 +261,9 @@ export function checkMilestone(
   checkpointRewards: CheckpointRewards | null,
 ): MilestoneResult | null {
   if (!checkpointRewards) return null;
-  const coin = checkpointRewards[String(currentDay)];
-  if (coin === undefined) return null;
+  const entry = checkpointRewards[String(currentDay)];
+  if (entry === undefined) return null;
+  const coin = typeof entry === 'number' ? entry : entry.coin ?? 0;
   return { goalId, day: currentDay, coinReward: coin };
 }
 
@@ -299,6 +300,18 @@ export type SettlementResult = {
   basis: PayoutBasisValue;
   coinAmount: number;
 };
+
+/**
+ * 今天已經記過一次了——這不是失敗，是重複點擊／畫面沒同步到最新狀態。
+ * 呼叫端要把它跟真正的網路/RPC 失敗分開處理：不彈 destructive error，
+ * 直接重新讀最新資料讓畫面自然變成已完成狀態（LT-FINAL-3 §8）。
+ */
+export class AlreadyCompletedError extends Error {
+  constructor(message = '今天已經完成過這個任務了') {
+    super(message);
+    this.name = 'AlreadyCompletedError';
+  }
+}
 
 export type CompletionResult = {
   completionId: string;
@@ -373,7 +386,7 @@ export async function completeTask(
   };
 
   if (result.error === 'already_completed') {
-    throw new Error('今天已經完成過這個任務了');
+    throw new AlreadyCompletedError();
   }
 
   return {
@@ -692,17 +705,20 @@ export type CreateSkillGoalInput = {
 /**
  * 建立技能學習類長期任務。
  * 寫入 tasks（is_long_term=true, long_term_type='skill'）+ long_term_goals
- * （里程碑存於 level_definitions）。
+ * （里程碑存於 level_definitions）+ child_tasks（讓孩子端讀得到這個目標）。
  *
- * 不建立 child_tasks：技能類沒有每日打卡，里程碑完成 UI 延後到 P5b，
- * 現在綁進每日任務清單會讓它變成一個可被誤完成的 0 幣任務。
+ * ⚠️ 曾經故意不建 child_tasks（假設技能類沒有每日打卡）。LT-FINAL-1.1 已經
+ * 證明 complete_task 對 staged progression 是安全的 session check-in——不會
+ * 動 current_level/current_value，也不會誤發里程碑幣值——所以那個舊假設不再
+ * 成立：沒有 child_tasks，孩子端連「記下今天的完成」都按不下去
+ * （complete_task 會回 task_not_assigned）。
  *
  * 與習慣類差異：
  * - 幣值不存 coin_override（總幣值由 level_definitions 各階段算），避免汙染
  *   「本週可賺幣值」等統計（spec 前置確認項目 B）。
  * - current_day / total_days 對技能類只是參考時程，不代表進度。
  *
- * 兩步寫入無原生 transaction，採補償刪除：goal 寫入失敗則刪除已建 task，
+ * 三步寫入無原生 transaction，採補償刪除：任一步失敗就刪掉已建的部分，
  * 不留孤兒資料。
  */
 export async function createSkillGoal(input: CreateSkillGoalInput): Promise<void> {
@@ -761,6 +777,20 @@ export async function createSkillGoal(input: CreateSkillGoalInput): Promise<void
     // 補償刪除：避免孤兒 task
     await supabase.from('tasks').delete().eq('id', task.id);
     throw new Error(goalError.message);
+  }
+
+  // Step 3：綁進孩子的任務清單，複用今天有做過幾次一樣的 is_active 語意
+  const { error: childTaskError } = await supabase.from('child_tasks').insert({
+    child_id: input.childId,
+    task_id: task.id,
+    is_active: true,
+  });
+
+  if (childTaskError) {
+    // 補償刪除：goal 與 task 都不留孤兒
+    await supabase.from('long_term_goals').delete().eq('task_id', task.id);
+    await supabase.from('tasks').delete().eq('id', task.id);
+    throw new Error(childTaskError.message);
   }
 }
 

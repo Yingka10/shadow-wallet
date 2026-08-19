@@ -43,8 +43,14 @@ function queryResult<T>(result: { data: T[] | null; error: { message: string } |
   chain.order = jest.fn(() => chain);
   chain.limit = jest.fn(() => chain);
   chain.in = jest.fn(() => chain);
+  chain.not = jest.fn(() => chain);
   chain.then = jest.fn((resolve) => Promise.resolve(result).then(resolve)) as never;
   return chain;
+}
+
+/** 有 current version 的卡片會多查一次「孩子最後做了什麼」。 */
+function actionsQuery(rows: { plan_version_id: string; action: string; created_at: string }[]) {
+  return queryResult({ data: rows, error: null });
 }
 
 beforeEach(() => mockFrom.mockReset());
@@ -78,14 +84,20 @@ describe('SupabaseChildProposalService.listProposedForParent', () => {
     } as ChildProposalPlanVersion;
     const proposalsQuery = queryResult({ data: [withPlan], error: null });
     const versionsQuery = queryResult({ data: [version], error: null });
-    mockFrom.mockReturnValueOnce(proposalsQuery).mockReturnValueOnce(versionsQuery);
+    mockFrom
+      .mockReturnValueOnce(proposalsQuery)
+      .mockReturnValueOnce(versionsQuery)
+      .mockReturnValueOnce(actionsQuery([]));
 
     await expect(new SupabaseChildProposalService().listProposedForParent({
       familyId: 'family-1', childId: 'child-a',
-    })).resolves.toEqual([{ proposal: withPlan, currentPlanVersion: version }]);
+    })).resolves.toEqual([
+      { proposal: withPlan, currentPlanVersion: version, latestChildAction: null },
+    ]);
 
     expect(mockFrom.mock.calls).toEqual([
       ['child_proposals'], ['child_proposal_plan_versions'],
+      ['child_proposal_status_events'],
     ]);
     expect(versionsQuery.in).toHaveBeenCalledWith('id', ['version-1']);
     expect(versionsQuery.select).toHaveBeenCalledWith('*');
@@ -96,11 +108,78 @@ describe('SupabaseChildProposalService.listProposedForParent', () => {
     const wrong = { id: 'version-1', proposal_id: 'another-proposal' } as ChildProposalPlanVersion;
     mockFrom
       .mockReturnValueOnce(queryResult({ data: [withPlan], error: null }))
-      .mockReturnValueOnce(queryResult({ data: [wrong], error: null }));
+      .mockReturnValueOnce(queryResult({ data: [wrong], error: null }))
+      .mockReturnValueOnce(actionsQuery([]));
 
     await expect(new SupabaseChildProposalService().listProposedForParent({
       familyId: 'family-1', childId: 'child-a',
-    })).resolves.toEqual([{ proposal: withPlan, currentPlanVersion: null }]);
+    })).resolves.toEqual([
+      { proposal: withPlan, currentPlanVersion: null, latestChildAction: null },
+    ]);
+  });
+
+  // ── P1-FINAL：孩子上一輪做了什麼 ──────────────────────────────────────
+  //
+  // 「他說可以了，還差一項」與「他想再調整」都會把提案送回 proposed，
+  // 而且留在同一個版本上 —— 版本資料裡分不出來，只有 action 分得出來。
+
+  it('讀回這一版上孩子最後一次的回覆語意', async () => {
+    const withPlan = { ...PROPOSAL, current_plan_version_id: 'version-2' };
+    const version = { id: 'version-2', proposal_id: PROPOSAL.id } as ChildProposalPlanVersion;
+    const events = actionsQuery([
+      { plan_version_id: 'version-2', action: 'accepted_shared_terms_pending_more', created_at: '2026-08-14T10:00:00Z' },
+      { plan_version_id: 'version-2', action: 'requested_shared_term_changes', created_at: '2026-08-13T10:00:00Z' },
+    ]);
+    mockFrom
+      .mockReturnValueOnce(queryResult({ data: [withPlan], error: null }))
+      .mockReturnValueOnce(queryResult({ data: [version], error: null }))
+      .mockReturnValueOnce(events);
+
+    await expect(new SupabaseChildProposalService().listProposedForParent({
+      familyId: 'family-1', childId: 'child-a',
+    })).resolves.toEqual([{
+      proposal: withPlan,
+      currentPlanVersion: version,
+      latestChildAction: 'accepted_shared_terms_pending_more',
+    }]);
+
+    // 以版本為鍵，不是提案：第一輪的回覆不可以貼到第二輪那一版上。
+    expect(events.in).toHaveBeenCalledWith('plan_version_id', ['version-2']);
+    expect(events.not).toHaveBeenCalledWith('action', 'is', null);
+    expect(events.order).toHaveBeenCalledWith('created_at', { ascending: false });
+  });
+
+  it('事件讀不到就當沒有，不讓一句附註把家長的主流程擋掉', async () => {
+    const withPlan = { ...PROPOSAL, current_plan_version_id: 'version-2' };
+    const version = { id: 'version-2', proposal_id: PROPOSAL.id } as ChildProposalPlanVersion;
+    mockFrom
+      .mockReturnValueOnce(queryResult({ data: [withPlan], error: null }))
+      .mockReturnValueOnce(queryResult({ data: [version], error: null }))
+      .mockReturnValueOnce(queryResult({ data: null, error: { message: '讀不到' } }));
+
+    await expect(new SupabaseChildProposalService().listProposedForParent({
+      familyId: 'family-1', childId: 'child-a',
+    })).resolves.toEqual([
+      { proposal: withPlan, currentPlanVersion: version, latestChildAction: null },
+    ]);
+  });
+
+  it('legacy 轉換沒有 action，不會被誤讀成某一種回覆', async () => {
+    const withPlan = { ...PROPOSAL, current_plan_version_id: 'version-2' };
+    const version = { id: 'version-2', proposal_id: PROPOSAL.id } as ChildProposalPlanVersion;
+    mockFrom
+      .mockReturnValueOnce(queryResult({ data: [withPlan], error: null }))
+      .mockReturnValueOnce(queryResult({ data: [version], error: null }))
+      .mockReturnValueOnce(queryResult({
+        data: [{ plan_version_id: 'version-2', action: null, created_at: '2026-08-14T10:00:00Z' }],
+        error: null,
+      }));
+
+    await expect(new SupabaseChildProposalService().listProposedForParent({
+      familyId: 'family-1', childId: 'child-a',
+    })).resolves.toEqual([
+      { proposal: withPlan, currentPlanVersion: version, latestChildAction: null },
+    ]);
   });
 
   it('不在 client 端撈全部狀態後過濾，draft/active/closed 由 query 排除', async () => {
