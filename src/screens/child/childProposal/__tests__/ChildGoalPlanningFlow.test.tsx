@@ -483,26 +483,23 @@ describe('§14 「我想改一下」不是打開一張表單', () => {
 });
 
 describe('P6｜needs_choice 與 ready 的視覺還原', () => {
-  it('步驟徽章跟著實際跑過的輪數走，不是寫死的 2／4——只跑 1 輪就到 ready 時分母不會硬湊成 4', async () => {
+  it('步驟徽章是固定三段，不跟著實際 AI round 數變動——只跑 1 輪就到 ready 一樣是 2/3 → 3/3', async () => {
     // 開場（不帶 response 的第 1 輪）直接回 CHOICE，選完的第 2 輪直接回 READY——
-    // 全程只有 2 輪，ready 不該出現「4」，因為根本沒有第 3、4 輪發生過。
+    // 全程只有 2 輪，畫面上仍然是「第 2 段」，不會因為輪數少就把分母也跟著改小。
     const h = harness([CHOICE, READY]);
     const view = await openWith(h, 'want_options');
 
     await waitFor(() => expect(view.getByTestId('planning-choice')).toBeTruthy());
-    // 分母是架構上限（開場 + 最多 3 輪 = 4）：還不知道最後會停在第幾輪。
-    expect(view.getByText('步驟 2 / 4')).toBeTruthy();
+    expect(view.getByText('步驟 2 / 3')).toBeTruthy();
 
     fireEvent.press(view.getByTestId('planning-option-option-1'));
     fireEvent.press(view.getByTestId('planning-choice-confirm'));
 
     await waitFor(() => expect(view.getByTestId('planning-ready')).toBeTruthy());
-    // ready 是終點：分母換成自己（走到底＝全部填滿），不是「2 直接跳成 4」。
     expect(view.getByText('步驟 3 / 3')).toBeTruthy();
-    expect(view.queryByText('步驟 4 / 4')).toBeNull();
   });
 
-  it('真的問滿 3 輪才到 ready 時，步驟數字才會走到 4／4', async () => {
+  it('AI 中間多問一輪 clarification，仍然停在第 2 段——不會多長出第 3、4 步', async () => {
     const h = harness([CLARIFICATION, CHOICE, READY]);
     const view = await openWith(h, 'want_options');
 
@@ -510,14 +507,16 @@ describe('P6｜needs_choice 與 ready 的視覺還原', () => {
     fireEvent.changeText(view.getByTestId('planning-answer-input'), '我想把英文口說變好');
     fireEvent.press(view.getByTestId('planning-answer-next'));
 
+    // 這已經是第 2 輪對話（開場 + clarification 回答），但仍然是「一起想怎麼開始」
+    // 這個概念階段，畫面數字不變，還是 2/3。
     await waitFor(() => expect(view.getByTestId('planning-choice')).toBeTruthy());
-    expect(view.getByText('步驟 3 / 4')).toBeTruthy();
+    expect(view.getByText('步驟 2 / 3')).toBeTruthy();
 
     fireEvent.press(view.getByTestId('planning-option-option-1'));
     fireEvent.press(view.getByTestId('planning-choice-confirm'));
 
     await waitFor(() => expect(view.getByTestId('planning-ready')).toBeTruthy());
-    expect(view.getByText('步驟 4 / 4')).toBeTruthy();
+    expect(view.getByText('步驟 3 / 3')).toBeTruthy();
   });
 
   it('「我有自己的方式」兩行文案都在，不是單行「我自己想」', async () => {

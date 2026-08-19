@@ -48,7 +48,6 @@ import {
 } from '../../../lib/childPlanning';
 // 直接指向這一支，不走 barrel（barrel 沒有重新匯出這個常數，加一個很小的
 // 直接 import 比為了一個常數改動 barrel 的匯出面安全）。
-import { CHILD_GOAL_PLANNING_MAX_ROUNDS } from '../../../lib/childPlanning/types';
 import { PLANNING_COPY, formatPlanningStep } from './copy';
 
 // ---------------------------------------------------------------------------
@@ -130,6 +129,24 @@ const SUPPORT_BY_CHOICE: Record<OpeningChoice, ChildPlanningSupportPreference> =
 // P6 視覺共用元件 —— 只用在 needs_choice 與 ready 這兩個 capture state。
 // 其餘畫面（開場／等待／澄清／我自己想／逾時）維持原樣，不在這輪範圍內。
 // ---------------------------------------------------------------------------
+
+/**
+ * 孩子端看到的固定三段：
+ *   1｜說出我想做的事（開場）
+ *   2｜一起想怎麼開始（needs_clarification／needs_choice／自己寫，不管
+ *      AI 中間多問幾輪，畫面上都還是「第 2 段」）
+ *   3｜看看整理好的計畫（ready）
+ *
+ * ⚠️ 這是 presentation semantics，跟實際 AI round 數脫鉤。之前用
+ *    session.responses.length 動態算過（needs_choice 用架構上限
+ *    CHILD_GOAL_PLANNING_MAX_ROUNDS 當分母、ready 用自己當分母），
+ *    canonical 路線會出現「步驟 2/4 → 步驟 3/3」——分母從 4 變 3，
+ *    視覺上像步驟被吃掉。固定三段就不會有這個問題：AI 多問一輪
+ *    只是仍然停在第 2 段，畫面數字不會變。
+ */
+const CHILD_PLANNING_TOTAL_STEPS = 3;
+const CHILD_PLANNING_STEP_CHOOSING = 2;
+const CHILD_PLANNING_STEP_READY = 3;
 
 /**
  * 頁首的步驟徽章：分段進度條 ＋ 純文字步驟數。
@@ -588,24 +605,6 @@ export default function ChildGoalPlanningFlow({
   // ── 對話中 ──────────────────────────────────────────────────────────────
   const result = session.latestResult;
 
-  /**
-   * 目前是第幾步（P6 §1 進度條用，只給 needs_choice／ready 這兩個 capture
-   * state）。
-   *
-   * ⚠️ 不能寫死 2／4——這場對話可能 1 輪就到 ready，也可能問到第 3 輪，
-   *    寫死的話會出現「明明只跳了一輪，數字卻從 2 跳到 4」這種看起來
-   *    像算錯的情況（P6 視覺回饋抓到的正是這個）。
-   *
-   *    session.responses 是「目前為止已經完成、而且帶著孩子回答的輪數」；
-   *    第一輪（開場直接叫的那一輪）沒有 response，所以真正跑過的輪數要
-   *    再 +1。currentStep 是「開場（1）＋ 已經跑過的輪數」。
-   */
-  const roundsCompleted = session.responses.length + 1;
-  const currentStep = 1 + roundsCompleted;
-  // 進行中（needs_choice／needs_clarification）用架構上限（開場 + 最多
-  // CHILD_GOAL_PLANNING_MAX_ROUNDS 輪）當分母，因為還不知道最後會停在第幾輪。
-  const inProgressTotalSteps = 1 + CHILD_GOAL_PLANNING_MAX_ROUNDS;
-
   // 孩子自己寫怎麼開始。三輪問完、逾時、或他在等待中按了「先不等」都走這裡。
   if (writingOwn) {
     return (
@@ -707,7 +706,7 @@ export default function ChildGoalPlanningFlow({
     const chosen = result.options.find((o) => o.id === chosenOptionId) ?? null;
     return (
       <ScrollView testID="planning-choice" contentContainerStyle={styles.body}>
-        <ProgressHeader step={currentStep} totalSteps={inProgressTotalSteps} />
+        <ProgressHeader step={CHILD_PLANNING_STEP_CHOOSING} totalSteps={CHILD_PLANNING_TOTAL_STEPS} />
         <View style={styles.headerRow}>
           <View style={styles.headerCopy}>
             {/* 標題直接用 AI 回來的 question——本來就是依 goal 動態生成，
@@ -776,9 +775,8 @@ export default function ChildGoalPlanningFlow({
   if (result?.status === 'ready') {
     return (
       <ScrollView testID="planning-ready" contentContainerStyle={styles.body}>
-        {/* ready 是終點——分母用 currentStep 自己，畫面上永遠是「走到底了」
-            （全部 segment 填滿），不是用架構上限硬湊出「4/4」。 */}
-        <ProgressHeader step={currentStep} totalSteps={currentStep} />
+        {/* ready 是第三段的終點，畫面上永遠是「走到底了」（全部 segment 填滿）。 */}
+        <ProgressHeader step={CHILD_PLANNING_STEP_READY} totalSteps={CHILD_PLANNING_TOTAL_STEPS} />
         <View style={styles.headerRow}>
           <View style={styles.headerCopy}>
             <Text style={styles.question}>{PLANNING_COPY.ready.title}</Text>
