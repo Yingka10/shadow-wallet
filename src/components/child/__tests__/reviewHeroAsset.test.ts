@@ -20,14 +20,13 @@ describe('review hero asset', () => {
     expect(Array.isArray(REVIEW_HERO_ASSET)).toBe(false);
   });
 
-  it('顯示寬度維持在設計指定的 94–106px', () => {
-    expect(REVIEW_HERO_ART_WIDTH).toBeGreaterThanOrEqual(94);
-    expect(REVIEW_HERO_ART_WIDTH).toBeLessThanOrEqual(106);
+  it('顯示寬度維持在 CHILD-REVIEW-V2-COMPACT-VIEWPORT 收緊後的 82–88px', () => {
+    expect(REVIEW_HERO_ART_WIDTH).toBeGreaterThanOrEqual(82);
+    expect(REVIEW_HERO_ART_WIDTH).toBeLessThanOrEqual(88);
   });
 
-  it('窄螢幕降到 84–92，不會縮回原本那顆裝飾小芽的尺寸', () => {
-    expect(REVIEW_HERO_ART_WIDTH_COMPACT).toBeGreaterThanOrEqual(84);
-    expect(REVIEW_HERO_ART_WIDTH_COMPACT).toBeLessThanOrEqual(92);
+  it('窄螢幕比正常寬度再小一截，不會縮回原本那顆裝飾小芽的尺寸', () => {
+    expect(REVIEW_HERO_ART_WIDTH_COMPACT).toBeGreaterThanOrEqual(60);
     expect(REVIEW_HERO_ART_WIDTH_COMPACT).toBeLessThan(REVIEW_HERO_ART_WIDTH);
   });
 

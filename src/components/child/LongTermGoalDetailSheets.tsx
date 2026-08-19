@@ -725,7 +725,7 @@ export default function LongTermGoalDetailSheets({
         />
         <View
           accessibilityViewIsModal
-          style={styles.sheet}
+          style={[styles.sheet, activeSheet === 'review' && styles.sheetReviewExpanded]}
         >
           {BARE_HEADER_SHEETS.includes(activeSheet) ? (
             /*
@@ -792,6 +792,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.13,
     shadowRadius: 16,
     elevation: 12,
+  },
+  // CHILD-REVIEW-V2-COMPACT-VIEWPORT：只有 Review 這張 sheet 提高——目標是
+  // 一般手機 viewport 能同時看到完整 Step 1 + Step 2，其他 sheet（menu／
+  // details／record／adjustment）維持原本的 86%，不連帶跟著長高。
+  sheetReviewExpanded: {
+    maxHeight: '93%',
   },
   bareHeader: {
     paddingTop: 10,

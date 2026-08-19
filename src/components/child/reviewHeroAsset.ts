@@ -30,14 +30,19 @@ export const REVIEW_HERO_ASSET: ImageSourcePropType =
  */
 export const REVIEW_HERO_ASPECT = 1220 / 1289;
 
-/** 顯示寬度（設計指定 94–106px）。 */
-export const REVIEW_HERO_ART_WIDTH = 100;
+/**
+ * 顯示寬度。CHILD-REVIEW-V2-COMPACT-VIEWPORT 從 100px 收緊到 82–88px，
+ * 換到 Step 1 + Step 2 要用的直向空間——插圖還在，只是不再是版面裡最高
+ * 的一塊。
+ */
+export const REVIEW_HERO_ART_WIDTH = 84;
 
 /**
  * 窄螢幕的寬度。降是為了不擠掉 evidence，但**不會**縮回原本那顆
- * 30–40px 的裝飾小芽 —— 那樣 hero 就沒有存在感了。
+ * 30–40px 的裝飾小芽 —— 那樣 hero 就沒有存在感了。跟正常寬度維持同一個
+ * 縮小比例。
  */
-export const REVIEW_HERO_ART_WIDTH_COMPACT = 88;
+export const REVIEW_HERO_ART_WIDTH_COMPACT = 74;
 
 /** 低於這個寬度就用 compact 尺寸。 */
 export const REVIEW_HERO_COMPACT_BREAKPOINT = 360;

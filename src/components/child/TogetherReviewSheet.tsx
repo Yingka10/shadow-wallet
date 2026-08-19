@@ -581,8 +581,9 @@ function ChoiceTile({
         </View>
       ) : null}
       {/* 圖示直接站在 tile 上。原本包一圈圓底，等於把它壓成一個小色塊 ——
-          辨識不出來是哪一株芽，四格看起來就都一樣。 */}
-      <TileGlyph name={icon} selected={selected} />
+          辨識不出來是哪一株芽，四格看起來就都一樣。
+          size=36：CHILD-REVIEW-V2-COMPACT-VIEWPORT 從預設 40 收到 34–38。 */}
+      <TileGlyph name={icon} selected={selected} size={36} />
       <Text style={[styles.tileLabel, selected && styles.tileLabelSelected]}>
         {label}
       </Text>
@@ -862,15 +863,17 @@ const styles = StyleSheet.create({
     lineHeight: 38,
     fontWeight: '900',
     letterSpacing: 0.3,
-    marginBottom: 10,
+    marginBottom: 6,
   },
 
+  // CHILD-REVIEW-V2-COMPACT-VIEWPORT：evidence 區塊的垂直留白收緊，字級
+  // 不動——收的是 padding／margin，不是正文可讀性。
   evidencePill: {
     alignSelf: 'flex-start',
     backgroundColor: Colors.cream100,
     borderRadius: 15,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 7,
   },
   evidenceText: {
     color: Colors.fgSecondary,
@@ -878,7 +881,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   evidenceFact: {
-    marginTop: 8,
+    marginTop: 5,
     marginLeft: 4,
     color: Colors.fgMuted,
     fontSize: 13,
@@ -886,12 +889,12 @@ const styles = StyleSheet.create({
   },
 
   // ── Step ──────────────────────────────────────────────────────────────
-  stepBlock: { marginTop: 20 },
+  stepBlock: { marginTop: 13 },
   stepHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 11,
-    marginBottom: 15,
+    marginBottom: 9,
   },
   stepMarker: {
     width: 30,
@@ -916,7 +919,7 @@ const styles = StyleSheet.create({
   },
 
   journeyCue: {
-    marginTop: 22,
+    marginTop: 13,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -937,24 +940,27 @@ const styles = StyleSheet.create({
   journeySprout: { opacity: 0.85 },
 
   // ── Tile ──────────────────────────────────────────────────────────────
+  // CHILD-REVIEW-V2-COMPACT-VIEWPORT：grid gap／tile 高度收緊，touch target
+  // 仍然遠大於最小可點尺寸（44px）——minHeight 104–112 是給整顆 tile，不是
+  // 卡在邊界。
   tileGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 11,
+    gap: 9,
   },
   tile: {
     // 兩欄。小裝置文字放不下時 flexWrap 會自然掉成一欄，不縮字。
     flexGrow: 1,
     flexBasis: '46%',
     minWidth: 150,
-    minHeight: 132,
+    minHeight: 108,
     borderRadius: 18,
     borderWidth: 1.5,
     paddingHorizontal: 12,
-    paddingVertical: 18,
+    paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
+    gap: 8,
   },
   tileResting: {
     borderColor: Colors.cream200,
