@@ -19,19 +19,24 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import {
   CLAIM_PERIOD_LABEL_ZH,
+  buildGrowthLines,
   computeFallbackRecurrenceSuggestion,
   computeFallbackScheduleSuggestion,
   containsArabicDigit,
   formatWeekdaysZh,
+  GROWTH_LINE_LABEL,
+  pickFocusLine,
   validateRecurrenceSuggestion,
   validateScheduleSuggestion,
   weeklyFallbackForced,
   WEEKLY_FALLBACK_FLAG,
+  type CategoryWeeklyFacts,
   type RecurrenceCandidate,
   type RecurrenceSuggestion,
   type ScheduleCandidate,
   type ScheduleClaimPeriod,
   type ScheduleSuggestion,
+  type WeeklyGrowthLine,
 } from './validators.ts';
 
 const corsHeaders = {
@@ -41,8 +46,11 @@ const corsHeaders = {
 
 const GEMINI_KEY = Deno.env.get('GEMINI_API_KEY')!;
 // gemini-2.0-flash has free-tier quota 0 on this key (429 RESOURCE_EXHAUSTED);
-// gemini-flash-latest is the model confirmed to return 200 on this key's free tier.
-const GEMINI_MODEL = 'gemini-flash-latest';
+// gemini-flash-latest (Gemini 3.7 Flash) hit its free-tier RPD limit on 2026-08-20
+// (28/20 requests). gemini-3.6-flash had quota but consistently exceeded the
+// GEMINI_TIMEOUT_MS budget below. Switched to gemini-3.5-flash-lite (lower
+// latency) same day. Re-check quota/latency before switching back.
+const GEMINI_MODEL = 'gemini-3.5-flash-lite';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_KEY}`;
 
 type TaskCategory = 'A' | 'B' | 'C' | 'D';
@@ -55,6 +63,17 @@ type WeeklyContext = {
   baumrindType: string | null;
   weekStart: string;
   taskCounts: Record<TaskCategory, { done: number; total: number }>;
+  /**
+   * 這週實際完成過的任務名稱，依類別分組、去重。給 Gemini 用來把
+   * motivation_observation 這類欄位寫具體——「孩子這週在『主動掃地』上很投入」
+   * 比「能感受到內心的成長與踏實」更站得住腳，因為前者指得出是哪件事。
+   * 只放名稱（字串），不放次數，所以不會踩到「不能出現阿拉伯數字」那條規則。
+   */
+  completedTaskNamesByCategory: Record<TaskCategory, string[]>;
+  /** 這週各成長線的結構化事實 + 已經算好的 status。純資料，AI 不參與這一步。 */
+  growthLines: WeeklyGrowthLine[];
+  /** 從 growthLines 挑出來、值得一起討論的一條；全部 stable 時是 undefined。 */
+  focusLineKey: TaskCategory | undefined;
   coinIncome: number;
   coinIncomeCount: number;
   coinSpend: number;
@@ -120,7 +139,16 @@ async function callGemini(prompt: string): Promise<string> {
 }
 
 type GeminiInsightResult = {
+  /** 本週重點——一句 headline，不是段落。先事實、再判斷（見 prompt 規則）。 */
   motivation_observation: string;
+  /**
+   * 針對 ctx.growthLines 裡「不是 stable」的線，AI 可以把 deterministic 的
+   * summary 改寫得更自然——key 是 category（A/B/C/D），沒被改寫的線維持
+   * buildGrowthLines() 算出來的規則版句子。stable 的線不需要、也不應該被改寫。
+   */
+  growthLineSummaries: Record<string, string>;
+  /** 只針對 focusLineKey 給的最小下一步；沒有 focusLineKey 時應該是空字串。 */
+  nextStep: string;
   dialogue: string;
   suggestions: Array<{
     body: string;
@@ -157,7 +185,11 @@ async function generateInsight(ctx: WeeklyContext): Promise<GeminiInsightResult>
     D: '學習與成長的目標',
   };
   const catLines = (['A', 'B', 'C', 'D'] as TaskCategory[])
-    .map(cat => `- ${CAT_NAMES[cat]}：這週完成 ${ctx.taskCounts[cat].done} 項，本來安排了 ${ctx.taskCounts[cat].total} 項`)
+    .map(cat => {
+      const names = ctx.completedTaskNamesByCategory[cat];
+      const namesPart = names.length > 0 ? `，實際完成的事包括：${names.join('、')}` : '';
+      return `- ${CAT_NAMES[cat]}：這週完成 ${ctx.taskCounts[cat].done} 項，本來安排了 ${ctx.taskCounts[cat].total} 項${namesPart}`;
+    })
     .join('\n');
 
   const styleLabel = BAUMRIND_LABELS[ctx.baumrindType ?? ''] ?? '沒有特別設定';
@@ -182,8 +214,22 @@ async function generateInsight(ctx: WeeklyContext): Promise<GeminiInsightResult>
     ? `\n【這週有任務排定的天數比實際做到的天數多】\n${recurrenceCandidateLines}\n`
     : '';
 
+  // 每條成長線的結構化事實——已經算好 status，AI 不判斷、不重算，只負責改寫措辭。
+  const growthLineLines = ctx.growthLines
+    .map(l => `- [${l.key}] ${l.label}（status=${l.status}）：${l.facts.join('；')}`)
+    .join('\n');
+  const growthLinesSection = ctx.growthLines.length > 0
+    ? `\n【這週各條成長線的事實——status 已經算好，不是你決定的，你只負責把它寫得自然】\n${growthLineLines}\n`
+    : '\n【這週沒有任何一條成長線有紀錄，還沒有活動可以整理】\n';
+  const focusLine = ctx.growthLines.find(l => l.key === ctx.focusLineKey);
+  const focusLineSection = focusLine
+    ? `\n【本週的 focus line 已經選好，是「${focusLine.label}」（原因：${focusLine.status === 'needs_discussion' ? '沒達到平常節奏，而且常常需要提醒' : '沒達到平常節奏'}）——nextStep 只能針對這一條寫，其他線不用給 nextStep】\n`
+    : '\n【這週所有成長線都是 stable，沒有 focus line——nextStep 請填空字串，不要硬找一條來講】\n';
+
   const prompt = `你是一位溫柔、細心的親職陪伴顧問，正在幫一位家長看懂孩子這一週的狀況。
 你的讀者是「家長本人」，不是專業人士，所以說話要像跟一位朋友聊他的孩子一樣自然、有溫度。
+
+GrowBook 的核心價值：同一個孩子同時有好幾條不同的成長線。你的工作是「先把每一條的事實整理清楚，再幫家長看出這週真正值得注意的是哪一條」——不是每一條都要給建議，多數線穩定的時候，直接說「其他安排先維持即可」就好。
 
 【這週孩子的情況】（以下是給你參考的背景，請不要原封不動抄進回覆裡）
 - 孩子年齡大約：${ctx.ageGroup} 歲
@@ -192,19 +238,33 @@ async function generateInsight(ctx: WeeklyContext): Promise<GeminiInsightResult>
 - 這週各方面的完成情況：
 ${catLines}
 - 成長幣：這週賺到 ${ctx.coinIncome} 枚（來自 ${ctx.coinIncomeCount} 次），花掉 ${ctx.coinSpend} 枚（${ctx.coinSpendCount} 次兌換）
-${scheduleSection}${recurrenceSection}
+${scheduleSection}${recurrenceSection}${growthLinesSection}${focusLineSection}
 【非常重要：說話方式】
-1. 全程用溫暖、鼓勵、體貼的語氣，多看見孩子的努力，少批評。
+1. 語氣溫和但**偏觀察式，不是稱讚式**。不要寫「有好好地倒垃圾、洗碗」這種幼兒園式稱讚，改寫成「倒垃圾、洗碗這週都有持續完成紀錄」這種系統整理式的觀察句——講的是「發生了什麼、看得出什麼」，不是「你好棒」。
 2. 用生活化的白話，想像你在跟一位不熟教育理論的家長講話。
 3. 絕對不要出現任何專有名詞或系統代號，包括但不限於：
    「Task-A / A 類 / B 類」「完成率」「動機類型」「教養風格」「里程碑」「幣值流動」這類詞。
    例如：不要說「里程碑」，改說「一個小目標」；不要說「完成率偏低」，改說「這週做起來比較吃力」。
-4. 內容要具體、要有畫面感，避免空泛的場面話；可以自然帶到上面看到的實際情況。
-5. **motivation_observation、dialogue、affirmations、suggestions 這幾個給人看的欄位，絕對不要出現任何阿拉伯數字**（次數、天數、幾項、百分比都算）——這些數字畫面上其他地方會用真實資料顯示，你這裡寫的數字沒辦法保證跟畫面對得上，一律用「這幾天」「好幾次」「大部分時候」這種不精確但不會出錯的講法代替。只有 schedule_suggestion／recurrence_suggestion 這兩個欄位例外，那裡才需要、也才可以寫具體數字。
+4. **motivation_observation（headline）要寫成三段，各自負責不同的事，不能只是一句空泛結論：**
+   - **第一段：總覽判斷**——這週大致穩不穩定、有沒有一條特別值得留意（如果有 focus line 就直接點名）。
+   - **第二段：穩定線的具體依據**——**最多只挑 1-2 條 stable 線當代表**，不要把每一條都寫進去（清單裡標記 stable 的線可能不只 1-2 條，其餘的留給下面的 growth-line 卡片顯示，這裡不用交代完）。用「實際做的事」清單裡的**真實任務名稱**當佐證，寫成類似「OO、OO這週都有持續完成紀錄」；如果清單有給「提醒後才開始」的訊號、而某條 stable 線完全沒有這個訊號，可以多補一句「多數不需要提醒就能完成」這類話讓「穩定」有根據——但沒有這個訊號就不要編。沒有任何 stable 線時，這段可以省略。
+   - **第三段：focus line 的具體診斷 + 下一步**——這段是全文重點，**必須說清楚問題出在哪一層，不能只說「節奏慢了」「需要加油」這種模糊話**：
+     · 如果 focus line 是 needs_discussion（清單裡有給「提醒後才開始」的次數），要點出「主要卡在『開始』」這個判斷——意思是孩子做得到、但常常要提醒才願意動手，這是啟動的問題、不是能力或意願的問題，用詞上要讓家長讀出這個區別（例如：「目前主要卡在『開始』，完成的部分不差，但還是需要提醒才會進入任務」）。
+     · 如果 focus line 是 watch（沒有「提醒」訊號，純粹是完成次數比目標安排少），就直說是「這週做的次數比原本安排少一些」，不要硬套「需要提醒」這種清單裡沒給的訊號上去。
+     · 段落最後帶一句下一步方向（例如「其他安排先維持即可，下週可以先看看目前的開始時段或方式是不是合適」）。
+   - **全部（或大部分）線都是 stable、沒有 focus line 時**，不要硬湊三段、更不要為了「一定要有建議」硬編一句「可以再多鼓勵孩子」「可以嘗試新方法」這種空話——直接明確講清楚，例如「這週各面向大致維持原本節奏，目前沒有特別需要調整的地方」，一句就好，nextStep 對應填空字串。
+8. **只能根據清單裡給的 facts 做判斷，不能自己加因果或心理推論**。清單只給了「completion count / target」「reminded 次數」這兩種事實，禁止在 motivation_observation、growthLineSummaries 裡寫這些清單沒有支持的話：
+   「有好好地……」「很棒」「很令人驚喜」「很投入」「很願意」「變得更有責任感」「很自律」「已經養成」「已經內化」「節奏有點慢」「表現很好」「更努力一點就好」——這些詞要嘛是空泛評價、要嘛是清單資料支持不了的動機/人格推論，一律不能用。
+   優先改用資料撐得住的講法：「有持續完成紀錄」「多數不需要提醒」「較常需要提醒」「目前主要卡在……」「這週沒有明顯需要調整的地方」「這一條較值得一起看看」。
+5. **growthLineSummaries 只能改寫上面清單裡真的列出來的線，key 用 A/B/C/D，不能發明清單以外的線，也不能改變 status（那是算好的，不是你決定）**。改寫時一樣要點出清單裡的具體事實（例如提到的任務名稱、或「常常需要提醒」這種已給的訊號），語氣一樣要偏觀察式、不要用「有好好地」這種稱讚語氣，不能自己加一個沒出現過的原因。
+6. **nextStep 最多給一件事、90 字內，只能對應 focus line 給的事實**，不可以是「多陪伴孩子」「保持耐心」這種放諸四海皆準的通用教養建議，措辭跟上面第三段的下一步保持一致。沒有 focus line 就填空字串，不要硬湊。
+7. **motivation_observation、growthLineSummaries、nextStep、dialogue、affirmations、suggestions 這幾個給人看的欄位，絕對不要出現任何阿拉伯數字**（次數、天數、幾項、百分比都算）——這些數字畫面上其他地方（growthLines 的 facts）會用真實資料顯示，你這裡寫的數字沒辦法保證跟畫面對得上，一律用不精確但不會出錯的講法代替。**但「不精確」不代表可以誇大或縮小**：facts 給的是「1 次」提醒，就只能用「有一次」「偶爾」這種對應單一次數的講法，不能寫成「好幾次」「常常」「這幾天都」——那些字眼只能用在 facts 真的給多次訊號的時候。方向寧可寫得保守（少講）也不要誇大（多講），因為誇大等於編造家長查不到根據的訊息。只有 schedule_suggestion／recurrence_suggestion 這兩個欄位例外，那裡才需要、也才可以寫具體數字。
 
 請只回傳 JSON（前後不要有任何其他文字或說明）：
 {
-  "motivation_observation": "給家長看的一段觀察，3~5句、溫暖具體，說說這週孩子的狀態、看到的亮點、以及可以多留意的地方。像在跟家長分享，不要說教。不能包含任何數字。",
+  "motivation_observation": "本週重點，依照上面規則4寫成三段（總覽／穩定線依據／focus line 診斷+下一步），每段之間用換行分開，總長度約120~200字，不能包含任何數字，不能是空泛鼓勵文，不能是幼兒園式稱讚。",
+  "growthLineSummaries": {"A/B/C/D 其中幾個 key，只放上面清單裡真的列出來的線": "改寫過的一句話，不能包含任何數字"},
+  "nextStep": "只針對 focus line 的最小下一步，90字內，不能包含任何數字；沒有 focus line 就填空字串",
   "dialogue": "一段家長可以直接對孩子說出口的開場白（3~4句、90字內），用『我』的口吻，先真心肯定這週看到的一件具體小事，再用一個溫柔的開放式問題，邀請孩子聊聊還沒開始或覺得困難的部分。語氣像關心，不像檢討。不能包含任何數字。",
   "suggestions": [
     {"body": "給家長的貼心建議，40~60字、白話、可以馬上做，說明為什麼這樣做對孩子好，不能包含任何數字", "actionLabel": "按鈕文字（5字內）", "action": "adjust_reminder"},
@@ -268,8 +328,28 @@ ${scheduleSection}${recurrenceSection}
     ? parsed.affirmations.filter((a): a is string => typeof a === 'string' && !containsArabicDigit(a))
     : [];
 
+  // growthLineSummaries：只接受 key 真的出現在這週 growthLines 裡、且沒有數字的改寫。
+  // 亂編的 key、含數字的句子，一律不採用——保留 buildGrowthLines() 的規則版 summary。
+  const validKeys = new Set(ctx.growthLines.map(l => l.key));
+  const rawSummaries = parsed.growthLineSummaries;
+  const safeGrowthLineSummaries: Record<string, string> = {};
+  if (rawSummaries && typeof rawSummaries === 'object') {
+    for (const [key, value] of Object.entries(rawSummaries as Record<string, unknown>)) {
+      if (validKeys.has(key as TaskCategory) && typeof value === 'string' && value.trim() !== '' && !containsArabicDigit(value)) {
+        safeGrowthLineSummaries[key] = value;
+      }
+    }
+  }
+
+  // nextStep 只有在有 focus line 時才採信；沒有 focus line 卻硬給一句，一律丟掉。
+  const safeNextStep = ctx.focusLineKey && typeof parsed.nextStep === 'string' && !containsArabicDigit(parsed.nextStep)
+    ? parsed.nextStep
+    : '';
+
   return {
     motivation_observation: parsed.motivation_observation,
+    growthLineSummaries: safeGrowthLineSummaries,
+    nextStep: safeNextStep,
     dialogue: safeDialogue,
     suggestions: parsed.suggestions,
     affirmations: safeAffirmations,
@@ -288,33 +368,39 @@ ${scheduleSection}${recurrenceSection}
  */
 function computeFallbackInsight(ctx: WeeklyContext): GeminiInsightResult {
   const categories: TaskCategory[] = ['A', 'B', 'C', 'D'];
-  const totalDone = categories.reduce((s, c) => s + ctx.taskCounts[c].done, 0);
-  const totalTasks = categories.reduce((s, c) => s + ctx.taskCounts[c].total, 0);
-  const completionRate = totalTasks > 0 ? totalDone / totalTasks : 0;
 
   // Weakest category = lowest completion rate among categories with at least one task.
+  // 只用在 task_recommendations（既有功能，跟 growth line 分開），不影響 headline。
   const weakest = categories
     .filter(c => ctx.taskCounts[c].total > 0)
     .sort((a, b) =>
       (ctx.taskCounts[a].done / ctx.taskCounts[a].total) - (ctx.taskCounts[b].done / ctx.taskCounts[b].total))[0]
     ?? 'B';
 
-  const motivation_observation = totalTasks === 0
-    ? '這週還沒有任務紀錄，可以和孩子一起看看有沒有想嘗試的新任務。'
-    : completionRate >= 0.8
-      ? `這週完成了 ${totalDone}/${totalTasks} 項任務，表現穩定，是值得肯定的一週。`
-      : completionRate >= 0.5
-        ? `這週完成了 ${totalDone}/${totalTasks} 項任務，有進展但還有進步空間，可以聊聊卡關的地方。`
-        : `這週完成了 ${totalDone}/${totalTasks} 項任務，比較吃力，建議找時間了解孩子這週遇到的狀況。`;
+  // headline／dialogue／nextStep 現在跟其他線的邏輯共用同一份 growthLines/focusLineKey，
+  // AI 掛掉時也不會退回「這週完成了 X/Y 項任務」這種扁平句子——growth line 卡片本身
+  // （facts 都是真數字）已經把細節顯示出來了，這裡只需要一句總覽。
+  const focusLine = ctx.growthLines.find(l => l.key === ctx.focusLineKey);
+  const motivation_observation = ctx.growthLines.length === 0
+    ? '這週還沒有任務完成紀錄，可以和孩子一起看看想從哪件事開始。'
+    : focusLine
+      ? `這週多數安排大致穩定，「${focusLine.label}」這條線比較值得一起看看。`
+      : '這週各方面的安排大致穩定，其他安排先維持即可。';
 
-  const dialogue = totalTasks === 0
+  const dialogue = ctx.growthLines.length === 0
     ? '這週我們還沒開始記錄，我想聽聽看，有沒有你會想試試看的任務？我們可以一起挑一個。'
-    : completionRate >= 0.5
-      ? '這週我有看到你把好幾件事慢慢完成，這點很棒。想問問你，這週哪一件事做起來最順、哪一件比較卡？'
-      : '這週好像有點吃力，沒關係。我想聽你說說看，這週最難開始的是哪一段？我們一起想辦法。';
+    : focusLine
+      ? `我看到你這週在好幾件事上都有努力，「${focusLine.label}」那邊最近比較常需要提醒，想聽聽看是不是哪裡卡住了？`
+      : '這週我有看到你把好幾件事穩穩地做完，這點很棒，想聊聊還有沒有想試試看的新挑戰？';
+
+  const nextStep = focusLine
+    ? `下週可以先維持其他安排，針對「${focusLine.label}」一起確認時段或方式是不是需要調整。`
+    : '';
 
   return {
     motivation_observation,
+    growthLineSummaries: {},
+    nextStep,
     dialogue,
     suggestions: [
       { body: '確認提醒時間是否符合孩子的作息，太早或太晚都容易被忽略。', actionLabel: '調整提醒', action: 'adjust_reminder' },
@@ -329,7 +415,7 @@ function computeFallbackInsight(ctx: WeeklyContext): GeminiInsightResult {
     task_recommendations: [
       {
         category: weakest,
-        suggestion: `Task-${weakest} 這週完成率較低，可以和孩子討論是不是任務難度或時間安排需要調整。`,
+        suggestion: `「${GROWTH_LINE_LABEL[weakest]}」這週完成率較低，可以和孩子討論是不是任務難度或時間安排需要調整。`,
       },
     ],
     schedule_suggestion: computeFallbackScheduleSuggestion(ctx.scheduleCandidates),
@@ -367,7 +453,7 @@ async function processChild(
     supabase.from('child_tasks').select('task_id').eq('child_id', childId).eq('is_active', true),
     supabase
       .from('task_completions')
-      .select('task_id, coin_earned, completed_at')
+      .select('task_id, coin_earned, completed_at, start_mode')
       .eq('child_id', childId)
       .gte('completed_at', weekStartISO)
       .lt('completed_at', weekEndISO),
@@ -380,11 +466,12 @@ async function processChild(
 
   const [tasksRes, txRes, childRes, existingReportRes] = await Promise.all([
     taskIds.length > 0
-      ? supabase.from('tasks').select('id, name, category, claim_period, max_claims_per_period, day_type, recurrence_days').in('id', taskIds).eq('is_active', true)
+      ? supabase.from('tasks').select('id, name, category, claim_period, max_claims_per_period, day_type, recurrence_days, schedule_mode, weekly_frequency').in('id', taskIds).eq('is_active', true)
       : Promise.resolve({
           data: [] as {
             id: string; name: string; category: string; claim_period: string; max_claims_per_period: number;
             day_type: string; recurrence_days: number[] | null;
+            schedule_mode: string | null; weekly_frequency: number | null;
           }[],
           error: null,
         }),
@@ -419,11 +506,55 @@ async function processChild(
   for (const c of completions) {
     completionCountByTask.set(c.task_id, (completionCountByTask.get(c.task_id) ?? 0) + 1);
   }
+  const completedTaskNamesByCategory: Record<TaskCategory, string[]> = {
+    A: [], B: [], C: [], D: [],
+  };
+  // 這個類別「一週該做幾次」——只加總真的有 weekly_frequency 節奏的任務。
+  // 沒有任何這種任務的類別，weeklyTarget 維持 null（不用達標與否判斷這條線）。
+  const weeklyTargetByCategory: Record<TaskCategory, number | null> = {
+    A: null, B: null, C: null, D: null,
+  };
   for (const t of tasksRes.data ?? []) {
     const cat = t.category as TaskCategory;
     taskCounts[cat].total += 1;
-    if (completedIds.has(t.id)) taskCounts[cat].done += 1;
+    if (completedIds.has(t.id)) {
+      taskCounts[cat].done += 1;
+      completedTaskNamesByCategory[cat].push(t.name);
+    }
+    if (t.schedule_mode === 'weekly_frequency' && typeof t.weekly_frequency === 'number') {
+      weeklyTargetByCategory[cat] = (weeklyTargetByCategory[cat] ?? 0) + t.weekly_frequency;
+    }
   }
+
+  // 這週各類別完成紀錄裡，start_mode='reminded' 的筆數——用來分辨「沒做滿但都是
+  // 自己開始」跟「沒做滿而且常常要提醒」，兩者不該給一樣的 status。
+  const taskCategoryById = new Map<string, TaskCategory>(
+    (tasksRes.data ?? []).map(t => [t.id, t.category as TaskCategory]),
+  );
+  // 只有這些 task_id 有週目標——targetDone 只能算它們的完成次數，不能算同類別
+  // 裡沒有週目標的其他任務，否則「達標與否」會被無關任務的完成次數混進去。
+  const weeklyFrequencyTaskIds = new Set(
+    (tasksRes.data ?? []).filter(t => t.schedule_mode === 'weekly_frequency').map(t => t.id),
+  );
+  const remindedCountByCategory: Record<TaskCategory, number> = { A: 0, B: 0, C: 0, D: 0 };
+  const targetDoneByCategory: Record<TaskCategory, number> = { A: 0, B: 0, C: 0, D: 0 };
+  for (const c of completions as { task_id: string; start_mode: string | null }[]) {
+    const cat = taskCategoryById.get(c.task_id);
+    if (!cat) continue;
+    if (c.start_mode === 'reminded') remindedCountByCategory[cat] += 1;
+    if (weeklyFrequencyTaskIds.has(c.task_id)) targetDoneByCategory[cat] += 1;
+  }
+
+  const categoryFacts: CategoryWeeklyFacts[] = (['A', 'B', 'C', 'D'] as TaskCategory[]).map(cat => ({
+    category: cat,
+    done: taskCounts[cat].done,
+    weeklyTarget: weeklyTargetByCategory[cat],
+    targetDone: targetDoneByCategory[cat],
+    remindedCount: remindedCountByCategory[cat],
+    completedTaskNames: completedTaskNamesByCategory[cat],
+  }));
+  const growthLines = buildGrowthLines(categoryFacts);
+  const focusLineKey = pickFocusLine(growthLines);
 
   // 這週已經達到次數上限的任務 —— 值得問「要不要放寬」的候選。
   // 只讓 Gemini 從這份清單挑，不讓它自己生 taskId（見 validateScheduleSuggestion）。
@@ -486,12 +617,15 @@ async function processChild(
     baumrindType: parentRes.data?.baumrind_type ?? null,
     weekStart,
     taskCounts,
+    completedTaskNamesByCategory,
     coinIncome: earnTxs.reduce((s, t) => s + t.amount, 0),
     coinIncomeCount: earnTxs.length,
     coinSpend: Math.abs(redeemTxs.reduce((s, t) => s + t.amount, 0)),
     coinSpendCount: redeemTxs.length,
     scheduleCandidates,
     recurrenceCandidates,
+    growthLines,
+    focusLineKey,
   };
 
   let insight: GeminiInsightResult;
@@ -537,6 +671,13 @@ async function processChild(
 
   const allSuggestions = [...insight.suggestions, ...scheduleSuggestionEntry, ...recurrenceSuggestionEntry];
 
+  // AI（若可用）只被允許改寫 summary 這一句，key／status／facts 全部維持
+  // buildGrowthLines() 算好的版本——這是 deterministic 與 AI 分工的實際落地處。
+  const finalGrowthLines = growthLines.map(line => ({
+    ...line,
+    summary: insight.growthLineSummaries[line.key] ?? line.summary,
+  }));
+
   // Upsert weekly_reports.
   // The error MUST be checked: a swallowed write failure (missing unique index
   // for onConflict, RLS, bad column) would let processChild "succeed" while
@@ -551,6 +692,9 @@ async function processChild(
         suggestions: allSuggestions,
         affirmations: insight.affirmations,
         dialogue: insight.dialogue ?? '',
+        growth_lines: finalGrowthLines,
+        focus_line_key: focusLineKey ?? null,
+        next_step: insight.nextStep ?? '',
         used_fallback: usedFallback,
       },
       task_adjustments: {
