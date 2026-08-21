@@ -29,6 +29,7 @@ import {
   type LongTermGoalProgress,
   type ScheduleClaimPeriod,
   type SuggestionAction,
+  type WeeklyGrowthLine,
 } from '../../../hooks/useParentWeeklyReport';
 import {
   useParentMonthlyReport,
@@ -544,6 +545,33 @@ function DialogueCard({ childName, dialoguePrompt, aiReady }: {
   );
 }
 
+const GROWTH_STATUS_META: Record<WeeklyGrowthLine['status'], { label: string; color: string; tint: string }> = {
+  stable: { label: '穩定', color: ParentColors.leaf700, tint: ParentColors.tintLeaf },
+  watch: { label: '先觀察', color: ParentColors.clay500, tint: '#FAF1E7' },
+  needs_discussion: { label: '值得一起看看', color: ParentColors.plum500, tint: '#F4EBF0' },
+};
+
+/**
+ * 一條成長線的卡片。facts 只取第一條當摘要下面的佐證（deterministic 算好的，
+ * 不是 AI 掰的）——其餘 facts 不在這裡塞滿，避免資訊密度暴增，細節留給
+ * 「查看完整紀錄」那幾個分頁。
+ */
+function GrowthLineCard({ line, isFocus }: { line: WeeklyGrowthLine; isFocus: boolean }) {
+  const meta = GROWTH_STATUS_META[line.status];
+  return (
+    <View style={[s.growthLineCard, isFocus && s.growthLineCardFocus]}>
+      <View style={s.growthLineHeader}>
+        <Text style={s.growthLineLabel}>{line.label}</Text>
+        <View style={[s.growthLineBadge, { backgroundColor: meta.tint }]}>
+          <Text style={[s.growthLineBadgeText, { color: meta.color }]}>{meta.label}</Text>
+        </View>
+      </View>
+      <Text style={s.growthLineSummary}>{line.summary}</Text>
+      {line.facts[0] ? <Text style={s.growthLineFact}>{line.facts[0]}</Text> : null}
+    </View>
+  );
+}
+
 function CoinDeltaRow({ tone, label, amount, note }: {
   tone: 'in' | 'out';
   label: string;
@@ -1038,6 +1066,7 @@ export default function ParentWeeklyTablet() {
     childName, weekLabel, weekRange,
     timeSavedMin, selfStartedCount, remindedCount, afterDinnerCount, beforeBedCount,
     aiInsight, aiReady, dialoguePrompt, affirmations,
+    growthLines, focusLineKey, nextStep,
     activity, coinFlow, suggestions,
     moments, longTermGoals,
     taskRecords, coinRecords, timeSavingRecords, redemptionRecords,
@@ -1275,6 +1304,23 @@ export default function ParentWeeklyTablet() {
                   <Text style={s.aiFooterText}>AI 整理 · 供參考</Text>
                 </View>
               </View>
+
+              {growthLines.length > 0 && (
+                <View style={s.card}>
+                  <Text style={s.sectionTitle}>成長線摘要</Text>
+                  <View style={s.growthLineList}>
+                    {growthLines.map(line => (
+                      <GrowthLineCard key={line.key} line={line} isFocus={line.key === focusLineKey} />
+                    ))}
+                  </View>
+                  {focusLineKey && nextStep ? (
+                    <View style={s.nextStepBox}>
+                      <Text style={s.nextStepLabel}>下一步</Text>
+                      <Text style={s.nextStepText}>{nextStep}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              )}
 
               <View style={s.card}>
                 <Text style={s.sectionTitle}>本週紀錄概覽</Text>
@@ -1706,6 +1752,69 @@ const s = StyleSheet.create({
     paddingTop: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: ParentColors.borderMedium,
+  },
+  growthLineList: {
+    gap: 12,
+  },
+  growthLineCard: {
+    borderWidth: 1,
+    borderColor: ParentColors.borderSoft,
+    borderRadius: ParentRadii.lg,
+    padding: 16,
+    gap: 6,
+  },
+  growthLineCardFocus: {
+    borderColor: ParentColors.plum500,
+    borderWidth: 1.5,
+    backgroundColor: '#FBF6F8',
+  },
+  growthLineHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  growthLineLabel: {
+    fontFamily: ParentFonts.display,
+    fontSize: 15,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgPrimary,
+  },
+  growthLineBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 100,
+  },
+  growthLineBadgeText: {
+    fontSize: 12,
+    fontWeight: ParentFontWeights.semi,
+  },
+  growthLineSummary: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: ParentColors.fgSecondary,
+  },
+  growthLineFact: {
+    fontSize: 12.5,
+    color: ParentColors.fgMuted,
+  },
+  nextStepBox: {
+    marginTop: 16,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: ParentColors.borderMedium,
+    gap: 4,
+  },
+  nextStepLabel: {
+    fontSize: 12,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.plum500,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  nextStepText: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: ParentColors.fgSecondary,
   },
   weeklyOverviewGrid: {
     flexDirection: 'row',

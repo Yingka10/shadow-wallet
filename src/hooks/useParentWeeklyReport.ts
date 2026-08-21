@@ -105,6 +105,20 @@ function sanitizeSuggestions(raw: WeeklySuggestion[]): WeeklySuggestion[] {
   });
 }
 
+export type GrowthLineStatus = 'stable' | 'watch' | 'needs_discussion';
+
+/**
+ * 跟 Edge Function（generate-weekly-report/validators.ts）的 WeeklyGrowthLine
+ * 鏡射宣告——那邊是 Deno 檔案，這裡沒辦法直接 import，型別要保持一致。
+ */
+export type WeeklyGrowthLine = {
+  key: TaskCategory;
+  label: string;
+  status: GrowthLineStatus;
+  facts: string[];
+  summary: string;
+};
+
 export type GrowthMoment = {
   id: string;
   dateLabel: string;
@@ -181,6 +195,12 @@ export type ParentWeeklyReportData = {
   beforeBedCount: number;
   aiInsight: string;
   dialoguePrompt: string;
+  /** 這週的成長線卡片——deterministic 算好的 status/facts，AI 只改寫過 summary。空陣列＝這週還沒有任何一條線有活動。 */
+  growthLines: WeeklyGrowthLine[];
+  /** growthLines 裡值得強調的那一條；undefined＝這週沒有特別要討論的線。 */
+  focusLineKey: TaskCategory | undefined;
+  /** 只針對 focusLineKey 的最小下一步；沒有 focus line 時是空字串。 */
+  nextStep: string;
   activity: WeeklyActivityBar[];
   coinFlow: WeeklyCoinFlow;
   suggestions: WeeklySuggestion[];
@@ -416,6 +436,9 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
   const [afterDinnerCount, setAfterDinnerCount] = useState(0);
   const [beforeBedCount, setBeforeBedCount] = useState(0);
   const [aiInsight, setAiInsight] = useState(PENDING_INSIGHT);
+  const [growthLines, setGrowthLines] = useState<WeeklyGrowthLine[]>([]);
+  const [focusLineKey, setFocusLineKey] = useState<TaskCategory | undefined>(undefined);
+  const [nextStep, setNextStep] = useState('');
   const [suggestions, setSuggestions] = useState<WeeklySuggestion[]>(PENDING_SUGGESTIONS);
   const [affirmations, setAffirmations] = useState<string[]>(PENDING_AFFIRMATIONS);
   const [dialoguePrompt, setDialoguePrompt] = useState('');
@@ -596,6 +619,9 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
           suggestions?: WeeklySuggestion[];
           affirmations?: string[];
           dialogue?: string;
+          growth_lines?: WeeklyGrowthLine[];
+          focus_line_key?: TaskCategory | null;
+          next_step?: string;
         } | null;
         task_adjustments: { abandonment_tier?: 1 | 2 | 3 | null } | null;
       } | null;
@@ -611,6 +637,12 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
         setDialoguePrompt('');
         setAiReady(false);
       }
+      // growthLines 是 deterministic 算好的，跟 AI 有沒有成功生成無關——
+      // 就算 aiReady=false（AI 掛掉或還沒生成過），只要 weekly_reports 那筆
+      // 存在，growth_lines 就該顯示，不用等 AI。
+      setGrowthLines(Array.isArray(report?.ai_suggestions?.growth_lines) ? report!.ai_suggestions!.growth_lines! : []);
+      setFocusLineKey(report?.ai_suggestions?.focus_line_key ?? undefined);
+      setNextStep(report?.ai_suggestions?.next_step ?? '');
 
       // Long-term goal progress
       // Cast via unknown: Relationships:[] in database.ts means the TS type doesn't
@@ -969,6 +1001,9 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     beforeBedCount,
     aiInsight,
     dialoguePrompt,
+    growthLines,
+    focusLineKey,
+    nextStep,
     activity,
     coinFlow,
     suggestions,
