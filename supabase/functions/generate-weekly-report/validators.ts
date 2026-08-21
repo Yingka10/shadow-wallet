@@ -188,3 +188,132 @@ export function computeFallbackRecurrenceSuggestion(
     actionLabel: '調整排定日',
   };
 }
+
+// ---------------------------------------------------------------------------
+// Growth lines — multi-line weekly aggregation (2026-08 改版)
+//
+// GrowBook 沿用既有的 canonical task purpose（A/B/C/D），不另創第二套分類。
+// 這裡只是把同一批 category 換成給家長看的生活化名稱，並且把「這一類這週
+// 有沒有活動、達不達得到自己的節奏」整理成可以直接顯示、也可以餵給 AI 的
+// 結構化事實 —— counts/target/reminded 這些 code 算得出來的東西，不問 AI。
+// ---------------------------------------------------------------------------
+
+export type TaskCategory = 'A' | 'B' | 'C' | 'D';
+
+/** 給家長看的生活化名稱。資料來源仍是既有 canonical purpose，不是新分類。 */
+export const GROWTH_LINE_LABEL: Record<TaskCategory, string> = {
+  A: '生活與自我管理',
+  B: '家庭參與與關係',
+  C: '自主目標與興趣',
+  D: '學習與技能',
+};
+
+export type GrowthLineStatus = 'stable' | 'watch' | 'needs_discussion';
+
+/** 一個類別這週的原始事實——全部由 code 算，AI 不參與這一步。 */
+export type CategoryWeeklyFacts = {
+  category: TaskCategory;
+  /** 這週這個類別「所有任務」實際完成次數（不分有沒有週目標）。 */
+  done: number;
+  /**
+   * 這個類別「一週該做幾次」的目標，取這個類別裡所有 schedule_mode='weekly_frequency'
+   * 任務的 weekly_frequency 加總。null 代表這個類別本來就沒有週目標概念
+   * （例如只有 one_time/fixed_days 任務）——這時候不判斷達不達標，只看有沒有活動。
+   */
+  weeklyTarget: number | null;
+  /**
+   * 這週「有週目標的那些任務」自己的完成次數——只能拿這個跟 weeklyTarget 比。
+   * 不能用 done（可能混了同類別裡沒有週目標的其他任務），不然一個類別裡只要
+   * 有一個任務剛好有週目標，其他任務的完成次數會被誤算進「達標與否」，
+   * 判斷結果會失真。weeklyTarget 是 null 時這欄一定也是 0，沒有意義。
+   */
+  targetDone: number;
+  /** 這週這個類別的完成紀錄裡，start_mode='reminded' 的筆數。 */
+  remindedCount: number;
+  /** 這週實際完成過的任務名稱（可重複，同一任務做兩次會出現兩次）。 */
+  completedTaskNames: string[];
+};
+
+export type WeeklyGrowthLine = {
+  key: TaskCategory;
+  label: string;
+  status: GrowthLineStatus;
+  /** 1-3 條、可由 facts 直接支持的敘述，可以含數字（這裡不是 AI 自由文字）。 */
+  facts: string[];
+  /** 一句話。deterministic 版本先填規則產生的句子，AI 可用同一批 facts 改寫得更自然。 */
+  summary: string;
+};
+
+/**
+ * status 判斷規則：
+ *   沒有週目標，或這週已達標／超過 → stable（不是「有任務就要有建議」）。
+ *   有週目標、沒達標、但這週沒有 reminded 訊號 → watch（節奏慢一點，先觀察）。
+ *   有週目標、沒達標、而且這週有 reminded 訊號 → needs_discussion（值得一起看看）。
+ * 只用「達標與否」不夠——一個任務沒做滿但都是孩子自己開始的，跟另一個沒做滿
+ * 又常常要提醒的，不該給一樣的緊急程度。
+ */
+export function computeGrowthLineStatus(facts: CategoryWeeklyFacts): GrowthLineStatus {
+  if (facts.weeklyTarget != null && facts.targetDone < facts.weeklyTarget) {
+    return facts.remindedCount > 0 ? 'needs_discussion' : 'watch';
+  }
+  return 'stable';
+}
+
+function buildCategoryFacts(facts: CategoryWeeklyFacts): string[] {
+  const lines: string[] = [];
+  lines.push(
+    facts.weeklyTarget != null
+      ? `本週目標 ${facts.weeklyTarget} 次，完成 ${facts.targetDone} 次`
+      : `本週完成 ${facts.done} 次`,
+  );
+  if (facts.remindedCount > 0) {
+    lines.push(`其中 ${facts.remindedCount} 次是提醒後才開始的`);
+  }
+  const uniqueNames = [...new Set(facts.completedTaskNames)];
+  if (uniqueNames.length > 0) {
+    lines.push(`實際做的事：${uniqueNames.join('、')}`);
+  }
+  return lines.slice(0, 3);
+}
+
+/** AI 不可用時也要能顯示的規則版一句話——跟 computeFallbackInsight 同一個降級哲學。 */
+function deterministicLineSummary(status: GrowthLineStatus): string {
+  switch (status) {
+    case 'stable':
+      return '這條線這週大致穩定，可以維持原安排。';
+    case 'watch':
+      return '這條線這週的節奏比平常慢一點，可以留意但不急著調整。';
+    case 'needs_discussion':
+      return '這條線這週比較常需要提醒才開始，值得找時間一起聊聊。';
+  }
+}
+
+/**
+ * 本週完全沒有活動的類別直接不產生線，不當成缺失顯示——
+ * 6-9 歲的孩子本週沒有生活常規任務排定，不代表有問題，是 Task-A 政策現況本來就會發生的事。
+ */
+export function buildGrowthLines(categoryFacts: CategoryWeeklyFacts[]): WeeklyGrowthLine[] {
+  return categoryFacts
+    .filter(f => f.done > 0)
+    .map(f => {
+      const status = computeGrowthLineStatus(f);
+      return {
+        key: f.category,
+        label: GROWTH_LINE_LABEL[f.category],
+        status,
+        facts: buildCategoryFacts(f),
+        summary: deterministicLineSummary(status),
+      };
+    });
+}
+
+/**
+ * 挑本週最值得討論的一條：needs_discussion 優先於 watch，都沒有就不挑
+ * （全部 stable 時，focusLineKey 就該是 undefined，不用硬湊一條出來講）。
+ * 同一個優先層有多條時取第一條——避免每次重新整理排序不穩定。
+ */
+export function pickFocusLine(lines: WeeklyGrowthLine[]): TaskCategory | undefined {
+  return lines.find(l => l.status === 'needs_discussion')?.key
+    ?? lines.find(l => l.status === 'watch')?.key
+    ?? undefined;
+}
