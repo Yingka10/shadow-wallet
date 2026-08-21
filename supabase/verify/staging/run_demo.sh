@@ -84,7 +84,7 @@ fi
 
 # 專案名稱必須是 growbook-staging。ref 打錯一個字母仍可能是別的專案，
 # 名稱是比 ref 更難意外撞上的第二道證據。
-NAME="$( cd "$ROOT" && npx supabase projects list 2>/dev/null \
+NAME="$( cd "$ROOT" && npx supabase projects list --output-format text 2>/dev/null \
         | awk -F'|' -v ref="$LINKED" '$3 ~ ref { gsub(/ /,"",$4); print $4 }' )"
 if [ "$NAME" != "$EXPECTED_PROJECT_NAME" ]; then
   echo "!! 中止：目標專案是「$NAME」，不是 $EXPECTED_PROJECT_NAME" >&2
