@@ -1305,23 +1305,6 @@ export default function ParentWeeklyTablet() {
                 </View>
               </View>
 
-              {growthLines.length > 0 && (
-                <View style={s.card}>
-                  <Text style={s.sectionTitle}>成長線摘要</Text>
-                  <View style={s.growthLineList}>
-                    {growthLines.map(line => (
-                      <GrowthLineCard key={line.key} line={line} isFocus={line.key === focusLineKey} />
-                    ))}
-                  </View>
-                  {focusLineKey && nextStep ? (
-                    <View style={s.nextStepBox}>
-                      <Text style={s.nextStepLabel}>下一步</Text>
-                      <Text style={s.nextStepText}>{nextStep}</Text>
-                    </View>
-                  ) : null}
-                </View>
-              )}
-
               <View style={s.card}>
                 <Text style={s.sectionTitle}>本週紀錄概覽</Text>
                 {/* 本週投入分布 */}
@@ -1388,6 +1371,23 @@ export default function ParentWeeklyTablet() {
                   )}
                 </View>
               </View>
+
+              {growthLines.length > 0 && (
+                <View style={s.card}>
+                  <Text style={s.sectionTitle}>成長線摘要</Text>
+                  <View style={s.growthLineList}>
+                    {growthLines.map(line => (
+                      <GrowthLineCard key={line.key} line={line} isFocus={line.key === focusLineKey} />
+                    ))}
+                  </View>
+                  {focusLineKey && nextStep ? (
+                    <View style={s.nextStepBox}>
+                      <Text style={s.nextStepLabel}>下一步</Text>
+                      <Text style={s.nextStepText}>{nextStep}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              )}
 
               {/* 長期任務進展 */}
               <View style={s.card}>
