@@ -567,7 +567,9 @@ function GrowthLineCard({ line, isFocus }: { line: WeeklyGrowthLine; isFocus: bo
         </View>
       </View>
       <Text style={s.growthLineSummary}>{line.summary}</Text>
-      {line.facts[0] ? <Text style={s.growthLineFact}>{line.facts[0]}</Text> : null}
+      {line.facts.slice(0, 2).map((fact, i) => (
+        <Text key={i} style={s.growthLineFact}>{fact}</Text>
+      ))}
     </View>
   );
 }
@@ -1279,43 +1281,27 @@ export default function ParentWeeklyTablet() {
           {/* Content */}
           {!loading && !error && (
             <>
-              <View style={s.summaryCard}>
-                <View style={s.statsHeaderRow}>
-                  <View>
-                    <Text style={s.eyebrow}>週報 · {weekRange}</Text>
-                    <Text style={s.sectionTitle}>本週整理</Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={handleAiRefresh}
-                    disabled={aiRefreshing}
-                    style={[s.aiRefreshBtn, aiRefreshing && s.aiRefreshBtnLoading]}
-                  >
-                    {aiRefreshing
-                      ? <ActivityIndicator size="small" color={ParentColors.accent} />
-                      : <RefreshIcon size={11} />}
-                    <Text style={s.aiRefreshBtnLabel}>
-                      {aiRefreshing ? '生成中' : '重新產生摘要'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-                <Text style={s.summaryText}>{summaryText}</Text>
-                <View style={s.summaryFooter}>
-                  <Text style={s.aiFooterText}>{childName || '孩子'} · {weekLabel}</Text>
-                  <Text style={s.aiFooterText}>AI 整理 · 供參考</Text>
-                </View>
-              </View>
-
               <View style={s.card}>
                 <Text style={s.sectionTitle}>本週紀錄概覽</Text>
                 {/* 本週投入分布 */}
                 <View style={s.metricGrid}>
                   <MetricTile
-                    label="已記錄任務"
+                    label="本週有紀錄的事情"
                     value={`${recordedTasks} 件`}
-                    note="本週完成紀錄"
+                    note="本週有完成紀錄的任務"
                     icon={
                       <IconBubble bg={ParentColors.tintLeaf}>
                         <CheckSquareIcon size={18} color={ParentColors.leaf700} />
+                      </IconBubble>
+                    }
+                  />
+                  <MetricTile
+                    label="有活動的成長線"
+                    value={`${growthLines.length} 條`}
+                    note="本週有紀錄的成長面向"
+                    icon={
+                      <IconBubble bg={ParentColors.tintPlum}>
+                        <SparkleIcon size={16} color={ParentColors.plum500} />
                       </IconBubble>
                     }
                   />
@@ -1356,25 +1342,18 @@ export default function ParentWeeklyTablet() {
                       }
                     />
                   )}
-                  {(afterDinnerCount > 0 || beforeBedCount > 0) && (
-                    <MetricTile
-                      compact
-                      label="完成時段"
-                      value={`晚餐後 ${afterDinnerCount}・睡前 ${beforeBedCount}`}
-                      note="本週分布，僅供參考"
-                      icon={
-                        <IconBubble bg={ParentColors.tintPine}>
-                          <ClockIcon size={18} color={ParentColors.pine400} />
-                        </IconBubble>
-                      }
-                    />
-                  )}
                 </View>
+                {/* 完成時段：不是建議依據，首層 KPI 只留「有紀錄的事情」跟「成長線」，這裡降級成小字附註。 */}
+                {(afterDinnerCount > 0 || beforeBedCount > 0) && (
+                  <Text style={s.timeWindowFootnote}>
+                    完成時段（僅供參考）：晚餐後 {afterDinnerCount}・睡前 {beforeBedCount}
+                  </Text>
+                )}
               </View>
 
               {growthLines.length > 0 && (
                 <View style={s.card}>
-                  <Text style={s.sectionTitle}>成長線摘要</Text>
+                  <Text style={s.sectionTitle}>成長摘要</Text>
                   <View style={s.growthLineList}>
                     {growthLines.map(line => (
                       <GrowthLineCard key={line.key} line={line} isFocus={line.key === focusLineKey} />
@@ -1388,6 +1367,32 @@ export default function ParentWeeklyTablet() {
                   ) : null}
                 </View>
               )}
+
+              <View style={s.summaryCard}>
+                <View style={s.statsHeaderRow}>
+                  <View>
+                    <Text style={s.eyebrow}>週報 · {weekRange}</Text>
+                    <Text style={s.sectionTitle}>本週整理</Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={handleAiRefresh}
+                    disabled={aiRefreshing}
+                    style={[s.aiRefreshBtn, aiRefreshing && s.aiRefreshBtnLoading]}
+                  >
+                    {aiRefreshing
+                      ? <ActivityIndicator size="small" color={ParentColors.accent} />
+                      : <RefreshIcon size={11} />}
+                    <Text style={s.aiRefreshBtnLabel}>
+                      {aiRefreshing ? '生成中' : '重新產生摘要'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={s.summaryText}>{summaryText}</Text>
+                <View style={s.summaryFooter}>
+                  <Text style={s.aiFooterText}>{childName || '孩子'} · {weekLabel}</Text>
+                  <Text style={s.aiFooterText}>AI 整理 · 供參考</Text>
+                </View>
+              </View>
 
               {/* 長期任務進展 */}
               <View style={s.card}>
@@ -1837,6 +1842,11 @@ const s = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
     marginTop: 14,
+  },
+  timeWindowFootnote: {
+    marginTop: 12,
+    fontSize: 12.5,
+    color: ParentColors.fgMuted,
   },
   metricTile: {
     flex: 1,
