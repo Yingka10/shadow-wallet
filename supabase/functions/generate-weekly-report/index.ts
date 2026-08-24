@@ -256,14 +256,14 @@ ${scheduleSection}${recurrenceSection}${growthLinesSection}${focusLineSection}
 8. **只能根據清單裡給的 facts 做判斷，不能自己加因果或心理推論**。清單只給了「completion count / target」「reminded 次數」這兩種事實，禁止在 motivation_observation、growthLineSummaries 裡寫這些清單沒有支持的話：
    「有好好地……」「很棒」「很令人驚喜」「很投入」「很願意」「變得更有責任感」「很自律」「已經養成」「已經內化」「節奏有點慢」「表現很好」「更努力一點就好」——這些詞要嘛是空泛評價、要嘛是清單資料支持不了的動機/人格推論，一律不能用。
    優先改用資料撐得住的講法：「有持續完成紀錄」「多數不需要提醒」「較常需要提醒」「目前主要卡在……」「這週沒有明顯需要調整的地方」「這一條較值得一起看看」。
-5. **growthLineSummaries 只能改寫上面清單裡真的列出來的線，key 用 A/B/C/D，不能發明清單以外的線，也不能改變 status（那是算好的，不是你決定）**。改寫時一樣要點出清單裡的具體事實（例如提到的任務名稱、或「常常需要提醒」這種已給的訊號），語氣一樣要偏觀察式、不要用「有好好地」這種稱讚語氣，不能自己加一個沒出現過的原因。
+5. **growthLineSummaries 只能改寫上面清單裡真的列出來的線，key 用 A/B/C/D，不能發明清單以外的線，也不能改變 status（那是算好的，不是你決定）**。**這句是畫面上這張卡最先讀到的一句話，只回答「這條線整體是什麼狀態」，不要回答「為什麼」——「為什麼」是 facts 清單自己會顯示的內容，這句不要重複 facts 裡已經有的任務名稱或次數**。務必極短：15 字內、一句話，例如「本週有持續完成紀錄」「這條線這週比較值得一起看看」「這週的節奏比平常慢一點」；不要寫成「OO、OO這兩項都有實際完成紀錄，次數比原本安排少一些」這種把 facts 內容又講一次的長句。語氣一樣要偏觀察式、不要用「有好好地」這種稱讚語氣，不能自己加一個沒出現過的原因。
 6. **nextStep 最多給一件事、90 字內，只能對應 focus line 給的事實**，不可以是「多陪伴孩子」「保持耐心」這種放諸四海皆準的通用教養建議，措辭跟上面第三段的下一步保持一致。**要寫成一個具體可以去做的動作（例如「找時間跟孩子聊聊……」），不要只寫「看看是不是合適」這種沒有動作、聽起來可做可不做的收尾**。沒有 focus line 就填空字串，不要硬湊。
 7. **motivation_observation、growthLineSummaries、nextStep、dialogue、affirmations、suggestions 這幾個給人看的欄位，絕對不要出現任何阿拉伯數字**（次數、天數、幾項、百分比都算）——這些數字畫面上其他地方（growthLines 的 facts）會用真實資料顯示，你這裡寫的數字沒辦法保證跟畫面對得上，一律用不精確但不會出錯的講法代替。**但「不精確」不代表可以誇大或縮小**：facts 給的是「1 次」提醒，就只能用「有一次」「偶爾」這種對應單一次數的講法，不能寫成「好幾次」「常常」「這幾天都」——那些字眼只能用在 facts 真的給多次訊號的時候。方向寧可寫得保守（少講）也不要誇大（多講），因為誇大等於編造家長查不到根據的訊息。只有 schedule_suggestion／recurrence_suggestion 這兩個欄位例外，那裡才需要、也才可以寫具體數字。
 
 請只回傳 JSON（前後不要有任何其他文字或說明）：
 {
   "motivation_observation": "本週重點，依照上面規則4寫成三段（總覽／穩定線依據／focus line 診斷+下一步），每段之間用換行分開，總長度約120~200字，不能包含任何數字，不能是空泛鼓勵文，不能是幼兒園式稱讚。",
-  "growthLineSummaries": {"A/B/C/D 其中幾個 key，只放上面清單裡真的列出來的線": "改寫過的一句話，不能包含任何數字"},
+  "growthLineSummaries": {"A/B/C/D 其中幾個 key，只放上面清單裡真的列出來的線": "極短一句話，15字內，只答『整體狀態』不要重複 facts 裡的任務名稱或次數，不能包含任何數字"},
   "nextStep": "只針對 focus line 的最小下一步，90字內，不能包含任何數字；沒有 focus line 就填空字串",
   "dialogue": "一段家長可以直接對孩子說出口的開場白（3~4句、90字內），用『我』的口吻，先真心肯定這週看到的一件具體小事，再用一個溫柔的開放式問題，邀請孩子聊聊還沒開始或覺得困難的部分。語氣像關心，不像檢討。不能包含任何數字。",
   "suggestions": [
@@ -330,12 +330,21 @@ ${scheduleSection}${recurrenceSection}${growthLinesSection}${focusLineSection}
 
   // growthLineSummaries：只接受 key 真的出現在這週 growthLines 裡、且沒有數字的改寫。
   // 亂編的 key、含數字的句子，一律不採用——保留 buildGrowthLines() 的規則版 summary。
+  // 長度上限是 UI 排版的硬底線（成長線卡片刻意做得很緊湊，見週報 UI Polish
+  // 工單）：prompt 要求 15 字內，這裡用比較寬鬆的 30 字當安全網，超過就不採用、
+  // 退回 deterministic summary，不要讓單一句子把卡片撐高。
   const validKeys = new Set(ctx.growthLines.map(l => l.key));
   const rawSummaries = parsed.growthLineSummaries;
   const safeGrowthLineSummaries: Record<string, string> = {};
   if (rawSummaries && typeof rawSummaries === 'object') {
     for (const [key, value] of Object.entries(rawSummaries as Record<string, unknown>)) {
-      if (validKeys.has(key as TaskCategory) && typeof value === 'string' && value.trim() !== '' && !containsArabicDigit(value)) {
+      if (
+        validKeys.has(key as TaskCategory)
+        && typeof value === 'string'
+        && value.trim() !== ''
+        && value.trim().length <= 30
+        && !containsArabicDigit(value)
+      ) {
         safeGrowthLineSummaries[key] = value;
       }
     }

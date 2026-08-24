@@ -138,10 +138,16 @@ function MinusIcon({ size = 11, color = ParentColors.error }: { size?: number; c
 // Sub-components
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * 掃讀順序是「數字先、label 後」——家長一排掃過去要先抓到 6 / 4 / +30 這些
+ * 數字本身，label 只是確認「這個數字是什麼」，不是要先讀 label 才找得到數字。
+ * note 是可選的：如果只是把 label 換句話說一次，呼叫端就不要傳，不然變成
+ * 每格都多一行沒有新資訊的小字。
+ */
 function MetricTile({ label, value, note, tone = 'neutral', icon, compact = false }: {
   label: string;
   value: string;
-  note: string;
+  note?: string;
   tone?: 'neutral' | 'green' | 'orange';
   icon?: React.ReactNode;
   /** 給「主動 1・提醒 0」這種比純數字長的文字用——字級跟大數字的卡片不一樣，擠在一起才不會爆版。 */
@@ -155,9 +161,9 @@ function MetricTile({ label, value, note, tone = 'neutral', icon, compact = fals
   return (
     <View style={s.metricTile}>
       {icon != null && <View style={s.metricIconWrap}>{icon}</View>}
-      <Text style={s.metricLabel}>{label}</Text>
       <Text style={[s.metricValue, compact && s.metricValueCompact, toneStyle]}>{value}</Text>
-      <Text style={s.metricNote}>{note}</Text>
+      <Text style={s.metricLabel}>{label}</Text>
+      {note ? <Text style={s.metricNote}>{note}</Text> : null}
     </View>
   );
 }
@@ -240,6 +246,16 @@ function formatDays(days: number[]): string {
   return `週${sorted.map(d => WEEKDAY_LABEL[d]).join('、')}`;
 }
 
+/**
+ * 「本週整理」的 AI/fallback 文字本來就是照 prompt 規則寫成固定三段（總覽／
+ * 穩定線依據／focus 診斷+下一步），用換行分開——這裡純粹是把同一段文字拆開
+ * 分層顯示（headline 最大、其餘正常大小），不是重新生成或改寫內容。段數不固定
+ * （全部 stable、或 AI 尚未生成時可能只有 1 段），純函式好測。
+ */
+export function splitSummaryParagraphs(text: string): string[] {
+  return text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+}
+
 /** 「8/10 14:30」這種顯示字串，給「已套用」badge 標記決定時間。 */
 function formatDecidedAt(iso: string): string {
   const d = new Date(iso);
@@ -257,12 +273,14 @@ type ScheduleAdoptOverride =
   | { claimPeriod: ScheduleClaimPeriod; maxClaimsPerPeriod: number }
   | { recurrenceDays: number[] };
 
-function ReviewPromptCard({ item, onAdopt, onDefer, onRevert, onAcknowledge }: {
+function ReviewPromptCard({ item, onAdopt, onDefer, onRevert, onAcknowledge, emphasizeTitle = false }: {
   item: ReviewPrompt;
   onAdopt: (item: ReviewPrompt, override?: ScheduleAdoptOverride) => Promise<void>;
   onDefer: (item: ReviewPrompt) => Promise<void>;
   onRevert: (item: ReviewPrompt) => Promise<void>;
   onAcknowledge: (item: ReviewPrompt) => Promise<void>;
+  /** focus card 裡的任務名稱要是全卡最醒目的文字；「其他可以考慮」清單裡維持原本大小，不搶 focus card 的視覺權重。 */
+  emphasizeTitle?: boolean;
 }) {
   const [adopting, setAdopting] = useState(false);
   const [deferring, setDeferring] = useState(false);
@@ -353,7 +371,7 @@ function ReviewPromptCard({ item, onAdopt, onDefer, onRevert, onAcknowledge }: {
           : <CheckSquareIcon size={18} color={ParentColors.teal500} />}
       </View>
       <View style={s.reviewPromptBody}>
-        <Text style={s.reviewPromptTitle}>{item.title}</Text>
+        <Text style={[s.reviewPromptTitle, emphasizeTitle && s.reviewPromptTitleEmphasized]}>{item.title}</Text>
         <Text style={s.reviewPromptText}>{item.prompt}</Text>
         {isScheduleSuggestion && !editing && (
           <Text style={s.scheduleDiffText}>
@@ -445,10 +463,10 @@ function ReviewPromptCard({ item, onAdopt, onDefer, onRevert, onAcknowledge }: {
                     ? <ActivityIndicator size="small" color={ParentColors.accent} />
                     : <Text style={s.adoptBtnText}>{item.actionLabel || '前往處理'}</Text>}
                 </TouchableOpacity>
-                <TouchableOpacity style={s.deferBtn} onPress={handleDefer} disabled={adopting || deferring}>
+                <TouchableOpacity style={s.deferBtnTertiary} onPress={handleDefer} disabled={adopting || deferring}>
                   {deferring
-                    ? <ActivityIndicator size="small" color={ParentColors.fgSecondary} />
-                    : <Text style={s.deferBtnText}>再觀察一週</Text>}
+                    ? <ActivityIndicator size="small" color={ParentColors.fgMuted} />
+                    : <Text style={s.deferBtnTertiaryText}>再觀察一週</Text>}
                 </TouchableOpacity>
               </>
             ) : editing ? (
@@ -484,10 +502,10 @@ function ReviewPromptCard({ item, onAdopt, onDefer, onRevert, onAcknowledge }: {
                 <TouchableOpacity style={s.deferBtn} onPress={startEditing} disabled={adopting || deferring}>
                   <Text style={s.deferBtnText}>修改建議</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={s.deferBtn} onPress={handleDefer} disabled={adopting || deferring}>
+                <TouchableOpacity style={s.deferBtnTertiary} onPress={handleDefer} disabled={adopting || deferring}>
                   {deferring
-                    ? <ActivityIndicator size="small" color={ParentColors.fgSecondary} />
-                    : <Text style={s.deferBtnText}>再觀察一週</Text>}
+                    ? <ActivityIndicator size="small" color={ParentColors.fgMuted} />
+                    : <Text style={s.deferBtnTertiaryText}>再觀察一週</Text>}
                 </TouchableOpacity>
               </>
             )}
@@ -499,15 +517,15 @@ function ReviewPromptCard({ item, onAdopt, onDefer, onRevert, onAcknowledge }: {
   );
 }
 
-function AffirmationsCard({ affirmations, aiReady }: { affirmations: string[]; aiReady: boolean }) {
+function AffirmationsCard({ affirmations, aiReady, style }: { affirmations: string[]; aiReady: boolean; style?: object }) {
   if (affirmations.length === 0) return null;
   return (
-    <View style={s.dialogueCard}>
+    <View style={[s.dialogueCard, style]}>
       <View style={s.dialogueHeader}>
         <View style={[s.dialogueIcon, { backgroundColor: ParentColors.amber300 + '33' }]}>
           <SparkleIcon size={13} color={ParentColors.warn} />
         </View>
-        <Text style={s.sectionTitle}>這週值得肯定的地方</Text>
+        <Text style={s.sectionTitleSecondary}>這週值得肯定的地方</Text>
       </View>
       {affirmations.map((line, i) => (
         <Text key={i} style={[s.dialogueText, s.affirmationLine]}>・{line}</Text>
@@ -534,7 +552,7 @@ function DialogueCard({ childName, dialoguePrompt, aiReady }: {
         <View style={s.dialogueIcon}>
           <SparkleIcon size={13} color={ParentColors.success} />
         </View>
-        <Text style={s.sectionTitle}>和孩子聊聊</Text>
+        <Text style={s.sectionTitleSecondary}>和孩子聊聊</Text>
       </View>
       <Text style={s.dialogueLabel}>{isAi ? 'AI 建議的對話起頭：' : '可以這樣開場：'}</Text>
       <Text style={s.dialogueText}>{text}</Text>
@@ -630,6 +648,7 @@ function FocusReviewCard({
                 onDefer={onDefer}
                 onRevert={onRevert}
                 onAcknowledge={onAcknowledge}
+                emphasizeTitle
               />
             </View>
           ) : nextStep ? (
@@ -1436,7 +1455,6 @@ export default function ParentWeeklyTablet() {
                   <MetricTile
                     label="本週有紀錄的事情"
                     value={`${recordedTasks} 件`}
-                    note="本週有完成紀錄的任務"
                     icon={
                       <IconBubble bg={ParentColors.tintLeaf}>
                         <CheckSquareIcon size={18} color={ParentColors.leaf700} />
@@ -1446,7 +1464,6 @@ export default function ParentWeeklyTablet() {
                   <MetricTile
                     label="有活動的成長線"
                     value={`${growthLines.length} 條`}
-                    note="本週有紀錄的成長面向"
                     icon={
                       <IconBubble bg={ParentColors.tintPlum}>
                         <SparkleIcon size={16} color={ParentColors.plum500} />
@@ -1456,7 +1473,6 @@ export default function ParentWeeklyTablet() {
                   <MetricTile
                     label="成長幣變化"
                     value={`${netCoin >= 0 ? '+' : ''}${netCoin} 枚`}
-                    note="本週變化"
                     tone={netCoin >= 0 ? 'green' : 'neutral'}
                     icon={
                       <IconBubble bg={ParentColors.tintGold}>
@@ -1468,7 +1484,6 @@ export default function ParentWeeklyTablet() {
                     <MetricTile
                       label="時間儲蓄"
                       value={`+${timeSavedMin} 分鐘`}
-                      note="本週累積"
                       tone="green"
                       icon={
                         <IconBubble bg={ParentColors.tintPine}>
@@ -1482,7 +1497,6 @@ export default function ParentWeeklyTablet() {
                       compact
                       label="開始方式"
                       value={`主動 ${selfStartedCount}・提醒 ${remindedCount}`}
-                      note="本週完成次數"
                       icon={
                         <IconBubble bg={ParentColors.tintGold}>
                           <BellIcon size={18} color={ParentColors.gold700} />
@@ -1535,7 +1549,25 @@ export default function ParentWeeklyTablet() {
                     </Text>
                   </TouchableOpacity>
                 </View>
-                <Text style={s.summaryText}>{summaryText}</Text>
+                {(() => {
+                  const [headline, ...rest] = splitSummaryParagraphs(summaryText);
+                  const evidence = rest.slice(0, -1);
+                  const focusPara = rest.length > 0 ? rest[rest.length - 1] : null;
+                  return (
+                    <>
+                      {headline ? <Text style={s.summaryHeadline}>{headline}</Text> : null}
+                      {evidence.map((p, i) => (
+                        <Text key={i} style={s.summaryEvidence}>{p}</Text>
+                      ))}
+                      {focusPara ? (
+                        <View style={s.summaryFocusBox}>
+                          <Text style={s.summaryFocusLabel}>focus / 下一步</Text>
+                          <Text style={s.summaryFocusText}>{focusPara}</Text>
+                        </View>
+                      ) : null}
+                    </>
+                  );
+                })()}
                 <View style={s.summaryFooter}>
                   <Text style={s.aiFooterText}>{childName || '孩子'} · {weekLabel}</Text>
                   <Text style={s.aiFooterText}>AI 整理 · 供參考</Text>
@@ -1555,7 +1587,8 @@ export default function ParentWeeklyTablet() {
 
               <OtherSuggestionsSection items={otherReviewPrompts} {...reviewPromptHandlers} />
 
-              <AffirmationsCard affirmations={affirmations} aiReady={aiReady} />
+              {/* focus 決策區到這裡結束；下面是正向補充區塊，多留一點間距標出這個層級轉換。 */}
+              <AffirmationsCard affirmations={affirmations} aiReady={aiReady} style={s.secondaryBlockStart} />
 
               <DialogueCard childName={childName} dialoguePrompt={dialoguePrompt} aiReady={aiReady} />
 
@@ -1697,7 +1730,10 @@ const s = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 32,
     paddingTop: 20,
-    gap: 16,
+    gap: 18,
+  },
+  secondaryBlockStart: {
+    marginTop: 6,
   },
   spacer: {
     flex: 1,
@@ -1851,12 +1887,46 @@ const s = StyleSheet.create({
     borderRadius: ParentRadii.xl,
     padding: 24,
     overflow: 'hidden',
+    // 成長摘要（上一層）到本週整理是一次資訊層級轉換，比同層卡片間距多留一點。
+    marginTop: 6,
     ...ParentShadows.card,
   },
-  summaryText: {
+  // 本週整理拆成三層：headline 最醒目，evidence 正常 body，focus/下一步
+  // 用 label+底色跟前兩層區隔——評審把截圖縮小到看不清楚正文時，headline
+  // 還是讀得到。
+  summaryHeadline: {
     fontFamily: ParentFonts.display,
-    fontSize: 18,
-    lineHeight: 31,
+    fontSize: 21,
+    lineHeight: 29,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgPrimary,
+    letterSpacing: -0.2,
+  },
+  summaryEvidence: {
+    fontFamily: ParentFonts.display,
+    fontSize: 15,
+    lineHeight: 23,
+    color: ParentColors.fgSecondary,
+    marginTop: 10,
+  },
+  summaryFocusBox: {
+    marginTop: 14,
+    padding: 14,
+    borderRadius: ParentRadii.md,
+    backgroundColor: '#FBF6F8',
+    gap: 3,
+  },
+  summaryFocusLabel: {
+    fontSize: 11.5,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.plum500,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  summaryFocusText: {
+    fontFamily: ParentFonts.display,
+    fontSize: 15,
+    lineHeight: 22,
     color: ParentColors.fgSecondary,
   },
   summaryFooter: {
@@ -1869,14 +1939,15 @@ const s = StyleSheet.create({
     borderTopColor: ParentColors.borderMedium,
   },
   growthLineList: {
-    gap: 12,
+    gap: 10,
   },
   growthLineCard: {
     borderWidth: 1,
     borderColor: ParentColors.borderSoft,
     borderRadius: ParentRadii.lg,
-    padding: 16,
-    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    gap: 5,
   },
   growthLineCardFocus: {
     borderColor: ParentColors.plum500,
@@ -1888,39 +1959,42 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  // 每張卡最先看到的文字——刻意比 summary/fact 拉開一級，不是跟著全站字級走。
   growthLineLabel: {
     fontFamily: ParentFonts.display,
-    fontSize: 15,
-    fontWeight: ParentFontWeights.semi,
+    fontSize: 18,
+    fontWeight: ParentFontWeights.bold,
     color: ParentColors.fgPrimary,
+    letterSpacing: -0.2,
   },
   growthLineBadge: {
     paddingHorizontal: 10,
-    paddingVertical: 3,
+    paddingVertical: 4,
     borderRadius: 100,
   },
   growthLineBadgeText: {
-    fontSize: 12,
+    fontSize: 12.5,
     fontWeight: ParentFontWeights.semi,
   },
   growthLineSummary: {
     fontSize: 14,
-    lineHeight: 21,
+    lineHeight: 20,
     color: ParentColors.fgSecondary,
   },
   growthLineFact: {
-    fontSize: 12.5,
+    fontSize: 13,
+    lineHeight: 18,
     color: ParentColors.fgMuted,
   },
   nextStepBox: {
-    marginTop: 16,
-    paddingTop: 14,
+    marginTop: 14,
+    paddingTop: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: ParentColors.borderMedium,
-    gap: 4,
+    gap: 3,
   },
   nextStepLabel: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: ParentFontWeights.semi,
     color: ParentColors.plum500,
     textTransform: 'uppercase',
@@ -1928,7 +2002,7 @@ const s = StyleSheet.create({
   },
   nextStepText: {
     fontSize: 14,
-    lineHeight: 21,
+    lineHeight: 20,
     color: ParentColors.fgSecondary,
   },
   focusEmptyText: {
@@ -2007,17 +2081,16 @@ const s = StyleSheet.create({
     fontSize: 12,
     fontWeight: ParentFontWeights.semi,
     color: ParentColors.fgMuted,
+    marginTop: 4,
   },
   metricValue: {
     fontFamily: ParentFonts.display,
-    fontSize: 25,
+    fontSize: 28,
     fontWeight: ParentFontWeights.bold,
     color: ParentColors.fgPrimary,
-    marginTop: 9,
   },
   metricValueCompact: {
-    fontSize: 16,
-    marginTop: 8,
+    fontSize: 17,
   },
   metricValueGreen: {
     color: ParentColors.success,
@@ -2027,9 +2100,9 @@ const s = StyleSheet.create({
   },
   metricNote: {
     fontFamily: ParentFonts.body,
-    fontSize: 12,
+    fontSize: 11.5,
     color: ParentColors.fgMuted,
-    marginTop: 5,
+    marginTop: 3,
   },
 
   // ── AI note card ──────────────────────────────────────────────────────────
@@ -2143,10 +2216,18 @@ const s = StyleSheet.create({
   },
   sectionTitle: {
     fontFamily: ParentFonts.display,
-    fontSize: 19,
+    fontSize: 22,
     fontWeight: ParentFontWeights.bold,
     color: ParentColors.fgPrimary,
     marginTop: 2,
+  },
+  // 「值得肯定」「和孩子聊聊」這種次要區塊用——視覺權重明顯低於主要 decision
+  // zone 的 section title，但仍是清楚的標題，不是靠字級製造唯一區別（§16/17）。
+  sectionTitleSecondary: {
+    fontFamily: ParentFonts.display,
+    fontSize: 16,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.fgSecondary,
   },
   statsMeta: {
     fontFamily: ParentFonts.body,
@@ -2742,6 +2823,14 @@ const s = StyleSheet.create({
     fontWeight: ParentFontWeights.semi,
     color: ParentColors.fgPrimary,
   },
+  // focus card 專用：任務名稱要是卡片裡最醒目的文字（§13）。「其他可以考慮」
+  // 清單不傳這個 prop，維持原本大小，才不會五則泛用建議跟 focus 卡搶視覺權重。
+  reviewPromptTitleEmphasized: {
+    fontFamily: ParentFonts.display,
+    fontSize: 18,
+    fontWeight: ParentFontWeights.bold,
+    letterSpacing: -0.1,
+  },
   reviewPromptText: {
     fontFamily: ParentFonts.body,
     fontSize: 13,
@@ -2829,38 +2918,59 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 8,
+    gap: 10,
+    marginTop: 10,
   },
+  // 三顆 action 高度統一（minHeight），primary/secondary/tertiary 靠底色與邊框深淺分層，
+  // 不是靠字級或縮字擠版面。
   adoptBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 14,
+    minHeight: 38,
     borderRadius: ParentRadii.pill,
     borderWidth: 1,
     borderColor: ParentColors.teal100,
     backgroundColor: ParentColors.teal50,
-    minWidth: 76,
+    minWidth: 84,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   adoptBtnText: {
     fontFamily: ParentFonts.body,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: ParentFontWeights.semi,
     color: ParentColors.accent,
   },
   deferBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 14,
+    minHeight: 38,
     borderRadius: ParentRadii.pill,
     borderWidth: 1,
     borderColor: ParentColors.borderSoft,
     backgroundColor: 'transparent',
+    justifyContent: 'center',
   },
   deferBtnText: {
     fontFamily: ParentFonts.body,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: ParentFontWeights.semi,
     color: ParentColors.fgSecondary,
+  },
+  // tertiary：「再觀察一週」——三顆裡最不搶眼的一顆，沒有邊框、文字用 muted 色，
+  // 但 minHeight/padding 跟另外兩顆一致，不會因為視覺輕就變得難點。
+  deferBtnTertiary: {
+    paddingHorizontal: 14,
+    minHeight: 38,
+    borderRadius: ParentRadii.pill,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+    justifyContent: 'center',
+  },
+  deferBtnTertiaryText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 13,
+    fontWeight: ParentFontWeights.medium,
+    color: ParentColors.fgMuted,
   },
   adoptedBadge: {
     flexDirection: 'row',
@@ -2883,24 +2993,25 @@ const s = StyleSheet.create({
     color: ParentColors.warn,
     width: '100%',
   },
+  // 「值得肯定」「和孩子聊聊」是正向補充，不是主要 decision zone——卡片本身
+  // 刻意比 growth summary / focus 淺一階：padding 收一點、不掛強陰影。
   dialogueCard: {
-    backgroundColor: ParentColors.bgSurface,
+    backgroundColor: ParentColors.bgSurfaceWarm,
     borderWidth: 1,
     borderColor: ParentColors.borderSoft,
     borderRadius: ParentRadii.xl,
-    padding: 24,
-    ...ParentShadows.card,
+    padding: 18,
   },
   dialogueHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginBottom: 14,
+    marginBottom: 12,
   },
   dialogueIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: ParentColors.teal50,
     alignItems: 'center',
     justifyContent: 'center',
@@ -2909,19 +3020,19 @@ const s = StyleSheet.create({
     fontFamily: ParentFonts.body,
     fontSize: 12,
     color: ParentColors.fgMuted,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   dialogueText: {
     fontFamily: ParentFonts.display,
-    fontSize: 16,
-    lineHeight: 28,
+    fontSize: 15,
+    lineHeight: 23,
     color: ParentColors.fgSecondary,
   },
   dialogueFootnote: {
     fontFamily: ParentFonts.body,
-    fontSize: 12,
+    fontSize: 11.5,
     color: ParentColors.fgMuted,
-    marginTop: 14,
+    marginTop: 12,
   },
   affirmationLine: {
     marginBottom: 8,

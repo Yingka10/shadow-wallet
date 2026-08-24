@@ -280,11 +280,11 @@ function buildCategoryFacts(facts: CategoryWeeklyFacts): string[] {
 function deterministicLineSummary(status: GrowthLineStatus): string {
   switch (status) {
     case 'stable':
-      return '這條線這週大致穩定，可以維持原安排。';
+      return '本週有持續完成紀錄。';
     case 'watch':
-      return '這條線這週的節奏比平常慢一點，可以留意但不急著調整。';
+      return '本週節奏比平常慢一點。';
     case 'needs_discussion':
-      return '這條線這週比較常需要提醒才開始，值得找時間一起聊聊。';
+      return '這條線這週值得一起看看。';
   }
 }
 
