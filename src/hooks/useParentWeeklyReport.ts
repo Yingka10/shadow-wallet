@@ -201,6 +201,10 @@ export type ParentWeeklyReportData = {
   focusLineKey: TaskCategory | undefined;
   /** 只針對 focusLineKey 的最小下一步；沒有 focus line 時是空字串。 */
   nextStep: string;
+  /** suggestions 裡「真的能可靠對應到 focusLineKey」的那一則；沒有就是 undefined（不亂猜）。 */
+  focusSuggestion: WeeklySuggestion | undefined;
+  /** suggestions 扣掉 focusSuggestion 之後剩下的——泛用建議、或對不到 focus line 的排程/拆目標建議。 */
+  otherSuggestions: WeeklySuggestion[];
   activity: WeeklyActivityBar[];
   coinFlow: WeeklyCoinFlow;
   suggestions: WeeklySuggestion[];
@@ -302,6 +306,36 @@ export function mergeSuggestionPatch(
           ...patch,
         } as WeeklySuggestion,
       ];
+}
+
+/**
+ * 一個 suggestion 能不能可靠對應到某一條 growth line：只有 taskId 指向「真的存在
+ * 於這個孩子任務清單裡」的那三種 action 才算——taskId 才有意義（category 查得到）。
+ *
+ * adjust_reminder/increase_difficulty/add_contribution 是 AI/fallback 產生的
+ * 泛用建議，從來沒有帶 taskId，猜不出屬於哪個類別，不能算。pause_or_renegotiate
+ * 的 taskId 其實是 childId（見下面 abandonmentSuggestion 的註解，那是借用既有
+ * adopt/defer 機制的權宜設計，不是真任務 id）——就算剛好對到 taskCategoryMap
+ * 也不能信，所以同樣不放進這個集合。
+ */
+export const FOCUS_MAPPABLE_ACTIONS: SuggestionAction[] = ['adjust_schedule', 'adjust_recurrence', 'break_down_goal'];
+
+/**
+ * 從這週的建議清單裡，挑出「真的能可靠對應到 focusLineKey」的那一則，讓週報
+ * UI 把它拉到「這週最值得一起看看」最上層。沒有 focusLineKey，或清單裡沒有
+ * 任何一則可靠對應，回傳 undefined——寧可不挑，也不要亂猜一個不相關的建議上去。
+ */
+export function pickFocusSuggestion(
+  suggestions: WeeklySuggestion[],
+  taskCategoryMap: Map<string, TaskCategory>,
+  focusLineKey: TaskCategory | undefined,
+): WeeklySuggestion | undefined {
+  if (!focusLineKey) return undefined;
+  return suggestions.find(sg =>
+    sg.taskId != null
+    && FOCUS_MAPPABLE_ACTIONS.includes(sg.action)
+    && taskCategoryMap.get(sg.taskId) === focusLineKey,
+  );
 }
 
 /**
@@ -439,6 +473,8 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
   const [growthLines, setGrowthLines] = useState<WeeklyGrowthLine[]>([]);
   const [focusLineKey, setFocusLineKey] = useState<TaskCategory | undefined>(undefined);
   const [nextStep, setNextStep] = useState('');
+  const [focusSuggestion, setFocusSuggestion] = useState<WeeklySuggestion | undefined>(undefined);
+  const [otherSuggestions, setOtherSuggestions] = useState<WeeklySuggestion[]>([]);
   const [suggestions, setSuggestions] = useState<WeeklySuggestion[]>(PENDING_SUGGESTIONS);
   const [affirmations, setAffirmations] = useState<string[]>(PENDING_AFFIRMATIONS);
   const [dialoguePrompt, setDialoguePrompt] = useState('');
@@ -641,7 +677,8 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
       // 就算 aiReady=false（AI 掛掉或還沒生成過），只要 weekly_reports 那筆
       // 存在，growth_lines 就該顯示，不用等 AI。
       setGrowthLines(Array.isArray(report?.ai_suggestions?.growth_lines) ? report!.ai_suggestions!.growth_lines! : []);
-      setFocusLineKey(report?.ai_suggestions?.focus_line_key ?? undefined);
+      const focusLineKeyValue = report?.ai_suggestions?.focus_line_key ?? undefined;
+      setFocusLineKey(focusLineKeyValue);
       setNextStep(report?.ai_suggestions?.next_step ?? '');
 
       // Long-term goal progress
@@ -700,6 +737,16 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
 
       const finalSuggestions = [...baseSuggestions, ...abandonmentSuggestion, ...breakDownSuggestions];
       setSuggestions(finalSuggestions.length > 0 ? finalSuggestions : PENDING_SUGGESTIONS);
+
+      // 「這週最值得一起看看」——從 finalSuggestions 裡挑出真的能對到 focusLineKey
+      // 的那一則。taskCategoryMap 直接沿用上面算 activity bars 用的同一份 tasks
+      // 清單（id→category），不用另外多查一次表。
+      const taskCategoryMap = new Map<string, TaskCategory>(
+        tasks.map(t => [t.id, t.category as TaskCategory]),
+      );
+      const focusSg = pickFocusSuggestion(finalSuggestions, taskCategoryMap, focusLineKeyValue);
+      setFocusSuggestion(focusSg);
+      setOtherSuggestions(focusSg ? finalSuggestions.filter(sg => sg !== focusSg) : finalSuggestions);
 
       // ── 「查看完整紀錄」四分頁清單 ───────────────────────────────────────────
       // 先建立「id → 真實名稱」對照表，讓每一筆紀錄都能顯示任務／獎勵的真名。
@@ -1004,6 +1051,8 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     growthLines,
     focusLineKey,
     nextStep,
+    focusSuggestion,
+    otherSuggestions,
     activity,
     coinFlow,
     suggestions,

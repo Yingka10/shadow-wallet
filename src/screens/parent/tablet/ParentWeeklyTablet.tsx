@@ -574,6 +574,105 @@ function GrowthLineCard({ line, isFocus }: { line: WeeklyGrowthLine; isFocus: bo
   );
 }
 
+/**
+ * 「這週最值得一起看看」——多條成長線裡真正被拉到第一層決策的那一條。
+ *
+ * 三種狀態，對應 GrowBook｜Weekly Report UI B §2/§3/§5：
+ *   1. 沒有 focusLineKey（全部 stable）→ 明確講「沒有特別需要調整的地方」，不硬湊。
+ *   2. 有 focusLineKey、也有一則可靠對應的 suggestion → facts + 系統建議 + 採用/修改/再觀察。
+ *   3. 有 focusLineKey、但沒有 suggestion 可靠對應 → 只顯示 facts + next_step，不硬掛一個
+ *      不相關的建議上去、也不假裝有 action 可以採用（安全 fallback，見 §12）。
+ */
+function FocusReviewCard({
+  focusLineKey, growthLines, nextStep, focusReviewPrompt,
+  onAdopt, onDefer, onRevert, onAcknowledge,
+}: {
+  focusLineKey: TaskCategory | undefined;
+  growthLines: WeeklyGrowthLine[];
+  nextStep: string;
+  focusReviewPrompt: ReviewPrompt | null;
+  onAdopt: (item: ReviewPrompt, override?: ScheduleAdoptOverride) => Promise<void>;
+  onDefer: (item: ReviewPrompt) => Promise<void>;
+  onRevert: (item: ReviewPrompt) => Promise<void>;
+  onAcknowledge: (item: ReviewPrompt) => Promise<void>;
+}) {
+  const line = focusLineKey != null ? growthLines.find(l => l.key === focusLineKey) : undefined;
+
+  return (
+    <View style={s.card}>
+      <View style={s.statsHeaderRow}>
+        <View>
+          <Text style={s.eyebrow}>親子回顧</Text>
+          <Text style={s.sectionTitle}>這週最值得一起看看</Text>
+        </View>
+        {line && (
+          <View style={[s.growthLineBadge, { backgroundColor: GROWTH_STATUS_META[line.status].tint }]}>
+            <Text style={[s.growthLineBadgeText, { color: GROWTH_STATUS_META[line.status].color }]}>
+              {line.label}
+            </Text>
+          </View>
+        )}
+      </View>
+
+      {!line ? (
+        <Text style={s.focusEmptyText}>這週沒有特別需要調整的地方。</Text>
+      ) : (
+        <>
+          {line.facts.slice(0, 2).map((fact, i) => (
+            <Text key={i} style={s.growthLineFact}>{fact}</Text>
+          ))}
+          {focusReviewPrompt ? (
+            <View style={s.focusSuggestionBox}>
+              <Text style={s.focusSuggestionLabel}>系統整理出的建議</Text>
+              <ReviewPromptCard
+                item={focusReviewPrompt}
+                onAdopt={onAdopt}
+                onDefer={onDefer}
+                onRevert={onRevert}
+                onAcknowledge={onAcknowledge}
+              />
+            </View>
+          ) : nextStep ? (
+            <Text style={[s.focusEmptyText, { marginTop: 10 }]}>{nextStep}</Text>
+          ) : null}
+        </>
+      )}
+    </View>
+  );
+}
+
+/** 「其他可以考慮」——跟本週 focus 沒有直接關係的泛用建議，預設收合、視覺權重比 focus card 低。 */
+function OtherSuggestionsSection({ items, ...handlers }: {
+  items: ReviewPrompt[];
+  onAdopt: (item: ReviewPrompt, override?: ScheduleAdoptOverride) => Promise<void>;
+  onDefer: (item: ReviewPrompt) => Promise<void>;
+  onRevert: (item: ReviewPrompt) => Promise<void>;
+  onAcknowledge: (item: ReviewPrompt) => Promise<void>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (items.length === 0) return null;
+
+  return (
+    <View style={[s.card, s.otherSuggestionsCard]}>
+      <TouchableOpacity
+        style={s.otherSuggestionsHeader}
+        onPress={() => setExpanded(v => !v)}
+        activeOpacity={0.7}
+      >
+        <Text style={s.otherSuggestionsTitle}>其他可以考慮 · {items.length}</Text>
+        <Text style={s.historyGroupChevron}>{expanded ? '▾' : '▸'}</Text>
+      </TouchableOpacity>
+      {expanded && (
+        <View style={s.reviewPromptList}>
+          {items.map((item, i) => (
+            <ReviewPromptCard key={`${item.title}-${i}`} item={item} {...handlers} />
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
 function CoinDeltaRow({ tone, label, amount, note }: {
   tone: 'in' | 'out';
   label: string;
@@ -1068,7 +1167,7 @@ export default function ParentWeeklyTablet() {
     childName, weekLabel, weekRange,
     timeSavedMin, selfStartedCount, remindedCount, afterDinnerCount, beforeBedCount,
     aiInsight, aiReady, dialoguePrompt, affirmations,
-    growthLines, focusLineKey, nextStep,
+    growthLines, focusLineKey, nextStep, focusSuggestion,
     activity, coinFlow, suggestions,
     moments, longTermGoals,
     taskRecords, coinRecords, timeSavingRecords, redemptionRecords,
@@ -1173,6 +1272,55 @@ export default function ParentWeeklyTablet() {
   const displayReviewPrompts = aiReady && aiReviewPrompts.length > 0
     ? aiReviewPrompts
     : safeReviewPrompts;
+  // focusSuggestion（hook 算好、taskId→category 可靠對應到 focusLineKey 的那一則）
+  // 找它在 displayReviewPrompts 裡對應的卡片——同一個 taskId+action 一定是同一則。
+  // 找不到（例如已經被家長「再觀察一週」而從 aiReviewPrompts 濾掉）就不硬湊，
+  // FocusReviewCard 會退回只顯示 facts/next_step，不假裝有建議可以採用。
+  const focusReviewPrompt: ReviewPrompt | null = focusSuggestion
+    ? displayReviewPrompts.find(p => p.taskId === focusSuggestion.taskId && p.action === focusSuggestion.action) ?? null
+    : null;
+  const otherReviewPrompts: ReviewPrompt[] = focusReviewPrompt
+    ? displayReviewPrompts.filter(p => p !== focusReviewPrompt)
+    : displayReviewPrompts;
+
+  // Focus card 跟「其他可以考慮」都是同一批 ReviewPromptCard，動作邏輯共用一份，
+  // 不要為了拆兩個位置複製兩次同樣的 mutation 邏輯。
+  const reviewPromptHandlers = {
+    onAdopt: async (i2: ReviewPrompt, override?: ScheduleAdoptOverride) => {
+      if (i2.taskId == null) return;
+      const isRecurrence = (override && 'recurrenceDays' in override)
+        || (!override && i2.suggestedRecurrenceDays != null);
+      if (isRecurrence) {
+        const recurrenceDays = override && 'recurrenceDays' in override
+          ? override.recurrenceDays
+          : i2.suggestedRecurrenceDays;
+        if (recurrenceDays == null) return;
+        await adoptRecurrenceSuggestion(i2.taskId, recurrenceDays);
+        return;
+      }
+      const claimPeriod = override && 'claimPeriod' in override ? override.claimPeriod : i2.suggestedClaimPeriod;
+      const maxClaimsPerPeriod = override && 'maxClaimsPerPeriod' in override ? override.maxClaimsPerPeriod : i2.suggestedMaxClaimsPerPeriod;
+      if (claimPeriod == null || maxClaimsPerPeriod == null) return;
+      await adoptScheduleSuggestion(i2.taskId, claimPeriod, maxClaimsPerPeriod);
+    },
+    onDefer: async (i2: ReviewPrompt) => {
+      if (i2.taskId == null || i2.action == null) return;
+      await deferSuggestion(i2.taskId, i2.action, {
+        body: i2.prompt, actionLabel: i2.actionLabel ?? '', taskName: i2.title,
+      });
+    },
+    onRevert: async (i2: ReviewPrompt) => {
+      if (i2.taskId == null || i2.action == null) return;
+      await revertSuggestion(i2.taskId, i2.action);
+    },
+    onAcknowledge: async (i2: ReviewPrompt) => {
+      if (i2.taskId == null || i2.action == null) return;
+      await acknowledgeSuggestion(i2.taskId, i2.action, {
+        body: i2.prompt, actionLabel: i2.actionLabel ?? '', taskName: i2.title,
+      });
+      handleNavigateManage('tasks');
+    },
+  };
 
   return (
     <View style={webTabletScreen}>
@@ -1394,6 +1542,23 @@ export default function ParentWeeklyTablet() {
                 </View>
               </View>
 
+              <FocusReviewCard
+                focusLineKey={focusLineKey}
+                growthLines={growthLines}
+                nextStep={nextStep}
+                focusReviewPrompt={focusReviewPrompt}
+                onAdopt={reviewPromptHandlers.onAdopt}
+                onDefer={reviewPromptHandlers.onDefer}
+                onRevert={reviewPromptHandlers.onRevert}
+                onAcknowledge={reviewPromptHandlers.onAcknowledge}
+              />
+
+              <OtherSuggestionsSection items={otherReviewPrompts} {...reviewPromptHandlers} />
+
+              <AffirmationsCard affirmations={affirmations} aiReady={aiReady} />
+
+              <DialogueCard childName={childName} dialoguePrompt={dialoguePrompt} aiReady={aiReady} />
+
               {/* 長期任務進展 */}
               <View style={s.card}>
                 <View style={s.statsHeaderRow}>
@@ -1417,61 +1582,6 @@ export default function ParentWeeklyTablet() {
                   </View>
                 )}
               </View>
-
-              <View style={s.card}>
-                <View style={s.statsHeaderRow}>
-                  <View>
-                    <Text style={s.eyebrow}>親子回顧</Text>
-                    <Text style={s.sectionTitle}>這週值得一起回顧</Text>
-                  </View>
-                </View>
-                <View style={s.reviewPromptList}>
-                  {displayReviewPrompts.map((item, i) => (
-                    <ReviewPromptCard
-                      key={`${item.title}-${i}`}
-                      item={item}
-                      onAdopt={async (i2, override) => {
-                        if (i2.taskId == null) return;
-                        const isRecurrence = (override && 'recurrenceDays' in override)
-                          || (!override && i2.suggestedRecurrenceDays != null);
-                        if (isRecurrence) {
-                          const recurrenceDays = override && 'recurrenceDays' in override
-                            ? override.recurrenceDays
-                            : i2.suggestedRecurrenceDays;
-                          if (recurrenceDays == null) return;
-                          await adoptRecurrenceSuggestion(i2.taskId, recurrenceDays);
-                          return;
-                        }
-                        const claimPeriod = override && 'claimPeriod' in override ? override.claimPeriod : i2.suggestedClaimPeriod;
-                        const maxClaimsPerPeriod = override && 'maxClaimsPerPeriod' in override ? override.maxClaimsPerPeriod : i2.suggestedMaxClaimsPerPeriod;
-                        if (claimPeriod == null || maxClaimsPerPeriod == null) return;
-                        await adoptScheduleSuggestion(i2.taskId, claimPeriod, maxClaimsPerPeriod);
-                      }}
-                      onDefer={async (i2) => {
-                        if (i2.taskId == null || i2.action == null) return;
-                        await deferSuggestion(i2.taskId, i2.action, {
-                          body: i2.prompt, actionLabel: i2.actionLabel ?? '', taskName: i2.title,
-                        });
-                      }}
-                      onRevert={async (i2) => {
-                        if (i2.taskId == null || i2.action == null) return;
-                        await revertSuggestion(i2.taskId, i2.action);
-                      }}
-                      onAcknowledge={async (i2) => {
-                        if (i2.taskId == null || i2.action == null) return;
-                        await acknowledgeSuggestion(i2.taskId, i2.action, {
-                          body: i2.prompt, actionLabel: i2.actionLabel ?? '', taskName: i2.title,
-                        });
-                        handleNavigateManage('tasks');
-                      }}
-                    />
-                  ))}
-                </View>
-              </View>
-
-              <AffirmationsCard affirmations={affirmations} aiReady={aiReady} />
-
-              <DialogueCard childName={childName} dialoguePrompt={dialoguePrompt} aiReady={aiReady} />
 
               <View style={s.card}>
                 <View style={s.statsHeaderRow}>
@@ -1819,6 +1929,38 @@ const s = StyleSheet.create({
   nextStepText: {
     fontSize: 14,
     lineHeight: 21,
+    color: ParentColors.fgSecondary,
+  },
+  focusEmptyText: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: ParentColors.fgSecondary,
+  },
+  focusSuggestionBox: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: ParentColors.borderMedium,
+  },
+  focusSuggestionLabel: {
+    fontSize: 12,
+    fontWeight: ParentFontWeights.semi,
+    color: ParentColors.plum500,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginBottom: 8,
+  },
+  otherSuggestionsCard: {
+    padding: 18,
+  },
+  otherSuggestionsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  otherSuggestionsTitle: {
+    fontSize: 13,
+    fontWeight: ParentFontWeights.semi,
     color: ParentColors.fgSecondary,
   },
   weeklyOverviewGrid: {
