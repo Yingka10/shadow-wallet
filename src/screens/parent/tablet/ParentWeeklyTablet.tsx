@@ -1971,12 +1971,12 @@ const s = StyleSheet.create({
   // 共用同一組樣式）——先前太小容易被忽略，即使是「穩定」這種語氣輕的狀態，
   // 字也要清楚可讀，不能只靠顏色分辨。
   growthLineBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
     borderRadius: 100,
   },
   growthLineBadgeText: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: ParentFontWeights.bold,
   },
   growthLineSummary: {
