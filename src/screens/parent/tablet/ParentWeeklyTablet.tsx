@@ -1962,19 +1962,22 @@ const s = StyleSheet.create({
   // 每張卡最先看到的文字——刻意比 summary/fact 拉開一級，不是跟著全站字級走。
   growthLineLabel: {
     fontFamily: ParentFonts.display,
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: ParentFontWeights.bold,
     color: ParentColors.fgPrimary,
     letterSpacing: -0.2,
   },
+  // status badge（穩定／先觀察／值得一起看看，以及 focus card 上的成長線分類 badge
+  // 共用同一組樣式）——先前太小容易被忽略，即使是「穩定」這種語氣輕的狀態，
+  // 字也要清楚可讀，不能只靠顏色分辨。
   growthLineBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
     borderRadius: 100,
   },
   growthLineBadgeText: {
-    fontSize: 12.5,
-    fontWeight: ParentFontWeights.semi,
+    fontSize: 14,
+    fontWeight: ParentFontWeights.bold,
   },
   growthLineSummary: {
     fontSize: 14,
