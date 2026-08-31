@@ -263,7 +263,7 @@ function buildCategoryFacts(facts: CategoryWeeklyFacts): string[] {
   const lines: string[] = [];
   lines.push(
     facts.weeklyTarget != null
-      ? `本週目標 ${facts.weeklyTarget} 次，完成 ${facts.targetDone} 次`
+      ? `原訂每週 ${facts.weeklyTarget} 次，本週完成 ${facts.targetDone} 次`
       : `本週完成 ${facts.done} 次`,
   );
   if (facts.remindedCount > 0) {

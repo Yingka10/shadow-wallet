@@ -607,9 +607,9 @@ function GrowthLineCard({ line, isFocus }: { line: WeeklyGrowthLine; isFocus: bo
  * focus，這裡沒有對應項）。
  */
 const FOCUS_SUGGESTION_HEADING: Partial<Record<SuggestionAction, string>> = {
-  adjust_schedule: '可以先一起確認目前安排的次數',
-  adjust_recurrence: '可以先一起確認目前排定的日子',
-  break_down_goal: '可以先一起看看能不能拆小一點',
+  adjust_schedule: '先確認目前安排的次數是否還適合',
+  adjust_recurrence: '先確認目前排定的日子是否還適合',
+  break_down_goal: '先看看能不能把目標拆小一點',
 };
 
 /**
@@ -707,7 +707,7 @@ function WeeklySynthesisCard({
                   // 只換顯示標題，title 本身不動——onDefer/onAcknowledge 會把
                   // title 當 taskName 存進 DB，改了 title 會污染資料庫紀錄。
                   displayTitle: (focusReviewPrompt.action && FOCUS_SUGGESTION_HEADING[focusReviewPrompt.action])
-                    ?? '可以先一起看看要不要調整',
+                    ?? '先看看要不要調整',
                 }}
                 onAdopt={onAdopt}
                 onDefer={onDefer}

@@ -393,7 +393,7 @@ function computeFallbackInsight(ctx: WeeklyContext): GeminiInsightResult {
   const motivation_observation = ctx.growthLines.length === 0
     ? '這週還沒有任務完成紀錄，可以和孩子一起看看想從哪件事開始。'
     : focusLine
-      ? `這週有一條線特別值得一起看看：「${focusLine.label}」。其他安排目前大致穩定，這條這週比較需要花時間聊聊。`
+      ? `這週多數成長線穩定，「${focusLine.label}」較值得一起看看。`
       : '這週各方面的安排大致穩定，其他安排先維持即可。';
 
   const dialogue = ctx.growthLines.length === 0
