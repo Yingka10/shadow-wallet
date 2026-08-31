@@ -215,6 +215,13 @@ function LongTermGoalCard({ goal }: { goal: LongTermGoalProgress }) {
 
 type ReviewPrompt = {
   title: string;
+  /**
+   * 只影響畫面上顯示的標題文字，不影響 title 本身——title 還是要保留任務
+   * 真名，因為 onDefer/onAcknowledge 會把 title 當 taskName 存進 DB（見
+   * reviewPromptHandlers）。這個欄位只給「本週整理」的 focus 卡用，把標題
+   * 換成討論方向短句時，不能連帶污染存進資料庫的任務名稱。
+   */
+  displayTitle?: string;
   prompt: string;
   tone: 'green' | 'orange';
   taskId?: string;
@@ -369,7 +376,7 @@ function ReviewPromptCard({ item, onAdopt, onDefer, onRevert, onAcknowledge }: {
           : <CheckSquareIcon size={18} color={ParentColors.teal500} />}
       </View>
       <View style={s.reviewPromptBody}>
-        <Text style={s.reviewPromptTitle}>{item.title}</Text>
+        <Text style={s.reviewPromptTitle}>{item.displayTitle ?? item.title}</Text>
         <Text style={s.reviewPromptText}>{item.prompt}</Text>
         {isScheduleSuggestion && !editing && (
           <Text style={s.scheduleDiffText}>
@@ -591,6 +598,21 @@ function GrowthLineCard({ line, isFocus }: { line: WeeklyGrowthLine; isFocus: bo
 }
 
 /**
+ * 「下一步」區塊的標題——用固定的、依 action 類型決定的討論方向短句，取代
+ * 直接把任務名稱當標題顯示。任務名稱已經在②層的 facts 裡出現過（「實際做
+ * 的事：OO」），這裡不用再講一次；而且任務名稱當標題很容易被誤讀成「AI
+ * 生出一個新任務」，換成討論方向短句才對得上這一層真正要做的事：根據紀錄
+ * 提出一個可以討論的調整方向，不是推薦一個新計畫。三種可能對應到 focus
+ * 卡（pause_or_renegotiate 的 taskId 是 childId 佔位值，設計上不會被選為
+ * focus，這裡沒有對應項）。
+ */
+const FOCUS_SUGGESTION_HEADING: Partial<Record<SuggestionAction, string>> = {
+  adjust_schedule: '可以先一起確認目前安排的次數',
+  adjust_recurrence: '可以先一起確認目前排定的日子',
+  break_down_goal: '可以先一起看看能不能拆小一點',
+};
+
+/**
  * 「本週整理」的單一收斂卡片——取代舊版「本週整理（AI 文字）」＋「這週最值得
  * 一起看看（focus 建議）」兩張卡。原本同一件事（focus line 值得看）被講三次
  * （本週整理 headline／本週整理 focus 段落／focus card facts+建議），現在只講
@@ -680,7 +702,13 @@ function WeeklySynthesisCard({
             <Text style={s.nextStepLabel}>下一步</Text>
             {focusReviewPrompt ? (
               <ReviewPromptCard
-                item={focusReviewPrompt}
+                item={{
+                  ...focusReviewPrompt,
+                  // 只換顯示標題，title 本身不動——onDefer/onAcknowledge 會把
+                  // title 當 taskName 存進 DB，改了 title 會污染資料庫紀錄。
+                  displayTitle: (focusReviewPrompt.action && FOCUS_SUGGESTION_HEADING[focusReviewPrompt.action])
+                    ?? '可以先一起看看要不要調整',
+                }}
                 onAdopt={onAdopt}
                 onDefer={onDefer}
                 onRevert={onRevert}
