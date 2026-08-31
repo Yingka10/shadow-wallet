@@ -273,14 +273,12 @@ type ScheduleAdoptOverride =
   | { claimPeriod: ScheduleClaimPeriod; maxClaimsPerPeriod: number }
   | { recurrenceDays: number[] };
 
-function ReviewPromptCard({ item, onAdopt, onDefer, onRevert, onAcknowledge, emphasizeTitle = false }: {
+function ReviewPromptCard({ item, onAdopt, onDefer, onRevert, onAcknowledge }: {
   item: ReviewPrompt;
   onAdopt: (item: ReviewPrompt, override?: ScheduleAdoptOverride) => Promise<void>;
   onDefer: (item: ReviewPrompt) => Promise<void>;
   onRevert: (item: ReviewPrompt) => Promise<void>;
   onAcknowledge: (item: ReviewPrompt) => Promise<void>;
-  /** focus card 裡的任務名稱要是全卡最醒目的文字；「其他可以考慮」清單裡維持原本大小，不搶 focus card 的視覺權重。 */
-  emphasizeTitle?: boolean;
 }) {
   const [adopting, setAdopting] = useState(false);
   const [deferring, setDeferring] = useState(false);
@@ -371,7 +369,7 @@ function ReviewPromptCard({ item, onAdopt, onDefer, onRevert, onAcknowledge, emp
           : <CheckSquareIcon size={18} color={ParentColors.teal500} />}
       </View>
       <View style={s.reviewPromptBody}>
-        <Text style={[s.reviewPromptTitle, emphasizeTitle && s.reviewPromptTitleEmphasized]}>{item.title}</Text>
+        <Text style={s.reviewPromptTitle}>{item.title}</Text>
         <Text style={s.reviewPromptText}>{item.prompt}</Text>
         {isScheduleSuggestion && !editing && (
           <Text style={s.scheduleDiffText}>
@@ -593,20 +591,30 @@ function GrowthLineCard({ line, isFocus }: { line: WeeklyGrowthLine; isFocus: bo
 }
 
 /**
- * 「這週最值得一起看看」——多條成長線裡真正被拉到第一層決策的那一條。
- *
- * 三種狀態，對應 GrowBook｜Weekly Report UI B §2/§3/§5：
- *   1. 沒有 focusLineKey（全部 stable）→ 明確講「沒有特別需要調整的地方」，不硬湊。
- *   2. 有 focusLineKey、也有一則可靠對應的 suggestion → facts + 系統建議 + 採用/修改/再觀察。
- *   3. 有 focusLineKey、但沒有 suggestion 可靠對應 → 只顯示 facts + next_step，不硬掛一個
- *      不相關的建議上去、也不假裝有 action 可以採用（安全 fallback，見 §12）。
+ * 「本週整理」的單一收斂卡片——取代舊版「本週整理（AI 文字）」＋「這週最值得
+ * 一起看看（focus 建議）」兩張卡。原本同一件事（focus line 值得看）被講三次
+ * （本週整理 headline／本週整理 focus 段落／focus card facts+建議），現在只講
+ * 一次，分三層：
+ *   ① 全家這週怎樣——一句 headline（AI/fallback 文字的第一段）＋各狀態計數，
+ *      不再顯示 AI 文字的第二、三段（那兩段本來就是在重複第②③層的內容）。
+ *   ② 為什麼這條值得看——focus line 的名稱＋facts，用可核對的證據呈現，不是散文。
+ *   ③ 下一步——真實的系統建議（若有可靠 mapping，含採用/修改/再觀察）或
+ *      next_step 文字；沒有 focus line 時①已經講清楚「沒有特別需要調整」，
+ *      ②③直接不顯示，不硬湊。
  */
-function FocusReviewCard({
-  focusLineKey, growthLines, nextStep, focusReviewPrompt,
+function WeeklySynthesisCard({
+  weekRange, childName, weekLabel, summaryText, aiRefreshing, onAiRefresh,
+  growthLines, focusLineKey, nextStep, focusReviewPrompt,
   onAdopt, onDefer, onRevert, onAcknowledge,
 }: {
-  focusLineKey: TaskCategory | undefined;
+  weekRange: string;
+  childName: string;
+  weekLabel: string;
+  summaryText: string;
+  aiRefreshing: boolean;
+  onAiRefresh: () => void;
   growthLines: WeeklyGrowthLine[];
+  focusLineKey: TaskCategory | undefined;
   nextStep: string;
   focusReviewPrompt: ReviewPrompt | null;
   onAdopt: (item: ReviewPrompt, override?: ScheduleAdoptOverride) => Promise<void>;
@@ -614,48 +622,81 @@ function FocusReviewCard({
   onRevert: (item: ReviewPrompt) => Promise<void>;
   onAcknowledge: (item: ReviewPrompt) => Promise<void>;
 }) {
+  const [headline] = splitSummaryParagraphs(summaryText);
   const line = focusLineKey != null ? growthLines.find(l => l.key === focusLineKey) : undefined;
 
+  const STATUS_ORDER: WeeklyGrowthLine['status'][] = ['stable', 'watch', 'needs_discussion'];
+  const countsStrip = STATUS_ORDER
+    .map(status => ({ status, count: growthLines.filter(l => l.status === status).length }))
+    .filter(c => c.count > 0);
+
   return (
-    <View style={s.card}>
+    <View style={s.summaryCard}>
       <View style={s.statsHeaderRow}>
         <View>
-          <Text style={s.eyebrow}>親子回顧</Text>
-          <Text style={s.sectionTitle}>這週最值得一起看看</Text>
+          <Text style={s.eyebrow}>週報 · {weekRange}</Text>
+          <Text style={s.sectionTitle}>本週整理</Text>
         </View>
-        {line && (
-          <View style={[s.growthLineBadge, { backgroundColor: GROWTH_STATUS_META[line.status].tint }]}>
-            <Text style={[s.growthLineBadgeText, { color: GROWTH_STATUS_META[line.status].color }]}>
-              {line.label}
-            </Text>
-          </View>
-        )}
+        <TouchableOpacity
+          onPress={onAiRefresh}
+          disabled={aiRefreshing}
+          style={[s.aiRefreshBtn, aiRefreshing && s.aiRefreshBtnLoading]}
+        >
+          {aiRefreshing
+            ? <ActivityIndicator size="small" color={ParentColors.accent} />
+            : <RefreshIcon size={11} />}
+          <Text style={s.aiRefreshBtnLabel}>{aiRefreshing ? '生成中' : '重新產生摘要'}</Text>
+        </TouchableOpacity>
       </View>
 
-      {!line ? (
-        <Text style={s.focusEmptyText}>這週沒有特別需要調整的地方。</Text>
-      ) : (
-        <>
-          {line.facts.slice(0, 2).map((fact, i) => (
-            <Text key={i} style={s.growthLineFact}>{fact}</Text>
+      {/* ① 全家這週怎樣 */}
+      {headline ? <Text style={s.summaryHeadline}>{headline}</Text> : null}
+      {countsStrip.length > 0 && (
+        <Text style={s.countsStripText}>
+          {countsStrip.map((c, i) => (
+            <Text key={c.status} style={{ color: GROWTH_STATUS_META[c.status].color, fontWeight: ParentFontWeights.semi }}>
+              {i > 0 ? '　·　' : ''}{c.count} 條{GROWTH_STATUS_META[c.status].label}
+            </Text>
           ))}
-          {focusReviewPrompt ? (
-            <View style={s.focusSuggestionBox}>
-              <Text style={s.focusSuggestionLabel}>系統整理出的建議</Text>
+        </Text>
+      )}
+
+      {line && (
+        <>
+          {/* ② 為什麼這條值得看 */}
+          <View style={s.summaryDivider} />
+          <View style={s.evidenceBlock}>
+            <Text style={s.evidenceLineLabel}>{line.label}</Text>
+            {line.facts.slice(0, 2).map((fact, i) => (
+              <Text key={i} style={s.growthLineFact}>
+                {fact.includes('提醒') ? `🔔 ${fact}` : fact}
+              </Text>
+            ))}
+          </View>
+
+          {/* ③ 下一步 */}
+          <View style={s.summaryDivider} />
+          <View>
+            <Text style={s.nextStepLabel}>下一步</Text>
+            {focusReviewPrompt ? (
               <ReviewPromptCard
                 item={focusReviewPrompt}
                 onAdopt={onAdopt}
                 onDefer={onDefer}
                 onRevert={onRevert}
                 onAcknowledge={onAcknowledge}
-                emphasizeTitle
               />
-            </View>
-          ) : nextStep ? (
-            <Text style={[s.focusEmptyText, { marginTop: 10 }]}>{nextStep}</Text>
-          ) : null}
+            ) : nextStep ? (
+              <Text style={[s.nextStepText, { marginTop: 4 }]}>{nextStep}</Text>
+            ) : null}
+          </View>
         </>
       )}
+
+      <View style={s.summaryFooter}>
+        <Text style={s.aiFooterText}>{childName || '孩子'} · {weekLabel}</Text>
+        <Text style={s.aiFooterText}>AI 整理 · 供參考</Text>
+      </View>
     </View>
   );
 }
@@ -1294,7 +1335,7 @@ export default function ParentWeeklyTablet() {
   // focusSuggestion（hook 算好、taskId→category 可靠對應到 focusLineKey 的那一則）
   // 找它在 displayReviewPrompts 裡對應的卡片——同一個 taskId+action 一定是同一則。
   // 找不到（例如已經被家長「再觀察一週」而從 aiReviewPrompts 濾掉）就不硬湊，
-  // FocusReviewCard 會退回只顯示 facts/next_step，不假裝有建議可以採用。
+  // WeeklySynthesisCard 會退回只顯示 facts/next_step，不假裝有建議可以採用。
   const focusReviewPrompt: ReviewPrompt | null = focusSuggestion
     ? displayReviewPrompts.find(p => p.taskId === focusSuggestion.taskId && p.action === focusSuggestion.action) ?? null
     : null;
@@ -1521,62 +1562,18 @@ export default function ParentWeeklyTablet() {
                       <GrowthLineCard key={line.key} line={line} isFocus={line.key === focusLineKey} />
                     ))}
                   </View>
-                  {focusLineKey && nextStep ? (
-                    <View style={s.nextStepBox}>
-                      <Text style={s.nextStepLabel}>下一步</Text>
-                      <Text style={s.nextStepText}>{nextStep}</Text>
-                    </View>
-                  ) : null}
                 </View>
               )}
 
-              <View style={s.summaryCard}>
-                <View style={s.statsHeaderRow}>
-                  <View>
-                    <Text style={s.eyebrow}>週報 · {weekRange}</Text>
-                    <Text style={s.sectionTitle}>本週整理</Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={handleAiRefresh}
-                    disabled={aiRefreshing}
-                    style={[s.aiRefreshBtn, aiRefreshing && s.aiRefreshBtnLoading]}
-                  >
-                    {aiRefreshing
-                      ? <ActivityIndicator size="small" color={ParentColors.accent} />
-                      : <RefreshIcon size={11} />}
-                    <Text style={s.aiRefreshBtnLabel}>
-                      {aiRefreshing ? '生成中' : '重新產生摘要'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-                {(() => {
-                  const [headline, ...rest] = splitSummaryParagraphs(summaryText);
-                  const evidence = rest.slice(0, -1);
-                  const focusPara = rest.length > 0 ? rest[rest.length - 1] : null;
-                  return (
-                    <>
-                      {headline ? <Text style={s.summaryHeadline}>{headline}</Text> : null}
-                      {evidence.map((p, i) => (
-                        <Text key={i} style={s.summaryEvidence}>{p}</Text>
-                      ))}
-                      {focusPara ? (
-                        <View style={s.summaryFocusBox}>
-                          <Text style={s.summaryFocusLabel}>focus / 下一步</Text>
-                          <Text style={s.summaryFocusText}>{focusPara}</Text>
-                        </View>
-                      ) : null}
-                    </>
-                  );
-                })()}
-                <View style={s.summaryFooter}>
-                  <Text style={s.aiFooterText}>{childName || '孩子'} · {weekLabel}</Text>
-                  <Text style={s.aiFooterText}>AI 整理 · 供參考</Text>
-                </View>
-              </View>
-
-              <FocusReviewCard
-                focusLineKey={focusLineKey}
+              <WeeklySynthesisCard
+                weekRange={weekRange}
+                childName={childName}
+                weekLabel={weekLabel}
+                summaryText={summaryText}
+                aiRefreshing={aiRefreshing}
+                onAiRefresh={handleAiRefresh}
                 growthLines={growthLines}
+                focusLineKey={focusLineKey}
                 nextStep={nextStep}
                 focusReviewPrompt={focusReviewPrompt}
                 onAdopt={reviewPromptHandlers.onAdopt}
@@ -1902,32 +1899,30 @@ const s = StyleSheet.create({
     color: ParentColors.fgPrimary,
     letterSpacing: -0.2,
   },
-  summaryEvidence: {
+  // 一句計數 strip（例如「2 條穩定・1 條先觀察・1 條值得一起看看」），取代原本
+  // AI 文字第二段（列穩定線佐證）——那段內容本來就跟②③層重複，不再顯示。
+  countsStripText: {
+    fontFamily: ParentFonts.body,
+    fontSize: 14,
+    marginTop: 8,
+  },
+  // ②③層之間的細分隔線，比 nextStepBox 那種「加框」更輕，避免又做出一個看起來
+  // 像獨立卡片的區塊——這裡要的是「同一張卡的下一段」，不是第二張卡。
+  summaryDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: ParentColors.borderMedium,
+    marginTop: 16,
+    marginBottom: 14,
+  },
+  evidenceBlock: {
+    gap: 4,
+  },
+  evidenceLineLabel: {
     fontFamily: ParentFonts.display,
-    fontSize: 15,
-    lineHeight: 23,
-    color: ParentColors.fgSecondary,
-    marginTop: 10,
-  },
-  summaryFocusBox: {
-    marginTop: 14,
-    padding: 14,
-    borderRadius: ParentRadii.md,
-    backgroundColor: '#FBF6F8',
-    gap: 3,
-  },
-  summaryFocusLabel: {
-    fontSize: 11.5,
-    fontWeight: ParentFontWeights.semi,
-    color: ParentColors.plum500,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  summaryFocusText: {
-    fontFamily: ParentFonts.display,
-    fontSize: 15,
-    lineHeight: 22,
-    color: ParentColors.fgSecondary,
+    fontSize: 16,
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgPrimary,
+    marginBottom: 2,
   },
   summaryFooter: {
     flexDirection: 'row',
@@ -1989,13 +1984,6 @@ const s = StyleSheet.create({
     lineHeight: 18,
     color: ParentColors.fgMuted,
   },
-  nextStepBox: {
-    marginTop: 14,
-    paddingTop: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: ParentColors.borderMedium,
-    gap: 3,
-  },
   nextStepLabel: {
     fontSize: 11.5,
     fontWeight: ParentFontWeights.semi,
@@ -2007,25 +1995,6 @@ const s = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     color: ParentColors.fgSecondary,
-  },
-  focusEmptyText: {
-    fontSize: 14,
-    lineHeight: 21,
-    color: ParentColors.fgSecondary,
-  },
-  focusSuggestionBox: {
-    marginTop: 14,
-    paddingTop: 14,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: ParentColors.borderMedium,
-  },
-  focusSuggestionLabel: {
-    fontSize: 12,
-    fontWeight: ParentFontWeights.semi,
-    color: ParentColors.plum500,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-    marginBottom: 8,
   },
   otherSuggestionsCard: {
     padding: 18,
@@ -2825,14 +2794,6 @@ const s = StyleSheet.create({
     fontSize: 15,
     fontWeight: ParentFontWeights.semi,
     color: ParentColors.fgPrimary,
-  },
-  // focus card 專用：任務名稱要是卡片裡最醒目的文字（§13）。「其他可以考慮」
-  // 清單不傳這個 prop，維持原本大小，才不會五則泛用建議跟 focus 卡搶視覺權重。
-  reviewPromptTitleEmphasized: {
-    fontFamily: ParentFonts.display,
-    fontSize: 18,
-    fontWeight: ParentFontWeights.bold,
-    letterSpacing: -0.1,
   },
   reviewPromptText: {
     fontFamily: ParentFonts.body,
