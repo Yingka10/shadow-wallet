@@ -416,3 +416,56 @@ describe('5. Reward freshness（沿用既有 evaluator，不是第二套）', ()
     expect(stale.currentPlanVersion?.child_confirmed_plan).toEqual(CHILD_CONFIRMED_PLAN);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 沒有終點的節奏計畫（2026-09-06）
+//
+// 「每週練琴三次」這種目標是 duration_type='recurring'，沒有 duration_days。
+// 它一樣有每週節奏可看，所以一樣該能直接確認。
+//
+// 客戶端這一側本來就是對的 —— systemFieldsComplete 對 duration_type 只有
+// 「long_term 時 duration_days 必須 > 0」一條要求。真正把它擋住的是 DB
+// 那一側（weekly_rhythm 的 evidence CHECK 要求 long_term），已另修。
+//
+// 這一組是**特徵測試**：它現在就該綠。存在的理由是防止有人日後在
+// systemFieldsComplete 加一條 duration_type === 'long_term' 把死結裝回去。
+// ─────────────────────────────────────────────────────────────────────────────
+describe('沒有終點的節奏計畫也能直接確認', () => {
+  it('recurring + weekly_frequency + weekly_rhythm 是可以確認的', () => {
+    const target = card({
+      duration_type: 'recurring',
+      duration_days: null,
+      progress_model: 'weekly_rhythm',
+      cadence_mode: 'weekly_frequency',
+      cadence_weekly_frequency: 3,
+      cadence_days: null,
+    });
+
+    expect(childPlanConfirmability(target)).toEqual({ ok: true });
+    expect(isChildPlanDirectConfirmable(target)).toBe(true);
+  });
+
+  it('recurring 不需要 duration_days —— 那是 long_term 才有的要求', () => {
+    const target = card({
+      duration_type: 'recurring',
+      duration_days: null,
+      progress_model: 'weekly_rhythm',
+    });
+
+    expect(isChildPlanDirectConfirmable(target)).toBe(true);
+  });
+
+  it('long_term 仍然必須有 duration_days', () => {
+    const target = card({
+      duration_type: 'long_term',
+      duration_days: null,
+      progress_model: 'weekly_rhythm',
+    });
+
+    expect(childPlanConfirmability(target)).toEqual({
+      ok: false,
+      block: 'system_fields_incomplete',
+      pending: [],
+    });
+  });
+});
