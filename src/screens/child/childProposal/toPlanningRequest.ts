@@ -86,6 +86,8 @@ export function toPlanningRequest(
       proposal.cadence_weekly_frequency,
       proposal.cadence_days,
     ),
+    // 期限那一輪還沒問到時就是 null。這一層不替孩子決定。
+    goalDuration: null,
     // preferred_time_custom 優先：那是孩子自己打的字，
     // preferred_time 是他從固定選項裡挑的。
     preferredTime: proposal.preferred_time_custom ?? proposal.preferred_time,

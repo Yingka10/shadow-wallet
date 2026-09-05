@@ -42,12 +42,14 @@ import {
   isChildOwned,
   type ChildGoalPlan,
   type ChildGoalPlanControl,
+  type ChildGoalDuration,
   type ChildGoalPlanCore,
   type ChildGoalPlanProgression,
   type ChildGoalPlanningInput,
   type ChildGoalPlanningResult,
   type ChildGoalPlanningUnavailableReason,
   type ChildPlanCadence,
+  type ChildPlanDurationOption,
   type ChildPlanClarificationKind,
   type ChildPlanFieldSource,
   type ChildPlanGoalControlType,
@@ -268,6 +270,42 @@ function validOptionRationale(value: unknown): ChildPlanStartOption['rationale']
     : 'invalid';
 }
 
+function goalDurationEquals(a: ChildGoalDuration, b: ChildGoalDuration): boolean {
+  if (a.kind !== b.kind) return false;
+  return a.kind !== 'days' || b.kind !== 'days' || a.days === b.days;
+}
+
+function validGoalDuration(value: unknown): ChildGoalDuration | null {
+  if (!isRecord(value)) return null;
+  if (value.kind === 'open_ended') return { kind: 'open_ended' };
+  if (value.kind !== 'days') return null;
+  if (typeof value.days !== 'number' || !Number.isInteger(value.days)) return null;
+  if (value.days < L.minGoalDurationDays || value.days > L.maxGoalDurationDays) return null;
+  return { kind: 'days', days: value.days };
+}
+
+function validDurationOptions(value: unknown): ChildPlanDurationOption[] | null {
+  if (!Array.isArray(value)) return null;
+  if (value.length < L.minDurationOptions || value.length > L.maxDurationOptions) return null;
+
+  const options: ChildPlanDurationOption[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!isRecord(item)) return null;
+    const id = nonEmptyString(item.id, L.maxOptionIdLength);
+    const text = nonEmptyString(item.text, L.maxOptionLength);
+    if (id === null || text === null) return null;
+    if (seen.has(id)) return null;
+    seen.add(id);
+    // 超出範圍**拒絕，不 clamp**。把 200 悄悄改成 180，就是讓孩子
+    // 確認一個他沒說過的期限。
+    if (typeof item.days !== 'number' || !Number.isInteger(item.days)) return null;
+    if (item.days < L.minGoalDurationDays || item.days > L.maxGoalDurationDays) return null;
+    options.push({ id, text, days: item.days });
+  }
+  return options;
+}
+
 function validOptions(value: unknown): ChildPlanStartOption[] | null {
   if (!Array.isArray(value)) return null;
   if (value.length < L.minChoiceOptions || value.length > L.maxChoiceOptions) return null;
@@ -383,6 +421,14 @@ function validateCore(raw: Record<string, unknown>, rejections: Rejections): Cor
     return null;
   }
 
+  // 期限缺席就是整份不放行（P1-A1 §5）。沒有相容分支 —— 有的話，
+  // 「這份計畫的期限是誰決定的」之後永遠會有兩個答案。
+  const goalDuration = validGoalDuration(raw.goalDuration);
+  if (goalDuration === null) {
+    rejections.add('SHAPE_INVALID');
+    return null;
+  }
+
   // nextAction 的來源在兩個地方各講一次，講不一樣就是回應本身矛盾。
   if (provenance.fields.nextAction !== nextActionSource) {
     rejections.add('SHAPE_INVALID');
@@ -405,6 +451,7 @@ function validateCore(raw: Record<string, unknown>, rejections: Rejections): Cor
       reviewPoint,
       planningContribution,
       provenance,
+      goalDuration,
       model,
     },
     texts: [desiredOutcome, actionPlanSummary, currentFocus, nextActionText],
@@ -695,6 +742,12 @@ function checkAgainstChildInput(
     rejections.add('CHILD_INPUT_OVERWRITTEN');
   }
 
+  // 孩子選過的期限不可以被換掉。與 cadence 同一條原則 ——
+  // 他看著那個數字點下去，換掉它等於他那一下沒有算數。
+  if (input.goalDuration !== null && !goalDurationEquals(plan.goalDuration, input.goalDuration)) {
+    rejections.add('CHILD_INPUT_OVERWRITTEN');
+  }
+
   // 孩子連節奏帶方法都講了，下一步就不可能是 AI 想出來的。
   //
   // 這條是「不得直接覆寫成另一套訓練」唯一驗得出來的形式：光看回應本身，
@@ -783,6 +836,7 @@ export function validateChildGoalPlanningResult(
 
   if (value.status === 'needs_clarification') return validateClarification(value, input);
   if (value.status === 'needs_choice') return validateChoice(value, input);
+  if (value.status === 'needs_duration') return validateDuration(value, input);
 
   if (value.status !== 'ready') return childGoalPlanningUnavailable('INVALID_RESPONSE');
 
@@ -929,6 +983,49 @@ function validateChoice(
 
   return {
     status: 'needs_choice',
+    schemaVersion: CHILD_GOAL_PLANNING_SCHEMA_VERSION,
+    knownGoal,
+    question,
+    options,
+    allowCustomAnswer: true,
+    model,
+  };
+}
+
+/**
+ * needs_duration —— 孩子沒講期間時，讓他自己選一個（P1-A1）。
+ */
+function validateDuration(
+  value: Record<string, unknown>,
+  input: ChildGoalPlanningInput,
+): ChildGoalPlanningResult {
+  const knownGoal = nonEmptyString(value.knownGoal, L.maxGoalLength);
+  const model = nonEmptyString(value.model, L.maxModelLength);
+  const question = nonEmptyString(value.question, L.maxChoiceQuestionLength);
+  const options = validDurationOptions(value.options);
+  if (knownGoal === null || model === null || question === null || options === null) {
+    return childGoalPlanningUnavailable('INVALID_RESPONSE', ['SHAPE_INVALID']);
+  }
+
+  // 孩子永遠可以自己說一個期間，或說這件事沒有終點。
+  if (value.allowCustomAnswer !== true) {
+    return childGoalPlanningUnavailable('INVALID_RESPONSE', ['SHAPE_INVALID']);
+  }
+
+  const rejections = new Rejections();
+  checkConversationText(
+    [question, ...options.map((option) => option.text)],
+    knownGoal,
+    input,
+    rejections,
+  );
+
+  if (rejections.any) {
+    return childGoalPlanningUnavailable('INVALID_AI_OUTPUT', rejections.list);
+  }
+
+  return {
+    status: 'needs_duration',
     schemaVersion: CHILD_GOAL_PLANNING_SCHEMA_VERSION,
     knownGoal,
     question,

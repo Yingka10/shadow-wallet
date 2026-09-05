@@ -75,11 +75,23 @@ export type ChildGoalPlanningInput = {
   /** 孩子在第一頁自己講的做法（含老師教的、課程安排的）。有值時只能整理。 */
   childApproach: string | null;
   cadence: ChildPlanCadence | null;
+  /** 孩子在期限那一輪選的答案。null = 還沒問到／還沒選。 */
+  goalDuration: ChildGoalDuration | null;
   preferredTime: string | null;
   planningSupportPreference: ChildPlanningSupportPreference | null;
   /** 這場對話到目前為止孩子回過的話，依時間排序。第一輪是空陣列。 */
   responses: ChildPlanningResponse[];
 };
+
+/**
+ * 孩子選的期限。與 App 端 ChildGoalDuration 鏡射。
+ *
+ * `open_ended` **不是** `days: null` —— 後者讀起來像「還沒決定」，
+ * 而這裡的意思是孩子已經決定了「沒有終點」。
+ */
+export type ChildGoalDuration =
+  | { kind: 'days'; days: number }
+  | { kind: 'open_ended' };
 
 /** 方法是怎麼來的。與 App 端 ChildPlanApproachOrigin 鏡射。 */
 export type ChildPlanApproachOrigin =
@@ -208,7 +220,16 @@ export type ChildGoalPlanCore = {
   reviewPoint: ChildPlanReviewPoint;
   planningContribution: ChildPlanningContribution;
   provenance: ChildPlanProvenance;
+  /** 孩子選的期限。**不從模型讀** —— 由組裝端從 input 帶入。 */
+  goalDuration: ChildGoalDuration;
   model: string;
+};
+
+/** 與 App 端 ChildPlanDurationOption 鏡射。id 由組裝端決定。 */
+export type ChildPlanDurationOption = {
+  id: string;
+  text: string;
+  days: number;
 };
 
 export type ChildGoalPlanControl =
@@ -248,6 +269,16 @@ export type ChildGoalPlanningResponse =
       question: string;
       options: ChildPlanStartOption[];
       /** 字面量 true —— 孩子永遠可以說「我自己想」。 */
+      allowCustomAnswer: true;
+      model: string;
+    }
+  | {
+      status: 'needs_duration';
+      schemaVersion: typeof CHILD_GOAL_PLANNING_SCHEMA_VERSION;
+      knownGoal: string;
+      question: string;
+      options: ChildPlanDurationOption[];
+      /** 字面量 true —— 孩子永遠可以自己說，或說這件事沒有終點。 */
       allowCustomAnswer: true;
       model: string;
     }
@@ -296,6 +327,12 @@ export const CHILD_GOAL_PLANNING_LIMITS = {
   maxControllableActions: 4,
   minChoiceOptions: 2,
   maxChoiceOptions: 3,
+  minDurationOptions: 2,
+  maxDurationOptions: 4,
+  // 期限邊界。與家長透過共同條件設定期限時的 RPC 檢查同一組值 ——
+  // 孩子若能選 300 天，家長之後想調整會被自己的 RPC 擋下來。
+  minGoalDurationDays: 1,
+  maxGoalDurationDays: 180,
   minTargetValue: 1,
   maxTargetValue: 10000,
   maxWeeklyFrequency: 7,
@@ -459,6 +496,14 @@ export function buildChildGoalPlanningPrompt(input: ChildGoalPlanningInput): str
   const sufficient = informationIsSufficient(input);
   const conversation = describeConversationForPrompt(input);
 
+  // 期限這一輪問不問，由這裡的事實決定，不由模型自己記得。
+  // 期限這一輪問不問，由這裡的事實決定，不由模型自己記得。
+  const durationRule = input.goalDuration === null
+    ? `還看不出他想花多久 → 給他 ${L.minDurationOptions}-${L.maxDurationOptions} 個具體期間讓他挑。
+                       ⚠️ 他如果原話裡已經講過期間（「兩週」「一個月」），
+                          那個期間**要成為其中一個選項**，不要漏掉它。`
+    : '期限他已經決定了 → **這一輪不可以回 needs_duration**。';
+
   const approachRule = approach
     ? `孩子已經決定做法了（「${approach}」`
       + `${chosen.origin === 'child_chose_option' ? '——這是他從你上一輪的選項裡挑的' : ''}）。`
@@ -528,7 +573,7 @@ ${input.preferredTime ? `孩子想做的時段：${input.preferredTime}` : '孩�
 
 ${conversationRule}
 
-三種狀態，選一個：
+四種狀態，選一個：
 
   needs_clarification  連他想達成什麼都還不清楚 → 問一題（一次只有一題）。
   needs_choice         目標清楚了，但他還沒決定怎麼做 → 給 2-3 個可以挑的開始方式。
@@ -536,7 +581,8 @@ ${conversationRule}
                        ⚠️ 他如果已經講出數量或期限（「5 本」「兩週」「20 公里」），
                           question 裡要先接住那個數字，讓他看得出你聽懂了 ——
                           「暑假 5 本書，你想怎麼排？」，不是只問「你想怎麼開始？」。
-  ready                資訊夠了 → 一份可執行的計畫。
+  needs_duration       其他都清楚了，但${durationRule}
+  ready                資訊夠了、而且期限已經定下來 → 一份可執行的計畫。
 
 goalControlType 與 progressionKind 是**兩個不同的問題**，要分開回答：
 
@@ -576,7 +622,19 @@ target_amount（缺目標數量）。
 目標清楚、但他還沒決定怎麼做時：
 {"status":"needs_choice","question":"你想先用哪一種方式開始？","options":[{"title":"先從短時間開始","detail":"每次先讀 10～15 分鐘","rhythmHint":"一週 3 次"},{"title":"讀一小段就停","detail":"每次完成一個小節就休息","rhythmHint":"一週 3 次"},{"title":"用頁數抓份量","detail":"每次先讀 5～10 頁","rhythmHint":"一週 3 次"}]}
 
-options 給 ${L.minChoiceOptions}-${L.maxChoiceOptions} 個：
+他還沒決定要花多久時：
+{"status":"needs_duration","question":"你想花多久把它讀完？","options":[{"text":"兩個星期","days":14},{"text":"一個月","days":30}]}
+
+options 給 ${L.minDurationOptions}-${L.maxDurationOptions} 個，每個都要有 days：
+- **依這個目標給合理的期間**，不要每次都給同一組數字：讀一本書給「兩週／一個月」，
+  學游泳給「兩個月／半年」。
+- days 必須落在 ${L.minGoalDurationDays}-${L.maxGoalDurationDays} 之間。超出這個範圍的選項會讓整輪無效，
+  **不會**被改成邊界值。
+- text 是孩子讀得懂的講法（「兩個星期」），不是「14 天」這種換算。
+- 不要放「我自己說」或「一直做下去」這兩個選項 —— 它們一定會被加上去，
+  你再寫一次會變成重複。
+
+needs_choice 的 options 給 ${L.minChoiceOptions}-${L.maxChoiceOptions} 個：
 - **每個都要是真的不同的策略**（例如：時間長短／份量單位／固定時段／完成的定義），
   不要只是換句話說同一件事——「讀 10 分鐘」「讀 12 分鐘」「讀 15 分鐘」是同一個策略
   換了個數字，不算三個選項。不要為了湊到 ${L.maxChoiceOptions} 個硬造重複的方案，
@@ -800,10 +858,33 @@ function normalizeOptions(value: unknown): RawStartOption[] | null {
   return options;
 }
 
+/** needs_duration 一個選項的原始形狀 —— 沒有 id（那是組裝端決定的）。 */
+export type RawDurationOption = { text: string; days: number };
+
+function normalizeDurationOptions(value: unknown): RawDurationOption[] | null {
+  const L = CHILD_GOAL_PLANNING_LIMITS;
+  if (!Array.isArray(value)) return null;
+  if (value.length < L.minDurationOptions || value.length > L.maxDurationOptions) return null;
+
+  const options: RawDurationOption[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) return null;
+    const optionText = text(item.text, L.maxOptionLength);
+    if (optionText === null) return null;
+    // 超出範圍拒絕，**不 clamp**：把 200 悄悄改成 180，就是讓孩子
+    // 確認一個他沒說過的期限。
+    if (typeof item.days !== 'number' || !Number.isInteger(item.days)) return null;
+    if (item.days < L.minGoalDurationDays || item.days > L.maxGoalDurationDays) return null;
+    options.push({ text: optionText, days: item.days });
+  }
+  return options;
+}
+
 /** 模型的「理解」。沒有 provenance —— 那是組裝端的事。 */
 export type ChildGoalPlanningUnderstanding =
   | { status: 'needs_clarification'; question: { kind: ChildPlanClarificationKind; text: string } }
   | { status: 'needs_choice'; question: string; options: RawStartOption[] }
+  | { status: 'needs_duration'; question: string; options: RawDurationOption[] }
   | {
       status: 'ready';
       desiredOutcome: string;
@@ -850,6 +931,13 @@ export function normalizeChildGoalPlanning(value: unknown): ChildGoalPlanningUnd
     const options = normalizeOptions(value.options);
     if (questionText === null || options === null) return null;
     return { status: 'needs_choice', question: questionText, options };
+  }
+
+  if (value.status === 'needs_duration') {
+    const questionText = text(value.question, L.maxChoiceQuestionLength);
+    const options = normalizeDurationOptions(value.options);
+    if (questionText === null || options === null) return null;
+    return { status: 'needs_duration', question: questionText, options };
   }
 
   if (value.status !== 'ready') return null;
@@ -1107,6 +1195,12 @@ export function composeChildGoalPlan(args: {
           ? 'filled_missing_details'
           : understanding.planningContribution,
     provenance,
+    // 期限是**孩子選的**，不從模型讀。與 option id、allowCustomAnswer
+    // 同一個做法：deterministic 的東西不交給模型再講一次。
+    //
+    // 這裡敢用非空斷言，是因為 composeChildGoalPlanningResponse 已經在
+    // 上游擋掉 goalDuration 為 null 的 ready（孩子還沒選期限就不可能有計畫）。
+    goalDuration: input.goalDuration!,
     model,
   };
 
@@ -1193,6 +1287,32 @@ export function composeChildGoalPlanningResponse(args: {
       model,
     };
   }
+
+  if (understanding.status === 'needs_duration') {
+    // 孩子已經選過期限了還在問 —— 跟資訊夠了還在問問題是同一種多嘴。
+    if (input.goalDuration !== null) return invalid;
+    return {
+      status: 'needs_duration',
+      schemaVersion: CHILD_GOAL_PLANNING_SCHEMA_VERSION,
+      knownGoal: input.childOriginalGoal.trim(),
+      question: understanding.question,
+      // id 由 Function 決定，跟 needs_choice 同一個做法。
+      options: understanding.options.map((option, index) => ({
+        id: `duration-${index + 1}`,
+        text: option.text,
+        days: option.days,
+      })),
+      // 字面量。孩子永遠可以自己說一個期間，或說這件事沒有終點。
+      allowCustomAnswer: true,
+      model,
+    };
+  }
+
+  // 孩子還沒選期限，就不可能有一份計畫（P1-A1）。
+  //
+  // 模型判斷「有沒有講期間」判錯的代價是多問一輪，不是產生一份沒有期限
+  // 的計畫 —— 後者會一路長成 duration_type='recurring' 的日常任務。
+  if (input.goalDuration === null) return invalid;
 
   return {
     status: 'ready',

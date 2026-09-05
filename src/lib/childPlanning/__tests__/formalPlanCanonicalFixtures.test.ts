@@ -39,6 +39,7 @@ function input(
     childOriginalMotivation: null,
     childApproach: approach,
     cadence,
+    goalDuration: null,
     preferredTime: null,
     planningSupportPreference: null,
     responses: [],
@@ -93,6 +94,8 @@ describe('Rhythm — 兩週讀書，平日睡前 15 分鐘', () => {
     currentFocus: '養成睡前讀書的習慣',
     nextAction: { text: '今晚睡前讀 15 分鐘', source: 'child_stated' },
     reviewPoint: { type: 'after_days', days: 7 },
+    goalDuration: { kind: 'days', days: 42 },
+
     planningContribution: 'organized_child_plan',
     provenance: provenance('我想兩週讀完一本書', '每天睡前讀 15 分鐘', {
       cadence: 'child_stated',
@@ -136,6 +139,8 @@ describe('Staged — 做一本漫畫', () => {
     currentFocus: '先把故事想出來',
     nextAction: { text: '寫下三句故事大綱', source: 'ai_suggested' },
     reviewPoint: null,
+    goalDuration: { kind: 'days', days: 42 },
+
     planningContribution: 'filled_missing_details',
     provenance: provenance('我想做一本漫畫', null, {
       nextAction: 'ai_suggested',
@@ -189,6 +194,8 @@ describe('Accumulation — 暑假讀 5 本書', () => {
     currentFocus: '先讀第一本',
     nextAction: { text: '挑一本想讀的書', source: 'derived_from_child' },
     reviewPoint: null,
+    goalDuration: { kind: 'days', days: 42 },
+
     planningContribution: 'organized_child_plan',
     provenance: provenance('暑假我想讀 5 本書', null, { target: 'child_stated' }),
     model: 'test-model',
@@ -228,6 +235,8 @@ describe('External outcome — 國文考 100 分', () => {
     currentFocus: '把上次錯的題目弄懂',
     nextAction: { text: '把上次錯的題目做一遍', source: 'ai_suggested' },
     reviewPoint: { type: 'after_sessions', sessions: 6 },
+    goalDuration: { kind: 'days', days: 42 },
+
     planningContribution: 'filled_missing_details',
     provenance: provenance('我想國文考 100 分', null, {
       nextAction: 'ai_suggested',

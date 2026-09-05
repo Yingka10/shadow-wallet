@@ -18,6 +18,7 @@ const INPUT: ChildGoalPlanningInput = {
   childOriginalMotivation: null,
   childApproach: null,
   cadence: null,
+  goalDuration: null,
   preferredTime: null,
   planningSupportPreference: null,
   responses: [],
@@ -49,6 +50,8 @@ function plan(overrides: Record<string, unknown> = {}): Record<string, unknown> 
     currentFocus: '先把三次固定下來',
     nextAction: { text: '今天先練 10 分鐘', source: 'ai_suggested' },
     reviewPoint: { type: 'after_days', days: 7 },
+    goalDuration: { kind: 'days', days: 42 },
+
     planningContribution: 'filled_missing_details',
     provenance: BASE_PROVENANCE,
     model: 'gemini-flash-latest',
@@ -294,11 +297,14 @@ describe('孩子講過的東西', () => {
     ...INPUT,
     childApproach: '每天放學練 10 分鐘',
     cadence: { mode: 'weekly_frequency', weeklyFrequency: 7 },
+    goalDuration: null,
   };
 
   const echoed = {
     cadence: { mode: 'weekly_frequency', weeklyFrequency: 7 },
     nextAction: { text: '放學後先練 10 分鐘', source: 'child_stated' },
+    goalDuration: { kind: 'days', days: 42 },
+
     planningContribution: 'organized_child_plan',
     provenance: provenance(
       {
@@ -463,6 +469,7 @@ describe('safety guard 不參與證據優先序，也不被 child-stated 覆蓋'
     ...INPUT,
     childApproach: '每天練 10 分鐘',
     cadence: { mode: 'weekly_frequency', weeklyFrequency: 3 },
+    goalDuration: null,
   };
 
   it('下一步是不可控的成果 → 還是擋下', () => {
@@ -470,6 +477,8 @@ describe('safety guard 不參與證據優先序，也不被 child-stated 覆蓋'
       {
         cadence: { mode: 'weekly_frequency', weeklyFrequency: 3 },
         nextAction: { text: '拿第一名', source: 'child_stated' },
+        goalDuration: { kind: 'days', days: 42 },
+
         planningContribution: 'organized_child_plan',
         provenance: allChildStated,
       },
@@ -492,6 +501,8 @@ describe('safety guard 不參與證據優先序，也不被 child-stated 覆蓋'
           { id: 'phase-2', title: '第二步', observableDoneWhen: '能完整彈完一次' },
         ],
         nextAction: { text: '今天先練 10 分鐘', source: 'child_stated' },
+        goalDuration: { kind: 'days', days: 42 },
+
         planningContribution: 'organized_child_plan',
         provenance: provenance(
           {

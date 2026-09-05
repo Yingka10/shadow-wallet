@@ -41,6 +41,8 @@ function input(overrides: Partial<ChildGoalPlanningInput> = {}): ChildGoalPlanni
     childOriginalMotivation: null,
     childApproach: null,
     cadence: null,
+    // canonical 案例都是「期限那一輪已經問完」之後的狀態 —— ready 的前提。
+    goalDuration: { kind: 'days', days: 14 },
     preferredTime: null,
     planningSupportPreference: null,
     responses: [],
@@ -558,6 +560,32 @@ describe('Case 9｜不可控結果「我要比賽第一名」', () => {
     });
     expect(result.status).toBe('unavailable');
   });
+
+  // Function 端自己就要擋掉 —— 送一份 goalDuration 是 null 的「計畫」出去，
+  // 靠 App validator 撿，是把錯誤留到最遠的一層才發現。
+  it('Function 端自己就不送出這份計畫，不靠 App validator 撿', () => {
+    const { response } = roundTrip(input({ goalDuration: null }), {
+      status: 'ready',
+      desiredOutcome: '把神奇樹屋讀完',
+      goalControlType: 'directly_actionable',
+      progressionKind: 'rhythm',
+      actionPlanSummary: '先用一週三次的節奏開始。',
+      currentFocus: '先把三次固定下來',
+      nextAction: { text: '今天先讀 10 分鐘', source: 'ai_suggested' },
+      reviewPoint: { type: 'after_days', days: 7 },
+      planningContribution: 'filled_missing_details',
+      suggestedCadence: { mode: 'weekly_frequency', weeklyFrequency: 3 },
+      sessionSize: { kind: 'minutes', minutes: 10 },
+      trialPeriod: { days: 7 },
+      phases: null,
+      targetValue: null,
+      targetUnit: null,
+      currentValue: null,
+      controllableActions: null,
+    });
+
+    expect(response.status).toBe('unavailable');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -983,5 +1011,70 @@ describe('prompt 說得出孩子已經想到多少', () => {
       expect({ forbidden, present: prompt.includes(forbidden) })
         .toEqual({ forbidden, present: false });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1-A1 — 孩子還沒選期限，就不可能有計畫
+// ---------------------------------------------------------------------------
+
+describe('Case 13｜期限還沒問', () => {
+  it('孩子還沒選期限，模型卻直接給計畫 → 不放行', () => {
+    const { result } = roundTrip(input({ goalDuration: null }), {
+      status: 'ready',
+      desiredOutcome: '把神奇樹屋讀完',
+      goalControlType: 'directly_actionable',
+      progressionKind: 'rhythm',
+      actionPlanSummary: '先用一週三次的節奏開始。',
+      currentFocus: '先把三次固定下來',
+      nextAction: { text: '今天先讀 10 分鐘', source: 'ai_suggested' },
+      reviewPoint: { type: 'after_days', days: 7 },
+      planningContribution: 'filled_missing_details',
+      suggestedCadence: { mode: 'weekly_frequency', weeklyFrequency: 3 },
+      sessionSize: { kind: 'minutes', minutes: 10 },
+      trialPeriod: { days: 7 },
+      phases: null,
+      targetValue: null,
+      targetUnit: null,
+      currentValue: null,
+      controllableActions: null,
+    });
+
+    expect(result.status).toBe('unavailable');
+  });
+});
+
+describe('Case 14｜插一輪問期限', () => {
+  it('模型說要問期限 → 整條路徑走得通，選項的 id 由 Function 決定', () => {
+    const { result } = roundTrip(
+      input({ childOriginalGoal: '我想把哈利波特讀完', goalDuration: null }),
+      {
+        status: 'needs_duration',
+        question: '你想花多久把它讀完？',
+        options: [
+          { text: '兩個星期', days: 14 },
+          { text: '一個月', days: 30 },
+        ],
+      },
+    );
+
+    expect(result.status).toBe('needs_duration');
+    expect(result.status === 'needs_duration' && result.options).toEqual([
+      { id: 'duration-1', text: '兩個星期', days: 14 },
+      { id: 'duration-2', text: '一個月', days: 30 },
+    ]);
+  });
+
+  it('孩子已經選過期限了還在問 → 不放行', () => {
+    const { result } = roundTrip(input({ goalDuration: { kind: 'days', days: 14 } }), {
+      status: 'needs_duration',
+      question: '你想花多久？',
+      options: [
+        { text: '兩個星期', days: 14 },
+        { text: '一個月', days: 30 },
+      ],
+    });
+
+    expect(result.status).toBe('unavailable');
   });
 });

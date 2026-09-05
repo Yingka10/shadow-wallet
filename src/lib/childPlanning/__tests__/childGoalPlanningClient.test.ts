@@ -18,6 +18,7 @@ const INPUT: ChildGoalPlanningInput = {
   childOriginalMotivation: null,
   childApproach: '平日睡前讀 15 分鐘',
   cadence: { mode: 'fixed_days', days: [1, 2, 3, 4, 5] },
+  goalDuration: null,
   preferredTime: '睡前',
   planningSupportPreference: 'organize_only',
   responses: [],
@@ -34,6 +35,8 @@ const GOOD_PLAN = {
     currentFocus: '先維持平日睡前的閱讀',
     nextAction: { text: '今晚睡前先讀 15 分鐘', source: 'child_stated' },
     reviewPoint: { type: 'after_days', days: 7 },
+    goalDuration: { kind: 'days', days: 42 },
+
     planningContribution: 'organized_child_plan',
     provenance: {
       childOriginalGoal: '我想兩週讀完神奇樹屋',
@@ -196,6 +199,7 @@ describe('generator 的降級', () => {
         childOriginalGoal: '我想兩週讀完神奇樹屋',
         childApproach: '平日睡前讀 15 分鐘',
         cadence: { mode: 'fixed_days', days: [1, 2, 3, 4, 5] },
+        goalDuration: null,
         preferredTime: '睡前',
         planningSupportPreference: 'organize_only',
       },

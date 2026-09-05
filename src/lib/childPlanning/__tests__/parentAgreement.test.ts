@@ -34,6 +34,8 @@ const CHILD_CONFIRMED_PLAN = {
   currentFocus: '養成睡前讀書的習慣',
   nextAction: { text: '今晚睡前讀 15 分鐘', source: 'child_stated' },
   reviewPoint: { type: 'after_days', days: 7 },
+  goalDuration: { kind: 'days', days: 42 },
+
   planningContribution: 'organized_child_plan',
   provenance: { childOriginalGoal: '我想兩週讀完一本書', childStatedApproach: '每天睡前讀 15 分鐘' },
   model: 'test-model',
