@@ -377,12 +377,40 @@ export const CHILD_GOAL_PLANNING_GEMINI_TIMEOUT_MS = 30_000;
 
 const AGE_GROUPS: readonly string[] = ['2-4', '4-6', '6-9', '9-12'];
 
+/**
+ * 期限欄位的形狀檢查。與 App 端 normalizeGoalDuration 鏡射，但**不修補** ——
+ * 這一層只回答「這個值合不合法」，不替孩子決定任何事。
+ */
+function goalDurationIsUsable(value: ChildGoalDuration | null): boolean {
+  if (value === null) return true;
+  if (value === undefined || typeof value !== 'object') return false;
+  if (value.kind === 'open_ended') return true;
+  if (value.kind !== 'days') return false;
+  if (!Number.isInteger(value.days)) return false;
+  return (
+    value.days >= CHILD_GOAL_PLANNING_LIMITS.minGoalDurationDays
+    && value.days <= CHILD_GOAL_PLANNING_LIMITS.maxGoalDurationDays
+  );
+}
+
 export function childGoalPlanningInputIsUsable(input: ChildGoalPlanningInput): boolean {
   if (input === null || typeof input !== 'object') return false;
   if (input.schemaVersion !== CHILD_GOAL_PLANNING_SCHEMA_VERSION) return false;
   if (typeof input.childOriginalGoal !== 'string') return false;
   if (input.childOriginalGoal.trim().length === 0) return false;
   if (!AGE_GROUPS.includes(input.ageGroup)) return false;
+
+  // 期限：**null 是合法的**（孩子還沒選，那正是要問他的那一輪），
+  // 但整個欄位缺席不是 —— 那代表送請求的 App 還沒有期限這半邊的程式。
+  //
+  // 不能靠下游的守衛擋：它們寫的都是 `=== null`，undefined 會從
+  // needs_duration 的 `!== null` 被排除、又從 ready 的 `=== null` 溜過去，
+  // 於是舊客戶端直接跳過期限那一輪，拿到一份 goalDuration 是 undefined 的
+  // 計畫（序列化之後那個鍵整個消失，連缺了什麼都看不出來）。
+  //
+  // 擋在這裡的好處是回 INVALID_INPUT —— 誠實地說「你的客戶端太舊」，
+  // 而不是把它講成模型輸出有問題。與 §5「舊計畫拒絕發布」同一個立場。
+  if (!goalDurationIsUsable(input.goalDuration)) return false;
 
   // responses 缺席當成第一輪（舊呼叫端相容）；有值就必須是合法陣列。
   // 壞掉的對話紀錄比沒有更糟：模型會拿到一份少一句的歷史，然後合理地

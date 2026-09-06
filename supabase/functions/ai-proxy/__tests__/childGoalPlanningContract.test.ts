@@ -977,6 +977,59 @@ describe('看不懂的輸出就是沒有計畫', () => {
     expect(childGoalPlanningInputIsUsable(input({ ageGroup: '13-15' as never }))).toBe(false);
     expect(childGoalPlanningInputIsUsable(input({ schemaVersion: 2 as never }))).toBe(false);
   });
+
+  // ── goalDuration 缺席 ≠ 孩子還沒選 ──────────────────────────────────────
+  //
+  // 2026-09-06 線上抓到的形狀：舊版 App 的請求裡**根本沒有 goalDuration 這個
+  // 欄位**（那半邊的程式還沒推出去），Function 收到的是 undefined。
+  //
+  // 而所有守衛寫的都是 `=== null`：
+  //   needs_duration  `if (input.goalDuration !== null) return invalid`  → undefined 進不去
+  //   ready           `if (input.goalDuration === null) return invalid`  → undefined 放行
+  // 於是舊客戶端會直接跳過期限那一輪，拿到一份 `goalDuration: undefined` 的
+  // 計畫 —— JSON.stringify 把 undefined 整個鍵刪掉，所以連缺了什麼都看不出來。
+  //
+  // 這裡把「沒有這個欄位」擋在呼叫模型之前，回 INVALID_INPUT。理由是它
+  // 誠實：這是**客戶端太舊**，不是模型輸出有問題，也不是孩子還沒選。
+  describe('goalDuration 缺席代表客戶端太舊，不是「還沒選」', () => {
+    it('沒有 goalDuration 這個欄位 → 不可用', () => {
+      const stale = input();
+      delete (stale as { goalDuration?: unknown }).goalDuration;
+      expect(childGoalPlanningInputIsUsable(stale)).toBe(false);
+    });
+
+    it('null 是合法的 —— 孩子還沒選，正是要問他的那一輪', () => {
+      expect(childGoalPlanningInputIsUsable(input({ goalDuration: null }))).toBe(true);
+    });
+
+    it('open_ended 是合法的 —— 孩子決定了「這件事沒有終點」', () => {
+      expect(
+        childGoalPlanningInputIsUsable(input({ goalDuration: { kind: 'open_ended' } })),
+      ).toBe(true);
+    });
+
+    it('形狀壞掉的期限不放行，不修補成一個數字', () => {
+      expect(
+        childGoalPlanningInputIsUsable(input({ goalDuration: { kind: 'days', days: 0 } })),
+      ).toBe(false);
+      expect(
+        childGoalPlanningInputIsUsable(
+          input({ goalDuration: { kind: 'days', days: 181 } }),
+        ),
+      ).toBe(false);
+      expect(
+        childGoalPlanningInputIsUsable(input({ goalDuration: { kind: 'forever' } as never })),
+      ).toBe(false);
+    });
+
+    it('擋不住的話，舊客戶端會拿到一份沒有期限的 ready 計畫', () => {
+      // 這一條釘住的是**症狀本身**：組裝端的 `input.goalDuration!` 非空斷言
+      // 只被 `=== null` 守著。萬一 usable 那道關被放寬，這裡會立刻紅。
+      const stale = input();
+      delete (stale as { goalDuration?: unknown }).goalDuration;
+      expect(childGoalPlanningInputIsUsable(stale)).toBe(false);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
