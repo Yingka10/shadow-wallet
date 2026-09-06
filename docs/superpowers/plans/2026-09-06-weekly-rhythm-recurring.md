@@ -56,7 +56,7 @@ CHECK 的註解自述理由是「一個 one_time 的計畫不該宣稱用每週�
 - Consumes: 無（本計畫第一個任務）
 - Produces: `child_proposal_plan_versions` 接受 `duration_type IN ('recurring','long_term')` 搭配 `progress_model='weekly_rhythm'`；兩支 RPC 在 `progressionKind='rhythm'` 且 duration 非 `one_time` 時寫入 `weekly_rhythm`
 
-- [ ] **Step 1: 寫會失敗的驗證腳本**
+- [x] **Step 1: 寫會失敗的驗證腳本**
 
 建立 `supabase/verify/weekly_rhythm_recurring_check.sql`。全程在交易內、最後 ROLLBACK，
 不留任何資料：
@@ -111,7 +111,7 @@ END $$;
 ROLLBACK;
 ```
 
-- [ ] **Step 2: 跑它，確認失敗**
+- [x] **Step 2: 跑它，確認失敗**
 
 Run：
 ```bash
@@ -120,7 +120,7 @@ psql "$DATABASE_URL" -f supabase/verify/weekly_rhythm_recurring_check.sql
 Expected：FAIL，錯誤訊息含
 `new row for relation "child_proposal_plan_versions" violates check constraint "child_proposal_plan_versions_progress_model_evidence"`
 
-- [ ] **Step 3: 寫 migration 的 CHECK 段**
+- [x] **Step 3: 寫 migration 的 CHECK 段**
 
 建立 `supabase/migrations/20260906000000_weekly_rhythm_recurring.sql`，第一段：
 
@@ -157,7 +157,7 @@ ALTER TABLE child_proposal_plan_versions
   );
 ```
 
-- [ ] **Step 4: 跑驗證腳本，確認 CHECK 已放行**
+- [x] **Step 4: 跑驗證腳本，確認 CHECK 已放行**
 
 Run：
 ```bash
@@ -166,7 +166,7 @@ psql "$DATABASE_URL" -f supabase/verify/weekly_rhythm_recurring_check.sql
 ```
 Expected：`NOTICE: PASS: recurring + weekly_frequency + weekly_rhythm 可以寫入`
 
-- [ ] **Step 5: 覆寫 publish_child_confirmed_plan_v1**
+- [x] **Step 5: 覆寫 publish_child_confirmed_plan_v1**
 
 把 `supabase/migrations/20260828000000_parent_shared_term_proposal.sql` 第 79 行起的
 整支函式定義**逐字複製**到新 migration，只改第 416-421 行那一段：
@@ -184,7 +184,7 @@ Expected：`NOTICE: PASS: recurring + weekly_frequency + weekly_rhythm 可以寫
 ⚠️ 複製整支而不是只貼這一段。`CREATE OR REPLACE FUNCTION` 是全體置換，
 只貼片段會把函式其餘部分刪掉。
 
-- [ ] **Step 6: 覆寫 propose_child_planning_terms_v1**
+- [x] **Step 6: 覆寫 propose_child_planning_terms_v1**
 
 同樣把 `supabase/migrations/20260830000000_shared_term_pending_reward_fix.sql` 第 21 行起的
 整支函式複製過來，只改第 414-419 行那一段：
@@ -200,7 +200,7 @@ Expected：`NOTICE: PASS: recurring + weekly_frequency + weekly_rhythm 可以寫
   END IF;
 ```
 
-- [ ] **Step 7: 確認 migration 冪等（可重跑）**
+- [x] **Step 7: 確認 migration 冪等（可重跑）**
 
 Run：
 ```bash
@@ -212,7 +212,7 @@ Expected：兩次都成功、沒有錯誤。`DROP CONSTRAINT IF EXISTS` 與
 
 （這一步是 P0-5A 的教訓：那一輪的 migration 不冪等，在 staging 重跑時炸掉。）
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add supabase/migrations/20260906000000_weekly_rhythm_recurring.sql \
@@ -241,7 +241,7 @@ recurring + weekly_frequency 的計畫在 DB 層拿不到 weekly_rhythm，
 `systemFieldsComplete` 加一條 `duration_type === 'long_term'` 就會把死結
 重新裝回去，而且不會有任何測試變紅。
 
-- [ ] **Step 1: 寫測試**
+- [x] **Step 1: 寫測試**
 
 在 `src/lib/childPlanning/__tests__/parentAgreement.test.ts` 末尾加入。
 沿用檔案既有的 `card()` helper（它接受 plan 欄位的 overrides）：
@@ -288,7 +288,7 @@ describe('沒有終點的節奏計畫也能直接確認', () => {
 });
 ```
 
-- [ ] **Step 2: 跑測試**
+- [x] **Step 2: 跑測試**
 
 Run：
 ```bash
@@ -301,7 +301,7 @@ Expected：全數 PASS。
 如果這三題有任何一題在 Task 1 之前就是紅的，代表我對客戶端閘門的判讀有誤，
 **停下來重新分析，不要改測試去配合**。
 
-- [ ] **Step 3: 跑整個 childPlanning 測試組，確認沒有回歸**
+- [x] **Step 3: 跑整個 childPlanning 測試組，確認沒有回歸**
 
 Run：
 ```bash
@@ -309,7 +309,7 @@ npx jest src/lib/childPlanning
 ```
 Expected：全數 PASS。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/lib/childPlanning/__tests__/parentAgreement.test.ts
@@ -445,6 +445,24 @@ spec 列了三個待驗證項，其中兩個在寫這份計畫時已經查清：
    不要動它們。
 
 3. **CHECK 是否有註解之外的考量** → 使用者已於 2026-09-06 拍板照改。
+
+---
+
+## 執行紀錄（2026-09-06）
+
+Task 1、Task 2 完成並在 staging 驗證通過。
+
+- 紅燈：staging 實際約束為 `duration_type = 'long_term'`，兩支 RPC 都帶舊條件
+- 綠燈：約束改為 `duration_type <> 'one_time'`，兩支 RPC `已更新 = true`
+- 冪等：整份 migration 重跑一次，無錯誤
+- 記帳：`supabase_migrations.schema_migrations` 已補 `20260906000000`
+- 寫入驗證：`weekly_rhythm_recurring_check.sql` 三項全過（含「one_time 仍被擋下」）
+
+套用途徑是 Dashboard SQL Editor（`BEGIN; … COMMIT;`）＋ 手動補記帳，
+因為本機到 pooler 的連線一直失敗（`.temp/pooler-url` 的主機名已過期，
+tenant not found）。**要拿正確連線字串請從 Dashboard → Connect 複製。**
+
+Task 3（staging E2E 驗收）尚未執行 —— 見下方。
 
 ---
 
