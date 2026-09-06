@@ -1078,3 +1078,54 @@ describe('Case 14｜插一輪問期限', () => {
     expect(result.status).toBe('unavailable');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// prompt 與守衛不可以互相矛盾（2026-09-06 線上 100% 失敗）
+//
+// 孩子挑完「每天睡前讀 15 分鐘」之後 informationIsSufficient 變成 true，
+// 但期限那一輪還沒問，goalDuration 仍是 null。此時 compose 的四條守衛：
+//
+//   needs_clarification  → informationIsSufficient 擋掉
+//   needs_choice         → informationIsSufficient 擋掉
+//   ready                → goalDuration === null 擋掉
+//   needs_duration       → **唯一合法的**
+//
+// 而 conversationRule 命令模型「status 必須是 ready，不可以再問問題、也不
+// 可以再給選項」—— 它指定了唯一會被拒絕的那個，並禁止唯一會被接受的那個。
+// 模型完全照做，然後被自己這端的守衛擋下 → INVALID_AI_OUTPUT。
+//
+// 為什麼 3550 個測試都沒抓到：上面那組 canonical 案例的 fixture 註解自己
+// 就寫了「都是期限那一輪已經問完之後的狀態」，所以
+// sufficient && goalDuration === null 這個組合從來沒有被建構過。
+// ─────────────────────────────────────────────────────────────────────────────
+describe('sufficient 但期限未定時，prompt 不可以命令 ready', () => {
+  const READING_APPROACH = '每天睡前讀 15 分鐘';
+  const CADENCE = { mode: 'weekly_frequency', weeklyFrequency: 7 } as const;
+
+  const pending = input({
+    childApproach: READING_APPROACH,
+    cadence: CADENCE,
+    goalDuration: null,
+  });
+
+  it('前提：這個狀態確實已經 informationIsSufficient', () => {
+    expect(informationIsSufficient(pending)).toBe(true);
+  });
+
+  it('prompt 不可以叫模型回 ready —— 那個 status 一定會被守衛拒絕', () => {
+    expect(buildChildGoalPlanningPrompt(pending)).not.toContain('status 必須是 ready');
+  });
+
+  it('prompt 要明說這一輪先問期限', () => {
+    expect(buildChildGoalPlanningPrompt(pending)).toContain('這一輪必須回 needs_duration');
+  });
+
+  it('期限定了之後才恢復「必須給計畫」', () => {
+    const decided = input({
+      childApproach: READING_APPROACH,
+      cadence: CADENCE,
+      goalDuration: { kind: 'days', days: 14 },
+    });
+    expect(buildChildGoalPlanningPrompt(decided)).toContain('status 必須是 ready');
+  });
+});

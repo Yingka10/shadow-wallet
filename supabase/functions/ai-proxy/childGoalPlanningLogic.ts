@@ -540,14 +540,34 @@ export function buildChildGoalPlanningPrompt(input: ChildGoalPlanningInput): str
     : '孩子還沒選節奏。這件事需要節奏才成立的話，可以在 suggestedCadence 給一個'
       + '對這個年紀合理、容易開始的建議；不需要就給 null。';
 
-  const conversationRule = sufficient
-    ? '⚠️ 孩子這次已經講得夠清楚了（有節奏、也講了他打算怎麼做）。'
-      + '**這一輪一定要給計畫，status 必須是 ready，不可以再問問題、也不可以再給選項。**'
-      + ' 而且 nextAction 要從他自己講的做法裡拿出來，source 給 "child_stated" 或'
-      + ' "derived_from_child"，不可以是 "ai_suggested" —— 他已經說了要做什麼，'
-      + '下一步就不該換成你想的。'
-    : '只有在「不知道答案就沒辦法形成合理的行動計畫」時才問，而且**一次只問一題**。'
-      + '孩子的話裡已經回答過的事不要再問一次（例如他說「平日睡前」，就不要再問一週幾次）。';
+  // ⚠️ 三岔，不是兩岔。
+  //
+  // 「資訊夠了就直接給計畫」在期限那一輪存在之前是對的。加了
+  // needs_duration 之後，compose 要求 ready 必須已經有 goalDuration
+  // （見下方 composeChildGoalPlanningResponse 的守衛）—— 所以在
+  // 「資訊夠了、但期限還沒定」的那一刻，命令模型回 ready 等於命令它回一個
+  // **一定會被自己這端拒絕**的東西。
+  //
+  // 那個狀態下四個 status 只有一個活得下來：
+  //   needs_clarification / needs_choice → informationIsSufficient 擋掉
+  //   ready                              → goalDuration === null 擋掉
+  //   needs_duration                     → 唯一合法
+  //
+  // 2026-09-06 線上 100% 重現（INVALID_AI_OUTPUT），模型完全照 prompt 做，
+  // 錯的是 prompt。改動這一段時務必同步看那四條守衛。
+  const conversationRule = !sufficient
+    ? '只有在「不知道答案就沒辦法形成合理的行動計畫」時才問，而且**一次只問一題**。'
+      + '孩子的話裡已經回答過的事不要再問一次（例如他說「平日睡前」，就不要再問一週幾次）。'
+    : input.goalDuration === null
+      ? '⚠️ 孩子這次已經講得夠清楚了（有節奏、也講了他打算怎麼做），'
+        + '**但他還沒說要花多久 —— 這一輪必須回 needs_duration。**'
+        + '不可以回 ready，也不可以再問別的事或再給開始方式的選項。'
+        + '期限是這份計畫成立前的最後一塊，問完它就可以整理成計畫了。'
+      : '⚠️ 孩子這次已經講得夠清楚了（有節奏、也講了他打算怎麼做）。'
+        + '**這一輪一定要給計畫，status 必須是 ready，不可以再問問題、也不可以再給選項。**'
+        + ' 而且 nextAction 要從他自己講的做法裡拿出來，source 給 "child_stated" 或'
+        + ' "derived_from_child"，不可以是 "ai_suggested" —— 他已經說了要做什麼，'
+        + '下一步就不該換成你想的。';
 
   return `你是 GrowBook 的計畫夥伴。一個孩子說出他想做的事，你的工作是幫他把它變成「接下來真的做得到的行動」。
 
