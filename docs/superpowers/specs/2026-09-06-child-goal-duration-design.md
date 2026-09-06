@@ -207,3 +207,63 @@ RPC 檢查 `v_duration_days NOT BETWEEN 1 AND 180`
 ⚠️ 實作必須開在 **master** 之上。撰寫本文件時的 worktree 停在
 `feat/weekly-report-growth-lines`，落後 master 64 個 commit，且完全沒有
 `src/lib/childPlanning/` 這條線。
+
+---
+
+## §2 實作交接（2026-09-06）
+
+§3（解死結）已由 Plan 1 完成並在 staging 驗證通過
+（`docs/superpowers/plans/2026-09-06-weekly-rhythm-recurring.md`）。§2 接手時：
+
+### ⚠️ migration 的基準檔
+
+§2 的 migration 必須從
+**`supabase/migrations/20260906000000_weekly_rhythm_recurring.sql:47-485`**
+複製 `publish_child_confirmed_plan_v1` 的函式本體，**不是**從
+`20260828000000_parent_shared_term_proposal.sql:79-516`。
+
+`CREATE OR REPLACE` 是全體置換，而 migration 依檔名順序套用 —— §2 的
+migration 排在 `20260906` 之後，從舊版複製會把 weekly_rhythm 的修正
+**靜默蓋掉**。那是資料庫端行為，本機 jest 一個字都測不出來，
+`childGoalPlanningParity` 也擋不住。
+
+`propose_child_planning_terms_v1`（同檔 500-1077）§2 若不動，維持現狀即可。
+
+### 已經成立，不用重做
+
+- evidence CHECK 已放寬成排除 `one_time`；`recurring` + `weekly_frequency`
+  可以有 `weekly_rhythm`
+- 兩支 RPC 的 `v_progress` 推導都已放寬
+- **客戶端不用改**：`systemFieldsComplete` 對 `recurring` 本來就沒有
+  `duration_days` 要求；`parentAgreement.test.ts` 已有三題契約測試釘住
+- staging 已套用（SQL Editor）並補進 `supabase_migrations.schema_migrations`
+
+### §2 的驗收要順便涵蓋 Plan 1 的殘留項
+
+Plan 1 Task 3 已移交至此。唯一還沒驗證的是
+`publish_child_confirmed_plan_v1` 對 `recurring` 計畫**實際產出**
+`weekly_rhythm`（已驗證的是「約束放行」與「函式已部署帶新條件」，
+不是 RPC 跑起來的行為）。
+
+§2 的 `open_ended → recurring → weekly_rhythm` 路徑走一次就涵蓋了，
+不需要另外設計驗收。
+
+### staging 連線注意
+
+`supabase/.temp/pooler-url` 的主機名已過期，`db push` 會得到
+`(ENOTFOUND) tenant/user postgres.<ref> not found`。
+**從 Dashboard → Connect 取當下的 URI**，不要用快取那個。
+`db push --linked` 會先打 Management API 建 login role（可能 544 逾時），
+設 `SUPABASE_DB_PASSWORD` 環境變數可跳過。
+
+連不上時的替代路徑：SQL Editor 貼 `BEGIN; <整份 migration> COMMIT;`，
+**然後一定要補記帳**：
+
+```sql
+INSERT INTO supabase_migrations.schema_migrations (version, name)
+VALUES ('<version>', '<name>') ON CONFLICT DO NOTHING;
+```
+
+不補的話，未來任何一次 `db push` 都會把它當成未套用而重跑 ——
+而重跑的順序會排在後續 migration 之前，把後面對同一支函式的修改蓋掉。
+查那張表要窄選取（`SELECT version, name`），`statements` 欄極大。
