@@ -924,6 +924,8 @@ function validateClarification(
 
   const rejections = new Rejections();
   checkConversationText([text], knownGoal, input, rejections);
+  // 資訊夠了還在問澄清問題，就是在耽誤他。
+  rejectIfInformationSufficient(input, rejections);
 
   // 同一種問題不准問第二次。
   //
@@ -984,6 +986,8 @@ function validateChoice(
     ...(option.rhythmHint !== undefined ? [option.rhythmHint] : []),
   ]);
   checkConversationText([question, ...optionTexts], knownGoal, input, rejections);
+  // 資訊夠了還在給選項，也是多嘴 —— 給選項同樣在耽誤他。
+  rejectIfInformationSufficient(input, rejections);
 
   // 孩子已經有方法了還在給他選項 —— 那就是把他的方法換掉的前一步。
   // 「已經有方法」包含他上一輪剛挑走的那個選項：再給一次選項，
@@ -1072,6 +1076,30 @@ function checkConversationText(
     rejections.add('DOMAIN_AUTHORITY_CLAIM');
   }
   if (knownGoal !== input.childOriginalGoal.trim()) rejections.add('CHILD_INPUT_OVERWRITTEN');
+}
+
+/**
+ * 「孩子已經講夠了，還在問／還在給選項」＝多嘴。
+ *
+ * ⚠️ 這一條**不在** checkConversationText 裡面，是刻意的。
+ *
+ * 它曾經在裡面，於是三個 status 無條件共用 —— 而 needs_duration 的
+ * **觸發前提正是資訊已經足夠**（孩子講完方法與節奏、只差期限），
+ * 所以期限那一輪 100% 被自己這端判成多嘴，退成 INVALID_AI_OUTPUT。
+ * 孩子的畫面停在選項頁，下一頁永遠不出現。
+ *
+ * 拆出來之後，每個 round 要不要套這條，在呼叫端看得見。新增 round 時
+ * 得自己回答一次「資訊足夠時它還該不該出現」，不會再預設繼承。
+ *
+ * 註：修法**不是**把 goalDuration 加進 informationSufficiency 當第三個
+ * 條件。那會讓「夠了、只差期限」這個狀態無法被表達 —— Function 端的
+ * conversationRule 會改走「資訊不足」那一岔去問別的問題，
+ * needs_clarification 的守衛也會跟著放行，等於還原 2876d78。
+ */
+function rejectIfInformationSufficient(
+  input: ChildGoalPlanningInput,
+  rejections: Rejections,
+): void {
   if (informationSufficiency(input) === 'sufficient') {
     rejections.add('UNNECESSARY_CLARIFICATION');
   }
