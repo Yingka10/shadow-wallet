@@ -344,6 +344,72 @@ describe('Case 5｜技能型「我想學會騎腳踏車」', () => {
     expect(result.plan.reviewPoint).toEqual({ type: 'after_phase', phaseId: 'phase-1' });
   });
 
+  // P1-M1B：expectedWeeks 是選填的模型判斷，不是結構性欄位（不像 id 由
+  // compose 端指派）。模型給了就要真的走得完整條路，這是繫住 prompt 字串
+  // 與正規化守衛的那條測試 —— 兩邊分別改的話，這裡先紅。
+  it('模型判斷出某一站大概幾週，帶得進正式計畫（P1-M1B）', () => {
+    const { result } = roundTrip(CASE_5_INPUT, {
+      status: 'ready',
+      desiredOutcome: '學會騎腳踏車',
+      goalControlType: 'directly_actionable',
+      progressionKind: 'staged',
+      actionPlanSummary: '先從滑行開始，能穩住之後再練踩踏。',
+      currentFocus: '先練滑行',
+      nextAction: { text: '先在草地上滑行 10 分鐘', source: 'ai_suggested' },
+      reviewPoint: { type: 'after_phase', phaseIndex: 1 },
+      planningContribution: 'filled_missing_details',
+      suggestedCadence: null,
+      sessionSize: null,
+      trialPeriod: null,
+      phases: [
+        { title: '能自己滑行', observableDoneWhen: '能雙腳離地滑行 5 公尺', expectedWeeks: 2 },
+        { title: '能自己踩踏', observableDoneWhen: '能不扶著騎完 10 公尺' },
+      ],
+      targetValue: null,
+      targetUnit: null,
+      currentValue: null,
+      controllableActions: null,
+    });
+
+    expect(result.status).toBe('ready');
+    if (result.status !== 'ready' || result.plan.progressionKind !== 'staged') return;
+    expect(result.plan.phases[0].expectedWeeks).toBe(2);
+    // 判不出來就是 undefined，不猜。
+    expect(result.plan.phases[1].expectedWeeks).toBeUndefined();
+  });
+
+  // prompt 字串明講「不用給 id」，但完全沒提 expectedWeeks —— 這一條證明
+  // 「沒有 expectedWeeks 的階段」仍然是 prompt 教出來的正常輸出，不是
+  // normalizePhases 額外要求的東西。少了這一條，兩邊一旦不同步：
+  // 要嘛 100% INVALID_AI_OUTPUT（守衛要求、prompt 沒教），要嘛模型端
+  // 根本沒被告知這個能力（prompt 沒提、model 永遠不給）。
+  it('沒有 expectedWeeks 的階段仍然合法 —— prompt 沒有要求它', () => {
+    const { result } = roundTrip(CASE_5_INPUT, {
+      status: 'ready',
+      desiredOutcome: '學會騎腳踏車',
+      goalControlType: 'directly_actionable',
+      progressionKind: 'staged',
+      actionPlanSummary: '先從滑行開始，能穩住之後再練踩踏。',
+      currentFocus: '先練滑行',
+      nextAction: { text: '先在草地上滑行 10 分鐘', source: 'ai_suggested' },
+      reviewPoint: { type: 'after_phase', phaseIndex: 1 },
+      planningContribution: 'filled_missing_details',
+      suggestedCadence: null,
+      sessionSize: null,
+      trialPeriod: null,
+      phases: [
+        { title: '能自己滑行', observableDoneWhen: '能雙腳離地滑行 5 公尺' },
+        { title: '能自己踩踏', observableDoneWhen: '能不扶著騎完 10 公尺' },
+      ],
+      targetValue: null,
+      targetUnit: null,
+      currentValue: null,
+      controllableActions: null,
+    });
+
+    expect(result.status).toBe('ready');
+  });
+
   it('缺「現在到哪」時，先問一題也是合法的', () => {
     const { result } = roundTrip(CASE_5_INPUT, {
       status: 'needs_clarification',

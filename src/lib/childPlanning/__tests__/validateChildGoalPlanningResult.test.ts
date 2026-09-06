@@ -228,6 +228,52 @@ describe('external_outcome', () => {
   });
 });
 
+describe('staged 的階段 expectedWeeks（P1-M1B 混合制回饋）', () => {
+  const staged = {
+    progressionKind: 'staged',
+    cadence: undefined,
+    sessionSize: undefined,
+    trialPeriod: undefined,
+    reviewPoint: null,
+    phases: [
+      { id: 'phase-1', title: '想好故事', observableDoneWhen: '寫出三句故事大綱', expectedWeeks: 2 },
+      { id: 'phase-2', title: '畫出分鏡', observableDoneWhen: '畫出 4 頁分鏡草稿' },
+    ],
+    provenance: provenance({
+      cadence: 'undecided',
+      sessionSize: 'undecided',
+      reviewPoint: 'undecided',
+      phases: 'ai_suggested',
+    }),
+  };
+
+  it('有給就帶進去，判不出來就是 undefined —— 不猜', () => {
+    const result = validate(staged);
+    expect(result.status).toBe('ready');
+    const phases = result.status === 'ready' && result.plan.progressionKind === 'staged'
+      ? result.plan.phases
+      : null;
+    expect(phases?.[0].expectedWeeks).toBe(2);
+    expect(phases?.[1].expectedWeeks).toBeUndefined();
+  });
+
+  it('超出 1-8 週不行', () => {
+    const phases = [
+      { ...staged.phases[0], expectedWeeks: 9 },
+      staged.phases[1],
+    ];
+    expect(validate({ ...staged, phases }).status).toBe('unavailable');
+  });
+
+  it('0 週不行', () => {
+    const phases = [
+      { ...staged.phases[0], expectedWeeks: 0 },
+      staged.phases[1],
+    ];
+    expect(validate({ ...staged, phases }).status).toBe('unavailable');
+  });
+});
+
 describe('staged 的階段', () => {
   const staged = {
     progressionKind: 'staged',

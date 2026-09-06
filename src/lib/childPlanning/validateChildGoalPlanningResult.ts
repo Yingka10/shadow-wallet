@@ -257,7 +257,22 @@ function validPhases(value: unknown): ChildPlanPhase[] | null {
     if (id === null || title === null || observableDoneWhen === null) return null;
     if (seen.has(id)) return null;
     seen.add(id);
-    phases.push({ id, title, observableDoneWhen });
+
+    // expectedWeeks 是選填的 —— 判不出來就是 undefined，不猜（P1-M1B）。
+    const rawWeeks = item.expectedWeeks;
+    if (rawWeeks === null || rawWeeks === undefined) {
+      phases.push({ id, title, observableDoneWhen });
+      continue;
+    }
+    if (
+      typeof rawWeeks !== 'number'
+      || !Number.isInteger(rawWeeks)
+      || rawWeeks < L.minPhaseExpectedWeeks
+      || rawWeeks > L.maxPhaseExpectedWeeks
+    ) {
+      return null;
+    }
+    phases.push({ id, title, observableDoneWhen, expectedWeeks: rawWeeks });
   }
   return phases;
 }

@@ -173,7 +173,13 @@ export type ChildPlanSessionSize =
   | { kind: 'minutes'; minutes: number }
   | { kind: 'count'; count: number; unit: string };
 
-export type ChildPlanPhase = { id: string; title: string; observableDoneWhen: string };
+export type ChildPlanPhase = {
+  id: string;
+  title: string;
+  observableDoneWhen: string;
+  /** 這一站大概涵蓋幾週（P1-M1B）。與 App 端 ChildPlanPhase 鏡射。 */
+  expectedWeeks?: number;
+};
 
 /** 與 App 端 ChildPlanStartOptionRationale 同值，由 parity 測試釘住。 */
 export type ChildPlanStartOptionRationale = 'good_starting_point' | 'closer_to_child_input';
@@ -327,6 +333,10 @@ export const CHILD_GOAL_PLANNING_LIMITS = {
   maxModelLength: 80,
   minPhases: 2,
   maxPhases: 5,
+  // phases[].expectedWeeks 邊界，與 App 端、milestone_agreements 的
+  // week_count clamp 同界。
+  minPhaseExpectedWeeks: 1,
+  maxPhaseExpectedWeeks: 8,
   minControllableActions: 1,
   maxControllableActions: 4,
   minChoiceOptions: 2,
@@ -666,6 +676,8 @@ goalControlType 與 progressionKind 是**兩個不同的問題**，要分開回�
                   重點是頻率、單次份量、先試多久，不要編假的里程碑。
     staged        有真實的能力或成果進展（學會騎車、學一首曲子、做一本漫畫）。
                   phases 給 ${L.minPhases}-${L.maxPhases} 個，每個都要是真的進展，不是為了湊數。
+                  看得出這一站大概要幾週才給 expectedWeeks（${L.minPhaseExpectedWeeks}-${L.maxPhaseExpectedWeeks}，
+                  整數），看不出來就不要給這個欄位，不要猜一個數字湊版面。
     accumulation  主要進度是「做到幾個 / 目標幾個」（讀 5 本書、跑 20 公里）。
                   不要硬拆成「第一本」「第二本」這種假階段。
 
@@ -730,7 +742,8 @@ planningContribution：只有整理他的方法給 organized_child_plan；補了
 
 各 progressionKind 專屬欄位（其他一律給 null，不要為了整齊硬填）：
   rhythm        sessionSize、trialPeriod（trialPeriod 有值時 reviewPoint 要講同一個數字）
-  staged        phases: [{"title":"先能自己滑行","observableDoneWhen":"能雙腳離地滑行 5 公尺"}]（不用給 id）
+  staged        phases: [{"title":"先能自己滑行","observableDoneWhen":"能雙腳離地滑行 5 公尺","expectedWeeks":2}]
+                （不用給 id；看不出要幾週就不要放 expectedWeeks 這個鍵，不要放 null）
   accumulation  targetValue、targetUnit（${L.maxUnitLength} 字內，例如「本」「公里」）、currentValue
 
 goalControlType 是 external_outcome 時，另外給 controllableActions: ["先複習 15 分鐘"]。
@@ -864,7 +877,7 @@ function normalizeReviewPoint(value: unknown): RawReviewPoint {
 }
 
 /** 模型回的階段（沒有 id —— id 由組裝端編）。 */
-export type RawPhase = { title: string; observableDoneWhen: string };
+export type RawPhase = { title: string; observableDoneWhen: string; expectedWeeks?: number };
 
 function normalizePhases(value: unknown): RawPhase[] | null {
   if (!Array.isArray(value)) return null;
@@ -877,7 +890,23 @@ function normalizePhases(value: unknown): RawPhase[] | null {
     const title = text(item.title, L.maxPhaseTitleLength);
     const observableDoneWhen = text(item.observableDoneWhen, L.maxDoneWhenLength);
     if (title === null || observableDoneWhen === null) return null;
-    phases.push({ title, observableDoneWhen });
+
+    // expectedWeeks 是選填的模型判斷（P1-M1B），不是 id 那種結構性欄位 ——
+    // prompt 沒有要求它，缺席不能擋。給了就要落在 1-8 之內。
+    const rawWeeks = item.expectedWeeks;
+    if (rawWeeks === null || rawWeeks === undefined) {
+      phases.push({ title, observableDoneWhen });
+      continue;
+    }
+    if (
+      typeof rawWeeks !== 'number'
+      || !Number.isInteger(rawWeeks)
+      || rawWeeks < L.minPhaseExpectedWeeks
+      || rawWeeks > L.maxPhaseExpectedWeeks
+    ) {
+      return null;
+    }
+    phases.push({ title, observableDoneWhen, expectedWeeks: rawWeeks });
   }
   return phases;
 }
@@ -1172,6 +1201,8 @@ export function composeChildGoalPlan(args: {
           id: phaseId(index),
           title: phase.title,
           observableDoneWhen: phase.observableDoneWhen,
+          // 模型判斷的（不是 id 那種結構性指派）；判不出來就 undefined，不猜。
+          ...(phase.expectedWeeks !== undefined ? { expectedWeeks: phase.expectedWeeks } : {}),
         }));
 
   // after_phase 的 index → 我們自己編的 id。指到不存在的階段就當作沒有

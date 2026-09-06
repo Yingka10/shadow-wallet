@@ -577,6 +577,17 @@ export type ChildPlanPhase = {
   title: string;
   /** 「能不扶著騎完 10 公尺」可以；「真正理解」「更有自信」不行。 */
   observableDoneWhen: string;
+  /**
+   * 這一站大概涵蓋幾週（P1-M1B，混合制回饋）。1-8，與
+   * milestone_agreements.completion_criterion 的 week_count 同界。
+   *
+   * **判不出來就是 undefined，不猜。** 沒有這個值的站，混合制回饋會把它
+   * 當純慶祝站處理（不發幣），不會硬湊一個區間。
+   *
+   * ⚠️ 不是 target_per_week。那個來自家長談定的 cadence，
+   * 在共同條件那一步才知道，這裡不由 AI 決定。
+   */
+  expectedWeeks?: number;
 };
 
 /** AI 這一輪到底做了什麼。 */
@@ -859,6 +870,9 @@ export const CHILD_GOAL_PLANNING_LIMITS = {
   maxGoalDurationDays: 180,
   minTargetValue: 1,
   maxTargetValue: 10000,
+  /** phases[].expectedWeeks 的邊界，與 milestone_agreements 的 week_count clamp 同界。 */
+  minPhaseExpectedWeeks: 1,
+  maxPhaseExpectedWeeks: 8,
   maxWeeklyFrequency: 7,
   minSessionMinutes: 1,
   maxSessionMinutes: 180,
