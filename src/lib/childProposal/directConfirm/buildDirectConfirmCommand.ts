@@ -19,7 +19,14 @@ import { CHILD_PROPOSAL_COMMAND_SCHEMA_VERSION } from '../types';
  */
 const DEFAULT_FIRST_REVIEW_DAYS = 7;
 
-const PURPOSE: Record<NonNullable<ChildProposalPlanVersion['purpose_category']>, PurposeCategory> = {
+/**
+ * DB 的字母編碼 → app 內的 PurposeCategory。
+ *
+ * 匯出是因為 enrichment 端也要用同一份（P1-A4A.1 的幣值錨點必須等於
+ * 家長端之後重算的結果，而重算走的就是這條映射）。第三份手抄的映射
+ * 正是 2026-09-07 那顆錨點不一致的成因類型。
+ */
+export const PURPOSE: Record<NonNullable<ChildProposalPlanVersion['purpose_category']>, PurposeCategory> = {
   A: 'life_routine',
   B: 'family_participation',
   C: 'autonomous_challenge',

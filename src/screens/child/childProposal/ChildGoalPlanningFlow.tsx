@@ -46,6 +46,7 @@ import {
   type ChildPlanningSupportPreference,
   type PublishFormalPlanResult,
 } from '../../../lib/childPlanning';
+import { childSessionMinutes } from '../../../lib/childPlanning/formalPlan/childSessionMinutes';
 // 直接指向這一支，不走 barrel（barrel 沒有重新匯出這個常數，加一個很小的
 // 直接 import 比為了一個常數改動 barrel 的匯出面安全）。
 import { PLANNING_COPY, formatPlanningStep } from './copy';
@@ -80,7 +81,13 @@ export type PlanningFlowPorts = {
    *    送出是「請爸媽看」。合成一步的話，送出失敗會看起來像確認失敗，
    *    而孩子會以為他剛剛點的頭沒有算數 —— 但那份計畫已經安全地存下來了。
    */
-  publish(): Promise<PublishFormalPlanResult>;
+  /**
+   * 送出正式版本。
+   *
+   * childSessionMinutes 是孩子自己選的單次份量 —— 幣值錨點要照它定價，
+   * 不是照 P0 草稿猜的那個數字（見 childSessionMinutes 的檔頭）。
+   */
+  publish(childSessionMinutes: number | null): Promise<PublishFormalPlanResult>;
 };
 
 export type ChildGoalPlanningFlowProps = {
@@ -482,9 +489,14 @@ export default function ChildGoalPlanningFlow({
    */
   const runPublish = useCallback(async () => {
     setPhase({ kind: 'confirmed', sent: false, sending: true });
-    const published = await ports.publish();
+    // confirmedPlan 在 handleConfirm 裡是同一個 tick 內剛 setSession 的，
+    // 這個 closure 還讀不到 —— 所以退回 latestResult，那是同一份計畫
+    // （confirmChildPlan 就是把它複製過去）。重試時走前者。
+    const plan = session.confirmedPlan
+      ?? (session.latestResult?.status === 'ready' ? session.latestResult.plan : null);
+    const published = await ports.publish(childSessionMinutes(plan));
     setPhase({ kind: 'confirmed', sent: published.ok, sending: false });
-  }, [ports]);
+  }, [ports, session]);
 
   const handleConfirm = useCallback(async () => {
     const confirmed = confirmChildPlan(session);
