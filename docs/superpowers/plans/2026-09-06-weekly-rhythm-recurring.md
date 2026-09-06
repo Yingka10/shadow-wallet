@@ -318,7 +318,23 @@ git commit -m "test(child-planning): 釘住『沒有終點的節奏計畫可以�
 
 ---
 
-### Task 3: staging 驗收
+### Task 3: staging 驗收 —— 併入 Plan 2 §2 驗收，本計畫不執行
+
+> **決議（2026-09-06）：不在這一包執行。**
+>
+> 剩下未驗證的只有一件事：`publish_child_confirmed_plan_v1` 對 recurring 計畫
+> **實際產出** `weekly_rhythm`（已驗證的是「約束放行」與「函式已部署帶新條件」，
+> 不是 RPC 跑起來的行為）。
+>
+> 而 Plan 2 的 §2 會再一次 `CREATE OR REPLACE` 同一支函式，改成讀 `goalDuration`
+> 決定 duration。現在做端到端驗收，等於驗一支即將被換掉的函式；而且產生 fixture
+> 需要走的孩子端規劃流程，正是 §2 在改的東西。
+>
+> §2 的驗收一定會走 `open_ended → recurring → weekly_rhythm` 這條路徑，
+> 剛好把這一段一起蓋掉。所以本任務的內容移交給 §2 的驗收計畫。
+>
+> 以下步驟保留作為 §2 驗收時的參考骨架。
+
 
 **Files:**
 - Create: `supabase/verify/staging/__tests__/weeklyRhythmRecurringSlice.test.ts`
