@@ -1217,6 +1217,42 @@ describe('Case 14｜插一輪問期限', () => {
 // 就寫了「都是期限那一輪已經問完之後的狀態」，所以
 // sufficient && goalDuration === null 這個組合從來沒有被建構過。
 // ─────────────────────────────────────────────────────────────────────────────
+describe('資訊不足＋期限未定時，prompt 也不可以放任模型回 ready', () => {
+  // 2026-09-07 線上：孩子在開場對節奏選了「我不知道」→ input.cadence 永遠是
+  // null → informationIsSufficient 永遠 false → 一律走 !sufficient 那一岔。
+  // 而那一岔**完全沒提** ready 已經被 goalDuration 守衛關掉，模型覺得
+  // 資訊夠了就回 ready，然後被自己這端拒絕（INVALID_AI_OUTPUT）。
+  //
+  // ready 的守衛與 sufficiency 無關：只要 goalDuration 是 null，ready 就
+  // 不可能通過。所以那句話必須出現在**每一岔**，不是只有 sufficient 那岔。
+  const noCadence = input({
+    childApproach: null,
+    cadence: null,
+    goalDuration: null,
+    responses: [
+      { type: 'choice_selection', optionId: 'option-3', optionText: '每次先讀 5 到 10 頁' },
+    ],
+  });
+
+  it('前提：這個狀態確實不是 informationIsSufficient', () => {
+    expect(informationIsSufficient(noCadence)).toBe(false);
+  });
+
+  it('prompt 明說這一輪不可以回 ready', () => {
+    expect(buildChildGoalPlanningPrompt(noCadence)).toContain('不可以回 ready');
+  });
+
+  it('prompt 指出覺得夠清楚時該回 needs_duration，而不是硬問別的問題', () => {
+    expect(buildChildGoalPlanningPrompt(noCadence)).toContain('needs_duration');
+  });
+
+  it('期限定了之後，這句限制就不該再出現', () => {
+    const decided = { ...noCadence, goalDuration: { kind: 'days', days: 14 } as const };
+    expect(informationIsSufficient(decided)).toBe(false);
+    expect(buildChildGoalPlanningPrompt(decided)).not.toContain('不可以回 ready');
+  });
+});
+
 describe('sufficient 但期限未定時，prompt 不可以命令 ready', () => {
   const READING_APPROACH = '每天睡前讀 15 分鐘';
   const CADENCE = { mode: 'weekly_frequency', weeklyFrequency: 7 } as const;

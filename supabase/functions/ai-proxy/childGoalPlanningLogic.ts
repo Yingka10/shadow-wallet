@@ -557,7 +557,6 @@ export function buildChildGoalPlanningPrompt(input: ChildGoalPlanningInput): str
   const conversation = describeConversationForPrompt(input);
 
   // 期限這一輪問不問，由這裡的事實決定，不由模型自己記得。
-  // 期限這一輪問不問，由這裡的事實決定，不由模型自己記得。
   const durationRule = input.goalDuration === null
     ? `還看不出他想花多久 → 給他 ${L.minDurationOptions}-${L.maxDurationOptions} 個具體期間讓他挑。
                        ⚠️ 他如果原話裡已經講過期間（「兩週」「一個月」），
@@ -593,9 +592,23 @@ export function buildChildGoalPlanningPrompt(input: ChildGoalPlanningInput): str
   //
   // 2026-09-06 線上 100% 重現（INVALID_AI_OUTPUT），模型完全照 prompt 做，
   // 錯的是 prompt。改動這一段時務必同步看那四條守衛。
+  //
+  // ⚠️ 2026-09-07 補：ready 的守衛**與 sufficiency 無關** —— 只要
+  // goalDuration 是 null，ready 就不可能通過。所以「不可以回 ready」
+  // 這句話必須出現在**每一岔**。
+  //
+  // 漏掉 !sufficient 那一岔的代價已經付過一次：孩子在開場對節奏選了
+  // 「我不知道」→ input.cadence 永遠是 null → informationIsSufficient
+  // 永遠 false → 一律走那一岔，而那一岔沒說 ready 已經關了，模型覺得
+  // 資訊夠了就回 ready，然後被自己這端拒絕。
   const conversationRule = !sufficient
     ? '只有在「不知道答案就沒辦法形成合理的行動計畫」時才問，而且**一次只問一題**。'
       + '孩子的話裡已經回答過的事不要再問一次（例如他說「平日睡前」，就不要再問一週幾次）。'
+      + (input.goalDuration === null
+        ? ' ⚠️ 他還沒說這件事要花多久，所以**這一輪不可以回 ready**。'
+          + '如果你覺得他講的其實已經夠清楚、可以給計畫了，那就回 **needs_duration** 先問期限 ——'
+          + '不要為了湊一輪而問一個你其實不需要答案的問題。'
+        : '')
     : input.goalDuration === null
       ? '⚠️ 孩子這次已經講得夠清楚了（有節奏、也講了他打算怎麼做），'
         + '**但他還沒說要花多久 —— 這一輪必須回 needs_duration。**'
