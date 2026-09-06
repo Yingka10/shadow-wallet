@@ -14,6 +14,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import type { ChildProposalFailure } from '../../childProposal/types';
+import type { MilestoneSplit } from './milestoneSplit';
 
 export const PROPOSE_CHILD_PLANNING_TERMS_RPC = 'propose_child_planning_terms_v1';
 
@@ -36,13 +37,19 @@ export const DURATION_DAYS_RANGE = { min: 1, max: 180 } as const;
 /**
  * 家長能提出的回饋方式。
  *
- * **只有兩個，而且只准往下。** 資格閘門說不能發幣的計畫，家長勾一個
+ * **只准往下或橫向，不准升級。** 資格閘門說不能發幣的計畫，家長勾一個
  * 選項不會讓它變成可以發幣 —— 那是規則引擎的判定，不是家庭偏好。
  *
- *   growbook_default  沿用 GrowBook 算出來的判定
- *   no_coin           這件事不給成長幣，看得到進度就好
+ *   growbook_default   沿用 GrowBook 算出來的判定（staged 計畫預設拆站）
+ *   no_coin            這件事不給成長幣，看得到進度就好
+ *   flat_per_completion 只在真的有拆站草案時才有意義：不拆站，
+ *                       全額每次結算（P1-M1B §1「家長能不能拒絕拆站」）。
+ *                       總額不變、也不會讓不能發幣的變成能發幣，
+ *                       跨的是既有那條「家長決定回饋方式」的線，
+ *                       不是把 duration_type/purpose_category 那種
+ *                       系統判定新開放給家長。
  */
-export type ChildPlanningRewardChoice = 'growbook_default' | 'no_coin';
+export type ChildPlanningRewardChoice = 'growbook_default' | 'no_coin' | 'flat_per_completion';
 
 /**
  * 家長提出的共同條件。**每一欄都是「沒提出就不動」**，
@@ -72,6 +79,16 @@ export type ChildPlanningRewardEvaluation = {
   taskPolicyVersion: string;
   sessionCoinReference: number;
   payoutType: 'per_completion';
+  /**
+   * staged 計畫的混合制回饋拆法（P1-M1B）。null = 不拆
+   * （非 staged 計畫、家長選 flat_per_completion、cadence 還沒定、
+   * 或沒有任何一站帶得出可追蹤的 criterion）。
+   *
+   * ⚠️ 目前只讀 currentPlanVersion 本人的 child_confirmed_plan，不沿
+   * adopted_from 走完整 lineage —— 再協商回合（authored_by='parent'）
+   * 讀不到孩子原版本的 phases 時就是 null，不猜、不補。
+   */
+  milestoneSplit: MilestoneSplit | null;
 };
 
 export type ProposeChildPlanningTermsCommand = {

@@ -17,6 +17,8 @@ import type {
   ParentProposalCardData,
 } from '../../childProposal/types';
 import { childPlanningNegotiability } from './isChildPlanningNegotiable';
+import { computeMilestoneSplit } from './milestoneSplit';
+import type { MilestoneSplitPhase } from './milestoneSplit';
 import { pricingRelevantChange, projectCard, projectSharedTerms } from './projectSharedTerms';
 import {
   CHILD_PLANNING_PREFERRED_TIMES,
@@ -155,7 +157,67 @@ export function freshRewardEvaluation(
     taskPolicyVersion: source.task_policy_version,
     sessionCoinReference: decision.coin.suggestedAmount,
     payoutType: 'per_completion',
+    milestoneSplit: milestoneSplitFor(card, terms, decision.coin.suggestedAmount),
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * 讀出 staged 計畫的 phases，只在 currentPlanVersion 本人就是孩子原版本
+ * 時才讀得到（P1-M1B §2.2 的已知限制，見 ChildPlanningRewardEvaluation
+ * 的欄位註解）。
+ */
+function stagedPhases(source: ChildProposalPlanVersion): MilestoneSplitPhase[] | null {
+  if (source.authored_by !== 'child') return null;
+  const plan = source.child_confirmed_plan;
+  if (!isRecord(plan) || plan.progressionKind !== 'staged') return null;
+  if (!Array.isArray(plan.phases)) return null;
+
+  const phases: MilestoneSplitPhase[] = [];
+  for (const item of plan.phases) {
+    if (!isRecord(item) || typeof item.title !== 'string') return null;
+    const weeks = item.expectedWeeks;
+    phases.push(
+      typeof weeks === 'number' ? { title: item.title, expectedWeeks: weeks } : { title: item.title },
+    );
+  }
+  return phases;
+}
+
+/** 家長談定的週目標。與 resolve_payout_basis_v1 的 fallback 同一個規則。 */
+function targetPerWeek(projected: ChildProposalPlanVersion): number | null {
+  if (projected.cadence_mode === 'weekly_frequency') {
+    return typeof projected.cadence_weekly_frequency === 'number'
+      && projected.cadence_weekly_frequency > 0
+      ? projected.cadence_weekly_frequency
+      : null;
+  }
+  if (projected.cadence_mode === 'fixed_days') {
+    return Array.isArray(projected.cadence_days) && projected.cadence_days.length > 0
+      ? projected.cadence_days.length
+      : null;
+  }
+  return null;
+}
+
+function milestoneSplitFor(
+  card: ParentProposalCardData,
+  terms: ChildPlanningSharedTerms,
+  session: number,
+) {
+  if (terms.rewardChoice === 'flat_per_completion') return null;
+  const source = card.currentPlanVersion;
+  if (!source) return null;
+  const phases = stagedPhases(source);
+  if (phases === null) return null;
+  return computeMilestoneSplit({
+    session,
+    targetPerWeek: targetPerWeek(projectSharedTerms(source, terms)),
+    phases,
+  });
 }
 
 export function buildChildPlanningTermsCommand(

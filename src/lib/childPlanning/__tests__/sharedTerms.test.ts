@@ -350,6 +350,90 @@ describe('5. reward 重新評估（§21 C）', () => {
       .toBeNull();
   });
 
+  // P1-M1B §2.2：staged 計畫的混合制回饋。
+  describe('milestoneSplit（P1-M1B）', () => {
+    const STAGED_PLAN = {
+      desiredOutcome: '學會騎腳踏車',
+      actionPlanSummary: '先練滑行，能穩住之後再練踩踏。',
+      nextAction: { text: '先在草地上滑行 10 分鐘', source: 'ai_suggested' },
+      progressionKind: 'staged',
+      phases: [
+        { id: 'phase-1', title: '能自己滑行', observableDoneWhen: '能雙腳離地滑行 5 公尺', expectedWeeks: 2 },
+        { id: 'phase-2', title: '能自己踩踏', observableDoneWhen: '能不扶著騎完 10 公尺', expectedWeeks: 2 },
+      ],
+    };
+
+    it('孩子的原版本 ＋ 家長談定每週次數 → 算得出拆站', () => {
+      const staged = card({ child_confirmed_plan: STAGED_PLAN });
+      const evaluation = freshRewardEvaluation(
+        staged,
+        { cadenceMode: 'weekly_frequency', cadenceWeeklyFrequency: 3 },
+        AGE_GROUP,
+      );
+
+      expect(evaluation).not.toBeNull();
+      expect(evaluation?.milestoneSplit).not.toBeNull();
+      expect(evaluation?.milestoneSplit?.segments).toHaveLength(2);
+      expect(evaluation?.milestoneSplit?.segments[0].targetPerWeek).toBe(3);
+    });
+
+    it('rhythm 計畫（既有行為）不受影響 —— milestoneSplit 是 null', () => {
+      const evaluation = freshRewardEvaluation(
+        card(),
+        { cadenceMode: 'weekly_frequency', cadenceWeeklyFrequency: 3 },
+        AGE_GROUP,
+      );
+
+      expect(evaluation).not.toBeNull();
+      expect(evaluation?.milestoneSplit).toBeNull();
+    });
+
+    it('家長選 flat_per_completion → 不拆站，milestoneSplit 是 null', () => {
+      const staged = card({ child_confirmed_plan: STAGED_PLAN });
+      const evaluation = freshRewardEvaluation(
+        staged,
+        {
+          cadenceMode: 'weekly_frequency', cadenceWeeklyFrequency: 3,
+          rewardChoice: 'flat_per_completion',
+        },
+        AGE_GROUP,
+      );
+
+      expect(evaluation).not.toBeNull();
+      expect(evaluation?.milestoneSplit).toBeNull();
+    });
+
+    // 「共同條件」目前只讀 currentPlanVersion 本人，不沿 adopted_from 走
+    // 完整 lineage（那需要整份版本清單，這一步只拿得到單一版本）。
+    // 再協商回合的 current 是家長草案，child_confirmed_plan 是 null ——
+    // 這時不猜、不補，milestoneSplit 就是 null。
+    it('家長再協商草案是目前版本時 → 讀不到 phases，milestoneSplit 是 null', () => {
+      const parentDraft = card({
+        authored_by: 'parent',
+        adopted_from_plan_version_id: 'version-child',
+        child_confirmed_plan: null,
+      });
+      const evaluation = freshRewardEvaluation(
+        parentDraft,
+        { cadenceMode: 'weekly_frequency', cadenceWeeklyFrequency: 3 },
+        AGE_GROUP,
+      );
+
+      expect(evaluation).not.toBeNull();
+      expect(evaluation?.milestoneSplit).toBeNull();
+    });
+
+    it('cadence 還沒定（沒有 weekly_frequency/fixed_days）→ milestoneSplit 是 null', () => {
+      const staged = card({
+        child_confirmed_plan: STAGED_PLAN,
+        cadence_mode: 'one_time', cadence_weekly_frequency: null,
+      });
+      const evaluation = freshRewardEvaluation(staged, {}, AGE_GROUP);
+
+      expect(evaluation?.milestoneSplit ?? null).toBeNull();
+    });
+  });
+
   it('reward 還沒說定的計畫，家長仍然可以只補節奏', () => {
     // 要求他先解決幣值才能送出，等於把一件系統還沒算出來的事推給他。
     const pendingReward = card({
