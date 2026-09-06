@@ -106,3 +106,20 @@ describe('搬運', () => {
     expect(request.responses).toHaveLength(1);
   });
 });
+
+describe('期限（P1-A1）', () => {
+  it('孩子還沒選期限就是 null —— 這一層不替他決定', () => {
+    const request = toPlanningRequest(PROPOSAL, CONTEXT);
+
+    expect(request.goalDuration).toBeNull();
+  });
+
+  it('孩子選過的期限從 responses 推導出來，不另外存一份', () => {
+    const request = toPlanningRequest(PROPOSAL, {
+      ...CONTEXT,
+      responses: [{ type: 'duration_selection', days: 14 }],
+    });
+
+    expect(request.goalDuration).toEqual({ kind: 'days', days: 14 });
+  });
+});

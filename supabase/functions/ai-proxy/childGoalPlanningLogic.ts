@@ -64,7 +64,11 @@ export type ChildPlanningResponse =
   /** 文字是 AI 寫的，**決定是孩子做的**。兩件事分開記。 */
   | { type: 'choice_selection'; optionId: string; optionText: string }
   /** 孩子說「我自己想」並自己輸入 —— 這是他的原話。 */
-  | { type: 'custom_choice'; answer: string };
+  | { type: 'custom_choice'; answer: string }
+  /** 孩子在期限那一輪選的天數（P1-A1）。數字是他看著點下去的。 */
+  | { type: 'duration_selection'; days: number }
+  /** 孩子說這件事沒有終點，他想一直做下去。 */
+  | { type: 'duration_open_ended' };
 
 export type ChildGoalPlanningInput = {
   schemaVersion: typeof CHILD_GOAL_PLANNING_SCHEMA_VERSION;
@@ -406,6 +410,16 @@ export function childGoalPlanningInputIsUsable(input: ChildGoalPlanningInput): b
     if (response.type === 'custom_choice') {
       return typeof response.answer === 'string' && response.answer.trim().length > 0;
     }
+    // 期限那一輪（P1-A1）。少了這兩條，孩子一選完期限，整個請求就被
+    // 這裡拒掉 —— 而畫面上看到的會是「這一輪沒有整理成功」。
+    if (response.type === 'duration_selection') {
+      return (
+        Number.isInteger(response.days)
+        && response.days >= CHILD_GOAL_PLANNING_LIMITS.minGoalDurationDays
+        && response.days <= CHILD_GOAL_PLANNING_LIMITS.maxGoalDurationDays
+      );
+    }
+    if (response.type === 'duration_open_ended') return true;
     return false;
   });
 }
@@ -479,6 +493,14 @@ export function describeConversationForPrompt(input: ChildGoalPlanningInput): st
     }
     if (response.type === 'choice_selection') {
       return `你給了幾個選項，他挑了：「${response.optionText}」`;
+    }
+    // 期限那兩種要講得出來 —— 這一段唯一的用途就是「不要再問一次他答過的事」，
+    // 而期限正是最容易被再問一次的那一題。
+    if (response.type === 'duration_selection') {
+      return `你問他想花多久，他選了：${response.days} 天`;
+    }
+    if (response.type === 'duration_open_ended') {
+      return '你問他想花多久，他說這件事沒有終點，想一直做下去';
     }
     return `他說要自己想，然後寫下：「${response.answer}」`;
   });

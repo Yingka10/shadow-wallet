@@ -141,6 +141,16 @@ export type ChildPlanningResponse =
       optionText: string;
     }
   /**
+   * 孩子在期限那一輪選了一個具體天數（P1-A1）。
+   *
+   * 只記 days，不記選項文字：期限的**內容**是那個數字，
+   * 而數字是他看著點下去的。文字（「兩個星期」）是同一件事的講法，
+   * 不是另一個要保存的決定。
+   */
+  | { type: 'duration_selection'; days: number }
+  /** 孩子說這件事沒有終點，他想一直做下去。 */
+  | { type: 'duration_open_ended' }
+  /**
    * 孩子說「我自己想」並自己輸入。
    *
    * 與 choice_selection 分開是因為證據強度不同：這是孩子的原話，
@@ -148,11 +158,31 @@ export type ChildPlanningResponse =
    */
   | { type: 'custom_choice'; answer: string };
 
-export const CHILD_PLANNING_RESPONSE_TYPES: readonly ChildPlanningResponse['type'][] = [
+export const CHILD_PLANNING_RESPONSE_TYPES = [
   'clarification_answer',
   'choice_selection',
   'custom_choice',
-] as const;
+  'duration_selection',
+  'duration_open_ended',
+] as const satisfies readonly ChildPlanningResponse['type'][];
+
+/**
+ * 上面那個清單漏了任何一個變體，這一行就編譯不過。
+ *
+ * ⚠️ 這不是形式主義。原本的宣告是 `readonly ChildPlanningResponse['type'][]`，
+ *    而**子集也符合那個型別** —— 所以 union 加了新成員時清單不更新，
+ *    TypeScript 一聲都不吭。而 parity 測試正是拿這個清單去掃 Function 端
+ *    原始碼的，清單漏了，兩端就都測不到那個新型別。
+ *
+ *    P1-A1 的 duration_selection / duration_open_ended 就是這樣一路綠燈
+ *    走到「畫面上根本沒有那一輪」才被人工發現的。
+ */
+type MissingResponseType = Exclude<
+  ChildPlanningResponse['type'],
+  (typeof CHILD_PLANNING_RESPONSE_TYPES)[number]
+>;
+const _allResponseTypesListed: MissingResponseType extends never ? true : never = true;
+void _allResponseTypesListed;
 
 export type ChildGoalPlanningInput = {
   schemaVersion: typeof CHILD_GOAL_PLANNING_SCHEMA_VERSION;
@@ -189,6 +219,27 @@ export type ChildGoalPlanningInput = {
    */
   responses: ChildPlanningResponse[];
 };
+
+/**
+ * 孩子目前選定的期限。
+ *
+ * 住在 responses 裡而不是另開一個欄位：responses 是既有的、只 append、
+ * 而且已經會被持久化的那一份紀錄。另外存一份等於同一件事有兩個來源，
+ * session 從資料庫還原時就會分岔。
+ *
+ * 沒選過就是 null —— **不替他預設一個期間**。
+ */
+export function resolveGoalDuration(
+  responses: readonly ChildPlanningResponse[],
+): ChildGoalDuration | null {
+  // 只 append，所以「改過」的樣子是後面又多一筆 —— 最後一筆才算數。
+  for (let index = responses.length - 1; index >= 0; index -= 1) {
+    const response = responses[index];
+    if (response.type === 'duration_open_ended') return { kind: 'open_ended' };
+    if (response.type === 'duration_selection') return { kind: 'days', days: response.days };
+  }
+  return null;
+}
 
 /**
  * 目前真正有效的「孩子的方法」。

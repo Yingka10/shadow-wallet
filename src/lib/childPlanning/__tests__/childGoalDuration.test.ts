@@ -9,6 +9,9 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { validateChildGoalPlanningResult } from '../validateChildGoalPlanningResult';
+import { childGoalPlanningInputIsUsable } from '../../../../supabase/functions/ai-proxy/childGoalPlanningLogic';
+import { buildChildGoalPlanningInput } from '../buildChildGoalPlanningInput';
+import { CHILD_PLANNING_RESPONSE_TYPES, resolveGoalDuration } from '../types';
 import type { ChildGoalPlanningInput } from '../types';
 
 const INPUT: ChildGoalPlanningInput = {
@@ -147,5 +150,105 @@ describe('goalDuration', () => {
     expect(result.status === 'unavailable' && result.rejections).toContain(
       'CHILD_INPUT_OVERWRITTEN',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 孩子選的期限住在 responses 裡
+// ---------------------------------------------------------------------------
+//
+// 與 childApproach 同一個理由：期限是孩子在對話裡做的決定，而 responses
+// 是既有的、只 append、而且已經會被持久化的那一份紀錄。另外開一個欄位
+// 存它，等於同一件事有兩個來源，session 從資料庫還原時就會分岔。
+
+describe('resolveGoalDuration', () => {
+  it('還沒選過就是 null —— 不替他預設一個期間', () => {
+    expect(resolveGoalDuration([])).toBeNull();
+  });
+
+  it('他選了兩個星期', () => {
+    expect(resolveGoalDuration([{ type: 'duration_selection', days: 14 }])).toEqual({
+      kind: 'days',
+      days: 14,
+    });
+  });
+
+  it('他說這件事沒有終點', () => {
+    expect(resolveGoalDuration([{ type: 'duration_open_ended' }])).toEqual({
+      kind: 'open_ended',
+    });
+  });
+
+  // responses 只 append，所以「改過」的樣子是後面又多一筆。
+  it('改過就以最後一次為準', () => {
+    expect(
+      resolveGoalDuration([
+        { type: 'duration_selection', days: 14 },
+        { type: 'duration_open_ended' },
+      ]),
+    ).toEqual({ kind: 'open_ended' });
+  });
+
+  it('其他種類的回應不影響它', () => {
+    expect(
+      resolveGoalDuration([
+        { type: 'duration_selection', days: 30 },
+        { type: 'choice_selection', optionId: 'option-1', optionText: '每次讀 10 分鐘' },
+      ]),
+    ).toEqual({ kind: 'days', days: 30 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 期限那一輪要真的走得完整條路
+// ---------------------------------------------------------------------------
+//
+// ⚠️ 這一段測的是 flow 測試**繞過去**的那一層。ChildGoalPlanningFlow 的
+//    測試注入 port，所以 buildChildGoalPlanningInput 與 ai-proxy 的入口檢查
+//    都不會被執行 —— 畫面全綠，孩子卻在真實路徑上一步都走不動。
+
+describe('duration 回應走得過入口檢查', () => {
+  it('組得出 input，responses 不會整個作廢', () => {
+    const input = buildChildGoalPlanningInput({
+      ageGroup: '6-9',
+      childOriginalGoal: '我想把哈利波特讀完',
+      responses: [{ type: 'duration_selection', days: 14 }],
+    });
+
+    expect(input).not.toBeNull();
+    expect(input?.responses).toEqual([{ type: 'duration_selection', days: 14 }]);
+  });
+
+  it('open_ended 也是', () => {
+    const input = buildChildGoalPlanningInput({
+      ageGroup: '6-9',
+      childOriginalGoal: '我想每週練琴三次',
+      responses: [{ type: 'duration_open_ended' }],
+    });
+
+    expect(input?.responses).toEqual([{ type: 'duration_open_ended' }]);
+  });
+
+  it('Function 端的入口檢查也收得下', () => {
+    const input = buildChildGoalPlanningInput({
+      ageGroup: '6-9',
+      childOriginalGoal: '我想把哈利波特讀完',
+      responses: [{ type: 'duration_selection', days: 14 }],
+    });
+
+    expect(input).not.toBeNull();
+    expect(childGoalPlanningInputIsUsable(input!)).toBe(true);
+  });
+
+  // 這一條是為了下一次：清單漏更新正是「兩端都測了卻測不到」的根因，
+  // 而 parity 測試就是拿這個陣列去掃 Function 端原始碼的。
+  it('回應型別清單涵蓋每一個變體', () => {
+    expect([...CHILD_PLANNING_RESPONSE_TYPES].sort()).toEqual([
+      'choice_selection',
+      'clarification_answer',
+      'custom_choice',
+      'duration_open_ended',
+      'duration_selection',
+    ]);
   });
 });

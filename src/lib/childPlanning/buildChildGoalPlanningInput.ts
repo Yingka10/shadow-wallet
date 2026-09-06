@@ -170,6 +170,25 @@ function normalizeResponses(
       continue;
     }
 
+    // 期限那一輪（P1-A1）。天數在這裡就要驗 —— 這一層放行的話，
+    // 一個 300 天會一路走到 publish 才被擋，而孩子早就點頭了。
+    if (response.type === 'duration_selection') {
+      if (!Number.isInteger(response.days)) return undefined;
+      if (
+        response.days < L.minGoalDurationDays
+        || response.days > L.maxGoalDurationDays
+      ) {
+        return undefined;
+      }
+      normalized.push({ type: 'duration_selection', days: response.days });
+      continue;
+    }
+
+    if (response.type === 'duration_open_ended') {
+      normalized.push({ type: 'duration_open_ended' });
+      continue;
+    }
+
     return undefined;
   }
 

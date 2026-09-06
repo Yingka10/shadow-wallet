@@ -107,6 +107,19 @@ const CHOICE_STRUCTURED: ChildGoalPlanningResult = {
   model: 'test-model',
 };
 
+const DURATION: ChildGoalPlanningResult = {
+  status: 'needs_duration',
+  schemaVersion: 1,
+  knownGoal: '我想把哈利波特讀完',
+  question: '你想花多久把它讀完？',
+  options: [
+    { id: 'duration-1', text: '兩個星期', days: 14 },
+    { id: 'duration-2', text: '一個月', days: 30 },
+  ],
+  allowCustomAnswer: true,
+  model: 'test-model',
+};
+
 const TIMEOUT: ChildGoalPlanningResult = {
   status: 'unavailable',
   schemaVersion: 1,
@@ -596,5 +609,104 @@ describe('P6｜needs_choice 與 ready 的視覺還原', () => {
 
     await waitFor(() => expect(view.getByTestId('planning-choice')).toBeTruthy());
     expect(view.getByText(PLANNING_COPY.choice.microcopy)).toBeTruthy();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// P1-A1 — 期限那一輪
+// ---------------------------------------------------------------------------
+
+describe('§A1 期限由孩子選', () => {
+  // 這一條是整包的守門員。needs_duration 曾經存在於型別、validator、
+  // ai-proxy 與 migration，唯獨不在畫面上 —— 那時 3532 個測試全綠，
+  // 因為沒有任何一個測「模型回這個狀態時孩子看到什麼」。
+  // 少了這一條，一部署 ai-proxy 孩子就會每一次都掉進「這一輪沒有整理成功」。
+  it('模型回 needs_duration 時渲染那一輪，不會掉進失敗的 fallback', async () => {
+    const h = harness([DURATION]);
+    const view = await openWith(h);
+
+    await waitFor(() => expect(view.getByTestId('planning-duration')).toBeTruthy());
+    expect(view.getByText('你想花多久把它讀完？')).toBeTruthy();
+    expect(view.getByText('兩個星期')).toBeTruthy();
+    expect(view.getByText('一個月')).toBeTruthy();
+  });
+
+  // 兩個尾巴是客戶端加的，模型改不掉 —— 跟 needs_choice 的「我自己想」同一個地位。
+  it('固定尾巴兩個永遠在：自己說、沒有終點', async () => {
+    const h = harness([DURATION]);
+    const view = await openWith(h);
+
+    await waitFor(() => expect(view.getByTestId('planning-duration')).toBeTruthy());
+    expect(view.getByTestId('planning-duration-custom')).toBeTruthy();
+    expect(view.getByTestId('planning-duration-open-ended')).toBeTruthy();
+  });
+
+  it('選了兩個星期 → 下一輪帶著他選的天數', async () => {
+    const h = harness([DURATION, READY]);
+    const view = await openWith(h);
+
+    await waitFor(() => expect(view.getByTestId('planning-duration')).toBeTruthy());
+    fireEvent.press(view.getByTestId('planning-duration-duration-1'));
+    fireEvent.press(view.getByTestId('planning-duration-confirm'));
+
+    await waitFor(() => expect(h.requests).toHaveLength(2));
+    expect(h.requests[1].responses).toContainEqual({ type: 'duration_selection', days: 14 });
+  });
+
+  it('說這件事沒有終點 → 記成 open_ended，不是某個天數', async () => {
+    const h = harness([DURATION, READY]);
+    const view = await openWith(h);
+
+    await waitFor(() => expect(view.getByTestId('planning-duration')).toBeTruthy());
+    // 「沒有終點」也是選了再確認，不是按到就送出去 —— 它跟選一個天數是
+    // 同等份量的答案，而那一輪送出去就退不回來（needs_choice 的舊教訓）。
+    fireEvent.press(view.getByTestId('planning-duration-open-ended'));
+    fireEvent.press(view.getByTestId('planning-duration-confirm'));
+
+    await waitFor(() => expect(h.requests).toHaveLength(2));
+    expect(h.requests[1].responses).toContainEqual({ type: 'duration_open_ended' });
+  });
+});
+
+describe('§A1 他心裡有一個時間', () => {
+  it('自己填 21 天 → 記成他說的那個數字', async () => {
+    const h = harness([DURATION, READY]);
+    const view = await openWith(h);
+
+    await waitFor(() => expect(view.getByTestId('planning-duration')).toBeTruthy());
+    fireEvent.press(view.getByTestId('planning-duration-custom'));
+    fireEvent.changeText(view.getByTestId('planning-duration-input'), '21');
+    fireEvent.press(view.getByTestId('planning-duration-custom-next'));
+
+    await waitFor(() => expect(h.requests).toHaveLength(2));
+    expect(h.requests[1].responses).toContainEqual({ type: 'duration_selection', days: 21 });
+  });
+
+  // 把 200 悄悄改成 180，就是讓孩子確認一個他沒說過的期限。
+  it('填 200 天 → 擋下並說明，不送出也不改成 180', async () => {
+    const h = harness([DURATION, READY]);
+    const view = await openWith(h);
+
+    await waitFor(() => expect(view.getByTestId('planning-duration')).toBeTruthy());
+    fireEvent.press(view.getByTestId('planning-duration-custom'));
+    fireEvent.changeText(view.getByTestId('planning-duration-input'), '200');
+    fireEvent.press(view.getByTestId('planning-duration-custom-next'));
+
+    expect(view.getByText(PLANNING_COPY.duration.outOfRange)).toBeTruthy();
+    expect(h.requests).toHaveLength(1);
+  });
+
+  it('填了不是數字的東西 → 擋下並說明', async () => {
+    const h = harness([DURATION, READY]);
+    const view = await openWith(h);
+
+    await waitFor(() => expect(view.getByTestId('planning-duration')).toBeTruthy());
+    fireEvent.press(view.getByTestId('planning-duration-custom'));
+    fireEvent.changeText(view.getByTestId('planning-duration-input'), '兩個星期');
+    fireEvent.press(view.getByTestId('planning-duration-custom-next'));
+
+    expect(view.getByText(PLANNING_COPY.duration.notANumber)).toBeTruthy();
+    expect(h.requests).toHaveLength(1);
   });
 });
