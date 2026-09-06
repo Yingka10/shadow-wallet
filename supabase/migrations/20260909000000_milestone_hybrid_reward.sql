@@ -53,15 +53,23 @@
 --     跟這一支無關，這一支不碰對話那條線）。
 --   * 不讓家長輸入金額。折扣公式的 0.4 是政策常數，寫死在
 --     apply_milestone_split_v1 裡，跟 App 端 milestoneSplit.ts 的
---     MILESTONE_SPLIT_POLICY_RATIO 手動保持一致（兩邊都要改才算改，
---     這是這支唯一沒有型別或測試釘住兩邊一致的地方，記在這裡）。
+--     MILESTONE_SPLIT_POLICY_RATIO 保持一致——兩邊由
+--     childPlanningSqlParity.test.ts 機器對齊（400feec），不再是只能
+--     靠人工記得的地方。
 --
 -- ⚠️ 這支 migration 寫完但**還沒套進資料庫**——A/B 驗收還在跑，混進另一支
 -- 還沒被使用者驗證過的 RPC 版本，會讓任何失敗的歸因變得不清楚。等 A/B
 -- 通過、且與 app-7c 一起複驗過才套用。
 --
+-- ⚠️ 套用方式：一定要用 `supabase db push`（或等價的交易式遷移工具），
+-- 不要把內容分段貼進 SQL Editor。這支一次動四支函式＋一個新欄位，
+-- 分段貼失敗會留下半套狀態——20260907 就是分段貼只套了內容、沒記帳
+-- 才被發現的，這支影響面比它大，風險更高。db push 是整包一個交易，
+-- 語法錯就整包回滾，不會有「套了一半」的中間狀態。
+--
 -- 冪等：全部 CREATE OR REPLACE ／ ADD COLUMN IF NOT EXISTS ／
--- DROP CONSTRAINT IF EXISTS，可重跑。
+-- DROP CONSTRAINT IF EXISTS，可重跑——但「可重跑」是給 db push 失敗後
+-- 重試用的，不是拿來當作可以分段貼的理由。
 -- ═══════════════════════════════════════════════════════════════════════════
 
 BEGIN;
