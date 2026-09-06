@@ -19,6 +19,7 @@ import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 
 import { CHILD_PLANNING_RESPONSE_TYPES } from '../types';
+import { MILESTONE_SPLIT_POLICY_RATIO } from '../sharedTerms/milestoneSplit';
 
 const MIGRATIONS_DIR = join(process.cwd(), 'supabase', 'migrations');
 
@@ -60,5 +61,43 @@ describe('record RPC 的孩子回應白名單與 App 端一致', () => {
   it('白名單沒有 App 端不認得的型別', () => {
     const inSql = [...(whitelist?.[1] ?? '').matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
     expect(inSql.sort()).toEqual([...CHILD_PLANNING_RESPONSE_TYPES].sort());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 拆站折扣的政策常數，SQL 那一份不准自己漂走
+// ---------------------------------------------------------------------------
+//
+// App 端 computeMilestoneSplit() 用 MILESTONE_SPLIT_POLICY_RATIO 算
+// `max(1, round(session * (1 - ratio)))`；SQL 端 apply_milestone_split_v1
+// 把同一個數字**寫死**成 0.6。兩邊是同一個政策常數的兩份宣告，改一邊
+// 沒改另一邊，家長在畫面上看到的金額與真正入帳的金額就會不一樣 ——
+// 而那是最不容易被發現的一種錯：兩邊各自都「正常運作」。
+//
+// §2.4 的作者自己點名這是他知道最脆弱的一點（他驗不到 SQL）。這一段
+// 就是把那份人工對齊換成機器對齊。
+
+describe('拆站折扣的政策常數兩端一致', () => {
+  const file = newestMigrationDefining('apply_milestone_split_v1');
+  const sql = readFileSync(join(MIGRATIONS_DIR, file), 'utf8');
+
+  // 只取真正在算的那一行：註解裡也會出現同樣的數字，
+  // 而 `v_discounted :=` 這個賦值只會出現在程式碼裡。
+  const formula = new RegExp('^.*v_discounted :=.*$', 'm').exec(sql)?.[0];
+
+  const expectedMultiplier = 1 - MILESTONE_SPLIT_POLICY_RATIO;
+
+  it('找得到折扣算式', () => {
+    expect(formula).toBeDefined();
+  });
+
+  it(`SQL 用的乘數就是 1 - MILESTONE_SPLIT_POLICY_RATIO（${1 - MILESTONE_SPLIT_POLICY_RATIO}）`, () => {
+    expect(formula).toContain(`* ${expectedMultiplier}`);
+  });
+
+  it('下限與 App 端的 Math.max(1, …) 一致', () => {
+    // 少了這個下限，session 幣值低的計畫拆完會變成 0 —— 孩子每次完成
+    // 拿不到任何東西，而畫面上仍然寫著「完成一次有幣」。
+    expect(formula).toContain('GREATEST(1');
   });
 });
