@@ -2,8 +2,10 @@ import {
   applySuggestionMutation,
   computeRevertTarget,
   mergeSuggestionPatch,
+  pickFocusSuggestion,
   type WeeklySuggestion,
 } from '../useParentWeeklyReport';
+import type { TaskCategory } from '../../types/database';
 
 describe('applySuggestionMutation', () => {
   it('does not change suggestion evidence when the task mutation is guarded', async () => {
@@ -92,6 +94,65 @@ describe('mergeSuggestionPatch', () => {
       deferred: true,
     }]);
     expect(result[0]).not.toHaveProperty('taskName');
+  });
+});
+
+describe('pickFocusSuggestion', () => {
+  const catMap = (entries: [string, TaskCategory][]) => new Map<string, TaskCategory>(entries);
+
+  it('needs_discussion line 有可 mapping 的 adjust_schedule suggestion → 挑出來當 focus', () => {
+    const sg: WeeklySuggestion = {
+      body: '放寬次數', actionLabel: '放寬次數', action: 'adjust_schedule', taskId: 'task-book', taskName: '固定看書六週',
+    };
+    const other: WeeklySuggestion = { body: '泛用建議', actionLabel: '調整提醒', action: 'adjust_reminder' };
+    const result = pickFocusSuggestion(
+      [other, sg],
+      catMap([['task-book', 'D']]),
+      'D',
+    );
+    expect(result).toBe(sg);
+  });
+
+  it('adjust_recurrence / break_down_goal 一樣算可靠 mapping', () => {
+    const recurrence: WeeklySuggestion = { body: 'x', actionLabel: 'x', action: 'adjust_recurrence', taskId: 't1' };
+    expect(pickFocusSuggestion([recurrence], catMap([['t1', 'B']]), 'B')).toBe(recurrence);
+
+    const breakDown: WeeklySuggestion = { body: 'x', actionLabel: 'x', action: 'break_down_goal', taskId: 't2' };
+    expect(pickFocusSuggestion([breakDown], catMap([['t2', 'C']]), 'C')).toBe(breakDown);
+  });
+
+  it('泛用建議（adjust_reminder / increase_difficulty / add_contribution）沒有 taskId，永遠不會被選成 focus', () => {
+    const generic: WeeklySuggestion = { body: 'x', actionLabel: 'x', action: 'add_contribution' };
+    expect(pickFocusSuggestion([generic], catMap([]), 'C')).toBeUndefined();
+  });
+
+  it('pause_or_renegotiate 的 taskId 其實是 childId（權宜設計），就算剛好對到 taskCategoryMap 也不採信', () => {
+    const abandonment: WeeklySuggestion = {
+      body: 'x', actionLabel: 'x', action: 'pause_or_renegotiate', taskId: 'child-1',
+    };
+    // 刻意讓 taskCategoryMap 剛好有一筆 key 是 'child-1'，模擬「萬一恰好撞名」的情況
+    expect(pickFocusSuggestion([abandonment], catMap([['child-1', 'A']]), 'A')).toBeUndefined();
+  });
+
+  it('全部 stable、focusLineKey 是 undefined → 不挑任何 suggestion 出來', () => {
+    const sg: WeeklySuggestion = { body: 'x', actionLabel: 'x', action: 'adjust_schedule', taskId: 't1' };
+    expect(pickFocusSuggestion([sg], catMap([['t1', 'D']]), undefined)).toBeUndefined();
+  });
+
+  it('focus line 有，但沒有任何 suggestion 對得到它 → 安全 fallback，不亂猜一個不相關的建議', () => {
+    const sg: WeeklySuggestion = { body: 'x', actionLabel: 'x', action: 'adjust_schedule', taskId: 't1' };
+    expect(pickFocusSuggestion([sg], catMap([['t1', 'B']]), 'D')).toBeUndefined();
+  });
+
+  it('同一批建議裡有多個 category，只挑對到 focusLineKey 的那一個', () => {
+    const forB: WeeklySuggestion = { body: 'B', actionLabel: 'x', action: 'adjust_schedule', taskId: 't-b' };
+    const forD: WeeklySuggestion = { body: 'D', actionLabel: 'x', action: 'adjust_schedule', taskId: 't-d' };
+    const result = pickFocusSuggestion(
+      [forB, forD],
+      catMap([['t-b', 'B'], ['t-d', 'D']]),
+      'D',
+    );
+    expect(result).toBe(forD);
   });
 });
 
