@@ -101,3 +101,48 @@ describe('拆站折扣的政策常數兩端一致', () => {
     expect(formula).toContain('GREATEST(1');
   });
 });
+
+// ---------------------------------------------------------------------------
+// 「一週幾次」怎麼從 cadence 推導出來，SQL 裡不准有兩種答案
+// ---------------------------------------------------------------------------
+//
+// weekly_frequency 直接讀次數、fixed_days 讀星期陣列長度——這個判準
+// resolve_payout_basis_v1（2026-08-18，訂價語意的原始定義）與
+// apply_milestone_split_v1（2026-09-09，這次混合制回饋加的）各自寫了
+// 一份。同一個政策，兩個不同時間、不同 session 的作者，各自從零推導
+// 一次——今天六顆 bug 都是這個形狀：一條規則散在多處，改的時候只掃到
+// 其中幾份。這裡把「兩份是同一個判準」釘住，不是釘死某一份不准改。
+
+describe('target_per_week 的推導規則兩份 SQL 一致', () => {
+  const payoutFile = newestMigrationDefining('resolve_payout_basis_v1');
+  const payoutSql = readFileSync(join(MIGRATIONS_DIR, payoutFile), 'utf8');
+  const payoutCase = /v_target := CASE([\s\S]*?)\bEND;/.exec(payoutSql)?.[1];
+
+  const milestoneFile = newestMigrationDefining('apply_milestone_split_v1');
+  const milestoneSql = readFileSync(join(MIGRATIONS_DIR, milestoneFile), 'utf8');
+  const milestoneCase = /v_target_per_week := CASE([\s\S]*?)\bEND;/.exec(milestoneSql)?.[1];
+
+  it('兩支都找得到各自的 CASE 判準', () => {
+    expect(payoutCase).toBeDefined();
+    expect(milestoneCase).toBeDefined();
+  });
+
+  it("weekly_frequency 分支兩邊都是直接回傳次數（不套 array_length）", () => {
+    const payoutBranch = /WHEN\s+\S+\s*=\s*'weekly_frequency'\s+THEN\s+(\S+)/.exec(payoutCase ?? '');
+    const milestoneBranch = /WHEN\s+\S+\s*=\s*'weekly_frequency'\s+THEN\s+(\S+)/.exec(milestoneCase ?? '');
+    expect(payoutBranch).not.toBeNull();
+    expect(milestoneBranch).not.toBeNull();
+    expect(payoutBranch?.[1]).not.toMatch(/array_length/);
+    expect(milestoneBranch?.[1]).not.toMatch(/array_length/);
+  });
+
+  it("fixed_days 分支兩邊都是 array_length(…, 1)", () => {
+    expect(payoutCase).toMatch(/WHEN\s+\S+\s*=\s*'fixed_days'\s+THEN\s+array_length\(\S+,\s*1\)/);
+    expect(milestoneCase).toMatch(/WHEN\s+\S+\s*=\s*'fixed_days'\s+THEN\s+array_length\(\S+,\s*1\)/);
+  });
+
+  it('兩邊都以 ELSE NULL 收尾——沒有第三種 cadence_mode 猜得出次數', () => {
+    expect(payoutCase).toMatch(/ELSE\s+NULL/);
+    expect(milestoneCase).toMatch(/ELSE\s+NULL/);
+  });
+});
