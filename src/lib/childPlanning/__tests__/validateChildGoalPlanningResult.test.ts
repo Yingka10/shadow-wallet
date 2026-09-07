@@ -18,6 +18,7 @@ const INPUT: ChildGoalPlanningInput = {
   childOriginalMotivation: null,
   childApproach: null,
   cadence: null,
+  goalDuration: null,
   preferredTime: null,
   planningSupportPreference: null,
   responses: [],
@@ -49,6 +50,8 @@ function plan(overrides: Record<string, unknown> = {}): Record<string, unknown> 
     currentFocus: '先把三次固定下來',
     nextAction: { text: '今天先練 10 分鐘', source: 'ai_suggested' },
     reviewPoint: { type: 'after_days', days: 7 },
+    goalDuration: { kind: 'days', days: 42 },
+
     planningContribution: 'filled_missing_details',
     provenance: BASE_PROVENANCE,
     model: 'gemini-flash-latest',
@@ -225,6 +228,52 @@ describe('external_outcome', () => {
   });
 });
 
+describe('staged 的階段 expectedWeeks（P1-M1B 混合制回饋）', () => {
+  const staged = {
+    progressionKind: 'staged',
+    cadence: undefined,
+    sessionSize: undefined,
+    trialPeriod: undefined,
+    reviewPoint: null,
+    phases: [
+      { id: 'phase-1', title: '想好故事', observableDoneWhen: '寫出三句故事大綱', expectedWeeks: 2 },
+      { id: 'phase-2', title: '畫出分鏡', observableDoneWhen: '畫出 4 頁分鏡草稿' },
+    ],
+    provenance: provenance({
+      cadence: 'undecided',
+      sessionSize: 'undecided',
+      reviewPoint: 'undecided',
+      phases: 'ai_suggested',
+    }),
+  };
+
+  it('有給就帶進去，判不出來就是 undefined —— 不猜', () => {
+    const result = validate(staged);
+    expect(result.status).toBe('ready');
+    const phases = result.status === 'ready' && result.plan.progressionKind === 'staged'
+      ? result.plan.phases
+      : null;
+    expect(phases?.[0].expectedWeeks).toBe(2);
+    expect(phases?.[1].expectedWeeks).toBeUndefined();
+  });
+
+  it('超出 1-8 週不行', () => {
+    const phases = [
+      { ...staged.phases[0], expectedWeeks: 9 },
+      staged.phases[1],
+    ];
+    expect(validate({ ...staged, phases }).status).toBe('unavailable');
+  });
+
+  it('0 週不行', () => {
+    const phases = [
+      { ...staged.phases[0], expectedWeeks: 0 },
+      staged.phases[1],
+    ];
+    expect(validate({ ...staged, phases }).status).toBe('unavailable');
+  });
+});
+
 describe('staged 的階段', () => {
   const staged = {
     progressionKind: 'staged',
@@ -294,11 +343,14 @@ describe('孩子講過的東西', () => {
     ...INPUT,
     childApproach: '每天放學練 10 分鐘',
     cadence: { mode: 'weekly_frequency', weeklyFrequency: 7 },
+    goalDuration: null,
   };
 
   const echoed = {
     cadence: { mode: 'weekly_frequency', weeklyFrequency: 7 },
     nextAction: { text: '放學後先練 10 分鐘', source: 'child_stated' },
+    goalDuration: { kind: 'days', days: 42 },
+
     planningContribution: 'organized_child_plan',
     provenance: provenance(
       {
@@ -463,6 +515,7 @@ describe('safety guard 不參與證據優先序，也不被 child-stated 覆蓋'
     ...INPUT,
     childApproach: '每天練 10 分鐘',
     cadence: { mode: 'weekly_frequency', weeklyFrequency: 3 },
+    goalDuration: null,
   };
 
   it('下一步是不可控的成果 → 還是擋下', () => {
@@ -470,6 +523,8 @@ describe('safety guard 不參與證據優先序，也不被 child-stated 覆蓋'
       {
         cadence: { mode: 'weekly_frequency', weeklyFrequency: 3 },
         nextAction: { text: '拿第一名', source: 'child_stated' },
+        goalDuration: { kind: 'days', days: 42 },
+
         planningContribution: 'organized_child_plan',
         provenance: allChildStated,
       },
@@ -492,6 +547,8 @@ describe('safety guard 不參與證據優先序，也不被 child-stated 覆蓋'
           { id: 'phase-2', title: '第二步', observableDoneWhen: '能完整彈完一次' },
         ],
         nextAction: { text: '今天先練 10 分鐘', source: 'child_stated' },
+        goalDuration: { kind: 'days', days: 42 },
+
         planningContribution: 'organized_child_plan',
         provenance: provenance(
           {
@@ -732,5 +789,88 @@ describe('需要孩子挑一個', () => {
     if (result.status !== 'needs_choice') return;
     expect(result.options[0].rationale).toBe('good_starting_point');
     expect(result.options[1].rationale).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// needs_duration：資訊足夠**正是**這一輪的前提，不是「多嘴」
+// ---------------------------------------------------------------------------
+//
+// 2026-09-06 線上重現：Function 正確回了 needs_duration，App 端卻 100%
+// 把它退成 INVALID_AI_OUTPUT —— 因為 checkConversationText() 尾巴那條
+// 「資訊夠了還在問就是多嘴」被三個 status 共用，而期限那一輪的**觸發
+// 條件就是資訊已經足夠**。孩子畫面上停在選項頁，下一頁永遠不出現。
+//
+// 這是 2876d78（prompt 命令一個守衛必定拒絕的 status）的鏡像：同一個
+// 新 round，這次是 App 端的舊守衛沒有重新盤點。
+
+describe('needs_duration 不可以因為「資訊已經足夠」被退掉', () => {
+  // 孩子挑完開始方式之後的真實狀態：有方法、有節奏，就差期限。
+  const SUFFICIENT: ChildGoalPlanningInput = {
+    ...INPUT,
+    childOriginalGoal: '把哈利波特看完',
+    childApproach: null,
+    cadence: { mode: 'weekly_frequency', weeklyFrequency: 3 },
+    goalDuration: null,
+    responses: [
+      {
+        type: 'choice_selection',
+        optionId: 'option-2',
+        optionText: '每次讀 10 頁就停',
+      },
+    ],
+  };
+
+  // 使用者 2026-09-06 從 Network 面板貼回來的那一份，逐字。
+  const LIVE_RESPONSE = {
+    status: 'needs_duration',
+    schemaVersion: 1,
+    knownGoal: '把哈利波特看完',
+    question: '每次讀 10 頁，一週 3 次，你想花多久把哈利波特看完？',
+    options: [
+      { id: 'duration-1', text: '兩個星期', days: 14 },
+      { id: 'duration-2', text: '一個月', days: 30 },
+      { id: 'duration-3', text: '兩個月', days: 60 },
+    ],
+    allowCustomAnswer: true,
+    model: 'gemini-flash-lite-latest',
+  };
+
+  it('線上那一份 needs_duration 會被收下', () => {
+    const result = validateChildGoalPlanningResult(LIVE_RESPONSE, SUFFICIENT);
+    expect(result.status).toBe('needs_duration');
+  });
+
+  it('不會被標成 UNNECESSARY_CLARIFICATION', () => {
+    const result = validateChildGoalPlanningResult(LIVE_RESPONSE, SUFFICIENT);
+    expect(result.status === 'unavailable' ? result.rejections : []).not.toContain(
+      'UNNECESSARY_CLARIFICATION',
+    );
+  });
+
+  it('選項與問題原樣帶到畫面上', () => {
+    const result = validateChildGoalPlanningResult(LIVE_RESPONSE, SUFFICIENT);
+    if (result.status !== 'needs_duration') throw new Error('前一條測試會先紅');
+    expect(result.options.map((o) => o.days)).toEqual([14, 30, 60]);
+    expect(result.question).toContain('你想花多久');
+    expect(result.allowCustomAnswer).toBe(true);
+  });
+
+  // 放寬只針對期限那一輪 —— 另外兩輪的「多嘴」判準必須原封不動。
+  it('資訊足夠時再問澄清問題，仍然是多嘴', () => {
+    const result = validateChildGoalPlanningResult(
+      {
+        status: 'needs_clarification',
+        schemaVersion: 1,
+        knownGoal: '把哈利波特看完',
+        question: { kind: 'approach', text: '你想怎麼開始呢？' },
+        model: 'gemini-flash-lite-latest',
+      },
+      SUFFICIENT,
+    );
+    expect(result.status).toBe('unavailable');
+    expect(result.status === 'unavailable' ? result.rejections : []).toContain(
+      'UNNECESSARY_CLARIFICATION',
+    );
   });
 });

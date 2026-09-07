@@ -56,7 +56,8 @@ function clampCoinOverride(value: number, minAllowed: number, maxAllowed: number
 }
 
 /** A/B 不發幣（rewardEligibility 第一步的硬規則），C/D 才進得了幣值計算。 */
-const COIN_CATEGORY_BY_PURPOSE: Record<PurposeCategory, CoinCategory | null> = {
+/** 匯出給 enrichment 端重算幣值錨點用 —— 不要再抄第二份。 */
+export const COIN_CATEGORY_BY_PURPOSE: Record<PurposeCategory, CoinCategory | null> = {
   life_routine: null,
   family_participation: null,
   autonomous_challenge: 'C',

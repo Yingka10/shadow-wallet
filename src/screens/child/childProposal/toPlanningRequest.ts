@@ -19,6 +19,7 @@
 //    · 不把對話中的答案塞回四個內容欄位
 // ─────────────────────────────────────────────────────────────────────────
 
+import { resolveGoalDuration } from '../../../lib/childPlanning';
 import type { ChildGoalPlanningRequest } from '../../../lib/childPlanning';
 import type {
   ChildPlanCadence,
@@ -86,6 +87,9 @@ export function toPlanningRequest(
       proposal.cadence_weekly_frequency,
       proposal.cadence_days,
     ),
+    // 期限從 responses 推導，不另外存一份 —— 同一件事有兩個來源的話，
+    // session 從資料庫還原時就會分岔。還沒選就是 null，這一層不替他決定。
+    goalDuration: resolveGoalDuration(context.responses),
     // preferred_time_custom 優先：那是孩子自己打的字，
     // preferred_time 是他從固定選項裡挑的。
     preferredTime: proposal.preferred_time_custom ?? proposal.preferred_time,

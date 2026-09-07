@@ -217,3 +217,65 @@ describe('provider 中立', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// 孩子選的份量要把幣值錨點一起帶走
+// ---------------------------------------------------------------------------
+//
+// 2026-09-07 線上抓到：家長按確認時被擋在「成長幣建議已更新，請重新整理
+// 後再確認。」，而重新整理沒有用 —— 錯的是資料本身。
+//
+// publish RPC 的規則是「份量孩子講過就照他的」，所以 estimated_minutes
+// 被改成孩子選的 10 分鐘；但 policy_session_coin_reference 直接沿用
+// enrichment，而 enrichment 是拿 P0 草稿猜的 15 分鐘定的價（10 幣）。
+// 於是那一列自己就矛盾：10 分鐘的計畫掛著 15 分鐘的價。
+//
+// 家長端確認時會拿計畫的份量重算（10 分鐘 → 6 幣）再跟錨點對帳，
+// 6 ≠ 10，於是**永遠**確認不了。
+//
+// 這跟期限那顆是同一道接縫：P0 草稿的輸入只有孩子最初打的那段話，
+// 不含規劃對話。期限與份量都已經改由孩子決定，只有幣值還留在草稿那側。
+
+describe('孩子選的份量會把幣值錨點一起改掉', () => {
+  const enrich = (childSessionMinutes: number | null) =>
+    toChildPlanEnrichment({
+      input: INPUT,
+      draft: DRAFT,
+      requestId: 'req-1',
+      generatedAt: '2026-09-07T00:00:00.000Z',
+      childSessionMinutes,
+    });
+
+  it('estimatedMinutes 跟著孩子，不是草稿', () => {
+    expect(enrich(10).estimatedMinutes).toBe(10);
+  });
+
+  it('錨點用孩子的份量重新定價 —— 6-9 歲 D 類 10 分鐘是 6 幣', () => {
+    // 這個數字不是抄來的：草稿的 15 分鐘在政策裡是 10 幣，10 分鐘是 6 幣。
+    // 錨點必須等於**家長端之後會重算出來的那個值**，否則對帳永遠失敗。
+    expect(enrich(10).reward.sessionCoinReference).toBe(6);
+  });
+
+  it('份量一樣時原封不動沿用草稿的錨點', () => {
+    // 沒有分歧就不要重算 —— 重算等於讓同一件事有兩個計算來源。
+    expect(enrich(DRAFT.estimatedMinutes).reward.sessionCoinReference).toBe(
+      DRAFT.sessionCoinReference,
+    );
+  });
+
+  it('孩子沒講份量時（null）也沿用草稿', () => {
+    expect(enrich(null).estimatedMinutes).toBe(DRAFT.estimatedMinutes);
+    expect(enrich(null).reward.sessionCoinReference).toBe(DRAFT.sessionCoinReference);
+  });
+
+  it('不發幣的類別不會因為重算而長出一個幣值', () => {
+    const result = toChildPlanEnrichment({
+      input: INPUT,
+      draft: { ...DRAFT, category: 'B', sessionCoinReference: null },
+      requestId: 'req-1',
+      generatedAt: '2026-09-07T00:00:00.000Z',
+      childSessionMinutes: 10,
+    });
+    expect(result.reward.sessionCoinReference).toBeNull();
+  });
+});

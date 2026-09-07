@@ -62,6 +62,7 @@ const AGE_GROUPS: readonly string[] = ['2-4', '4-6', '6-9', '9-12'];
 async function tryEnrich(
   deps: PublishChildConfirmedPlanDeps,
   proposal: ChildProposal,
+  childSessionMinutes: number | null,
 ): Promise<ChildPlanEnrichment | null> {
   const { enrichmentClient, port } = deps;
   if (enrichmentClient === null) return null;
@@ -79,6 +80,9 @@ async function tryEnrich(
     return toChildPlanEnrichment({
       input,
       draft: result.draft,
+      // 孩子自己選的份量會蓋掉草稿的估計（RPC 的規則），所以幣值錨點
+      // 也必須跟著它重算 —— 否則正式欄位裡的份量與價格會互相矛盾。
+      childSessionMinutes,
       requestId: planDraftRequestKey(proposal.id, input),
       generatedAt: (deps.now ? deps.now() : new Date()).toISOString(),
     });
@@ -91,6 +95,13 @@ async function tryEnrich(
 export type PublishChildConfirmedPlanInput = {
   proposalId: string;
   sessionId: string;
+  /**
+   * 孩子在規劃裡自己選的單次份量（分鐘）。沒選就是 null。
+   *
+   * 由呼叫端用 childSessionMinutes() 從確認過的計畫算出來 —— 那支與
+   * publish RPC 的判準鏡射，見它的檔頭。
+   */
+  childSessionMinutes?: number | null;
 };
 
 export async function publishChildConfirmedPlan(
@@ -98,6 +109,7 @@ export async function publishChildConfirmedPlan(
   input: PublishChildConfirmedPlanInput,
 ): Promise<PublishFormalPlanResult> {
   const { proposalId, sessionId } = input;
+  const childSessionMinutes = input.childSessionMinutes ?? null;
 
   // 提案讀不到就直接讓 RPC 去判斷授權與狀態 —— 這一層不自己回一個
   // 看起來像業務規則的錯誤。RPC 是唯一的權威。
@@ -108,7 +120,8 @@ export async function publishChildConfirmedPlan(
     proposal = null;
   }
 
-  const enrichment = proposal === null ? null : await tryEnrich(deps, proposal);
+  const enrichment =
+    proposal === null ? null : await tryEnrich(deps, proposal, childSessionMinutes);
 
   const args: PublishChildConfirmedPlanArgs = {
     proposalId,

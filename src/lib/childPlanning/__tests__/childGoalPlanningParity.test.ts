@@ -72,6 +72,7 @@ const INPUT: ChildGoalPlanningInput = {
   childOriginalMotivation: null,
   childApproach: null,
   cadence: null,
+  goalDuration: null,
   preferredTime: null,
   planningSupportPreference: null,
   responses: [],

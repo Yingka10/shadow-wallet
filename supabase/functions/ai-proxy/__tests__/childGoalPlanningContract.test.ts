@@ -41,6 +41,8 @@ function input(overrides: Partial<ChildGoalPlanningInput> = {}): ChildGoalPlanni
     childOriginalMotivation: null,
     childApproach: null,
     cadence: null,
+    // canonical 案例都是「期限那一輪已經問完」之後的狀態 —— ready 的前提。
+    goalDuration: { kind: 'days', days: 14 },
     preferredTime: null,
     planningSupportPreference: null,
     responses: [],
@@ -342,6 +344,72 @@ describe('Case 5｜技能型「我想學會騎腳踏車」', () => {
     expect(result.plan.reviewPoint).toEqual({ type: 'after_phase', phaseId: 'phase-1' });
   });
 
+  // P1-M1B：expectedWeeks 是選填的模型判斷，不是結構性欄位（不像 id 由
+  // compose 端指派）。模型給了就要真的走得完整條路，這是繫住 prompt 字串
+  // 與正規化守衛的那條測試 —— 兩邊分別改的話，這裡先紅。
+  it('模型判斷出某一站大概幾週，帶得進正式計畫（P1-M1B）', () => {
+    const { result } = roundTrip(CASE_5_INPUT, {
+      status: 'ready',
+      desiredOutcome: '學會騎腳踏車',
+      goalControlType: 'directly_actionable',
+      progressionKind: 'staged',
+      actionPlanSummary: '先從滑行開始，能穩住之後再練踩踏。',
+      currentFocus: '先練滑行',
+      nextAction: { text: '先在草地上滑行 10 分鐘', source: 'ai_suggested' },
+      reviewPoint: { type: 'after_phase', phaseIndex: 1 },
+      planningContribution: 'filled_missing_details',
+      suggestedCadence: null,
+      sessionSize: null,
+      trialPeriod: null,
+      phases: [
+        { title: '能自己滑行', observableDoneWhen: '能雙腳離地滑行 5 公尺', expectedWeeks: 2 },
+        { title: '能自己踩踏', observableDoneWhen: '能不扶著騎完 10 公尺' },
+      ],
+      targetValue: null,
+      targetUnit: null,
+      currentValue: null,
+      controllableActions: null,
+    });
+
+    expect(result.status).toBe('ready');
+    if (result.status !== 'ready' || result.plan.progressionKind !== 'staged') return;
+    expect(result.plan.phases[0].expectedWeeks).toBe(2);
+    // 判不出來就是 undefined，不猜。
+    expect(result.plan.phases[1].expectedWeeks).toBeUndefined();
+  });
+
+  // prompt 字串明講「不用給 id」，但完全沒提 expectedWeeks —— 這一條證明
+  // 「沒有 expectedWeeks 的階段」仍然是 prompt 教出來的正常輸出，不是
+  // normalizePhases 額外要求的東西。少了這一條，兩邊一旦不同步：
+  // 要嘛 100% INVALID_AI_OUTPUT（守衛要求、prompt 沒教），要嘛模型端
+  // 根本沒被告知這個能力（prompt 沒提、model 永遠不給）。
+  it('沒有 expectedWeeks 的階段仍然合法 —— prompt 沒有要求它', () => {
+    const { result } = roundTrip(CASE_5_INPUT, {
+      status: 'ready',
+      desiredOutcome: '學會騎腳踏車',
+      goalControlType: 'directly_actionable',
+      progressionKind: 'staged',
+      actionPlanSummary: '先從滑行開始，能穩住之後再練踩踏。',
+      currentFocus: '先練滑行',
+      nextAction: { text: '先在草地上滑行 10 分鐘', source: 'ai_suggested' },
+      reviewPoint: { type: 'after_phase', phaseIndex: 1 },
+      planningContribution: 'filled_missing_details',
+      suggestedCadence: null,
+      sessionSize: null,
+      trialPeriod: null,
+      phases: [
+        { title: '能自己滑行', observableDoneWhen: '能雙腳離地滑行 5 公尺' },
+        { title: '能自己踩踏', observableDoneWhen: '能不扶著騎完 10 公尺' },
+      ],
+      targetValue: null,
+      targetUnit: null,
+      currentValue: null,
+      controllableActions: null,
+    });
+
+    expect(result.status).toBe('ready');
+  });
+
   it('缺「現在到哪」時，先問一題也是合法的', () => {
     const { result } = roundTrip(CASE_5_INPUT, {
       status: 'needs_clarification',
@@ -557,6 +625,32 @@ describe('Case 9｜不可控結果「我要比賽第一名」', () => {
       controllableActions: null,
     });
     expect(result.status).toBe('unavailable');
+  });
+
+  // Function 端自己就要擋掉 —— 送一份 goalDuration 是 null 的「計畫」出去，
+  // 靠 App validator 撿，是把錯誤留到最遠的一層才發現。
+  it('Function 端自己就不送出這份計畫，不靠 App validator 撿', () => {
+    const { response } = roundTrip(input({ goalDuration: null }), {
+      status: 'ready',
+      desiredOutcome: '把神奇樹屋讀完',
+      goalControlType: 'directly_actionable',
+      progressionKind: 'rhythm',
+      actionPlanSummary: '先用一週三次的節奏開始。',
+      currentFocus: '先把三次固定下來',
+      nextAction: { text: '今天先讀 10 分鐘', source: 'ai_suggested' },
+      reviewPoint: { type: 'after_days', days: 7 },
+      planningContribution: 'filled_missing_details',
+      suggestedCadence: { mode: 'weekly_frequency', weeklyFrequency: 3 },
+      sessionSize: { kind: 'minutes', minutes: 10 },
+      trialPeriod: { days: 7 },
+      phases: null,
+      targetValue: null,
+      targetUnit: null,
+      currentValue: null,
+      controllableActions: null,
+    });
+
+    expect(response.status).toBe('unavailable');
   });
 });
 
@@ -949,6 +1043,59 @@ describe('看不懂的輸出就是沒有計畫', () => {
     expect(childGoalPlanningInputIsUsable(input({ ageGroup: '13-15' as never }))).toBe(false);
     expect(childGoalPlanningInputIsUsable(input({ schemaVersion: 2 as never }))).toBe(false);
   });
+
+  // ── goalDuration 缺席 ≠ 孩子還沒選 ──────────────────────────────────────
+  //
+  // 2026-09-06 線上抓到的形狀：舊版 App 的請求裡**根本沒有 goalDuration 這個
+  // 欄位**（那半邊的程式還沒推出去），Function 收到的是 undefined。
+  //
+  // 而所有守衛寫的都是 `=== null`：
+  //   needs_duration  `if (input.goalDuration !== null) return invalid`  → undefined 進不去
+  //   ready           `if (input.goalDuration === null) return invalid`  → undefined 放行
+  // 於是舊客戶端會直接跳過期限那一輪，拿到一份 `goalDuration: undefined` 的
+  // 計畫 —— JSON.stringify 把 undefined 整個鍵刪掉，所以連缺了什麼都看不出來。
+  //
+  // 這裡把「沒有這個欄位」擋在呼叫模型之前，回 INVALID_INPUT。理由是它
+  // 誠實：這是**客戶端太舊**，不是模型輸出有問題，也不是孩子還沒選。
+  describe('goalDuration 缺席代表客戶端太舊，不是「還沒選」', () => {
+    it('沒有 goalDuration 這個欄位 → 不可用', () => {
+      const stale = input();
+      delete (stale as { goalDuration?: unknown }).goalDuration;
+      expect(childGoalPlanningInputIsUsable(stale)).toBe(false);
+    });
+
+    it('null 是合法的 —— 孩子還沒選，正是要問他的那一輪', () => {
+      expect(childGoalPlanningInputIsUsable(input({ goalDuration: null }))).toBe(true);
+    });
+
+    it('open_ended 是合法的 —— 孩子決定了「這件事沒有終點」', () => {
+      expect(
+        childGoalPlanningInputIsUsable(input({ goalDuration: { kind: 'open_ended' } })),
+      ).toBe(true);
+    });
+
+    it('形狀壞掉的期限不放行，不修補成一個數字', () => {
+      expect(
+        childGoalPlanningInputIsUsable(input({ goalDuration: { kind: 'days', days: 0 } })),
+      ).toBe(false);
+      expect(
+        childGoalPlanningInputIsUsable(
+          input({ goalDuration: { kind: 'days', days: 181 } }),
+        ),
+      ).toBe(false);
+      expect(
+        childGoalPlanningInputIsUsable(input({ goalDuration: { kind: 'forever' } as never })),
+      ).toBe(false);
+    });
+
+    it('擋不住的話，舊客戶端會拿到一份沒有期限的 ready 計畫', () => {
+      // 這一條釘住的是**症狀本身**：組裝端的 `input.goalDuration!` 非空斷言
+      // 只被 `=== null` 守著。萬一 usable 那道關被放寬，這裡會立刻紅。
+      const stale = input();
+      delete (stale as { goalDuration?: unknown }).goalDuration;
+      expect(childGoalPlanningInputIsUsable(stale)).toBe(false);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -983,5 +1130,157 @@ describe('prompt 說得出孩子已經想到多少', () => {
       expect({ forbidden, present: prompt.includes(forbidden) })
         .toEqual({ forbidden, present: false });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1-A1 — 孩子還沒選期限，就不可能有計畫
+// ---------------------------------------------------------------------------
+
+describe('Case 13｜期限還沒問', () => {
+  it('孩子還沒選期限，模型卻直接給計畫 → 不放行', () => {
+    const { result } = roundTrip(input({ goalDuration: null }), {
+      status: 'ready',
+      desiredOutcome: '把神奇樹屋讀完',
+      goalControlType: 'directly_actionable',
+      progressionKind: 'rhythm',
+      actionPlanSummary: '先用一週三次的節奏開始。',
+      currentFocus: '先把三次固定下來',
+      nextAction: { text: '今天先讀 10 分鐘', source: 'ai_suggested' },
+      reviewPoint: { type: 'after_days', days: 7 },
+      planningContribution: 'filled_missing_details',
+      suggestedCadence: { mode: 'weekly_frequency', weeklyFrequency: 3 },
+      sessionSize: { kind: 'minutes', minutes: 10 },
+      trialPeriod: { days: 7 },
+      phases: null,
+      targetValue: null,
+      targetUnit: null,
+      currentValue: null,
+      controllableActions: null,
+    });
+
+    expect(result.status).toBe('unavailable');
+  });
+});
+
+describe('Case 14｜插一輪問期限', () => {
+  it('模型說要問期限 → 整條路徑走得通，選項的 id 由 Function 決定', () => {
+    const { result } = roundTrip(
+      input({ childOriginalGoal: '我想把哈利波特讀完', goalDuration: null }),
+      {
+        status: 'needs_duration',
+        question: '你想花多久把它讀完？',
+        options: [
+          { text: '兩個星期', days: 14 },
+          { text: '一個月', days: 30 },
+        ],
+      },
+    );
+
+    expect(result.status).toBe('needs_duration');
+    expect(result.status === 'needs_duration' && result.options).toEqual([
+      { id: 'duration-1', text: '兩個星期', days: 14 },
+      { id: 'duration-2', text: '一個月', days: 30 },
+    ]);
+  });
+
+  it('孩子已經選過期限了還在問 → 不放行', () => {
+    const { result } = roundTrip(input({ goalDuration: { kind: 'days', days: 14 } }), {
+      status: 'needs_duration',
+      question: '你想花多久？',
+      options: [
+        { text: '兩個星期', days: 14 },
+        { text: '一個月', days: 30 },
+      ],
+    });
+
+    expect(result.status).toBe('unavailable');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// prompt 與守衛不可以互相矛盾（2026-09-06 線上 100% 失敗）
+//
+// 孩子挑完「每天睡前讀 15 分鐘」之後 informationIsSufficient 變成 true，
+// 但期限那一輪還沒問，goalDuration 仍是 null。此時 compose 的四條守衛：
+//
+//   needs_clarification  → informationIsSufficient 擋掉
+//   needs_choice         → informationIsSufficient 擋掉
+//   ready                → goalDuration === null 擋掉
+//   needs_duration       → **唯一合法的**
+//
+// 而 conversationRule 命令模型「status 必須是 ready，不可以再問問題、也不
+// 可以再給選項」—— 它指定了唯一會被拒絕的那個，並禁止唯一會被接受的那個。
+// 模型完全照做，然後被自己這端的守衛擋下 → INVALID_AI_OUTPUT。
+//
+// 為什麼 3550 個測試都沒抓到：上面那組 canonical 案例的 fixture 註解自己
+// 就寫了「都是期限那一輪已經問完之後的狀態」，所以
+// sufficient && goalDuration === null 這個組合從來沒有被建構過。
+// ─────────────────────────────────────────────────────────────────────────────
+describe('資訊不足＋期限未定時，prompt 也不可以放任模型回 ready', () => {
+  // 2026-09-07 線上：孩子在開場對節奏選了「我不知道」→ input.cadence 永遠是
+  // null → informationIsSufficient 永遠 false → 一律走 !sufficient 那一岔。
+  // 而那一岔**完全沒提** ready 已經被 goalDuration 守衛關掉，模型覺得
+  // 資訊夠了就回 ready，然後被自己這端拒絕（INVALID_AI_OUTPUT）。
+  //
+  // ready 的守衛與 sufficiency 無關：只要 goalDuration 是 null，ready 就
+  // 不可能通過。所以那句話必須出現在**每一岔**，不是只有 sufficient 那岔。
+  const noCadence = input({
+    childApproach: null,
+    cadence: null,
+    goalDuration: null,
+    responses: [
+      { type: 'choice_selection', optionId: 'option-3', optionText: '每次先讀 5 到 10 頁' },
+    ],
+  });
+
+  it('前提：這個狀態確實不是 informationIsSufficient', () => {
+    expect(informationIsSufficient(noCadence)).toBe(false);
+  });
+
+  it('prompt 明說這一輪不可以回 ready', () => {
+    expect(buildChildGoalPlanningPrompt(noCadence)).toContain('不可以回 ready');
+  });
+
+  it('prompt 指出覺得夠清楚時該回 needs_duration，而不是硬問別的問題', () => {
+    expect(buildChildGoalPlanningPrompt(noCadence)).toContain('needs_duration');
+  });
+
+  it('期限定了之後，這句限制就不該再出現', () => {
+    const decided = { ...noCadence, goalDuration: { kind: 'days', days: 14 } as const };
+    expect(informationIsSufficient(decided)).toBe(false);
+    expect(buildChildGoalPlanningPrompt(decided)).not.toContain('不可以回 ready');
+  });
+});
+
+describe('sufficient 但期限未定時，prompt 不可以命令 ready', () => {
+  const READING_APPROACH = '每天睡前讀 15 分鐘';
+  const CADENCE = { mode: 'weekly_frequency', weeklyFrequency: 7 } as const;
+
+  const pending = input({
+    childApproach: READING_APPROACH,
+    cadence: CADENCE,
+    goalDuration: null,
+  });
+
+  it('前提：這個狀態確實已經 informationIsSufficient', () => {
+    expect(informationIsSufficient(pending)).toBe(true);
+  });
+
+  it('prompt 不可以叫模型回 ready —— 那個 status 一定會被守衛拒絕', () => {
+    expect(buildChildGoalPlanningPrompt(pending)).not.toContain('status 必須是 ready');
+  });
+
+  it('prompt 要明說這一輪先問期限', () => {
+    expect(buildChildGoalPlanningPrompt(pending)).toContain('這一輪必須回 needs_duration');
+  });
+
+  it('期限定了之後才恢復「必須給計畫」', () => {
+    const decided = input({
+      childApproach: READING_APPROACH,
+      cadence: CADENCE,
+      goalDuration: { kind: 'days', days: 14 },
+    });
+    expect(buildChildGoalPlanningPrompt(decided)).toContain('status 必須是 ready');
   });
 });

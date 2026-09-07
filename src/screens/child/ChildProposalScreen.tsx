@@ -410,7 +410,7 @@ export default function ChildProposalScreen() {
        * 一個都不覆蓋孩子。掛掉也照樣送出，缺的欄位由 RPC 列進
        * requires_parent_decision。
        */
-      publish() {
+      publish(childSessionMinutes) {
         if (proposalId === null) {
           return Promise.resolve({
             ok: false as const,
@@ -427,7 +427,7 @@ export default function ChildProposalScreen() {
             },
             enrichmentClient: planDraftClientSetup.client,
           },
-          { proposalId, sessionId },
+          { proposalId, sessionId, childSessionMinutes },
         );
       },
     };

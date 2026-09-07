@@ -53,6 +53,8 @@ const PLAN = {
   currentFocus: '先維持平日睡前的閱讀',
   nextAction: { text: '今晚睡前先讀 15 分鐘', source: 'child_stated' },
   reviewPoint: null,
+  goalDuration: { kind: 'days', days: 42 },
+
   planningContribution: 'organized_child_plan',
   provenance: {
     childOriginalGoal: '我想兩週讀完這本書',

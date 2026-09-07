@@ -141,6 +141,16 @@ export type ChildPlanningResponse =
       optionText: string;
     }
   /**
+   * 孩子在期限那一輪選了一個具體天數（P1-A1）。
+   *
+   * 只記 days，不記選項文字：期限的**內容**是那個數字，
+   * 而數字是他看著點下去的。文字（「兩個星期」）是同一件事的講法，
+   * 不是另一個要保存的決定。
+   */
+  | { type: 'duration_selection'; days: number }
+  /** 孩子說這件事沒有終點，他想一直做下去。 */
+  | { type: 'duration_open_ended' }
+  /**
    * 孩子說「我自己想」並自己輸入。
    *
    * 與 choice_selection 分開是因為證據強度不同：這是孩子的原話，
@@ -148,11 +158,31 @@ export type ChildPlanningResponse =
    */
   | { type: 'custom_choice'; answer: string };
 
-export const CHILD_PLANNING_RESPONSE_TYPES: readonly ChildPlanningResponse['type'][] = [
+export const CHILD_PLANNING_RESPONSE_TYPES = [
   'clarification_answer',
   'choice_selection',
   'custom_choice',
-] as const;
+  'duration_selection',
+  'duration_open_ended',
+] as const satisfies readonly ChildPlanningResponse['type'][];
+
+/**
+ * 上面那個清單漏了任何一個變體，這一行就編譯不過。
+ *
+ * ⚠️ 這不是形式主義。原本的宣告是 `readonly ChildPlanningResponse['type'][]`，
+ *    而**子集也符合那個型別** —— 所以 union 加了新成員時清單不更新，
+ *    TypeScript 一聲都不吭。而 parity 測試正是拿這個清單去掃 Function 端
+ *    原始碼的，清單漏了，兩端就都測不到那個新型別。
+ *
+ *    P1-A1 的 duration_selection / duration_open_ended 就是這樣一路綠燈
+ *    走到「畫面上根本沒有那一輪」才被人工發現的。
+ */
+type MissingResponseType = Exclude<
+  ChildPlanningResponse['type'],
+  (typeof CHILD_PLANNING_RESPONSE_TYPES)[number]
+>;
+const _allResponseTypesListed: MissingResponseType extends never ? true : never = true;
+void _allResponseTypesListed;
 
 export type ChildGoalPlanningInput = {
   schemaVersion: typeof CHILD_GOAL_PLANNING_SCHEMA_VERSION;
@@ -173,6 +203,13 @@ export type ChildGoalPlanningInput = {
    */
   childApproach: string | null;
   cadence: ChildPlanCadence | null;
+  /**
+   * 孩子在期限那一輪選的答案（P1-A1）。null = 還沒問到／還沒選。
+   *
+   * 與 cadence 同一個地位：**它是孩子的決定，模型只能照抄回來。**
+   * validator 會比對，不一致就是 CHILD_INPUT_OVERWRITTEN。
+   */
+  goalDuration: ChildGoalDuration | null;
   preferredTime: string | null;
   planningSupportPreference: ChildPlanningSupportPreference | null;
   /**
@@ -182,6 +219,27 @@ export type ChildGoalPlanningInput = {
    */
   responses: ChildPlanningResponse[];
 };
+
+/**
+ * 孩子目前選定的期限。
+ *
+ * 住在 responses 裡而不是另開一個欄位：responses 是既有的、只 append、
+ * 而且已經會被持久化的那一份紀錄。另外存一份等於同一件事有兩個來源，
+ * session 從資料庫還原時就會分岔。
+ *
+ * 沒選過就是 null —— **不替他預設一個期間**。
+ */
+export function resolveGoalDuration(
+  responses: readonly ChildPlanningResponse[],
+): ChildGoalDuration | null {
+  // 只 append，所以「改過」的樣子是後面又多一筆 —— 最後一筆才算數。
+  for (let index = responses.length - 1; index >= 0; index -= 1) {
+    const response = responses[index];
+    if (response.type === 'duration_open_ended') return { kind: 'open_ended' };
+    if (response.type === 'duration_selection') return { kind: 'days', days: response.days };
+  }
+  return null;
+}
 
 /**
  * 目前真正有效的「孩子的方法」。
@@ -350,6 +408,21 @@ export type ChildPlanStartOption = {
   rationale?: ChildPlanStartOptionRationale;
 };
 
+/**
+ * 一個具體的期限選項（P1-A1）。
+ *
+ * **一定要有 `days`。** 孩子看得到那個數字才點下去 —— 沒有數字的選項
+ * 等於讓他同意一個他沒看過的期限，正是這一輪要防的事。
+ *
+ * 「我想自己說」與「這件事沒有終點」是**客戶端固定尾巴**，不由模型生成，
+ * 所以它們不在這個型別裡。
+ */
+export type ChildPlanDurationOption = {
+  id: string;
+  text: string;
+  days: number;
+};
+
 // ---------------------------------------------------------------------------
 // Provenance —— 孩子的自主性
 // ---------------------------------------------------------------------------
@@ -504,6 +577,17 @@ export type ChildPlanPhase = {
   title: string;
   /** 「能不扶著騎完 10 公尺」可以；「真正理解」「更有自信」不行。 */
   observableDoneWhen: string;
+  /**
+   * 這一站大概涵蓋幾週（P1-M1B，混合制回饋）。1-8，與
+   * milestone_agreements.completion_criterion 的 week_count 同界。
+   *
+   * **判不出來就是 undefined，不猜。** 沒有這個值的站，混合制回饋會把它
+   * 當純慶祝站處理（不發幣），不會硬湊一個區間。
+   *
+   * ⚠️ 不是 target_per_week。那個來自家長談定的 cadence，
+   * 在共同條件那一步才知道，這裡不由 AI 決定。
+   */
+  expectedWeeks?: number;
 };
 
 /** AI 這一輪到底做了什麼。 */
@@ -542,9 +626,26 @@ export type ChildGoalPlanCore = {
   reviewPoint: ChildPlanReviewPoint;
   planningContribution: ChildPlanningContribution;
   provenance: ChildPlanProvenance;
+  /**
+   * 這個目標要花多久（P1-A1）。**孩子決定的，不是模型判斷的。**
+   *
+   * `open_ended` 是「這件事沒有終點，我想一直做下去」—— 那是孩子的
+   * 判斷，不是「模型算不出天數」的預設值。
+   */
+  goalDuration: ChildGoalDuration;
   /** 真正回答的 model。稽核用 —— MODEL_CHAIN 會 fallback，不能寫死首選。 */
   model: string;
 };
+
+/**
+ * 孩子選的期限。
+ *
+ * 兩態是刻意的：`open_ended` **不是** `days: null`。後者讀起來像
+ * 「還沒決定」，而這裡的意思是孩子已經決定了「沒有終點」。
+ */
+export type ChildGoalDuration =
+  | { kind: 'days'; days: number }
+  | { kind: 'open_ended' };
 
 /**
  * 成果控制得了嗎。
@@ -639,12 +740,18 @@ export type ChildPlanRejectionCode =
   | 'DOMAIN_AUTHORITY_CLAIM';
 
 /**
- * 四態。
+ * 五態。
  *
  * needs_clarification  連孩子想達成什麼都還不夠清楚 → 問一題
  * needs_choice         目標清楚，但還沒決定怎麼做 → 給 2-3 個選項
+ * needs_duration       其他都清楚，但沒講要花多久 → 給 2-4 個具體期間
  * ready                資訊夠了 → 一份可執行的計畫
  * unavailable          技術性失敗（關著／逾時／亂回／服務錯誤）
+ *
+ * ⚠️ needs_duration **不沿用 needs_choice**。後者的選項形狀是
+ *    {title, detail, rhythmHint}，為「怎麼開始」設計；期限硬塞進去
+ *    會讓兩種語意共用一個型別，而它們的驗證規則完全不同
+ *    （期限要 days，且要落在家長改得動的範圍內）。
  *
  * ⚠️ unavailable **不可以**被偽裝成 needs_clarification。Gemini 逾時的時候
  *    把它塞成一個問題，孩子看到的是「AI 在問我問題」，但他講得一點都沒錯 ——
@@ -673,6 +780,20 @@ export type ChildGoalPlanningResult =
        * 孩子**一定**可以說「我自己想」——這不是一個可以被關掉的旗標，
        * 所以型別上它只有一個值。一個「只能從 AI 選項裡挑」的畫面，
        * 在這個契約下寫不出來。
+       */
+      allowCustomAnswer: true;
+      model: string;
+    }
+  | {
+      status: 'needs_duration';
+      schemaVersion: typeof CHILD_GOAL_PLANNING_SCHEMA_VERSION;
+      knownGoal: string;
+      question: string;
+      /** 2-4 個具體期間，每一個都帶 days。 */
+      options: ChildPlanDurationOption[];
+      /**
+       * 字面量 `true`。與 needs_choice 同一個理由 —— 孩子**一定**可以
+       * 自己說一個期間，或說這件事沒有終點。
        */
       allowCustomAnswer: true;
       model: string;
@@ -735,8 +856,23 @@ export const CHILD_GOAL_PLANNING_LIMITS = {
   maxControllableActions: 4,
   minChoiceOptions: 2,
   maxChoiceOptions: 3,
+  minDurationOptions: 2,
+  maxDurationOptions: 4,
+  /**
+   * 期限邊界。與家長透過共同條件設定期限時的 RPC 檢查同一組值
+   * （propose_child_planning_terms_v1 的 1-180）。
+   *
+   * 不採用 PLAN_DRAFT_LIMITS.maxDurationDays(365) —— 那是模型輸出的
+   * 理智檢查，不是產品邊界。孩子若能選 300 天，家長之後想調整會被
+   * 自己的 RPC 擋下來，變成一個「建得起來但改不動」的值。
+   */
+  minGoalDurationDays: 1,
+  maxGoalDurationDays: 180,
   minTargetValue: 1,
   maxTargetValue: 10000,
+  /** phases[].expectedWeeks 的邊界，與 milestone_agreements 的 week_count clamp 同界。 */
+  minPhaseExpectedWeeks: 1,
+  maxPhaseExpectedWeeks: 8,
   maxWeeklyFrequency: 7,
   minSessionMinutes: 1,
   maxSessionMinutes: 180,

@@ -22,6 +22,7 @@ import {
   CHILD_PLAN_CLARIFICATION_KINDS,
   type ChildGoalPlanningInput,
   type ChildPlanAgeGroup,
+  type ChildGoalDuration,
   type ChildPlanCadence,
   type ChildPlanningResponse,
   type ChildPlanningSupportPreference,
@@ -44,11 +45,29 @@ export type ChildGoalPlanningRequest = {
   /** 孩子在第一頁自己想到的做法。**不要把它塞進 goal**，也不要塞對話中的答案。 */
   childApproach?: string | null;
   cadence?: ChildPlanCadence | null;
+  /** 孩子在期限那一輪選的答案。沒問到／沒選就不給或給 null。 */
+  goalDuration?: ChildGoalDuration | null;
   preferredTime?: string | null;
   planningSupportPreference?: string | null;
   /** 這場對話到目前為止孩子回過的話。第一輪不給或給空陣列。 */
   responses?: readonly ChildPlanningResponse[] | null;
 };
+
+function normalizeGoalDuration(
+  value: ChildGoalDuration | null | undefined,
+): ChildGoalDuration | null {
+  if (value === null || value === undefined) return null;
+  if (value.kind === 'open_ended') return { kind: 'open_ended' };
+  if (value.kind !== 'days') return null;
+  if (!Number.isInteger(value.days)) return null;
+  if (
+    value.days < CHILD_GOAL_PLANNING_LIMITS.minGoalDurationDays
+    || value.days > CHILD_GOAL_PLANNING_LIMITS.maxGoalDurationDays
+  ) {
+    return null;
+  }
+  return { kind: 'days', days: value.days };
+}
 
 function trimmedOrNull(value: string | null | undefined, max: number): string | null {
   if (typeof value !== 'string') return null;
@@ -151,6 +170,25 @@ function normalizeResponses(
       continue;
     }
 
+    // 期限那一輪（P1-A1）。天數在這裡就要驗 —— 這一層放行的話，
+    // 一個 300 天會一路走到 publish 才被擋，而孩子早就點頭了。
+    if (response.type === 'duration_selection') {
+      if (!Number.isInteger(response.days)) return undefined;
+      if (
+        response.days < L.minGoalDurationDays
+        || response.days > L.maxGoalDurationDays
+      ) {
+        return undefined;
+      }
+      normalized.push({ type: 'duration_selection', days: response.days });
+      continue;
+    }
+
+    if (response.type === 'duration_open_ended') {
+      normalized.push({ type: 'duration_open_ended' });
+      continue;
+    }
+
     return undefined;
   }
 
@@ -182,10 +220,14 @@ export function buildChildGoalPlanningInput(
   const responses = normalizeResponses(request.responses);
   if (responses === undefined) return null;
 
+  // 期限是孩子的決定 —— 形狀不對就當作沒選，**不修補成一個數字**。
+  const goalDuration = normalizeGoalDuration(request.goalDuration);
+
   return {
     schemaVersion: CHILD_GOAL_PLANNING_SCHEMA_VERSION,
     ageGroup: request.ageGroup as ChildPlanAgeGroup,
     childOriginalGoal,
+    goalDuration,
     childOriginalMotivation: trimmedOrNull(
       request.childOriginalMotivation,
       CHILD_GOAL_PLANNING_LIMITS.maxMotivationLength,

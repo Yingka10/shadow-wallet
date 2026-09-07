@@ -37,15 +37,31 @@ import type {
   ChildProposalPlanDraft,
   ChildProposalPlanDraftInput,
 } from '../../childProposal/planDraft/types';
+import type { ChildProposalPurposeCategory } from '../../childProposal/types';
 import type { ChildPlanEnrichment } from './types';
+import { PURPOSE } from '../../childProposal/directConfirm/buildDirectConfirmCommand';
+import {
+  COIN_CATEGORY_BY_PURPOSE,
+} from '../../../screens/parent/tablet/taskDrawer/taskReward/evaluateTaskReward';
+import { priceCoin } from '../../../screens/parent/tablet/taskDrawer/taskReward/coinPolicy';
 
 export function toChildPlanEnrichment(args: {
   input: ChildProposalPlanDraftInput;
   draft: ChildProposalPlanDraft;
   requestId: string;
   generatedAt: string;
+  /**
+   * 孩子在規劃裡自己選的單次份量。null = 他沒講，草稿說了算。
+   *
+   * publish RPC 的規則是「份量孩子講過就照他的」，所以正式欄位的
+   * estimated_minutes 會是這個數字。錨點必須跟著它一起走 ——
+   * 不然那一列自己就矛盾（10 分鐘的計畫掛著 15 分鐘的價），
+   * 而家長端拿計畫份量重算之後永遠對不上，確認鍵形同壞掉。
+   */
+  childSessionMinutes?: number | null;
 }): ChildPlanEnrichment {
   const { input, draft, requestId, generatedAt } = args;
+  const childSessionMinutes = args.childSessionMinutes ?? null;
 
   // completion_description 走既有的固定句型，不照抄模型的自由文字 ——
   // 與 P0-3 同一個理由：模型今天寫「完成一次約定的閱讀時段」，
@@ -59,10 +75,19 @@ export function toChildPlanEnrichment(args: {
   // 而 P1 的正確依據是孩子確認過的 progressionKind —— 那份資料在 RPC 手上，
   // 不在這裡。算了再送過去，等於讓兩個地方各自推導同一個欄位。
 
+  // 份量與幣值錨點是同一件事的兩面，必須一起決定。
+  //
+  // 沒有分歧就原封不動沿用草稿 —— 重算一個相同的數字，等於讓同一件事
+  // 多一個計算來源，而那正是這顆 bug 的形狀。
+  const estimatedMinutes = childSessionMinutes ?? draft.estimatedMinutes;
+  const sessionCoinReference = estimatedMinutes === draft.estimatedMinutes
+    ? draft.sessionCoinReference
+    : repriceSessionCoin(purposeCategory, input.ageGroup, estimatedMinutes);
+
   return {
     purposeCategory,
     completionDescription,
-    estimatedMinutes: draft.estimatedMinutes,
+    estimatedMinutes,
     durationType: draft.durationType,
     ...(draft.durationDays !== null ? { durationDays: draft.durationDays } : null),
     reward: {
@@ -78,7 +103,7 @@ export function toChildPlanEnrichment(args: {
       //
       // 以前這兩個值只留在 ai_snapshot 裡。稽核快照的形狀由「某一次
       // enrichment 回了什麼」決定，正式任務建不建得起來不可以取決於它。
-      sessionCoinReference: draft.sessionCoinReference,
+      sessionCoinReference,
       payoutType: draft.payoutType,
     },
     taskPolicyVersion: TASK_POLICY_VERSION,
@@ -99,4 +124,24 @@ export function toChildPlanEnrichment(args: {
     }),
     aiModel: draft.model,
   };
+}
+
+/**
+ * 用孩子選的份量重算單次參考價。
+ *
+ * 走的是**家長端確認時會走的同一條鏈**（purpose → coin category →
+ * coinPolicy），這不是巧合而是要求：錨點的意義就是「拿現在重算的結果
+ * 跟它對帳」，兩邊用不同的鏈算，對帳必然失敗。
+ *
+ * 不發幣的類別回 null —— 重算不可以讓一份本來不發幣的計畫長出幣值。
+ */
+function repriceSessionCoin(
+  purposeCategory: ChildProposalPurposeCategory,
+  ageGroup: ChildProposalPlanDraftInput['ageGroup'],
+  estimatedMinutes: number,
+): number | null {
+  const coinCategory = COIN_CATEGORY_BY_PURPOSE[PURPOSE[purposeCategory]];
+  if (coinCategory === null) return null;
+  const pricing = priceCoin(ageGroup, coinCategory, estimatedMinutes);
+  return pricing.status === 'priced' ? pricing.suggestedAmount : null;
 }

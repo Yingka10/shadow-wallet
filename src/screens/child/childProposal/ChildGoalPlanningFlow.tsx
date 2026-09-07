@@ -46,6 +46,7 @@ import {
   type ChildPlanningSupportPreference,
   type PublishFormalPlanResult,
 } from '../../../lib/childPlanning';
+import { childSessionMinutes } from '../../../lib/childPlanning/formalPlan/childSessionMinutes';
 // 直接指向這一支，不走 barrel（barrel 沒有重新匯出這個常數，加一個很小的
 // 直接 import 比為了一個常數改動 barrel 的匯出面安全）。
 import { PLANNING_COPY, formatPlanningStep } from './copy';
@@ -80,7 +81,13 @@ export type PlanningFlowPorts = {
    *    送出是「請爸媽看」。合成一步的話，送出失敗會看起來像確認失敗，
    *    而孩子會以為他剛剛點的頭沒有算數 —— 但那份計畫已經安全地存下來了。
    */
-  publish(): Promise<PublishFormalPlanResult>;
+  /**
+   * 送出正式版本。
+   *
+   * childSessionMinutes 是孩子自己選的單次份量 —— 幣值錨點要照它定價，
+   * 不是照 P0 草稿猜的那個數字（見 childSessionMinutes 的檔頭）。
+   */
+  publish(childSessionMinutes: number | null): Promise<PublishFormalPlanResult>;
 };
 
 export type ChildGoalPlanningFlowProps = {
@@ -247,6 +254,14 @@ function PencilIcon({ size = 18, color = Colors.leaf700 }: { size?: number; colo
  *    才會有值（見 validateChildGoalPlanningResult 的 rationaleCount<=1），
  *    低權重純文字，不用綠色實心 chip，免得又讀成「AI 已經幫你選好了」。
  */
+/**
+ * 「這件事沒有終點」在選取狀態裡的 id。
+ *
+ * 用一個不可能與模型選項相撞的字串（模型那邊是 duration-1、duration-2…），
+ * 這樣「選了哪一個」只有一個狀態要管。
+ */
+const OPEN_ENDED_ID = '__open_ended__';
+
 function StartOptionCard({
   testID,
   index,
@@ -258,7 +273,8 @@ function StartOptionCard({
   onPress,
 }: {
   testID: string;
-  index: number;
+  /** 選項序號。缺席＝這張卡不是「GrowBook 提的第 N 個」，不畫編號圓。 */
+  index?: number;
   title: string;
   detail?: string;
   rhythmHint?: string;
@@ -278,7 +294,11 @@ function StartOptionCard({
       activeOpacity={0.85}
     >
       <View style={[styles.optionMarker, selected && styles.optionMarkerOn]}>
-        <Text style={[styles.optionMarkerText, selected && styles.optionMarkerTextOn]}>{index}</Text>
+        {index !== undefined ? (
+          <Text style={[styles.optionMarkerText, selected && styles.optionMarkerTextOn]}>
+            {index}
+          </Text>
+        ) : null}
       </View>
       <View style={styles.optionCardCopy}>
         {badge ? (
@@ -395,6 +415,16 @@ export default function ChildGoalPlanningFlow({
    * 的選取狀態進來。
    */
   const [chosenOptionId, setChosenOptionId] = useState<string | null>(null);
+  /**
+   * 期限那一頁選起來、但還沒送出的那一個（P1-A1）。
+   *
+   * 「沒有終點」也走這個狀態（值是 OPEN_ENDED_ID）而不是按了就直接送 ——
+   * 它跟選一個天數是同等份量的答案，手指滑到就決定了一樣退不回來。
+   */
+  const [chosenDurationId, setChosenDurationId] = useState<string | null>(null);
+  const [writingDuration, setWritingDuration] = useState(false);
+  const [durationInput, setDurationInput] = useState('');
+  const [durationError, setDurationError] = useState<string | null>(null);
 
   const exits = useMemo(() => childPlanningSessionExits(session), [session]);
 
@@ -459,9 +489,14 @@ export default function ChildGoalPlanningFlow({
    */
   const runPublish = useCallback(async () => {
     setPhase({ kind: 'confirmed', sent: false, sending: true });
-    const published = await ports.publish();
+    // confirmedPlan 在 handleConfirm 裡是同一個 tick 內剛 setSession 的，
+    // 這個 closure 還讀不到 —— 所以退回 latestResult，那是同一份計畫
+    // （confirmChildPlan 就是把它複製過去）。重試時走前者。
+    const plan = session.confirmedPlan
+      ?? (session.latestResult?.status === 'ready' ? session.latestResult.plan : null);
+    const published = await ports.publish(childSessionMinutes(plan));
     setPhase({ kind: 'confirmed', sent: published.ok, sending: false });
-  }, [ports]);
+  }, [ports, session]);
 
   const handleConfirm = useCallback(async () => {
     const confirmed = confirmChildPlan(session);
@@ -760,6 +795,156 @@ export default function ChildGoalPlanningFlow({
               optionId: chosen.id,
               optionText: chosen.text,
             });
+          }}
+        />
+
+        <Secondary
+          testID="planning-send-to-parents"
+          label={PLANNING_COPY.requesting.escapeSend}
+          onPress={onSendToParents}
+        />
+      </ScrollView>
+    );
+  }
+
+  // 他心裡有一個時間，自己填（P1-A1 的固定尾巴一）。
+  //
+  // 放在 needs_duration 之前：這一頁是它的子畫面，開著的時候要蓋過選項頁。
+  if (writingDuration) {
+    const submitDuration = () => {
+      const raw = durationInput.trim();
+      // 只收純數字。「兩個星期」這種寫法要換算，而換算就是替他決定 ——
+      // 他要的可能是 14 天，也可能是「兩個週末」。
+      if (!/^[0-9]+$/.test(raw)) {
+        setDurationError(PLANNING_COPY.duration.notANumber);
+        return;
+      }
+      const days = Number(raw);
+      // 1-180 與家長之後調整期限時的檢查同一組值。超出**擋下並說明**，
+      // 不收斂到邊界 —— 那等於讓他確認一個他沒說過的期限。
+      if (days < 1 || days > 180) {
+        setDurationError(PLANNING_COPY.duration.outOfRange);
+        return;
+      }
+      setDurationInput('');
+      setDurationError(null);
+      setWritingDuration(false);
+      setChosenDurationId(null);
+      void runRound({ type: 'duration_selection', days });
+    };
+
+    return (
+      <ScrollView testID="planning-duration-custom-page" contentContainerStyle={styles.body}>
+        <Text style={styles.question}>{PLANNING_COPY.duration.customQuestion}</Text>
+        <View style={styles.durationInputRow}>
+          <TextInput
+            testID="planning-duration-input"
+            style={[styles.input, styles.durationInput]}
+            value={durationInput}
+            onChangeText={(next) => {
+              setDurationInput(next);
+              // 他一開始改，上一次的說明就沒有意義了。
+              if (durationError !== null) setDurationError(null);
+            }}
+            placeholder={PLANNING_COPY.duration.customPlaceholder}
+            placeholderTextColor={Colors.ink300}
+            keyboardType="number-pad"
+          />
+          <Text style={styles.durationUnit}>{PLANNING_COPY.duration.customUnit}</Text>
+        </View>
+
+        {durationError !== null ? (
+          <Text testID="planning-duration-error" style={styles.durationError}>
+            {durationError}
+          </Text>
+        ) : null}
+
+        <Primary
+          testID="planning-duration-custom-next"
+          label={PLANNING_COPY.duration.customNext}
+          disabled={durationInput.trim().length === 0}
+          onPress={submitDuration}
+        />
+
+        <Secondary
+          testID="planning-duration-custom-back"
+          label={PLANNING_COPY.nav.back}
+          onPress={() => {
+            setDurationInput('');
+            setDurationError(null);
+            setWritingDuration(false);
+          }}
+        />
+      </ScrollView>
+    );
+  }
+
+  if (result?.status === 'needs_duration') {
+    const chosen = result.options.find((o) => o.id === chosenDurationId) ?? null;
+    const openEndedChosen = chosenDurationId === OPEN_ENDED_ID;
+    return (
+      <ScrollView testID="planning-duration" contentContainerStyle={styles.body}>
+        <ProgressHeader step={CHILD_PLANNING_STEP_CHOOSING} totalSteps={CHILD_PLANNING_TOTAL_STEPS} />
+        <View style={styles.headerRow}>
+          <View style={styles.headerCopy}>
+            {/* 標題用 AI 回來的 question —— 它會接住孩子的目標
+                （「你想花多久把它讀完？」），不是一句通用的問法。 */}
+            <Text style={styles.question}>{result.question}</Text>
+            <Text style={styles.subtitle}>{PLANNING_COPY.duration.hint}</Text>
+          </View>
+          <Mascot size={80} />
+        </View>
+
+        <Text style={styles.microcopy}>{PLANNING_COPY.duration.microcopy}</Text>
+
+        <View style={styles.options}>
+          {result.options.map((option, index) => (
+            <StartOptionCard
+              key={option.id}
+              testID={`planning-duration-${option.id}`}
+              index={index + 1}
+              title={option.text}
+              selected={chosenDurationId === option.id}
+              onPress={() => setChosenDurationId(option.id)}
+            />
+          ))}
+
+          {/* 尾巴二：沒有編號圓 —— 它不是「GrowBook 提的第 N 個期間」，
+              但它是一個同等份量的答案，所以仍然可選、仍然要按確認。 */}
+          <StartOptionCard
+            testID="planning-duration-open-ended"
+            title={PLANNING_COPY.duration.openEndedTitle}
+            detail={PLANNING_COPY.duration.openEndedSubtitle}
+            selected={openEndedChosen}
+            onPress={() => setChosenDurationId(OPEN_ENDED_ID)}
+          />
+
+          {/* 尾巴一：換一種動作（虛線框、鉛筆、chevron），不是第 N+2 個選項。 */}
+          <CustomOptionRow
+            testID="planning-duration-custom"
+            title={PLANNING_COPY.duration.customTitle}
+            subtitle={PLANNING_COPY.duration.customSubtitle}
+            onPress={() => {
+              setDurationError(null);
+              setWritingDuration(true);
+            }}
+          />
+        </View>
+
+        <Text style={styles.reassurance}>{PLANNING_COPY.duration.reassurance}</Text>
+
+        <Primary
+          testID="planning-duration-confirm"
+          label={PLANNING_COPY.duration.confirm}
+          disabled={chosen === null && !openEndedChosen}
+          onPress={() => {
+            if (chosen === null && !openEndedChosen) return;
+            setChosenDurationId(null);
+            void runRound(
+              openEndedChosen
+                ? { type: 'duration_open_ended' }
+                : { type: 'duration_selection', days: chosen!.days },
+            );
           }}
         />
 
@@ -1116,6 +1301,12 @@ const styles = StyleSheet.create({
   },
   block: { gap: 8 },
   options: { gap: 10, marginTop: 8 },
+  durationInputRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  durationInput: { flex: 1, minHeight: 52 },
+  durationUnit: { fontSize: 18, fontWeight: '600', color: Colors.ink700 },
+  // 暖琥珀不用紅 —— 這是「再看一下」，不是他做錯事（色票檔的既有決定）。
+  durationError: { fontSize: 14, color: Colors.warning, marginTop: 8, marginBottom: 4 },
+
   input: {
     minHeight: 92,
     borderRadius: 18,
