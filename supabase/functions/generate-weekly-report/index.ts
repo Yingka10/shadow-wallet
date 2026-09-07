@@ -27,6 +27,7 @@ import {
   GROWTH_LINE_LABEL,
   pickFocusLine,
   weeklyTargetAppliesToWeek,
+  type WeeklyRhythmTaskFact,
   validateRecurrenceSuggestion,
   validateScheduleSuggestion,
   weeklyFallbackForced,
@@ -519,11 +520,11 @@ async function processChild(
   const completedTaskNamesByCategory: Record<TaskCategory, string[]> = {
     A: [], B: [], C: [], D: [],
   };
-  // 這個類別「一週該做幾次」——只加總真的有 weekly_frequency 節奏、而且在
-  // 報表這一週就已經開始的任務（見 weeklyTargetAppliesToWeek）。
-  // 沒有任何這種任務的類別，weeklyTarget 維持 null（不用達標與否判斷這條線）。
-  const weeklyTargetByCategory: Record<TaskCategory, number | null> = {
-    A: null, B: null, C: null, D: null,
+  // 這個類別裡有週節奏、而且這一週已經開始的任務，**逐個**記下自己的目標與
+  // 完成次數（見 weeklyTargetAppliesToWeek）。刻意不加總：不同任務的週目標是
+  // 各自談定的，加起來會生出一個沒有人同意過的數字。
+  const rhythmTasksByCategory: Record<TaskCategory, WeeklyRhythmTaskFact[]> = {
+    A: [], B: [], C: [], D: [],
   };
   for (const t of tasksRes.data ?? []) {
     const cat = t.category as TaskCategory;
@@ -533,7 +534,11 @@ async function processChild(
       completedTaskNamesByCategory[cat].push(t.name);
     }
     if (weeklyTargetAppliesToWeek(t, weekStart)) {
-      weeklyTargetByCategory[cat] = (weeklyTargetByCategory[cat] ?? 0) + (t.weekly_frequency as number);
+      rhythmTasksByCategory[cat].push({
+        taskName: t.name,
+        target: t.weekly_frequency as number,
+        done: completionCountByTask.get(t.id) ?? 0,
+      });
     }
   }
 
@@ -542,25 +547,17 @@ async function processChild(
   const taskCategoryById = new Map<string, TaskCategory>(
     (tasksRes.data ?? []).map(t => [t.id, t.category as TaskCategory]),
   );
-  // 只有這些 task_id 有週目標——targetDone 只能算它們的完成次數，不能算同類別
-  // 裡沒有週目標的其他任務，否則「達標與否」會被無關任務的完成次數混進去。
-  const weeklyFrequencyTaskIds = new Set(
-    (tasksRes.data ?? []).filter(t => weeklyTargetAppliesToWeek(t, weekStart)).map(t => t.id),
-  );
   const remindedCountByCategory: Record<TaskCategory, number> = { A: 0, B: 0, C: 0, D: 0 };
-  const targetDoneByCategory: Record<TaskCategory, number> = { A: 0, B: 0, C: 0, D: 0 };
   for (const c of completions as { task_id: string; start_mode: string | null }[]) {
     const cat = taskCategoryById.get(c.task_id);
     if (!cat) continue;
     if (c.start_mode === 'reminded') remindedCountByCategory[cat] += 1;
-    if (weeklyFrequencyTaskIds.has(c.task_id)) targetDoneByCategory[cat] += 1;
   }
 
   const categoryFacts: CategoryWeeklyFacts[] = (['A', 'B', 'C', 'D'] as TaskCategory[]).map(cat => ({
     category: cat,
     done: taskCounts[cat].done,
-    weeklyTarget: weeklyTargetByCategory[cat],
-    targetDone: targetDoneByCategory[cat],
+    rhythmTasks: rhythmTasksByCategory[cat],
     remindedCount: remindedCountByCategory[cat],
     completedTaskNames: completedTaskNamesByCategory[cat],
   }));

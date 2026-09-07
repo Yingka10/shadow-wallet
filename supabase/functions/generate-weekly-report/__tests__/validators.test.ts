@@ -119,6 +119,35 @@ describe('validateScheduleSuggestion', () => {
     expect(result).toBeNull();
   });
 
+  // 真實線上案例（2026-09-07）：候選是「每天最多 1 次」，Gemini 回
+  // 「每週最多 2 次」並在文案裡寫成「放寬上限」。舊版只比數字（2 > 1）就放行，
+  // 家長畫面上出現「目前：每天最多 1 次 → 建議：每週最多 2 次」，
+  // 而那其實是把每週 7 次砍成 2 次 —— 收緊被講成放寬。
+  it('回歸：換算成一週最多幾次再比 —— 每天 1 次改成每週 2 次是收緊，必須拒絕', () => {
+    const result = validateScheduleSuggestion(
+      { taskId: 'task-1', body: 'x', actionLabel: 'x', suggestedClaimPeriod: 'week', suggestedMaxClaimsPerPeriod: 2 },
+      [scheduleCandidate], // day / 1 = 每週 7 次
+    );
+    expect(result).toBeNull();
+  });
+
+  it('每天 1 次改成每週 8 次是真的放寬，接受', () => {
+    const result = validateScheduleSuggestion(
+      { taskId: 'task-1', body: 'x', actionLabel: 'x', suggestedClaimPeriod: 'week', suggestedMaxClaimsPerPeriod: 8 },
+      [scheduleCandidate],
+    );
+    expect(result?.suggestedClaimPeriod).toBe('week');
+    expect(result?.suggestedMaxClaimsPerPeriod).toBe(8);
+  });
+
+  it("候選是 'once' 時不比較 —— 整個任務期間的總量跟週期性上限沒有共同單位", () => {
+    const result = validateScheduleSuggestion(
+      { taskId: 'task-1', body: 'x', actionLabel: 'x', suggestedClaimPeriod: 'week', suggestedMaxClaimsPerPeriod: 99 },
+      [{ ...scheduleCandidate, claimPeriod: 'once' as const }],
+    );
+    expect(result).toBeNull();
+  });
+
   it('rejects malformed input shapes', () => {
     expect(validateScheduleSuggestion(null, [scheduleCandidate])).toBeNull();
     expect(validateScheduleSuggestion({}, [scheduleCandidate])).toBeNull();

@@ -102,6 +102,21 @@ export function containsArabicDigit(text: string): boolean {
 }
 
 /**
+ * 一週最多幾次 —— 把不同 claim_period 換算成同一個單位才能比大小。
+ *
+ * 「每天最多 1 次」其實是每週最多 7 次。直接比數字（2 > 1）會把
+ * 「每天 1 次 → 每週 2 次」這種**收緊**當成放寬放行，畫面上就出現
+ * 「目前：每天最多 1 次 → 建議：每週最多 2 次」這種自相矛盾的建議。
+ *
+ * 'once' 是整個任務期間的總量，跟週期性上限沒有共同單位，一律不比較。
+ */
+function weeklyCap(period: ScheduleClaimPeriod, max: number): number | null {
+  if (period === 'day') return max * 7;
+  if (period === 'week') return max;
+  return null; // 'once'
+}
+
+/**
  * Gemini can only be trusted to pick a taskId from the candidate list we gave it —
  * never to invent one. Anything that doesn't match a real candidate, or proposes a
  * cap that isn't actually larger than today's, is dropped rather than written to DB.
@@ -118,7 +133,11 @@ export function validateScheduleSuggestion(
 
   const candidate = candidates.find(c => c.taskId === s.taskId);
   if (!candidate) return null;
-  if (s.suggestedMaxClaimsPerPeriod <= candidate.maxClaimsPerPeriod) return null;
+  // 放寬必須是真的放寬 —— 換算成「一週最多幾次」再比，不能只比數字。
+  const capBefore = weeklyCap(candidate.claimPeriod, candidate.maxClaimsPerPeriod);
+  const capAfter = weeklyCap(s.suggestedClaimPeriod as ScheduleClaimPeriod, s.suggestedMaxClaimsPerPeriod);
+  if (capBefore == null || capAfter == null) return null;
+  if (capAfter <= capBefore) return null;
 
   return {
     taskId: s.taskId,
@@ -210,24 +229,31 @@ export const GROWTH_LINE_LABEL: Record<TaskCategory, string> = {
 
 export type GrowthLineStatus = 'stable' | 'watch' | 'needs_discussion';
 
+/** 一個有週節奏的任務，這一週各自的目標與完成次數。 */
+export type WeeklyRhythmTaskFact = {
+  taskName: string;
+  /** 這個任務自己談定的 weekly_frequency。 */
+  target: number;
+  /** 這個任務這一週的完成次數。 */
+  done: number;
+};
+
 /** 一個類別這週的原始事實——全部由 code 算，AI 不參與這一步。 */
 export type CategoryWeeklyFacts = {
   category: TaskCategory;
   /** 這週這個類別「所有任務」實際完成次數（不分有沒有週目標）。 */
   done: number;
   /**
-   * 這個類別「一週該做幾次」的目標，取這個類別裡所有 schedule_mode='weekly_frequency'
-   * 任務的 weekly_frequency 加總。null 代表這個類別本來就沒有週目標概念
-   * （例如只有 one_time/fixed_days 任務）——這時候不判斷達不達標，只看有沒有活動。
+   * 這個類別裡「有週節奏、而且這一週已經開始」的任務，各自的目標與完成次數。
+   *
+   * ⚠️ 刻意**不加總**。「把哈利波特看完每週三次」和「畫畫練習每週三次」是兩份
+   * 分開談定的約定，把它們加成「每週六次」會產生一個**沒有任何人同意過的數字**，
+   * 家長在畫面上找不到它的出處。達標與否也要逐個任務判斷：兩個任務一個做滿、
+   * 一個完全沒動，加總起來可能剛好等於目標，那條線就會被誤判成穩定。
+   *
+   * 空陣列＝這個類別沒有週節奏任務，不判斷達不達標，只看有沒有活動。
    */
-  weeklyTarget: number | null;
-  /**
-   * 這週「有週目標的那些任務」自己的完成次數——只能拿這個跟 weeklyTarget 比。
-   * 不能用 done（可能混了同類別裡沒有週目標的其他任務），不然一個類別裡只要
-   * 有一個任務剛好有週目標，其他任務的完成次數會被誤算進「達標與否」，
-   * 判斷結果會失真。weeklyTarget 是 null 時這欄一定也是 0，沒有意義。
-   */
-  targetDone: number;
+  rhythmTasks: WeeklyRhythmTaskFact[];
   /** 這週這個類別的完成紀錄裡，start_mode='reminded' 的筆數。 */
   remindedCount: number;
   /** 這週實際完成過的任務名稱（可重複，同一任務做兩次會出現兩次）。 */
@@ -277,19 +303,39 @@ export function weeklyTargetAppliesToWeek(
  * 又常常要提醒的，不該給一樣的緊急程度。
  */
 export function computeGrowthLineStatus(facts: CategoryWeeklyFacts): GrowthLineStatus {
-  if (facts.weeklyTarget != null && facts.targetDone < facts.weeklyTarget) {
+  // 逐個任務看。加總會互相掩蓋：一個做滿、一個掛零，總數可能剛好達標，
+  // 但那條線裡確實有一件事整週沒動。
+  if (facts.rhythmTasks.some(t => t.done < t.target)) {
     return facts.remindedCount > 0 ? 'needs_discussion' : 'watch';
   }
   return 'stable';
 }
 
+/**
+ * 這一類第一行要講什麼。沒跟上的時候**點名那一個任務** —— 家長要知道的是
+ * 「要看的是哪一件事」，不是一個算不出出處的類別總量。
+ */
+function rhythmHeadline(facts: CategoryWeeklyFacts): string {
+  const missed = facts.rhythmTasks.filter(t => t.done < t.target);
+  if (missed.length > 0) {
+    // 差最多的那一個最值得講；差距相同時取第一個，避免每次重新整理順序跳動。
+    const worst = [...missed].sort((a, b) => (a.done - a.target) - (b.done - b.target))[0];
+    return facts.rhythmTasks.length === 1
+      ? `原訂每週 ${worst.target} 次，本週完成 ${worst.done} 次`
+      : `${worst.taskName}：原訂每週 ${worst.target} 次，本週完成 ${worst.done} 次`;
+  }
+  // 都跟上了。只有一個任務時講得出「原訂幾次」；多個就只講這一類做了幾次，
+  // 不要為了湊一個目標數字而加總。
+  if (facts.rhythmTasks.length === 1) {
+    const only = facts.rhythmTasks[0];
+    return `原訂每週 ${only.target} 次，本週完成 ${only.done} 次`;
+  }
+  return `本週完成 ${facts.done} 次`;
+}
+
 function buildCategoryFacts(facts: CategoryWeeklyFacts): string[] {
   const lines: string[] = [];
-  lines.push(
-    facts.weeklyTarget != null
-      ? `原訂每週 ${facts.weeklyTarget} 次，本週完成 ${facts.targetDone} 次`
-      : `本週完成 ${facts.done} 次`,
-  );
+  lines.push(rhythmHeadline(facts));
   if (facts.remindedCount > 0) {
     lines.push(`其中 ${facts.remindedCount} 次是提醒後才開始的`);
   }
