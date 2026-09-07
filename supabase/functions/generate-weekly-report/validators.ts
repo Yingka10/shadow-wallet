@@ -245,6 +245,30 @@ export type WeeklyGrowthLine = {
 };
 
 /**
+ * 這個任務的每週次數目標，該不該算進「報表這一週」的目標？
+ *
+ * 一個下週才開始的任務，在報表那一週還不存在。把它的 weekly_frequency 加進
+ * 該週的目標，那條成長線就會顯示「原訂每週 N 次，本週完成 0 次」——但那 N 次
+ * 從來沒有在那一週被約定過，家長看到的是一個憑空出現的未達標。
+ *
+ * 只排除「整週都還沒開始」的任務。週中才開始的仍然照算：要不要按比例打折
+ * 是另一個產品決定，這裡不自己發明一套折算規則。
+ */
+export function weeklyTargetAppliesToWeek(
+  task: { schedule_mode?: string | null; weekly_frequency?: number | null; start_date?: string | null },
+  weekStart: string,
+): boolean {
+  if (task.schedule_mode !== 'weekly_frequency') return false;
+  if (typeof task.weekly_frequency !== 'number') return false;
+  // 沒排開始日 = 沒有「還沒開始」這回事，一直都算數。
+  if (!task.start_date) return true;
+  const end = new Date(`${weekStart}T00:00:00Z`);
+  end.setUTCDate(end.getUTCDate() + 6);
+  // 兩邊都是 YYYY-MM-DD，字串比較就是日期比較。
+  return task.start_date <= end.toISOString().slice(0, 10);
+}
+
+/**
  * status 判斷規則：
  *   沒有週目標，或這週已達標／超過 → stable（不是「有任務就要有建議」）。
  *   有週目標、沒達標、但這週沒有 reminded 訊號 → watch（節奏慢一點，先觀察）。

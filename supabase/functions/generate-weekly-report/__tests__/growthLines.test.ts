@@ -2,6 +2,7 @@ import {
   buildGrowthLines,
   computeGrowthLineStatus,
   pickFocusLine,
+  weeklyTargetAppliesToWeek,
   type CategoryWeeklyFacts,
 } from '../validators';
 
@@ -119,5 +120,53 @@ describe('pickFocusLine', () => {
       facts({ category: 'D', done: 1, weeklyTarget: 3, targetDone: 1, remindedCount: 2 }), // needs_discussion
     ]);
     expect(pickFocusLine(lines)).toBe('D');
+  });
+});
+
+// 這一週的週目標，只能由「這一週真的存在的任務」貢獻。
+// 真實情境：家長週一新建一個「每週三次」的任務，然後回頭看上週的週報 ——
+// 上週那條線不該因此變成「原訂每週三次，本週完成 0 次」。
+describe('weeklyTargetAppliesToWeek', () => {
+  const WEEK = '2026-08-31'; // 週一，該週最後一天是 2026-09-06
+
+  const task = (over: Record<string, unknown> = {}) => ({
+    schedule_mode: 'weekly_frequency',
+    weekly_frequency: 3,
+    start_date: '2026-08-01',
+    ...over,
+  });
+
+  it('週目標之外的排程模式一律不算', () => {
+    expect(weeklyTargetAppliesToWeek(task({ schedule_mode: 'fixed_days' }), WEEK)).toBe(false);
+    expect(weeklyTargetAppliesToWeek(task({ schedule_mode: null }), WEEK)).toBe(false);
+  });
+
+  it('沒有次數就沒有目標可以加總', () => {
+    expect(weeklyTargetAppliesToWeek(task({ weekly_frequency: null }), WEEK)).toBe(false);
+  });
+
+  it('沒排開始日 = 一直都在', () => {
+    expect(weeklyTargetAppliesToWeek(task({ start_date: null }), WEEK)).toBe(true);
+  });
+
+  it('這一週之前就開始的，算', () => {
+    expect(weeklyTargetAppliesToWeek(task({ start_date: '2026-08-01' }), WEEK)).toBe(true);
+  });
+
+  it('這一週第一天開始的，算', () => {
+    expect(weeklyTargetAppliesToWeek(task({ start_date: '2026-08-31' }), WEEK)).toBe(true);
+  });
+
+  it('週中才開始的仍然照算 —— 按比例打折是另一個決定，這裡不自己發明', () => {
+    expect(weeklyTargetAppliesToWeek(task({ start_date: '2026-09-03' }), WEEK)).toBe(true);
+  });
+
+  it('這一週最後一天開始的，算', () => {
+    expect(weeklyTargetAppliesToWeek(task({ start_date: '2026-09-06' }), WEEK)).toBe(true);
+  });
+
+  it('下一週才開始的，不算 —— 那 N 次從沒在這一週被約定過', () => {
+    expect(weeklyTargetAppliesToWeek(task({ start_date: '2026-09-07' }), WEEK)).toBe(false);
+    expect(weeklyTargetAppliesToWeek(task({ start_date: '2026-10-01' }), WEEK)).toBe(false);
   });
 });

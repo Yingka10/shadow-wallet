@@ -26,6 +26,7 @@ import {
   formatWeekdaysZh,
   GROWTH_LINE_LABEL,
   pickFocusLine,
+  weeklyTargetAppliesToWeek,
   validateRecurrenceSuggestion,
   validateScheduleSuggestion,
   weeklyFallbackForced,
@@ -475,12 +476,12 @@ async function processChild(
 
   const [tasksRes, txRes, childRes, existingReportRes] = await Promise.all([
     taskIds.length > 0
-      ? supabase.from('tasks').select('id, name, category, claim_period, max_claims_per_period, day_type, recurrence_days, schedule_mode, weekly_frequency').in('id', taskIds).eq('is_active', true)
+      ? supabase.from('tasks').select('id, name, category, claim_period, max_claims_per_period, day_type, recurrence_days, schedule_mode, weekly_frequency, start_date').in('id', taskIds).eq('is_active', true)
       : Promise.resolve({
           data: [] as {
             id: string; name: string; category: string; claim_period: string; max_claims_per_period: number;
             day_type: string; recurrence_days: number[] | null;
-            schedule_mode: string | null; weekly_frequency: number | null;
+            schedule_mode: string | null; weekly_frequency: number | null; start_date: string | null;
           }[],
           error: null,
         }),
@@ -518,7 +519,8 @@ async function processChild(
   const completedTaskNamesByCategory: Record<TaskCategory, string[]> = {
     A: [], B: [], C: [], D: [],
   };
-  // 這個類別「一週該做幾次」——只加總真的有 weekly_frequency 節奏的任務。
+  // 這個類別「一週該做幾次」——只加總真的有 weekly_frequency 節奏、而且在
+  // 報表這一週就已經開始的任務（見 weeklyTargetAppliesToWeek）。
   // 沒有任何這種任務的類別，weeklyTarget 維持 null（不用達標與否判斷這條線）。
   const weeklyTargetByCategory: Record<TaskCategory, number | null> = {
     A: null, B: null, C: null, D: null,
@@ -530,8 +532,8 @@ async function processChild(
       taskCounts[cat].done += 1;
       completedTaskNamesByCategory[cat].push(t.name);
     }
-    if (t.schedule_mode === 'weekly_frequency' && typeof t.weekly_frequency === 'number') {
-      weeklyTargetByCategory[cat] = (weeklyTargetByCategory[cat] ?? 0) + t.weekly_frequency;
+    if (weeklyTargetAppliesToWeek(t, weekStart)) {
+      weeklyTargetByCategory[cat] = (weeklyTargetByCategory[cat] ?? 0) + (t.weekly_frequency as number);
     }
   }
 
@@ -543,7 +545,7 @@ async function processChild(
   // 只有這些 task_id 有週目標——targetDone 只能算它們的完成次數，不能算同類別
   // 裡沒有週目標的其他任務，否則「達標與否」會被無關任務的完成次數混進去。
   const weeklyFrequencyTaskIds = new Set(
-    (tasksRes.data ?? []).filter(t => t.schedule_mode === 'weekly_frequency').map(t => t.id),
+    (tasksRes.data ?? []).filter(t => weeklyTargetAppliesToWeek(t, weekStart)).map(t => t.id),
   );
   const remindedCountByCategory: Record<TaskCategory, number> = { A: 0, B: 0, C: 0, D: 0 };
   const targetDoneByCategory: Record<TaskCategory, number> = { A: 0, B: 0, C: 0, D: 0 };
