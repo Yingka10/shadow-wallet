@@ -27,6 +27,10 @@ import type { ChildProposalPlanDraftInput } from './childProposalPlanDraftLogic.
 import { handleChildGoalPlanning } from './childGoalPlanning.ts';
 import type { ChildGoalPlanningInput } from './childGoalPlanningLogic.ts';
 import {
+  formatAdvisorRecentContext,
+  type AdvisorRecentFamilyContext,
+} from './advisorRecentContext.ts';
+import {
   formatWeekdaysZh,
   validateAdvisorSuggestedAction,
   CLAIM_PERIOD_LABEL_ZH,
@@ -264,6 +268,7 @@ async function handleAdvisorChat(payload: {
   history?: { role: 'parent' | 'ai'; text: string }[];
   scheduleCandidates?: AdvisorScheduleCandidate[];
   recurrenceCandidates?: AdvisorRecurrenceCandidate[];
+  recentFamilyContext?: AdvisorRecentFamilyContext;
 }) {
   const STATUS_LABEL: Record<string, string> = {
     done: '已完成',
@@ -332,6 +337,8 @@ async function handleAdvisorChat(payload: {
     ? `\n【可以參考：這週有任務排定的天數比實際做到的天數多】\n${recurrenceCandidateLines}\n`
     : '';
 
+  const recentContextSection = formatAdvisorRecentContext(payload.recentFamilyContext);
+
   const prompt = `你是一位溫柔、細心的親職陪伴顧問，正在跟一位家長聊聊孩子「${payload.childName}」的狀況。你就是家長身邊的助手，不是在幫某個系統代言。
 
 孩子的任務是自己回報完成的，實際情況可能比你手上的紀錄更豐富。你能看到的資料如下，看不到的部分（例如逐筆完成時間、孩子的原話）就別假裝知道、也別提到「系統」「資料庫」「我看得到的資料」這類詞——需要提醒家長資訊有限時，用「這幾天還沒特別看到相關紀錄」「可以再多留意一下」這種自然口吻帶過就好，不要解釋原因或提到任何技術性字眼。
@@ -346,7 +353,7 @@ ${weekLines}
 ${ltLines}
 - 最近的行為模式（依實際紀錄推算，不是問卷分類）：
 ${behaviorLines}
-${scheduleSection}${recurrenceSection}
+${scheduleSection}${recurrenceSection}${recentContextSection}
 ${historyLines ? `之前的對話：\n${historyLines}\n` : ''}
 家長現在問：「${payload.question}」
 
@@ -356,6 +363,8 @@ ${historyLines ? `之前的對話：\n${historyLines}\n` : ''}
 3. 只根據上面給的資料回答，不要編造數字或具體事件；資料不夠判斷時自然帶過（見上），不要提「系統」「資料庫」「目前只記錄到」這類字眼，也不要交代資料從哪裡來。
 4. 若問題跟任務節奏、步調安排、要不要加/減任務有關，請依「最近的行為模式」給出貼合這個孩子實際步調的建議（例如活躍天數少就別建議加量、長期任務卡住就建議拆小），不要給空泛通用的建議，也不要提到「活躍天數」「行為模式」這種分析用詞，用生活化的說法講出來就好。
 5. 不要用條列式或標題，reply 要用一般說話的口吻，像朋友聊天，不要像在報告或客服回覆。
+6. 只有在「最近幾個已結束週期」至少有兩個可比較週期時，才能描述跨週趨勢；只有一週就只陳述那一週。沒有列出的週或任務不等於沒有做，不能自行補成零次。
+7. 「最近一次已確認的共同版本變動」只能當成家庭曾經做過的決定，不代表它造成後續表現；除非紀錄本身足夠，不能自行寫成因果關係。
 
 除了 reply 之外，請判斷這輪對話是否適合附帶一個具體可操作的建議（suggestedAction）。大部分時候都應該是 null——只有話題明確切中以下情況之一才給：
 - 家長聊到任務頻率/次數安排不太夠用，且下面【這週有任務常常一次就做到次數上限】清單裡有相關任務時，可以給 adjust_schedule。
@@ -513,6 +522,7 @@ Deno.serve(async (req) => {
           history?: { role: 'parent' | 'ai'; text: string }[];
           scheduleCandidates?: AdvisorScheduleCandidate[];
           recurrenceCandidates?: AdvisorRecurrenceCandidate[];
+          recentFamilyContext?: AdvisorRecentFamilyContext;
         });
         break;
       case 'wishClarify':

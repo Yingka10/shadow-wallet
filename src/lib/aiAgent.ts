@@ -241,6 +241,24 @@ export type AdvisorChatInput = {
   /** 這個孩子這週可能值得調整的任務候選清單，讓顧問偶爾能附帶可套用的建議。 */
   scheduleCandidates?: AdvisorScheduleCandidate[];
   recurrenceCandidates?: AdvisorRecurrenceCandidate[];
+  /** 最近四個已結束週期的完成摘要，以及最近一次已確認共同版本差異。 */
+  recentFamilyContext?: {
+    completedWeeks: Array<{
+      weekStart: string;
+      weekEnd: string;
+      tasks: Array<{
+        taskName: string;
+        completedCount: number;
+        selfStartedCount: number;
+        remindedCount: number;
+      }>;
+    }>;
+    latestSharedPlanChange: {
+      taskName: string;
+      changedAt: string;
+      changes: string[];
+    } | null;
+  };
 };
 
 export type AdvisorChatResult = {

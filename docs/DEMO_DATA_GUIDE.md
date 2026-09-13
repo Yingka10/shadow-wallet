@@ -56,9 +56,9 @@ State B 的內容（相對 State A 的增量）：
 
 | | State A | State B |
 |---|---|---|
-| tasks / active 指派 | 6 / 6 | 7 / 7 |
-| long_term_goals | 3 | 4 |
-| task_completions | 9 | 11 |
+| tasks / active 指派 | 7 / 7 | 8 / 8 |
+| long_term_goals | 4 | 5 |
+| task_completions | 15 | 17 |
 | transactions | 3 | 5 |
 | wallet | 36 | 56 |
 | child_proposals | **0** | **1（active）** |
