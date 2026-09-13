@@ -270,8 +270,8 @@ DO $tasks$
 DECLARE
   d     demo_input%ROWTYPE;
   v_res jsonb;
-  -- 週期性與長期任務都從「上週一」開始，這個家庭才會像是已經運作了一段時間，
-  -- 而且背景完成紀錄（下一個區塊）落得進各自的 plan window。
+  -- 多數週期性與長期任務從「上週一」開始；四週閱讀計畫會再往前兩週，
+  -- 讓顧問有真的跨週紀錄可比較。背景完成都必須落在各自的 plan window。
   -- 單次任務不挪：它就是要當成「今天還沒做的那一件」。
   v_start date := pg_temp.demo_this_monday() - 7;
 BEGIN
@@ -309,12 +309,13 @@ BEGIN
   -- 4. 四週閱讀計畫｜成長計畫｜五個里程碑
   --    刻意不標記任何里程碑為已完成 —— 目前沒有 milestone completion model，
   --    任何「已完成」都會是編的。
+  --    這一筆從三週前開始，剛好涵蓋三個已結束週與本週；其他任務仍從上週開始。
   v_res := create_parent_task_v1(jsonb_set(
     pg_temp.demo_long(pg_temp.demo_from(pg_temp.demo_command(
       d.child_id, d.family_id, '四週閱讀計畫', 'growth_plan', 'learning_skill',
       'long_term', 'growth_plan', 'progress_only', 'plan_complete', 'fixed_days',
       pg_temp.demo_plain('progress_only'), 'd0e70000-0000-4000-8000-0000000000a4'::uuid,
-      '一起把閱讀變成日常', '每次讀完和家人說一段'), v_start), 28),
+      '一起把閱讀變成日常', '每次讀完和家人說一段'), v_start - 14), 28),
     '{plan,milestones}', jsonb_build_array(
       jsonb_build_object('title', '找到想讀的第一本書', 'targetDay', 3),
       jsonb_build_object('title', '連續三天各讀一段',   'targetDay', 7),
@@ -440,6 +441,8 @@ DECLARE
   d demo_input%ROWTYPE;
   v_today       date := (now() AT TIME ZONE 'Asia/Taipei')::date;
   v_this_monday date := pg_temp.demo_this_monday();
+  v_three_weeks_ago date := pg_temp.demo_this_monday() - 21;
+  v_two_weeks_ago   date := pg_temp.demo_this_monday() - 14;
   v_last_monday date := pg_temp.demo_this_monday() - 7;
   v_elapsed     date[] := ARRAY[]::date[];
   v_day         date;
@@ -471,12 +474,20 @@ BEGIN
     RAISE EXCEPTION '背景紀錄找不到對應任務，seed 的任務名稱可能被改過了';
   END IF;
 
+  -- ── 更早兩週：只補閱讀線，讓顧問能比較「跨週變化」───────────────
+  -- 第一週一次且需要提醒；第二週兩次，一次提醒、一次自行開始。
+  -- 所有紀錄仍走 complete_task + record_completion_context，不手寫摘要。
+  PERFORM pg_temp.demo_complete(v_reading, d.child_id, v_three_weeks_ago + 2, 21, 'before_bed', 'reminded');
+  PERFORM pg_temp.demo_complete(v_reading, d.child_id, v_two_weeks_ago,     21, 'before_bed', 'reminded');
+  PERFORM pg_temp.demo_complete(v_reading, d.child_id, v_two_weeks_ago + 4, 21, 'before_bed', 'self_started');
+
   -- ── 上週：三天、五筆 ──────────────────────────────────────────────────────
   PERFORM pg_temp.demo_complete(v_exercise, d.child_id, v_last_monday,     19, 'after_dinner', 'self_started');
   PERFORM pg_temp.demo_complete(v_bag,      d.child_id, v_last_monday,     21, 'before_bed',   'reminded');
   PERFORM pg_temp.demo_complete(v_dinner,   d.child_id, v_last_monday + 2, 19, 'after_dinner', 'self_started');
   PERFORM pg_temp.demo_complete(v_reading,  d.child_id, v_last_monday + 2, 21, 'before_bed',   'reminded');
   PERFORM pg_temp.demo_complete(v_exercise, d.child_id, v_last_monday + 4, 19, 'after_dinner', 'self_started');
+  PERFORM pg_temp.demo_complete(v_reading,  d.child_id, v_last_monday + 4, 21, 'before_bed',   'self_started');
 
   -- 技能類：兩次練習紀錄，只是「今天有練」的 session check-in，不會推進
   -- current_level（LT-FINAL-1.1 §D：session check-in ≠ progress advancement，
@@ -542,8 +553,8 @@ BEGIN
   END IF;
 
   SELECT count(*) INTO v_count FROM task_completions WHERE child_id = v_child;
-  IF v_count <> 11 THEN
-    RAISE EXCEPTION '背景完成紀錄應該是 11 筆（上週 5 + 本週 4 + 技能練習 2），實際 %', v_count;
+  IF v_count <> 15 THEN
+    RAISE EXCEPTION '背景完成紀錄應該是 15 筆（跨週閱讀 4 + 原背景 11），實際 %', v_count;
   END IF;
 END
 $wallet_check$;

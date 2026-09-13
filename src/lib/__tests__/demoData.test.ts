@@ -351,8 +351,8 @@ describe('P0-10A. State A 的背景紀錄', () => {
     expect(body).toMatch(/RAISE EXCEPTION[^;]*追不回任何一次完成/);
   });
 
-  it('背景完成筆數是固定的（上週 5 + 本週 4 + 技能練習 2）', () => {
-    expect(body).toMatch(/v_count <> 11/);
+  it('背景完成筆數是固定的（跨週閱讀 4 + 原背景 11）', () => {
+    expect(body).toMatch(/v_count <> 15/);
   });
 });
 

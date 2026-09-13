@@ -493,7 +493,7 @@ suite('P0-8M · staging vertical slice', () => {
   it('§24 accept 前後：completion / transaction / wallet / 2／3 完全相同', () => {
     expectNoClawback(baseline, afterAccept);
     expect(afterAccept.walletBalance).toBe(56);
-    expect(afterAccept.familyCompletionCount).toBe(11);
+    expect(afterAccept.familyCompletionCount).toBe(15);
     expect(afterAccept.transactionIds).toHaveLength(5);
   });
 

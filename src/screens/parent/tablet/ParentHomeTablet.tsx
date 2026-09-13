@@ -108,6 +108,10 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { taipeiDayRange } from '../../../lib/taipeiDate';
+import {
+  loadAdvisorRecentFamilyContext,
+  type AdvisorRecentFamilyContext,
+} from '../../../lib/advisorRecentContext';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -2202,6 +2206,13 @@ function AdvisorSideSheet({
   const [weekHistory, setWeekHistory] = useState<{ dateLabel: string; tasks: string[] }[]>([]);
   const [scheduleCandidates, setScheduleCandidates] = useState<AdvisorScheduleCandidate[]>([]);
   const [recurrenceCandidates, setRecurrenceCandidates] = useState<AdvisorRecurrenceCandidate[]>([]);
+  const [weekHistoryLoaded, setWeekHistoryLoaded] = useState(false);
+  const [candidatesLoaded, setCandidatesLoaded] = useState(false);
+  const [recentContextLoaded, setRecentContextLoaded] = useState(false);
+  const [recentFamilyContext, setRecentFamilyContext] = useState<AdvisorRecentFamilyContext>({
+    completedWeeks: [],
+    latestSharedPlanChange: null,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -2283,6 +2294,8 @@ function AdvisorSideSheet({
         setRecurrenceCandidates(recurrence);
       } catch (err) {
         console.error('[AdvisorSideSheet] loadCandidates error:', err);
+      } finally {
+        if (!cancelled) setCandidatesLoaded(true);
       }
     }
     void loadCandidates();
@@ -2320,11 +2333,32 @@ function AdvisorSideSheet({
         setWeekHistory([...byDay.entries()].map(([dateLabel, dayTasks]) => ({ dateLabel, tasks: dayTasks })));
       } catch (err) {
         console.error('[AdvisorSideSheet] loadWeekHistory error:', err);
+      } finally {
+        if (!cancelled) setWeekHistoryLoaded(true);
       }
     }
     void loadWeekHistory();
     return () => { cancelled = true; };
   }, [childId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadRecentContext() {
+      try {
+        const context = await loadAdvisorRecentFamilyContext(childId);
+        if (!cancelled) setRecentFamilyContext(context);
+      } catch (err) {
+        // Loader 本身已逐來源降級；這層是最後保險，顧問不因跨週脈絡失效而不可用。
+        console.error('[AdvisorSideSheet] loadRecentContext error:', err);
+      } finally {
+        if (!cancelled) setRecentContextLoaded(true);
+      }
+    }
+    void loadRecentContext();
+    return () => { cancelled = true; };
+  }, [childId]);
+
+  const contextReady = weekHistoryLoaded && candidatesLoaded && recentContextLoaded;
 
   const ask = useCallback(
     async (question: string, historyBefore: AdvisorChatMessage[]) => {
@@ -2344,6 +2378,7 @@ function AdvisorSideSheet({
         history: historyBefore.map(m => ({ role: m.role, text: m.text })),
         scheduleCandidates,
         recurrenceCandidates,
+        recentFamilyContext,
       });
       setMessages(prev => [
         ...prev,
@@ -2351,7 +2386,7 @@ function AdvisorSideSheet({
       ]);
       setSending(false);
     },
-    [childName, doneToday, totalToday, todayTasks, weekHistory, ltItems, scheduleCandidates, recurrenceCandidates],
+    [childName, doneToday, totalToday, todayTasks, weekHistory, ltItems, scheduleCandidates, recurrenceCandidates, recentFamilyContext],
   );
 
   const handleAdoptSuggestion = useCallback(async (messageIndex: number, action: AdvisorSuggestedAction) => {
@@ -2372,17 +2407,16 @@ function AdvisorSideSheet({
   }, []);
 
   useEffect(() => {
-    if (initialPrompt && !askedInitial.current) {
+    if (initialPrompt && contextReady && !askedInitial.current) {
       askedInitial.current = true;
       setMessages([{ role: 'parent', text: initialPrompt, at: dayjs().format('HH:mm') }]);
       void ask(initialPrompt, []);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [initialPrompt, contextReady, ask]);
 
   const handleSend = () => {
     const text = input.trim();
-    if (!text || sending) return;
+    if (!text || sending || !contextReady) return;
     setInput('');
     setMessages(prev => {
       const historyBefore = prev;
@@ -2481,11 +2515,12 @@ function AdvisorSideSheet({
             onChangeText={setInput}
             onSubmitEditing={handleSend}
             returnKeyType="send"
+            editable={contextReady}
           />
           <TouchableOpacity
-            style={[styles.chatSendBtn, sending && styles.chatSendBtnDisabled]}
+            style={[styles.chatSendBtn, (sending || !contextReady) && styles.chatSendBtnDisabled]}
             onPress={handleSend}
-            disabled={sending}
+            disabled={sending || !contextReady}
             activeOpacity={0.8}
           >
             <SendArrowIcon size={14} color="#fff" />

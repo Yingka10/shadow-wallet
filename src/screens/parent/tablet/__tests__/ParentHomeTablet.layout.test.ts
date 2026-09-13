@@ -160,6 +160,14 @@ describe('ParentHomeTablet layout tokens', () => {
     expect(parentHomeTabletStyles).not.toHaveProperty('advisorOpenButton');
   });
 
+  it('waits for recent family context before the first advisor request', () => {
+    expect(homeSource).toContain('loadAdvisorRecentFamilyContext(childId)');
+    expect(homeSource).toContain('recentFamilyContext,');
+    expect(homeSource).toContain('const contextReady = weekHistoryLoaded && candidatesLoaded && recentContextLoaded');
+    expect(homeSource).toContain('initialPrompt && contextReady && !askedInitial.current');
+    expect(homeSource).toContain('sending || !contextReady');
+  });
+
   // v15：畫布從冷白改成暖 off-white。冷白（#FBFCFC）跟白卡幾乎同色，卡片浮不
   // 出來，逼得個別卡片自己去上米黃底才顯得像卡——整頁於是變成紙本表單。
   // 畫布退半階、卡片維持純白，卡片感由對比提供，不必再靠上色。
