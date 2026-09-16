@@ -2211,6 +2211,7 @@ function AdvisorSideSheet({
   const [recentContextLoaded, setRecentContextLoaded] = useState(false);
   const [recentFamilyContext, setRecentFamilyContext] = useState<AdvisorRecentFamilyContext>({
     completedWeeks: [],
+    weeklyMemories: [],
     latestSharedPlanChange: null,
   });
 

@@ -29,6 +29,16 @@ describe('chatWithAdvisor recent family context', () => {
             remindedCount: 1,
           }],
         }],
+        weeklyMemories: [{
+          weekStart: '2026-08-24',
+          salientLines: [{
+            key: 'C',
+            label: '學習與技能',
+            status: 'watch',
+            facts: ['閱讀完成次數比前一週增加'],
+          }],
+          allStable: false,
+        }],
         latestSharedPlanChange: null,
       },
     };

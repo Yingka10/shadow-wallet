@@ -12,7 +12,13 @@ dayjs.extend(isoWeek);
 
 const TZ = 'Asia/Taipei';
 export const ADVISOR_RECENT_COMPLETED_WEEKS = 4;
+export const ADVISOR_WEEKLY_MEMORY_TOTAL_WEEKS = 12;
+export const ADVISOR_OLDER_WEEKLY_MEMORIES =
+  ADVISOR_WEEKLY_MEMORY_TOTAL_WEEKS - ADVISOR_RECENT_COMPLETED_WEEKS;
 const MAX_TASKS_PER_WEEK = 8;
+const MAX_MEMORY_LINES_PER_WEEK = 2;
+const MAX_MEMORY_FACTS_PER_LINE = 3;
+const MAX_MEMORY_FACT_LENGTH = 120;
 
 export type AdvisorRecentTaskActivity = {
   taskName: string;
@@ -33,9 +39,23 @@ export type AdvisorSharedPlanChange = {
   changes: string[];
 };
 
+export type AdvisorWeeklyMemory = {
+  weekStart: string;
+  salientLines: Array<{
+    key: 'A' | 'B' | 'C' | 'D';
+    label: string;
+    status: 'watch' | 'needs_discussion';
+    facts: string[];
+  }>;
+  /** 只有四條成長線都通過結構驗證且皆為 stable 時才會是 true。 */
+  allStable: boolean;
+};
+
 export type AdvisorRecentFamilyContext = {
   /** 已結束的 ISO 週，依時間由舊到新；不把本週未完資料跟完整週直接相比。 */
   completedWeeks: AdvisorRecentWeek[];
+  /** 最近四週之前的壓縮週脈絡，依時間由舊到新；只含 deterministic facts。 */
+  weeklyMemories: AdvisorWeeklyMemory[];
   /** 最近一筆已生效共同版本相對於它採用來源的可確認差異。 */
   latestSharedPlanChange: AdvisorSharedPlanChange | null;
 };
@@ -44,6 +64,11 @@ type CompletionRow = {
   task_id: string;
   completed_at: string;
   start_mode: string | null;
+};
+
+type WeeklyReportRow = {
+  week_start: unknown;
+  ai_suggestions: unknown;
 };
 
 type PlanComparable = Pick<
@@ -95,6 +120,85 @@ function formatPreferredTime(plan: PlanComparable): string {
     flexible: '彈性安排',
   };
   return plan.preferred_time ? (labels[plan.preferred_time] ?? plan.preferred_time) : '未指定時段';
+}
+
+function boundedText(value: unknown, maxLength: number): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return text ? text.slice(0, maxLength) : null;
+}
+
+function validWeekStart(value: unknown): string | null {
+  const text = boundedText(value, 10);
+  if (!text || !/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  const parsed = dayjs.tz(text, TZ);
+  return parsed.isValid() && parsed.format('YYYY-MM-DD') === text ? text : null;
+}
+
+/**
+ * 把較早的 weekly_reports 壓成可餵給顧問的週記憶。只讀 growth_lines 的
+ * key/status/facts；summary、next_step、motivation_observation 等 AI prose 一律不回餵。
+ */
+export function buildAdvisorWeeklyMemories(
+  rows: WeeklyReportRow[],
+  currentWeekStart: string,
+): AdvisorWeeklyMemory[] {
+  const currentStart = dayjs.tz(currentWeekStart, TZ).startOf('day');
+  const earliest = currentStart.subtract(ADVISOR_WEEKLY_MEMORY_TOTAL_WEEKS, 'week');
+  const recentCutoff = currentStart.subtract(ADVISOR_RECENT_COMPLETED_WEEKS, 'week');
+  const priority = { needs_discussion: 0, watch: 1 } as const;
+
+  return rows
+    .map(row => {
+      const weekStart = validWeekStart(row.week_start);
+      if (!weekStart) return null;
+      const week = dayjs.tz(weekStart, TZ);
+      if (week.isBefore(earliest) || !week.isBefore(recentCutoff)) return null;
+
+      const suggestions = row.ai_suggestions;
+      if (!suggestions || typeof suggestions !== 'object' || Array.isArray(suggestions)) return null;
+      const rawLines = (suggestions as { growth_lines?: unknown }).growth_lines;
+      if (!Array.isArray(rawLines) || rawLines.length === 0) return null;
+
+      const parsedLines = rawLines.map((raw, index) => {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+        const line = raw as Record<string, unknown>;
+        const key = typeof line.key === 'string' && ['A', 'B', 'C', 'D'].includes(line.key)
+          ? line.key as 'A' | 'B' | 'C' | 'D'
+          : null;
+        const label = boundedText(line.label, 40);
+        const status = line.status === 'stable' || line.status === 'watch' || line.status === 'needs_discussion'
+          ? line.status
+          : null;
+        if (!key || !label || !status || !Array.isArray(line.facts)) return null;
+        const facts = line.facts
+          .map(fact => boundedText(fact, MAX_MEMORY_FACT_LENGTH))
+          .filter((fact): fact is string => fact != null)
+          .slice(0, MAX_MEMORY_FACTS_PER_LINE);
+        return { key, label, status, facts, index };
+      });
+
+      const validLines = parsedLines.filter((line): line is NonNullable<typeof line> => line != null);
+      const validKeys = new Set(validLines.map(line => line.key));
+      const allStable = rawLines.length === 4
+        && validLines.length === 4
+        && validKeys.size === 4
+        && validLines.every(line => line.status === 'stable');
+      if (allStable) return { weekStart, salientLines: [], allStable: true };
+
+      const salientLines = validLines
+        .filter((line): line is typeof line & { status: 'watch' | 'needs_discussion' } =>
+          line.status !== 'stable' && line.facts.length > 0)
+        .sort((a, b) => priority[a.status] - priority[b.status] || a.index - b.index)
+        .slice(0, MAX_MEMORY_LINES_PER_WEEK)
+        .map(({ key, label, status, facts }) => ({ key, label, status, facts }));
+      return salientLines.length > 0
+        ? { weekStart, salientLines, allStable: false }
+        : null;
+    })
+    .filter((memory): memory is AdvisorWeeklyMemory => memory != null)
+    .sort((a, b) => a.weekStart.localeCompare(b.weekStart))
+    .slice(-ADVISOR_OLDER_WEEKLY_MEMORIES);
 }
 
 /**
@@ -184,8 +288,8 @@ const PLAN_FIELDS = [
 ].join(', ');
 
 /**
- * 讀取顧問用的最小跨週脈絡。兩個來源彼此獨立降級：完成歷史或共同版本其中
- * 一邊查不到，另一邊仍可用；整段失敗也只回空 context，不阻斷顧問聊天。
+ * 讀取顧問用的分層跨週脈絡。三個來源彼此獨立降級：完成歷史、較早週記憶或
+ * 共同版本任一邊查不到，其他仍可用；整段失敗也不阻斷顧問聊天。
  */
 export async function loadAdvisorRecentFamilyContext(
   childId: string,
@@ -193,6 +297,7 @@ export async function loadAdvisorRecentFamilyContext(
   const currentWeekStart = dayjs().tz(TZ).startOf('isoWeek');
   const earliestStart = currentWeekStart.subtract(ADVISOR_RECENT_COMPLETED_WEEKS, 'week');
   let completedWeeks: AdvisorRecentWeek[] = [];
+  let weeklyMemories: AdvisorWeeklyMemory[] = [];
   let latestSharedPlanChange: AdvisorSharedPlanChange | null = null;
 
   try {
@@ -223,6 +328,25 @@ export async function loadAdvisorRecentFamilyContext(
     );
   } catch (err) {
     console.warn('[advisorRecentContext] completion history unavailable:', err);
+  }
+
+  try {
+    const memoryStart = currentWeekStart.subtract(ADVISOR_WEEKLY_MEMORY_TOTAL_WEEKS, 'week');
+    const recentCutoff = currentWeekStart.subtract(ADVISOR_RECENT_COMPLETED_WEEKS, 'week');
+    const { data: reportRows, error: reportError } = await supabase
+      .from('weekly_reports')
+      .select('week_start, ai_suggestions')
+      .eq('child_id', childId)
+      .gte('week_start', memoryStart.format('YYYY-MM-DD'))
+      .lt('week_start', recentCutoff.format('YYYY-MM-DD'))
+      .order('week_start', { ascending: true });
+    if (reportError) throw reportError;
+    weeklyMemories = buildAdvisorWeeklyMemories(
+      (reportRows ?? []) as WeeklyReportRow[],
+      currentWeekStart.format('YYYY-MM-DD'),
+    );
+  } catch (err) {
+    console.warn('[advisorRecentContext] weekly memory unavailable:', err);
   }
 
   try {
@@ -289,5 +413,5 @@ export async function loadAdvisorRecentFamilyContext(
     console.warn('[advisorRecentContext] shared-plan history unavailable:', err);
   }
 
-  return { completedWeeks, latestSharedPlanChange };
+  return { completedWeeks, weeklyMemories, latestSharedPlanChange };
 }

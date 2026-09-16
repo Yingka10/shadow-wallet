@@ -9,6 +9,16 @@ export type AdvisorRecentFamilyContext = {
       remindedCount?: unknown;
     }>;
   }>;
+  weeklyMemories?: Array<{
+    weekStart?: unknown;
+    salientLines?: Array<{
+      key?: unknown;
+      label?: unknown;
+      status?: unknown;
+      facts?: unknown;
+    }>;
+    allStable?: unknown;
+  }>;
   latestSharedPlanChange?: {
     taskName?: unknown;
     changedAt?: unknown;
@@ -62,6 +72,38 @@ export function formatAdvisorRecentContext(
     })
     .filter((section): section is string => section != null);
 
+  const memorySections = (Array.isArray(context.weeklyMemories) ? context.weeklyMemories : [])
+    .slice(-8)
+    .map(memory => {
+      const weekStart = safeText(memory?.weekStart, 10);
+      if (!weekStart) return null;
+      if (memory?.allStable === true) return `- ${weekStart}\n  - 各成長線大致穩定`;
+      if (!Array.isArray(memory?.salientLines)) return null;
+      const lineSections = memory.salientLines
+        .slice(0, 2)
+        .map(line => {
+          const key = safeText(line?.key, 1);
+          const label = safeText(line?.label, 40);
+          const status = line?.status === 'needs_discussion'
+            ? '需要一起討論'
+            : line?.status === 'watch'
+              ? '先觀察'
+              : null;
+          if (!key || !['A', 'B', 'C', 'D'].includes(key) || !label || !status) return null;
+          const facts = Array.isArray(line?.facts)
+            ? line.facts
+                .slice(0, 3)
+                .map(fact => safeText(fact, 120))
+                .filter((fact): fact is string => fact != null)
+            : [];
+          if (facts.length === 0) return null;
+          return `  - ${label}：${status}\n${facts.map(fact => `    - ${fact}`).join('\n')}`;
+        })
+        .filter((line): line is string => line != null);
+      return lineSections.length > 0 ? `- ${weekStart}\n${lineSections.join('\n')}` : null;
+    })
+    .filter((section): section is string => section != null);
+
   const change = context.latestSharedPlanChange;
   const changeTaskName = safeText(change?.taskName, 40);
   const changedAt = safeText(change?.changedAt, 35);
@@ -75,6 +117,9 @@ export function formatAdvisorRecentContext(
   const sections: string[] = [];
   if (weekSections.length > 0) {
     sections.push(`【最近幾個已結束週期的完成紀錄（由舊到新）】\n${weekSections.join('\n')}`);
+  }
+  if (memorySections.length > 0) {
+    sections.push(`【較早的跨週脈絡（由舊到新，僅用來辨識變化）】\n${memorySections.join('\n')}`);
   }
   if (changeTaskName && changedAt && changes.length > 0) {
     sections.push(

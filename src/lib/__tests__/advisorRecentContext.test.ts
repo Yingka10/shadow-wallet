@@ -1,11 +1,33 @@
-jest.mock('../supabase', () => ({ supabase: {} }));
+const mockFrom = jest.fn();
+
+jest.mock('../supabase', () => ({
+  supabase: { from: (...args: unknown[]) => mockFrom(...args) },
+}));
 
 import {
+  buildAdvisorWeeklyMemories,
   buildRecentCompletedWeeks,
   buildSharedPlanChange,
+  loadAdvisorRecentFamilyContext,
 } from '../advisorRecentContext';
 
+function queryResult(result: { data: unknown; error: unknown }) {
+  const query: Record<string, unknown> = {};
+  for (const method of ['select', 'eq', 'gte', 'lt', 'order', 'not', 'in']) {
+    query[method] = jest.fn(() => query);
+  }
+  query.then = (
+    resolve: (value: { data: unknown; error: unknown }) => unknown,
+    reject?: (reason: unknown) => unknown,
+  ) => Promise.resolve(result).then(resolve, reject);
+  return query;
+}
+
 describe('advisorRecentContext', () => {
+  beforeEach(() => {
+    mockFrom.mockReset();
+  });
+
   it('groups only completed weeks in Taipei time and keeps an empty current week out', () => {
     const weeks = buildRecentCompletedWeeks(
       [
@@ -95,5 +117,104 @@ describe('advisorRecentContext', () => {
       created_at: '2026-09-01T00:00:00.000Z',
     };
     expect(buildSharedPlanChange({ taskName: '運動', source: version, current: version })).toBeNull();
+  });
+
+  it('keeps at most two salient deterministic lines and prioritizes needs_discussion', () => {
+    const memories = buildAdvisorWeeklyMemories([
+      {
+        week_start: '2026-08-10',
+        ai_suggestions: {
+          growth_lines: [
+            { key: 'A', label: '生活自理', status: 'watch', facts: ['A fact'], summary: '不應進入 memory' },
+            { key: 'B', label: '家庭參與', status: 'needs_discussion', facts: ['B fact'] },
+            { key: 'C', label: '學習與技能', status: 'needs_discussion', facts: ['C fact'] },
+            { key: 'D', label: '自主與負責', status: 'watch', facts: ['D fact'] },
+          ],
+          next_step: '這也是 AI prose，不應進入 memory',
+        },
+      },
+    ], '2026-09-14');
+
+    expect(memories).toEqual([{
+      weekStart: '2026-08-10',
+      salientLines: [
+        { key: 'B', label: '家庭參與', status: 'needs_discussion', facts: ['B fact'] },
+        { key: 'C', label: '學習與技能', status: 'needs_discussion', facts: ['C fact'] },
+      ],
+      allStable: false,
+    }]);
+    expect(JSON.stringify(memories)).not.toContain('summary');
+    expect(JSON.stringify(memories)).not.toContain('next_step');
+  });
+
+  it('compresses a fully valid stable week without carrying four lines of prose', () => {
+    const growthLines = (['A', 'B', 'C', 'D'] as const).map(key => ({
+      key,
+      label: `${key} label`,
+      status: 'stable',
+      facts: [`${key} fact`],
+      summary: `${key} summary`,
+    }));
+    expect(buildAdvisorWeeklyMemories([
+      { week_start: '2026-08-03', ai_suggestions: { growth_lines: growthLines } },
+    ], '2026-09-14')).toEqual([{
+      weekStart: '2026-08-03',
+      salientLines: [],
+      allStable: true,
+    }]);
+  });
+
+  it('skips malformed report data and does not falsely call a partially valid week stable', () => {
+    const memories = buildAdvisorWeeklyMemories([
+      { week_start: '2026-08-03', ai_suggestions: 'bad-json-shape' },
+      {
+        week_start: '2026-08-10',
+        ai_suggestions: {
+          growth_lines: [
+            { key: 'A', label: '生活自理', status: 'stable', facts: ['ok'] },
+            { key: {}, label: '壞資料', status: 'stable', facts: [] },
+          ],
+        },
+      },
+    ], '2026-09-14');
+    expect(memories).toEqual([]);
+  });
+
+  it('uses the 12-week calendar window and excludes the recent four weeks', () => {
+    const line = {
+      key: 'C', label: '學習與技能', status: 'watch', facts: ['本週先觀察'], summary: '略',
+    };
+    const memories = buildAdvisorWeeklyMemories([
+      { week_start: '2026-06-15', ai_suggestions: { growth_lines: [line] } }, // 12 週以前
+      { week_start: '2026-06-22', ai_suggestions: { growth_lines: [line] } }, // 邊界，可用
+      { week_start: '2026-08-10', ai_suggestions: { growth_lines: [line] } }, // 較早 memory 最後一週
+      { week_start: '2026-08-17', ai_suggestions: { growth_lines: [line] } }, // 最近四週，排除
+      { week_start: '2026-09-14', ai_suggestions: { growth_lines: [line] } }, // 當週，排除
+    ], '2026-09-14');
+    expect(memories.map(memory => memory.weekStart)).toEqual(['2026-06-22', '2026-08-10']);
+  });
+
+  it('keeps the other context sources usable when weekly memory query fails', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'weekly_reports') {
+        return queryResult({ data: null, error: new Error('weekly reports unavailable') });
+      }
+      if (table === 'task_completions' || table === 'child_proposals') {
+        return queryResult({ data: [], error: null });
+      }
+      throw new Error(`unexpected table: ${table}`);
+    });
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await expect(loadAdvisorRecentFamilyContext('child-1')).resolves.toEqual({
+      completedWeeks: [],
+      weeklyMemories: [],
+      latestSharedPlanChange: null,
+    });
+    expect(warn).toHaveBeenCalledWith(
+      '[advisorRecentContext] weekly memory unavailable:',
+      expect.any(Error),
+    );
+    warn.mockRestore();
   });
 });
