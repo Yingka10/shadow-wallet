@@ -1970,8 +1970,8 @@ const s = StyleSheet.create({
   },
   summaryEvidence: {
     fontFamily: ParentFonts.display,
-    fontSize: 15,
-    lineHeight: 23,
+    fontSize: 17,
+    lineHeight: 26,
     color: ParentColors.fgSecondary,
     marginTop: 10,
   },
