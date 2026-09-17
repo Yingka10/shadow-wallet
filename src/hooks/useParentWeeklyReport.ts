@@ -278,6 +278,27 @@ function getWeekBounds(offset: number) {
   return { start, end };
 }
 
+/** 最多可以往回看幾週——canGoBack／goBack 共用同一個常數，避免兩處各自寫一個數字、對不上。 */
+export const MAX_WEEKS_BACK = 4;
+
+/**
+ * goBack 按鈕的下一個 weekOffset。曾經寫成 `Math.max(o - 1, -1)`——多打了一個
+ * `-1`，導致點過一次「上一週」之後不管再點幾次都卡在 -1，canGoBack 卻還顯示
+ * 可以繼續往回（因為它比對的是 -4），使用者會覺得「更早的週報都看不到」。
+ * 這裡抽成獨立函式，讓這個下限值只有一個地方可以錯。
+ */
+export function computeWeekOffsetAfterGoBack(current: number): number {
+  return Math.max(current - 1, -MAX_WEEKS_BACK);
+}
+
+export function computeWeekOffsetAfterGoForward(current: number): number {
+  return Math.min(current + 1, 0);
+}
+
+export function canGoBackFrom(offset: number): boolean {
+  return offset > -MAX_WEEKS_BACK;
+}
+
 /**
  * Pure merge step behind patchSuggestionRecord: find the matching (taskId, action)
  * entry and patch it, or append a freshly-seeded one if it isn't there yet
@@ -1067,10 +1088,10 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     loading,
     error,
     weekOffset,
-    canGoBack: weekOffset > -4,
+    canGoBack: canGoBackFrom(weekOffset),
     canGoForward: weekOffset < 0,
-    goBack: () => setWeekOffset(o => Math.max(o - 1, -1)),
-    goForward: () => setWeekOffset(o => Math.min(o + 1, 0)),
+    goBack: () => setWeekOffset(computeWeekOffsetAfterGoBack),
+    goForward: () => setWeekOffset(computeWeekOffsetAfterGoForward),
     addMoment,
     refresh: fetchAll,
     requestAiRefresh,

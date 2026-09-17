@@ -1,6 +1,9 @@
 import {
   applySuggestionMutation,
+  canGoBackFrom,
   computeRevertTarget,
+  computeWeekOffsetAfterGoBack,
+  computeWeekOffsetAfterGoForward,
   mergeSuggestionPatch,
   pickFocusSuggestion,
   type WeeklySuggestion,
@@ -153,6 +156,37 @@ describe('pickFocusSuggestion', () => {
       'D',
     );
     expect(result).toBe(forD);
+  });
+});
+
+describe('週次導航（goBack/goForward/canGoBack）', () => {
+  // 這組是真的線上回歸：goBack 曾經寫成 Math.max(o - 1, -1)，多打了一個 -1，
+  // 導致點過一次「上一週」之後不管再點幾次都卡在 -1（上週），canGoBack 卻
+  // 還比對 -4、顯示按鈕可以繼續按——使用者看起來像是「更早的週報都消失了」。
+  it('連續點擊 goBack 4 次，weekOffset 應該依序走到 -1/-2/-3/-4，不能卡在 -1', () => {
+    let offset = 0;
+    const seen: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      offset = computeWeekOffsetAfterGoBack(offset);
+      seen.push(offset);
+    }
+    expect(seen).toEqual([-1, -2, -3, -4]);
+  });
+
+  it('已經在 -4（最早可回溯週）時，再按 goBack 不會超過下限', () => {
+    expect(computeWeekOffsetAfterGoBack(-4)).toBe(-4);
+  });
+
+  it('canGoBack 在 -4 之前都應該是 true，到了 -4 就是 false（跟 goBack 的下限一致）', () => {
+    expect(canGoBackFrom(0)).toBe(true);
+    expect(canGoBackFrom(-1)).toBe(true);
+    expect(canGoBackFrom(-3)).toBe(true);
+    expect(canGoBackFrom(-4)).toBe(false);
+  });
+
+  it('goForward 不會超過本週（0）', () => {
+    expect(computeWeekOffsetAfterGoForward(-1)).toBe(0);
+    expect(computeWeekOffsetAfterGoForward(0)).toBe(0);
   });
 });
 
