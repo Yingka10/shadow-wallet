@@ -579,6 +579,13 @@ const GROWTH_STATUS_META: Record<WeeklyGrowthLine['status'], { label: string; co
   needs_discussion: { label: '值得一起看看', color: ParentColors.plum500, tint: '#F4EBF0' },
 };
 
+/** 「本週整理」計數 pill 用的小圖示。 */
+const STATUS_STRIP_ICON: Record<WeeklyGrowthLine['status'], string> = {
+  stable: '📈',
+  watch: '🔍',
+  needs_discussion: '👥',
+};
+
 /**
  * 一條成長線的卡片。facts 只取第一條當摘要下面的佐證（deterministic 算好的，
  * 不是 AI 掰的）——其餘 facts 不在這裡塞滿，避免資訊密度暴增，細節留給
@@ -685,52 +692,75 @@ function WeeklySynthesisCard({
         <Text key={i} style={s.summaryEvidence}>{p}</Text>
       ))}
       {countsStrip.length > 0 && (
-        <Text style={s.countsStripText}>
-          {countsStrip.map((c, i) => (
-            <Text key={c.status} style={{ color: GROWTH_STATUS_META[c.status].color, fontWeight: ParentFontWeights.semi }}>
-              {i > 0 ? '　·　' : ''}{c.count} 條{GROWTH_STATUS_META[c.status].label}
-            </Text>
-          ))}
-        </Text>
-      )}
-
-      {line && (
-        <>
-          {/* ② 為什麼這條值得看 */}
-          <View style={s.summaryDivider} />
-          <View style={s.evidenceBlock}>
-            <Text style={s.evidenceLineLabel}>{line.label}</Text>
-            {line.facts.slice(0, 2).map((fact, i) => (
-              <Text key={i} style={s.growthLineFact}>
-                {fact.includes('提醒') ? `🔔 ${fact}` : fact}
+        <View style={s.countsPillRow}>
+          {countsStrip.map(c => (
+            <View key={c.status} style={[s.countsPill, { backgroundColor: GROWTH_STATUS_META[c.status].tint }]}>
+              <Text style={s.countsPillIcon}>{STATUS_STRIP_ICON[c.status]}</Text>
+              <Text style={[s.countsPillText, { color: GROWTH_STATUS_META[c.status].color }]}>
+                {c.count} 條{GROWTH_STATUS_META[c.status].label}
               </Text>
-            ))}
-          </View>
-
-          {/* ③ 下一步 */}
-          <View style={s.summaryDivider} />
-          <View>
-            <Text style={s.nextStepLabel}>下一步</Text>
-            {focusReviewPrompt ? (
-              <ReviewPromptCard
-                item={{
-                  ...focusReviewPrompt,
-                  // 只換顯示標題，title 本身不動——onDefer/onAcknowledge 會把
-                  // title 當 taskName 存進 DB，改了 title 會污染資料庫紀錄。
-                  displayTitle: (focusReviewPrompt.action && FOCUS_SUGGESTION_HEADING[focusReviewPrompt.action])
-                    ?? '先看看要不要調整',
-                }}
-                onAdopt={onAdopt}
-                onDefer={onDefer}
-                onRevert={onRevert}
-                onAcknowledge={onAcknowledge}
-              />
-            ) : nextStep ? (
-              <Text style={[s.nextStepText, { marginTop: 4 }]}>{nextStep}</Text>
-            ) : null}
-          </View>
-        </>
+            </View>
+          ))}
+        </View>
       )}
+
+      {line && (() => {
+        // facts 是固定樣板產生的字串（buildCategoryFacts，見 validators.ts），
+        // 用固定前綴比對抓出任務名稱／目標次數／提醒訊號，組成「任務名：原訂
+        // 每週 X 次，本週完成 Y 次」這種合併呈現——不是解析 AI 自由文字，前綴
+        // 是我們自己控制的樣板，比對穩定。
+        const targetFact = line.facts.find(f => f.startsWith('原訂每週') || f.startsWith('本週完成'));
+        const reminderFact = line.facts.find(f => f.includes('提醒'));
+        const namesFact = line.facts.find(f => f.startsWith('實際做的事：'));
+        const taskNamePrefix = namesFact?.replace('實際做的事：', '') ?? null;
+
+        return (
+          <>
+            {/* ② 為什麼這條值得看 */}
+            <View style={s.evidenceCard}>
+              <View style={s.evidenceCardHeader}>
+                <IconBubble bg={GROWTH_STATUS_META[line.status].tint} size={32}>
+                  <Text style={s.evidenceCardIcon}>🎯</Text>
+                </IconBubble>
+                <Text style={s.evidenceLineLabel}>{line.label}</Text>
+              </View>
+              {targetFact ? (
+                <Text style={s.growthLineFact}>
+                  {taskNamePrefix ? `${taskNamePrefix}：${targetFact}` : targetFact}
+                </Text>
+              ) : null}
+              {reminderFact ? <Text style={s.growthLineFact}>🔔 {reminderFact}</Text> : null}
+            </View>
+
+            {/* ③ 下一步 */}
+            <View style={s.nextStepCard}>
+              <View style={s.evidenceCardHeader}>
+                <IconBubble bg="#F4EBF0" size={32}>
+                  <Text style={s.evidenceCardIcon}>📋</Text>
+                </IconBubble>
+                <Text style={s.evidenceLineLabel}>下一步</Text>
+              </View>
+              {focusReviewPrompt ? (
+                <ReviewPromptCard
+                  item={{
+                    ...focusReviewPrompt,
+                    // 只換顯示標題，title 本身不動——onDefer/onAcknowledge 會把
+                    // title 當 taskName 存進 DB，改了 title 會污染資料庫紀錄。
+                    displayTitle: (focusReviewPrompt.action && FOCUS_SUGGESTION_HEADING[focusReviewPrompt.action])
+                      ?? '先看看要不要調整',
+                  }}
+                  onAdopt={onAdopt}
+                  onDefer={onDefer}
+                  onRevert={onRevert}
+                  onAcknowledge={onAcknowledge}
+                />
+              ) : nextStep ? (
+                <Text style={s.nextStepText}>{nextStep}</Text>
+              ) : null}
+            </View>
+          </>
+        );
+      })()}
 
       <View style={s.summaryFooter}>
         <Text style={s.aiFooterText}>{childName || '孩子'} · {weekLabel}</Text>
@@ -1945,30 +1975,60 @@ const s = StyleSheet.create({
     color: ParentColors.fgSecondary,
     marginTop: 10,
   },
-  // 一句計數 strip（例如「2 條穩定・1 條先觀察・1 條值得一起看看」），取代原本
-  // AI 文字第二段（列穩定線佐證）——那段內容本來就跟②③層重複，不再顯示。
-  countsStripText: {
+  // 計數 pill row（例如「📈 3 條穩定」「👥 1 條值得一起看看」），取代原本 AI
+  // 文字第二段（列穩定線佐證）——那段內容本來就跟②③層重複，不用文字重講。
+  countsPillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  countsPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: ParentRadii.pill,
+  },
+  countsPillIcon: {
+    fontSize: 13,
+  },
+  countsPillText: {
     fontFamily: ParentFonts.body,
-    fontSize: 14,
-    marginTop: 8,
+    fontSize: 13,
+    fontWeight: ParentFontWeights.semi,
   },
-  // ②③層之間的細分隔線，比 nextStepBox 那種「加框」更輕，避免又做出一個看起來
-  // 像獨立卡片的區塊——這裡要的是「同一張卡的下一段」，不是第二張卡。
-  summaryDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: ParentColors.borderMedium,
+  // ②③層改成獨立的淺色卡片（不是分隔線）——每張卡自己的圖示 bubble + 標題，
+  // 讓「這是一個可以核對的證據區塊／可以決定的下一步區塊」更明確，不是本週
+  // 整理散文的延伸段落。
+  evidenceCard: {
     marginTop: 16,
-    marginBottom: 14,
-  },
-  evidenceBlock: {
+    padding: 16,
+    borderRadius: ParentRadii.lg,
+    backgroundColor: '#FBF6F8',
     gap: 4,
+  },
+  nextStepCard: {
+    marginTop: 12,
+    padding: 16,
+    borderRadius: ParentRadii.lg,
+    backgroundColor: '#FBF6F8',
+  },
+  evidenceCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 8,
+  },
+  evidenceCardIcon: {
+    fontSize: 15,
   },
   evidenceLineLabel: {
     fontFamily: ParentFonts.display,
     fontSize: 16,
     fontWeight: ParentFontWeights.bold,
     color: ParentColors.fgPrimary,
-    marginBottom: 2,
   },
   summaryFooter: {
     flexDirection: 'row',
@@ -2029,13 +2089,6 @@ const s = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     color: ParentColors.fgMuted,
-  },
-  nextStepLabel: {
-    fontSize: 11.5,
-    fontWeight: ParentFontWeights.semi,
-    color: ParentColors.plum500,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
   },
   nextStepText: {
     fontSize: 14,
