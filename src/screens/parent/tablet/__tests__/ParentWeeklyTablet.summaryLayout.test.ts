@@ -1,4 +1,5 @@
-import { splitSummaryParagraphs } from '../ParentWeeklyTablet';
+import React from 'react';
+import { renderWithBoldCategoryLabels, splitSummaryParagraphs } from '../ParentWeeklyTablet';
 
 // 「本週整理」畫面把同一段 AI/fallback 文字拆成 headline／evidence／focus 三層
 // 顯示（見 GrowBook｜Weekly Report UI Polish §10）——這裡只測「拆」這個純函式，
@@ -42,5 +43,49 @@ describe('splitSummaryParagraphs', () => {
     const result = splitSummaryParagraphs(text);
     expect(result).toHaveLength(3);
     expect(result[0]).toBe('這週多數線都穩，學習與技能這條線這週比較需要花時間聊聊。');
+  });
+});
+
+type BoldTextElement = React.ReactElement<{ children: string; style: object }>;
+
+describe('renderWithBoldCategoryLabels', () => {
+  const boldStyle = { fontWeight: 'bold' };
+
+  it('把文字裡出現的成長線名稱換成粗體 Text，其餘文字原樣保留', () => {
+    const result = renderWithBoldCategoryLabels(
+      '生活與自我管理、家庭參與與關係這兩條這週都有持續完成紀錄。',
+      ['生活與自我管理', '家庭參與與關係'],
+      boldStyle,
+    );
+    expect(Array.isArray(result)).toBe(true);
+    const arr = result as React.ReactNode[];
+    // 依序應該是：粗體「生活與自我管理」、純文字「、」、粗體「家庭參與與關係」、剩餘文字
+    expect(React.isValidElement(arr[0])).toBe(true);
+    expect((arr[0] as BoldTextElement).props.children).toBe('生活與自我管理');
+    expect((arr[0] as BoldTextElement).props.style).toBe(boldStyle);
+    expect(arr[1]).toBe('、');
+    expect(React.isValidElement(arr[2])).toBe(true);
+    expect((arr[2] as BoldTextElement).props.children).toBe('家庭參與與關係');
+  });
+
+  it('沒有任何 label 對到文字時，回傳只有原字串這一個元素的陣列（不硬套粗體）', () => {
+    const result = renderWithBoldCategoryLabels('這週各方面大致穩定。', ['學習與技能'], boldStyle);
+    expect(result).toEqual(['這週各方面大致穩定。']);
+  });
+
+  it('labels 是空陣列時直接回傳原字串', () => {
+    expect(renderWithBoldCategoryLabels('任何文字', [], boldStyle)).toBe('任何文字');
+  });
+
+  it('同一個 label 重複出現在同一句時，每次出現都標成粗體', () => {
+    const result = renderWithBoldCategoryLabels(
+      '學習與技能這條線值得看，學習與技能的次數比較少。',
+      ['學習與技能'],
+      boldStyle,
+    ) as React.ReactNode[];
+    const boldOccurrences = result.filter(
+      part => React.isValidElement(part) && (part as BoldTextElement).props.children === '學習與技能',
+    );
+    expect(boldOccurrences).toHaveLength(2);
   });
 });

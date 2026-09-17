@@ -268,6 +268,30 @@ export function splitSummaryParagraphs(text: string): string[] {
   return text.split(/\n+/).map(p => p.trim()).filter(Boolean);
 }
 
+/**
+ * 把散文裡出現的成長線名稱（例如「生活與自我管理」）標成粗體，其餘文字不變。
+ * labels 用這週真的存在的 growthLines 名稱（不是寫死一份對照表）——這樣
+ * 分類名稱一旦改了也不用兩邊同步維護。用 RN Text 巢狀 span 做法，不影響
+ * 原本文字內容，只是換一種樣式渲染同一段字。
+ */
+export function renderWithBoldCategoryLabels(
+  text: string,
+  labels: string[],
+  boldStyle: object,
+): React.ReactNode {
+  const uniqueLabels = [...new Set(labels)].filter(Boolean);
+  if (uniqueLabels.length === 0) return text;
+  const escaped = uniqueLabels.map(l => l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const pattern = new RegExp(`(${escaped.join('|')})`, 'g');
+  // split 在字串開頭/結尾比對到分隔時會產生空字串——過濾掉，不然 render tree
+  // 裡會多出一堆沒有內容的 Text 節點。
+  return text.split(pattern).filter(Boolean).map((part, i) =>
+    uniqueLabels.includes(part)
+      ? <Text key={i} style={boldStyle}>{part}</Text>
+      : part,
+  );
+}
+
 /** 「8/10 14:30」這種顯示字串，給「已套用」badge 標記決定時間。 */
 function formatDecidedAt(iso: string): string {
   const d = new Date(iso);
@@ -686,10 +710,12 @@ function WeeklySynthesisCard({
         </TouchableOpacity>
       </View>
 
-      {/* ① 全家這週怎樣——完整三段散文 */}
+      {/* ① 全家這週怎樣——完整三段散文；成長線名稱標粗體，方便掃讀哪一條被點名。 */}
       {paragraphs[0] ? <Text style={s.summaryHeadline}>{paragraphs[0]}</Text> : null}
       {paragraphs.slice(1).map((p, i) => (
-        <Text key={i} style={s.summaryEvidence}>{p}</Text>
+        <Text key={i} style={s.summaryEvidence}>
+          {renderWithBoldCategoryLabels(p, growthLines.map(l => l.label), s.categoryLabelBold)}
+        </Text>
       ))}
       {countsStrip.length > 0 && (
         <View style={s.countsPillRow}>
@@ -755,7 +781,9 @@ function WeeklySynthesisCard({
                   onAcknowledge={onAcknowledge}
                 />
               ) : nextStep ? (
-                <Text style={s.nextStepText}>{nextStep}</Text>
+                <Text style={s.nextStepText}>
+                  {renderWithBoldCategoryLabels(nextStep, growthLines.map(l => l.label), s.categoryLabelBold)}
+                </Text>
               ) : null}
             </View>
           </>
@@ -1974,6 +2002,11 @@ const s = StyleSheet.create({
     lineHeight: 26,
     color: ParentColors.fgSecondary,
     marginTop: 10,
+  },
+  // 散文裡提到成長線名稱時標粗體，方便掃讀哪一條被點名（renderWithBoldCategoryLabels）。
+  categoryLabelBold: {
+    fontWeight: ParentFontWeights.bold,
+    color: ParentColors.fgPrimary,
   },
   // 計數 pill row（例如「📈 3 條穩定」「👥 1 條值得一起看看」），取代原本 AI
   // 文字第二段（列穩定線佐證）——那段內容本來就跟②③層重複，不用文字重講。
