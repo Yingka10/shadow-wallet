@@ -258,9 +258,14 @@ function formatDays(days: number[]): string {
  * 穩定線依據／focus 診斷+下一步），用換行分開——這裡純粹是把同一段文字拆開
  * 分層顯示（headline 最大、其餘正常大小），不是重新生成或改寫內容。段數不固定
  * （全部 stable、或 AI 尚未生成時可能只有 1 段），純函式好測。
+ *
+ * 用 `\n+`（一個以上的換行都算分隔）而不是只認 `\n\n`：實測發現 Gemini 有時
+ * 只用單一 `\n` 分三段，若只認雙換行會讓整段文字被當成一段，全部擠進
+ * headline 樣式顯示。這個 schema 裡本來就不會有「同一段內部需要換行」的
+ * 情境（三段各自是一句流暢的話），所以放寬成認任何換行是安全的。
  */
 export function splitSummaryParagraphs(text: string): string[] {
-  return text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+  return text.split(/\n+/).map(p => p.trim()).filter(Boolean);
 }
 
 /** 「8/10 14:30」這種顯示字串，給「已套用」badge 標記決定時間。 */

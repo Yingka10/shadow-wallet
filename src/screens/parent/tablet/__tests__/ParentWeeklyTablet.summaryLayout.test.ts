@@ -32,8 +32,15 @@ describe('splitSummaryParagraphs', () => {
     expect(splitSummaryParagraphs(text)).toEqual(['headline 段', 'evidence 段', 'focus 段']);
   });
 
-  it('單一換行（不是空行）不會被當成段落分隔——三段式規則要求的是空行分段', () => {
-    const text = '第一行\n第二行（同一段內的換行，不應該被拆開）';
-    expect(splitSummaryParagraphs(text)).toEqual([text]);
+  it('單一換行也會被當成段落分隔——實測 Gemini 有時只用單一 \\n 分三段，不能只認雙換行', () => {
+    const text = '第一段\n第二段\n第三段';
+    expect(splitSummaryParagraphs(text)).toEqual(['第一段', '第二段', '第三段']);
+  });
+
+  it('真實案例：Gemini 這次用單一換行分隔三段，仍要正確拆成三段而不是整段擠進 headline', () => {
+    const text = '這週多數線都穩，學習與技能這條線這週比較需要花時間聊聊。\n生活與自我管理、家庭參與與關係這兩條這週都有持續完成紀錄，目前沒有明顯需要調整的訊號。\n學習與技能這條線這週沒有完全跟上原本安排，其中有幾次是在提醒後才開始的；這一條這週比較值得找時間跟孩子聊聊，看看提醒的時機或方式要不要調整。';
+    const result = splitSummaryParagraphs(text);
+    expect(result).toHaveLength(3);
+    expect(result[0]).toBe('這週多數線都穩，學習與技能這條線這週比較需要花時間聊聊。');
   });
 });
