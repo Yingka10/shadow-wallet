@@ -621,7 +621,7 @@ const TASK_CATEGORY_COLOR: Record<TaskCategory, string> = {
   A: ParentColors.leaf700,
   B: '#3E6FA6',
   C: ParentColors.clay500,
-  D: ParentColors.plum500,
+  D: '#8E44AD',
 };
 
 /**
