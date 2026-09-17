@@ -387,13 +387,28 @@ function computeFallbackInsight(ctx: WeeklyContext): GeminiInsightResult {
     ?? 'B';
 
   // headline／dialogue／nextStep 現在跟其他線的邏輯共用同一份 growthLines/focusLineKey，
-  // AI 掛掉時也不會退回「這週完成了 X/Y 項任務」這種扁平句子——growth line 卡片本身
-  // （facts 都是真數字）已經把細節顯示出來了，這裡只需要一句總覽。
+  // AI 掛掉時也不會退回「這週完成了 X/Y 項任務」這種扁平句子。motivation_observation
+  // 維持跟 AI 版本一樣的三段結構（總覽／穩定線依據／focus 診斷+下一步）——Gemini
+  // 常常打不通，家長實際看到的多半是這個 fallback，兩條路徑的呈現不該落差太大。
   const focusLine = ctx.growthLines.find(l => l.key === ctx.focusLineKey);
+  const stableLines = ctx.growthLines.filter(l => l.status === 'stable').slice(0, 2);
+  const stableEvidence = stableLines.length > 0
+    ? `${stableLines.map(l => l.label).join('、')}${stableLines.length > 1 ? '這幾條線' : '這條線'}目前都有持續完成紀錄，目前沒有明顯需要調整的訊號。`
+    : '';
+  // 只判斷「有沒有提醒訊號」，不取精確次數——跟 AI prompt 規則 7 一樣，寧可用
+  // 「有一次」這種保守講法，也不要在 fallback 裡自己拼出可能跟 facts 對不上的數字。
+  const focusHasReminderSignal = focusLine?.facts.some(f => f.includes('提醒')) ?? false;
+  const focusEvidence = focusLine
+    ? focusHasReminderSignal
+      ? `「${focusLine.label}」這週沒有完全跟上原本安排，其中有一次是在提醒後才開始的。其他安排先維持即可，找時間跟孩子聊聊，看看提醒的時機或方式要不要調整。`
+      : `「${focusLine.label}」這週做的次數比原本安排少一些。其他安排先維持即可，可以留意但不用急著調整。`
+    : '';
   const motivation_observation = ctx.growthLines.length === 0
     ? '這週還沒有任務完成紀錄，可以和孩子一起看看想從哪件事開始。'
     : focusLine
-      ? `這週多數成長線穩定，「${focusLine.label}」較值得一起看看。`
+      ? [`這週多數成長線穩定，「${focusLine.label}」較值得一起看看。`, stableEvidence, focusEvidence]
+          .filter(p => p !== '')
+          .join('\n\n')
       : '這週各方面的安排大致穩定，其他安排先維持即可。';
 
   const dialogue = ctx.growthLines.length === 0

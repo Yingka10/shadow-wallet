@@ -614,11 +614,11 @@ const FOCUS_SUGGESTION_HEADING: Partial<Record<SuggestionAction, string>> = {
 
 /**
  * 「本週整理」的單一收斂卡片——取代舊版「本週整理（AI 文字）」＋「這週最值得
- * 一起看看（focus 建議）」兩張卡。原本同一件事（focus line 值得看）被講三次
- * （本週整理 headline／本週整理 focus 段落／focus card facts+建議），現在只講
- * 一次，分三層：
- *   ① 全家這週怎樣——一句 headline（AI/fallback 文字的第一段）＋各狀態計數，
- *      不再顯示 AI 文字的第二、三段（那兩段本來就是在重複第②③層的內容）。
+ * 一起看看（focus 建議）」兩張卡，分三層：
+ *   ① 全家這週怎樣——完整的 AI/fallback 三段散文（總覽／穩定線依據／focus
+ *      診斷+下一步）＋各狀態計數。這段散文閱讀感是刻意保留的，跟②③層的
+ *      真實 facts／建議是互補，不是取代關係——①負責「讀起來自然」，②③
+ *      負責「有東西可以核對、可以按」。
  *   ② 為什麼這條值得看——focus line 的名稱＋facts，用可核對的證據呈現，不是散文。
  *   ③ 下一步——真實的系統建議（若有可靠 mapping，含採用/修改/再觀察）或
  *      next_step 文字；沒有 focus line 時①已經講清楚「沒有特別需要調整」，
@@ -644,7 +644,10 @@ function WeeklySynthesisCard({
   onRevert: (item: ReviewPrompt) => Promise<void>;
   onAcknowledge: (item: ReviewPrompt) => Promise<void>;
 }) {
-  const [headline] = splitSummaryParagraphs(summaryText);
+  // ①層顯示完整的 AI/fallback 三段文字（總覽／穩定線依據／focus 診斷+下一步），
+  // 不是只取第一段——這是家長明確要求保留的散文閱讀感，②③層的真實 facts／
+  // 建議是額外補上的證據與下一步，兩者並存，不是取代關係。
+  const paragraphs = splitSummaryParagraphs(summaryText);
   const line = focusLineKey != null ? growthLines.find(l => l.key === focusLineKey) : undefined;
 
   const STATUS_ORDER: WeeklyGrowthLine['status'][] = ['stable', 'watch', 'needs_discussion'];
@@ -671,8 +674,11 @@ function WeeklySynthesisCard({
         </TouchableOpacity>
       </View>
 
-      {/* ① 全家這週怎樣 */}
-      {headline ? <Text style={s.summaryHeadline}>{headline}</Text> : null}
+      {/* ① 全家這週怎樣——完整三段散文 */}
+      {paragraphs[0] ? <Text style={s.summaryHeadline}>{paragraphs[0]}</Text> : null}
+      {paragraphs.slice(1).map((p, i) => (
+        <Text key={i} style={s.summaryEvidence}>{p}</Text>
+      ))}
       {countsStrip.length > 0 && (
         <Text style={s.countsStripText}>
           {countsStrip.map((c, i) => (
@@ -1926,6 +1932,13 @@ const s = StyleSheet.create({
     fontWeight: ParentFontWeights.bold,
     color: ParentColors.fgPrimary,
     letterSpacing: -0.2,
+  },
+  summaryEvidence: {
+    fontFamily: ParentFonts.display,
+    fontSize: 15,
+    lineHeight: 23,
+    color: ParentColors.fgSecondary,
+    marginTop: 10,
   },
   // 一句計數 strip（例如「2 條穩定・1 條先觀察・1 條值得一起看看」），取代原本
   // AI 文字第二段（列穩定線佐證）——那段內容本來就跟②③層重複，不再顯示。
