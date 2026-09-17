@@ -46,42 +46,43 @@ describe('splitSummaryParagraphs', () => {
   });
 });
 
-type BoldTextElement = React.ReactElement<{ children: string; style: object }>;
+type BoldTextElement = React.ReactElement<{ children: string; style: { color: string; fontWeight: string } }>;
 
 describe('renderWithBoldCategoryLabels', () => {
-  const boldStyle = { fontWeight: 'bold' };
-
-  it('把文字裡出現的成長線名稱換成粗體 Text，其餘文字原樣保留', () => {
+  it('把文字裡出現的成長線名稱換成粗體＋該類別自己的顏色，其餘文字原樣保留', () => {
+    const labelColors = new Map([
+      ['生活與自我管理', '#456E27'],
+      ['家庭參與與關係', '#3E6FA6'],
+    ]);
     const result = renderWithBoldCategoryLabels(
       '生活與自我管理、家庭參與與關係這兩條這週都有持續完成紀錄。',
-      ['生活與自我管理', '家庭參與與關係'],
-      boldStyle,
+      labelColors,
     );
     expect(Array.isArray(result)).toBe(true);
     const arr = result as React.ReactNode[];
     // 依序應該是：粗體「生活與自我管理」、純文字「、」、粗體「家庭參與與關係」、剩餘文字
     expect(React.isValidElement(arr[0])).toBe(true);
     expect((arr[0] as BoldTextElement).props.children).toBe('生活與自我管理');
-    expect((arr[0] as BoldTextElement).props.style).toBe(boldStyle);
+    expect((arr[0] as BoldTextElement).props.style.color).toBe('#456E27');
     expect(arr[1]).toBe('、');
     expect(React.isValidElement(arr[2])).toBe(true);
     expect((arr[2] as BoldTextElement).props.children).toBe('家庭參與與關係');
+    expect((arr[2] as BoldTextElement).props.style.color).toBe('#3E6FA6');
   });
 
-  it('沒有任何 label 對到文字時，回傳只有原字串這一個元素的陣列（不硬套粗體）', () => {
-    const result = renderWithBoldCategoryLabels('這週各方面大致穩定。', ['學習與技能'], boldStyle);
+  it('沒有任何 label 對到文字時，回傳只有原字串這一個元素的陣列（不硬套顏色）', () => {
+    const result = renderWithBoldCategoryLabels('這週各方面大致穩定。', new Map([['學習與技能', '#7E5A6F']]));
     expect(result).toEqual(['這週各方面大致穩定。']);
   });
 
-  it('labels 是空陣列時直接回傳原字串', () => {
-    expect(renderWithBoldCategoryLabels('任何文字', [], boldStyle)).toBe('任何文字');
+  it('labelColors 是空 map 時直接回傳原字串', () => {
+    expect(renderWithBoldCategoryLabels('任何文字', new Map())).toBe('任何文字');
   });
 
-  it('同一個 label 重複出現在同一句時，每次出現都標成粗體', () => {
+  it('同一個 label 重複出現在同一句時，每次出現都標成該類別的顏色', () => {
     const result = renderWithBoldCategoryLabels(
       '學習與技能這條線值得看，學習與技能的次數比較少。',
-      ['學習與技能'],
-      boldStyle,
+      new Map([['學習與技能', '#7E5A6F']]),
     ) as React.ReactNode[];
     const boldOccurrences = result.filter(
       part => React.isValidElement(part) && (part as BoldTextElement).props.children === '學習與技能',

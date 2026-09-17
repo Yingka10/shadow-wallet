@@ -269,27 +269,27 @@ export function splitSummaryParagraphs(text: string): string[] {
 }
 
 /**
- * 把散文裡出現的成長線名稱（例如「生活與自我管理」）標成粗體，其餘文字不變。
- * labels 用這週真的存在的 growthLines 名稱（不是寫死一份對照表）——這樣
- * 分類名稱一旦改了也不用兩邊同步維護。用 RN Text 巢狀 span 做法，不影響
- * 原本文字內容，只是換一種樣式渲染同一段字。
+ * 把散文裡出現的成長線名稱（例如「生活與自我管理」）標成粗體＋該類別自己的
+ * 顏色，其餘文字不變。labelColors 的 key 用這週真的存在的 growthLines 名稱
+ * （不是寫死一份對照表）——這樣分類名稱一旦改了也不用兩邊同步維護。用 RN
+ * Text 巢狀 span 做法，不影響原本文字內容，只是換一種樣式渲染同一段字。
  */
 export function renderWithBoldCategoryLabels(
   text: string,
-  labels: string[],
-  boldStyle: object,
+  labelColors: Map<string, string>,
 ): React.ReactNode {
-  const uniqueLabels = [...new Set(labels)].filter(Boolean);
+  const uniqueLabels = [...labelColors.keys()].filter(Boolean);
   if (uniqueLabels.length === 0) return text;
   const escaped = uniqueLabels.map(l => l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const pattern = new RegExp(`(${escaped.join('|')})`, 'g');
   // split 在字串開頭/結尾比對到分隔時會產生空字串——過濾掉，不然 render tree
   // 裡會多出一堆沒有內容的 Text 節點。
-  return text.split(pattern).filter(Boolean).map((part, i) =>
-    uniqueLabels.includes(part)
-      ? <Text key={i} style={boldStyle}>{part}</Text>
-      : part,
-  );
+  return text.split(pattern).filter(Boolean).map((part, i) => {
+    const color = labelColors.get(part);
+    return color
+      ? <Text key={i} style={{ fontWeight: ParentFontWeights.bold, color }}>{part}</Text>
+      : part;
+  });
 }
 
 /** 「8/10 14:30」這種顯示字串，給「已套用」badge 標記決定時間。 */
@@ -611,6 +611,20 @@ const STATUS_STRIP_ICON: Record<WeeklyGrowthLine['status'], string> = {
 };
 
 /**
+ * 四個任務種類（A/B/C/D）各自固定的顏色——本週整理散文裡提到分類名稱時用
+ * 這組顏色標粗體，讓家長一眼認出「這句在講哪一條線」，跟顏色的意思無關
+ * （不是狀態色，狀態色是 GROWTH_STATUS_META）。三個沿用既有 token，只有
+ * B（家庭參與與關係）的藍色是這裡新加的——調色盤裡原本沒有藍，其餘三類
+ * 剛好都能對到既有顏色，不用整組重新定義。
+ */
+const TASK_CATEGORY_COLOR: Record<TaskCategory, string> = {
+  A: ParentColors.leaf700,
+  B: '#3E6FA6',
+  C: ParentColors.clay500,
+  D: ParentColors.plum500,
+};
+
+/**
  * 一條成長線的卡片。facts 只取第一條當摘要下面的佐證（deterministic 算好的，
  * 不是 AI 掰的）——其餘 facts 不在這裡塞滿，避免資訊密度暴增，細節留給
  * 「查看完整紀錄」那幾個分頁。
@@ -685,6 +699,8 @@ function WeeklySynthesisCard({
   // 建議是額外補上的證據與下一步，兩者並存，不是取代關係。
   const paragraphs = splitSummaryParagraphs(summaryText);
   const line = focusLineKey != null ? growthLines.find(l => l.key === focusLineKey) : undefined;
+  // label → 該類別自己的顏色，只給這週真的存在的線建 map，不會標到不存在的分類。
+  const labelColors = new Map(growthLines.map(l => [l.label, TASK_CATEGORY_COLOR[l.key]]));
 
   const STATUS_ORDER: WeeklyGrowthLine['status'][] = ['stable', 'watch', 'needs_discussion'];
   const countsStrip = STATUS_ORDER
@@ -714,7 +730,7 @@ function WeeklySynthesisCard({
       {paragraphs[0] ? <Text style={s.summaryHeadline}>{paragraphs[0]}</Text> : null}
       {paragraphs.slice(1).map((p, i) => (
         <Text key={i} style={s.summaryEvidence}>
-          {renderWithBoldCategoryLabels(p, growthLines.map(l => l.label), s.categoryLabelBold)}
+          {renderWithBoldCategoryLabels(p, labelColors)}
         </Text>
       ))}
       {countsStrip.length > 0 && (
@@ -782,7 +798,7 @@ function WeeklySynthesisCard({
                 />
               ) : nextStep ? (
                 <Text style={s.nextStepText}>
-                  {renderWithBoldCategoryLabels(nextStep, growthLines.map(l => l.label), s.categoryLabelBold)}
+                  {renderWithBoldCategoryLabels(nextStep, labelColors)}
                 </Text>
               ) : null}
             </View>
@@ -2002,11 +2018,6 @@ const s = StyleSheet.create({
     lineHeight: 26,
     color: ParentColors.fgSecondary,
     marginTop: 10,
-  },
-  // 散文裡提到成長線名稱時標粗體，方便掃讀哪一條被點名（renderWithBoldCategoryLabels）。
-  categoryLabelBold: {
-    fontWeight: ParentFontWeights.bold,
-    color: ParentColors.fgPrimary,
   },
   // 計數 pill row（例如「📈 3 條穩定」「👥 1 條值得一起看看」），取代原本 AI
   // 文字第二段（列穩定線佐證）——那段內容本來就跟②③層重複，不用文字重講。
