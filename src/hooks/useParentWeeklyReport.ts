@@ -516,6 +516,14 @@ export function useParentWeeklyReport(childId: string): ParentWeeklyReportData {
     `${weekEnd.month() + 1} 月 ${weekEnd.date()} 日`;
 
   const fetchAll = useCallback(async () => {
+    // childId 在孩子清單／選中孩子還沒 resolve 完之前會是空字串（見
+    // SelectedChildContext.tsx 的 `selected?.id ?? ''`）。畫面本身已經用
+    // loadingChildren/childId 擋住不渲染，但 hook 的 useEffect 不管畫面擋
+    // 不擋還是會跑——不擋住就會用空字串組出 `id=eq.`、`child_id=eq.` 這種
+    // 空值篩選條件送給 PostgREST，一定被拒絕成 400。等 childId 真的 resolve
+    // 出來，這個 useCallback 的 identity 會變、effect 會重新跑一次，不需要
+    // 在這裡自己重試。
+    if (!childId) return;
     setLoading(true);
     setError(null);
     try {
